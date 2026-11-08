@@ -5,8 +5,7 @@ import { Icon } from "../Icon";
 import { MetroProgressBar } from "../controls/Controls";
 import { ToolTip } from "../controls/Controls";
 import { useStatusMessage, setStatus } from "../../state/status";
-import { mainTabs, activeTab, startSubnav } from "./sections";
-import { isDm } from "../../api/server/session";
+import { MAIN_TABS, activeTab, startSubnav } from "./sections";
 import { LINKS, openLink } from "../../lib/links";
 import { useApi } from "../../state/ApiContext";
 import { isTauri } from "../../lib/tauri";
@@ -63,7 +62,7 @@ export function MainTabs() {
   const active = activeTab(pathname);
   return (
     <nav className="tabs main" aria-label="Main">
-      {mainTabs().map((t) => {
+      {MAIN_TABS.map((t) => {
         const disabled = t.needsCharacter && !snapshot;
         if (disabled) return <span key={t.id} className="tab disabled" aria-disabled="true">{t.label}</span>;
         return (
@@ -83,7 +82,6 @@ export function ProfileBlock() {
   const { setPortraitsOpen } = useShell();
   const [quickOpen, setQuickOpen] = useState(false);
   if (!snapshot) {
-    if (isDm()) return null;
     return <button type="button" className="aur-newchar" aria-label="New character" onClick={() => nav("/characters?new=1")}><Icon name="plus" /></button>;
   }
   const classes = snapshot.level.classes.map((c) => c.name).filter(Boolean).join(" / ");
@@ -156,7 +154,7 @@ export function QuickBar() {
         <button type="button" onClick={() => run("save")} aria-label={snapshot.dirty ? "Save (unsaved changes)" : "Save"}>
           Save
         </button>
-      ) : isDm() ? null : (
+      ) : (
         <button type="button" onClick={() => run("new")}><Icon name="plus" />New character</button>
       )}
       <i className="sep" />

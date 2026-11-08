@@ -1,0 +1,11 @@
+{
+  "build": {
+    "beforeBuildCommand": "node ui/party/build.mjs",
+    "frontendDist": "../ui/party/dist"
+  },
+  "app": {
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https: http:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    }
+  }
+}

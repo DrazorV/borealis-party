@@ -63,12 +63,6 @@ struct Key<'a> {
 pub struct CacheKey(Vec<u8>);
 
 impl CacheKey {
-    /// The key's bytes: equal bytes mean the same packs in the same state.
-    #[must_use]
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
-
     /// The key for loading `bundled` then `custom` pack folders (in that order) with these preferences.
     #[must_use]
     pub fn new(

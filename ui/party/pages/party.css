@@ -1,0 +1,39 @@
+.party { display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-3); padding: var(--sp-4); max-width: 920px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+.party > .btn { align-self: flex-start; }
+.party-list { list-style: none; margin: var(--sp-2) 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.party-row-button { display: flex; gap: var(--sp-3); align-items: center; width: 100%; min-height: 40px; padding: var(--sp-2) var(--sp-3); background: var(--surface); color: inherit; border: var(--border-w) solid var(--border); border-radius: var(--radius); cursor: pointer; text-align: left; font: inherit; flex-wrap: wrap; }
+@media (hover: hover) and (pointer: fine) { .party-row-button:hover { border-color: var(--accent); } }
+.party-inline { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin-top: var(--sp-2); }
+.party-inline input, .party-inline select { flex: 1 1 200px; min-width: 0; }
+.party-line { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; }
+.party-member { padding: var(--sp-3); background: var(--surface); border: var(--border-w) solid var(--border); border-radius: var(--radius); }
+.party-member-head { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+.party-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: var(--sp-2); margin: var(--sp-3) 0 var(--sp-2); }
+.party-stats div { text-align: center; }
+.party-stats dt { font-size: var(--fs-xs); opacity: 0.7; }
+.party-stats dd { margin: 0; font-size: 18px; font-weight: 600; }
+.party-xp { display: flex; gap: var(--sp-3); align-items: center; }
+.party-xp .progress { flex: 1; }
+.party-scope { display: flex; gap: var(--sp-2); align-items: center; padding: var(--sp-1) var(--sp-3); background: var(--surface); border-bottom: var(--border-w) solid var(--border); font-size: var(--fs-sm); }
+.party-scope.viewing { background: var(--accent); color: #fff; }
+.party-scope.viewing .btn { color: inherit; }
+.party-scope .spacer, .party .spacer, .party-member-head .spacer, .party-line .spacer, .party-inline .spacer, .party-row-button .spacer { flex: 1; }
+.party-connect { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; background: var(--bg); color: var(--text, inherit); }
+.party-connect-card { display: flex; flex-direction: column; gap: var(--sp-3); width: 100%; max-width: 360px; padding: var(--sp-5); }
+.party-connect-card h1 { margin: 0; font-size: var(--fs-xl); }
+.party-connect-card label { display: flex; flex-direction: column; gap: var(--sp-1); }
+.party-connect-card input.aur-text { min-height: 36px; padding: 0 var(--sp-2); font-size: 16px; box-sizing: border-box; }
+.party-role { display: flex; gap: var(--sp-4); border: 0; padding: 0; margin: 0; }
+.party-role legend { padding: 0 0 var(--sp-1); }
+.party-role label { flex-direction: row; align-items: center; }
+@media (max-width: 480px) { .party-scope-user { display: none; } }
+
+/* Upstream controls that don't apply to this account. The classes are set in entry/App.tsx. */
+html.party-browser .aur-winbtns { display: none; }
+.tabs.sub a[href="#/notes"] { display: none; }
+html.party-dm .aur-newchar, html.party-dm .aur-quickbar { display: none; }
+html.party-dm .tabs.main .tab.disabled { display: none; }
+html.party-dm [data-testid^="nav-"]:not([data-testid="nav-start"]):not([data-testid="nav-more"]) { display: none; }
+html.party-dm .tabs.sub a[href="#/characters"] { display: none; }
+html.party-player .tabs.sub a[href="#/content"], html.party-player .tabs.sub a[href="#/content/sources"] { display: none; }
+.party-scope-host { flex: none; }

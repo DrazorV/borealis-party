@@ -1,0 +1,31 @@
+# The party server's own workspace. Upstream's workspace (the Cargo.toml at the repository root) does not know about it.
+#
+# `src-tauri` is used as an ordinary path dependency, and the patches below make its `tauri` crates resolve to the
+# webview-free stand-ins in `crates/`, so upstream's code compiles for the server without being edited.
+[workspace]
+resolver = "2"
+members = [
+  "crates/borealis-server",
+  "crates/tauri",
+  "crates/tauri-macros",
+  "crates/tauri-build",
+  "crates/tauri-plugin-dialog",
+  "crates/tauri-plugin-updater",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[patch.crates-io]
+tauri = { path = "crates/tauri" }
+tauri-build = { path = "crates/tauri-build" }
+tauri-plugin-dialog = { path = "crates/tauri-plugin-dialog" }
+tauri-plugin-updater = { path = "crates/tauri-plugin-updater" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

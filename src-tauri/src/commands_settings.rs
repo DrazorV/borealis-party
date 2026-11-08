@@ -127,7 +127,7 @@ pub fn content_update_status(state: S<'_>) -> ApiResult<ContentUpdateStatus> {
 
 /// Desktop startup: load the secondary folder now and run the automatic content update after
 /// [`crate::content_auto::STARTUP_UPDATE_DELAY`], on a background thread.
-#[cfg(all(feature = "shell", not(any(target_os = "android", target_os = "ios"))))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn spawn_startup_content_tasks(app: &AppHandle) {
     use tauri::Manager;
     app.state::<AppState>().mark_content_update_pending();

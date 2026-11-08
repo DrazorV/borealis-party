@@ -1,0 +1,17 @@
+// Applied with `gradlew --init-script`, so upstream's Android project stays as it is.
+// Gives the party app its own identity, and allows plain HTTP for servers on a home network.
+def here = buildscript.sourceFile.parentFile
+
+allprojects { project ->
+    if (project.path != ":app") return
+    project.pluginManager.withPlugin("com.android.application") {
+        // Build-type resources override upstream's strings.xml in `main`.
+        ["debug", "release"].each { type ->
+            project.android.sourceSets.getByName(type).res.srcDir(new File(here, "res"))
+        }
+        project.androidComponents.onVariants(project.androidComponents.selector().all()) { variant ->
+            variant.applicationId.set("app.borealis.party")
+            variant.manifestPlaceholders.put("usesCleartextTraffic", "true")
+        }
+    }
+}

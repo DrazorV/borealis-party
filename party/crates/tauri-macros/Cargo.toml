@@ -1,0 +1,15 @@
+[package]
+name = "tauri-macros"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The #[command] and generate_handler! macros of the tauri stand-in"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"

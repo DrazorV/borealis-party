@@ -294,7 +294,7 @@ impl Default for AppSettings {
 }
 
 /// This build runs on a phone or tablet (no claude/codex CLI there, so no AI at all).
-pub const IS_MOBILE: bool = cfg!(any(target_os = "android", target_os = "ios", feature = "headless"));
+pub const IS_MOBILE: bool = cfg!(any(target_os = "android", target_os = "ios"));
 
 const THEMES: [&str; 3] = ["system", "light", "dark"];
 const DENSITIES: [&str; 2] = ["compact", "comfortable"];

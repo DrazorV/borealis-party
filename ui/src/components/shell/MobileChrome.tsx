@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from "react-router";
 import { Icon } from "../Icon";
 import { BrandMark } from "./BrandMark";
-import { MAIN_TABS, activeTab, mainTabs } from "./sections";
+import { MAIN_TABS, activeTab } from "./sections";
 import { useShell } from "./ShellContext";
 import { useShellActions } from "./useShellActions";
 import { UpdateCommand } from "./UpdateFlyout";
@@ -37,7 +37,7 @@ export function BottomBar() {
   const { pathname } = useLocation();
   const { snapshot } = useShellActions();
   const active = activeTab(pathname);
-  const primary = mainTabs().filter((t) => !t.secondary);
+  const primary = MAIN_TABS.filter((t) => !t.secondary);
   // B-48 O1: on phones the tabs stay tappable without a character (they show "No character open"); the icon sits in a pill (Android cue).
   const phone = usePhone();
   const icon = (name: (typeof MAIN_TABS)[number]["icon"]) => (phone ? <span className="bb-pill"><Icon name={name} /></span> : <Icon name={name} />);

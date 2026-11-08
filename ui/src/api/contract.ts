@@ -885,7 +885,7 @@ export const EVENTS = {
 export interface Api extends ApiMethods {
   subscribe<E extends EventName>(event: E, handler: (payload: ApiEvents[E]) => void): Unsubscribe;
   /** "mock" when no backend is attached (browser dev / tests). */
-  readonly kind: "tauri" | "mock" | "http";
+  readonly kind: "tauri" | "mock";
 }
 
 /** Convenience re-exports for UI code. */

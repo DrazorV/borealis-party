@@ -13,11 +13,6 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 # Same as [workspace.lints], except unsafe_code is "deny" rather than "forbid" so the one Windows-only
 # FFI module (src/console_attach.rs, AttachConsole/SetStdHandle) can opt out with #[allow(unsafe_code)].
-[[bin]]
-name = "borealis"
-path = "src/main.rs"
-required-features = ["shell"]
-
 [lints.rust]
 unsafe_code = "deny"
 
@@ -25,12 +20,7 @@ unsafe_code = "deny"
 all = { level = "warn", priority = -1 }
 
 [features]
-# A party client gets its rules from the server: no device transfer or on-device semantic search by default.
-default = ["shell"]
-# The desktop and phone app: the real Tauri runtime. Off for the server, which uses `headless` instead.
-shell = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-build", "dep:tauri-plugin-updater"]
-# The multi-user server (crates/borealis-server): `tauri-headless` compiles in under the name `tauri`, no webview.
-headless = ["dep:tauri-headless"]
+default = ["device-link", "llama"]
 # Device transfer (B2/B3): tokio + rustls TCP, SPAKE2/QR authentication and the OS secure store
 # (Keychain, Android Keystore, Credential Manager, Secret Service). On by default since B3 on every
 # target (X0.1: GO on iOS and Android); mDNS discovery is desktop-only (see below).
@@ -46,11 +36,10 @@ llama = ["borealis-embed/llama"]
 mas = ["dep:objc2", "dep:objc2-foundation"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [], optional = true }
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [], optional = true }
-tauri-headless = { path = "../crates/tauri-headless", optional = true }
+tauri = { version = "2", features = [] }
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
@@ -64,7 +53,7 @@ thiserror.workspace = true
 base64 = "0.22"
 miniz_oxide = "0.9.1"
 uuid = { version = "1", features = ["v4"] }
-tauri-plugin-dialog = { version = "2", optional = true }
+tauri-plugin-dialog = "2"
 sha2 = "0.10"
 borealis-migrate.workspace = true
 borealis-import-5etools = { path = "../crates/borealis-import-5etools" }
@@ -113,7 +102,7 @@ borealis-link = { workspace = true, features = ["mdns"] }
 # Mac App Store flavour). Registered at runtime only for a direct install that can replace itself (Windows NSIS,
 # the macOS app, a Linux AppImage; never deb/rpm) and only once a real public key is configured (`self_update.rs`).
 # The web view gets no updater permission: the backend's commands drive it.
-tauri-plugin-updater = { version = "2.14.1", default-features = false, features = ["rustls-tls", "zip"], optional = true }
+tauri-plugin-updater = { version = "2.14.1", default-features = false, features = ["rustls-tls", "zip"] }
 # Obsidian vault (GitHub #15): watch the open vault for changes made by other apps, and delete notes to the OS trash.
 notify = { version = "8.2", default-features = false, features = ["macos_fsevent"] }
 trash = "5.2"
