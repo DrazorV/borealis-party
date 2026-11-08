@@ -103,6 +103,9 @@ pub mod error;
 pub mod extras;
 pub mod folder_access;
 // Mac App Store build only: NSURL security-scoped bookmarks (two Foundation calls objc2 marks unsafe).
+#[cfg(target_os = "ios")]
+#[allow(unsafe_code)]
+mod folder_access_ios;
 #[cfg(all(target_os = "macos", feature = "mas"))]
 #[allow(unsafe_code)]
 mod folder_access_mac;
@@ -172,6 +175,8 @@ pub mod state;
 pub mod sync_dto;
 pub mod tracker_api;
 pub mod vault;
+#[cfg(target_os = "android")]
+pub mod vault_android;
 pub mod vector_service;
 pub mod vector_status;
 pub mod version_rows;
@@ -347,6 +352,9 @@ pub fn run() {
     // Android: the in-app Kotlin plugin behind "Share logs" and opened files (see `native_share`).
     #[cfg(target_os = "android")]
     let builder = builder.plugin(native_share::init());
+    // Android (B-221): the in-app Kotlin plugin behind the Obsidian vault's document tree (see `vault_android`).
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(vault_android::init());
     builder
         .plugin(tauri_plugin_dialog::init())
         // Semantic search device facts: tier RAM, battery / thermal / background state (S3.1).
@@ -354,6 +362,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             startup_boot::on_window_event(window, event);
             semantic_device::on_window_event(window, event);
+            commands_vault::on_window_event(window, event);
             #[cfg(desktop)]
             picked_files::on_window_event(window, event);
         })
@@ -600,6 +609,8 @@ pub fn run() {
             commands_vault::vault_read,
             commands_vault::vault_save,
             commands_vault::vault_create_note,
+            commands_vault::set_character_note,
+            commands_vault::vault_create_character_note,
             commands_vault::vault_delete,
             commands_vault::vault_rename_preview,
             commands_vault::vault_rename,

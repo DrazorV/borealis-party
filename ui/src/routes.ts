@@ -23,6 +23,7 @@ export const ROUTES: readonly RouteDef[] = [
   { path: "/search", label: "Search", icon: "book-search", needsCharacter: false, secondary: true },
   { path: "/compendium", label: "Compendium", icon: "book", needsCharacter: false, secondary: true },
   { path: "/content", label: "Content", icon: "box", needsCharacter: false, secondary: true },
+  { path: "/notes", label: "Notes", icon: "file", needsCharacter: false, secondary: true },
   { path: "/import", label: "Import", icon: "upload", needsCharacter: false, secondary: true, ai: true },
   { path: "/ai", label: "AI Assistant", icon: "bot", needsCharacter: false, secondary: true, ai: true },
 ];

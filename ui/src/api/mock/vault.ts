@@ -56,6 +56,8 @@ export class MockVault {
   readonly trashed: string[] = [];
   watching = false;
   readonly opened: string[] = [];
+  /** iOS: files iCloud Drive has not downloaded yet (listed as `cloud`, opening one says it is downloading). */
+  readonly cloud = new Set<string>();
   private clock = 1_700_000_000_000;
 
   constructor(private readonly picks: MockPicks, private readonly emit: (c: VaultChange) => void) {
@@ -105,7 +107,12 @@ export class MockVault {
       const childFolders = [...folders].filter((f) => parentOf(f) === folder).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
       const childFiles = [...this.files.keys()].filter((f) => parentOf(f) === folder).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
       for (const f of childFolders) { entries.push({ path: f, name: fileName(f), kind: "folder", size: 0, mtimeMs: 0 }); walk(f); }
-      for (const f of childFiles) { const file = this.files.get(f)!; entries.push({ path: f, name: fileName(f), kind: kindOf(f), size: file.text.length, mtimeMs: file.mtimeMs }); }
+      for (const f of childFiles) {
+        const file = this.files.get(f)!;
+        entries.push(this.cloud.has(f)
+          ? { path: f, name: fileName(f), kind: kindOf(f), size: 0, mtimeMs: file.mtimeMs, cloud: true }
+          : { path: f, name: fileName(f), kind: kindOf(f), size: file.text.length, mtimeMs: file.mtimeMs });
+      }
     };
     walk("");
     return { dir, name, unavailable: false, obsidian: true, config: this.config, entries, truncated: false };
@@ -114,6 +121,9 @@ export class MockVault {
   read(s: AppSettings, path: string): VaultNote {
     this.ready(s);
     const f = this.file(path);
+    if (this.cloud.has(path)) {
+      throw { ...apiError("io_error", "This file is still downloading from iCloud. It opens when it is ready."), details: { downloading: true } };
+    }
     if (!["note", "canvas"].includes(kindOf(path))) throw apiError("invalid_argument", "Borealis opens only notes and canvases as text.");
     this.opened.push(path);
     return this.note(path, f);
@@ -174,6 +184,23 @@ export class MockVault {
     const f = { text: "", mtimeMs: this.tick() };
     this.files.set(path, f);
     return this.note(path, f);
+  }
+
+  /** B-222: a note a character may link to (in the open vault, a Markdown note). */
+  checkNote(s: AppSettings, path: string): void {
+    this.ready(s);
+    this.file(path);
+    if (kindOf(path) !== "note") throw apiError("invalid_argument", "Only a Markdown note can be linked to a character.");
+  }
+
+  /** B-222: `Characters/<name>.md`, numbered from " 2" when taken (never replaced); returns its path. */
+  createCharacterNote(s: AppSettings, name: string, text: string): string {
+    this.ready(s);
+    const stem = name.replace(/[/\\:*?"<>|#^[\]]/g, "-").trim().replace(/^\.+|\.+$/g, "") || "Character";
+    for (let n = 0; ; n += 1) {
+      const path = `Characters/${n === 0 ? stem : `${stem} ${n + 1}`}.md`;
+      if (!this.files.has(path)) { this.files.set(path, { text, mtimeMs: this.tick() }); return path; }
+    }
   }
 
   delete(s: AppSettings, path: string, permanent: boolean): VaultDeleteStatus {

@@ -14,6 +14,8 @@ type S<'a> = State<'a, AppState>;
 
 /// `vault:changed` in the UI contract: a batch of changes made to the vault by other apps.
 pub const EVENT_VAULT_CHANGED: &str = "borealis://vault-changed";
+/// `app:lifecycle` in the UI contract (phones): the app went to the background or came back to the foreground.
+pub const EVENT_APP_LIFECYCLE: &str = "borealis://app-lifecycle";
 /// Longest web address opened from a note.
 const MAX_URL_LEN: usize = 2048;
 
@@ -49,6 +51,25 @@ pub fn vault_create_note(
     folder: Option<String>,
 ) -> ApiResult<VaultNote> {
     state.vault_create_note(name.as_deref(), from.as_deref(), folder.as_deref())
+}
+
+/// Link a character to a vault note (B-222), or unlink it (`path` = `None`).
+#[tauri::command(async)]
+pub fn set_character_note(
+    state: S<'_>,
+    character_id: String,
+    path: Option<String>,
+) -> ApiResult<crate::dto::CharacterSnapshot> {
+    state.set_character_note(&character_id, path.as_deref())
+}
+
+/// Create a note for a character from its details and link it (B-222).
+#[tauri::command(async)]
+pub fn vault_create_character_note(
+    state: S<'_>,
+    character_id: String,
+) -> ApiResult<crate::dto::CharacterSnapshot> {
+    state.vault_create_character_note(&character_id)
 }
 
 /// Delete a file to the OS trash, or for good when `permanent`.
@@ -133,12 +154,32 @@ pub fn vault_watch(app: tauri::AppHandle, state: S<'_>, enabled: bool) -> ApiRes
     })
 }
 
-/// Phones: no vault watcher (phones are phase 2).
+/// Phones: no vault watcher. The notes view reads the vault again when the app comes back ([`on_window_event`]).
 #[cfg(not(desktop))]
 #[tauri::command(async)]
 pub fn vault_watch(enabled: bool) -> ApiResult<()> {
     let _ = enabled;
     Ok(())
+}
+
+/// Phones (B-221): tell the notes view when the app leaves or returns to the foreground, so it saves the open note and
+/// then reads the vault again (Obsidian Sync or iCloud may have changed it meanwhile).
+pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    #[cfg(mobile)]
+    {
+        use tauri::Emitter as _;
+        let foreground = match event {
+            tauri::WindowEvent::Suspended => false,
+            tauri::WindowEvent::Resumed => true,
+            _ => return,
+        };
+        let _ = window.emit(
+            EVENT_APP_LIFECYCLE,
+            serde_json::json!({ "foreground": foreground }),
+        );
+    }
+    #[cfg(desktop)]
+    let _ = (window, event);
 }
 
 /// A web address from a note, if it is one Borealis opens: `http`, `https` or `mailto`, normalised.

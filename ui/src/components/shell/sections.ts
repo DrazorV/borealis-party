@@ -43,7 +43,7 @@ export const START_SUBNAV: readonly { to: string; label: string; desktopOnly?: b
   { to: "/characters", label: "Character Collection" },
   { to: "/content/sources", label: "Sources" },
   { to: "/content", label: "Additional Content" },
-  { to: "/notes", label: "Notes", desktopOnly: true },
+  { to: "/notes", label: "Notes" },
 ];
 
 /** The START sub-tabs this build shows. */
@@ -78,7 +78,7 @@ export interface MenuEntry {
   noAiTo?: string;
   /** Hidden in store builds (iOS, Google Play): store rules forbid pointing at downloads outside the store. */
   directOnly?: boolean;
-  /** Hidden on phones (the Notes view is desktop only for now). */
+  /** Hidden on phones (no entry uses it since Notes came to phones, B-221). */
   desktopOnly?: boolean;
 }
 export interface MenuDef { id: string; label: string; entries: MenuEntry[] }
@@ -109,7 +109,7 @@ export const MENUS: readonly MenuDef[] = [
     { id: "settings", label: "Application Settings", action: "settings" },
     { id: "s1", label: "", separator: true },
     { id: "content", label: "Additional Content", to: "/content" },
-    { id: "notes", label: "Notes", to: "/notes", desktopOnly: true },
+    { id: "notes", label: "Notes", to: "/notes" },
     { id: "ai", label: "AI Assistant", to: "/ai", ai: true },
   ] },
   { id: "help", label: "Help", entries: [
