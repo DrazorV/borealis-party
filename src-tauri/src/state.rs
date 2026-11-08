@@ -466,6 +466,12 @@ impl AppState {
     }
 
     fn from_hub(paths: AppPaths, settings: AppSettings, hub: ContentHub) -> Self {
+        Self::from_shared_hub(paths, settings, Arc::new(hub))
+    }
+
+    /// A state over a content snapshot other states may be using too (the multi-user server).
+    #[must_use]
+    pub fn from_shared_hub(paths: AppPaths, settings: AppSettings, hub: Arc<ContentHub>) -> Self {
         let seed = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0x9E37_79B9_7F4A_7C15, |d| {
@@ -481,7 +487,7 @@ impl AppState {
             search,
             semantic,
             vectors,
-            content: RwLock::new(Arc::new(hub)),
+            content: RwLock::new(hub),
             settings: RwLock::new(settings),
             sessions: Mutex::new(HashMap::new()),
             content_op: Mutex::new(()),
@@ -509,7 +515,14 @@ impl AppState {
     /// # Errors
     /// `internal` if the lock is poisoned.
     pub fn set_hub(&self, hub: ContentHub) -> ApiResult<()> {
-        let hub = Arc::new(hub);
+        self.set_shared_hub(Arc::new(hub))
+    }
+
+    /// [`AppState::set_hub`] for a snapshot other states may be using too.
+    ///
+    /// # Errors
+    /// `internal` if the lock is poisoned.
+    pub fn set_shared_hub(&self, hub: Arc<ContentHub>) -> ApiResult<()> {
         let mut guard: RwLockWriteGuard<'_, Arc<ContentHub>> = self.content.write()?;
         *guard = Arc::clone(&hub);
         drop(guard);

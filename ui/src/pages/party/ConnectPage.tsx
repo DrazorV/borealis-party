@@ -1,0 +1,108 @@
+import { type FormEvent, useEffect, useState } from "react";
+import { checkServer, signIn, signUp, type ServerInfo } from "../../api/server/party";
+import { homeScope, rememberServer, rememberedServer, saveSession, type Role } from "../../api/server/session";
+import { isTauri } from "../../lib/tauri";
+import "./party.css";
+
+const message = (e: unknown): string => (e as { message?: string }).message ?? "Something went wrong.";
+
+function normalise(address: string): string {
+  const trimmed = address.trim().replace(/\/+$/, "");
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+}
+
+/** The first screen on a device with no session: pick the server (installed apps only), then sign in or sign up. */
+export function ConnectPage() {
+  // A browser got this page from the server, so the server is already known.
+  const needsAddress = isTauri();
+  const [address, setAddress] = useState(rememberedServer());
+  const [server, setServer] = useState<{ baseUrl: string; info: ServerInfo } | null>(null);
+  const [mode, setMode] = useState<"in" | "up">("in");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<Role>("player");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const connect = async (baseUrl: string) => {
+    setBusy(true);
+    setError("");
+    try {
+      setServer({ baseUrl, info: await checkServer(baseUrl) });
+      if (baseUrl) rememberServer(baseUrl);
+    } catch (e) { setError(message(e)); }
+    finally { setBusy(false); }
+  };
+
+  useEffect(() => {
+    if (!needsAddress) void connect("");
+  }, [needsAddress]);
+
+  const submitAddress = (e: FormEvent) => {
+    e.preventDefault();
+    void connect(normalise(address));
+  };
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!server) return;
+    setBusy(true);
+    setError("");
+    try {
+      const out = mode === "in"
+        ? await signIn(server.baseUrl, username, password)
+        : await signUp(server.baseUrl, username, password, role);
+      saveSession({ baseUrl: server.baseUrl, token: out.token, user: out.user, ...homeScope(out.user.role) });
+      window.location.hash = "/party";
+      window.location.reload();
+    } catch (err) {
+      setError(message(err));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="party-connect">
+      <form className="card party-connect-card" onSubmit={(e) => void (server ? submit(e) : submitAddress(e))}>
+        <h1>Borealis Party</h1>
+        {!server && needsAddress && (
+          <>
+            <p className="muted">Enter the address of your group's server.</p>
+            <label>
+              Server address
+              <input className="aur-text" autoFocus inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="192.168.1.20:8787" value={address} onChange={(e) => setAddress(e.target.value)} required />
+            </label>
+            <button className="btn primary" disabled={busy}>Connect</button>
+          </>
+        )}
+        {server && (
+          <>
+            <label>
+              Username
+              <input className="aur-text" autoFocus autoCapitalize="none" spellCheck={false} autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+            </label>
+            <label>
+              Password
+              <input className="aur-text" type="password" autoComplete={mode === "in" ? "current-password" : "new-password"} value={password} onChange={(e) => setPassword(e.target.value)} required />
+            </label>
+            {mode === "up" && (
+              <fieldset className="party-role">
+                <legend>I am a</legend>
+                <label><input type="radio" name="role" checked={role === "player"} onChange={() => setRole("player")} /> Player</label>
+                <label><input type="radio" name="role" checked={role === "dm"} onChange={() => setRole("dm")} /> Dungeon Master</label>
+              </fieldset>
+            )}
+            <button className="btn primary" disabled={busy}>{mode === "in" ? "Sign in" : "Create account"}</button>
+            {server.info.openRegistration && (
+              <button type="button" className="btn" onClick={() => { setMode(mode === "in" ? "up" : "in"); setError(""); }}>
+                {mode === "in" ? "Create an account" : "I already have an account"}
+              </button>
+            )}
+            {needsAddress && <button type="button" className="btn" onClick={() => setServer(null)}>Change server</button>}
+          </>
+        )}
+        {error && <div className="alert danger" role="alert"><div>{error}</div></div>}
+      </form>
+    </div>
+  );
+}

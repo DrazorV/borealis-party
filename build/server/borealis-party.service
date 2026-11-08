@@ -1,0 +1,33 @@
+[Unit]
+Description=Borealis Party server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=borealis-party
+Group=borealis-party
+EnvironmentFile=-/etc/borealis-party/server.env
+ExecStart=/opt/borealis-party/borealis-server
+Restart=on-failure
+RestartSec=5
+# Gives open characters time to be written on stop.
+TimeoutStopSec=30
+
+StateDirectory=borealis-party
+StateDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+ReadWritePaths=/var/lib/borealis-party
+
+[Install]
+WantedBy=multi-user.target

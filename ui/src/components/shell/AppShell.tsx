@@ -8,6 +8,8 @@ import { BottomBar, MobileTitleBar } from "./MobileChrome";
 import { ShellProvider, useShell } from "./ShellContext";
 import { LevelPanel } from "../../pages/builder/LevelPanel";
 import { useNarrow } from "./useNarrow";
+import { ScopeBar } from "../../pages/party/ScopeBar";
+import { signedIn } from "../../api/server/session";
 import { phoneOs } from "../../lib/phone";
 import { useContentUpdateNotice } from "./useContentUpdateNotice";
 import { useFolderNotice } from "./useFolderNotice";
@@ -85,7 +87,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div className="aur-title-text">Borealis</div>
               <SearchBox />
               <TitleCommands />
-              {!native && !phoneOs() && <WindowButtons />}
+              {!native && !phoneOs() && (isDesktopTauri() || !signedIn()) && <WindowButtons />}
             </header>
           )}
           {!narrow && (
@@ -94,6 +96,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <ProfileBlock />
             </div>
           )}
+          <ScopeBar />
           <SubBand />
           <main id="main" className="aur-content" tabIndex={-1}>{children}</main>
           <StatusBar compact={narrow} busy={busy} />

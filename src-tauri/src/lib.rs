@@ -4,6 +4,9 @@
 //! `impl AppState`), `snapshot_map`/`extras`/`elements` (engine -> contract DTO mapping), `dto`/`dto_ext`
 //! (contract types), `magic`/`equipment`/`sheet_api`/`compendium` (play services), `error` (typed `{code, message}` errors) and `commands` (Tauri wrappers).
 
+#[cfg(feature = "headless")]
+extern crate tauri_headless as tauri;
+
 pub mod added_picks;
 #[cfg(ai_cli)]
 pub mod ai_dto;
@@ -47,12 +50,15 @@ pub mod commands_pick;
 pub mod commands_play;
 #[cfg(ai_cli)]
 pub mod commands_report;
+#[cfg(feature = "shell")]
 pub mod commands_semantic;
 pub mod commands_settings;
 #[cfg(feature = "device-link")]
 pub mod commands_sync;
+#[cfg(feature = "shell")]
 pub mod commands_system;
 pub mod commands_tracker;
+#[cfg(feature = "shell")]
 pub mod commands_vault;
 pub mod companion;
 pub mod companion_api;
@@ -100,6 +106,8 @@ pub mod folder_access;
 #[cfg(all(target_os = "macos", feature = "mas"))]
 #[allow(unsafe_code)]
 mod folder_access_mac;
+#[cfg(feature = "headless")]
+pub mod headless;
 pub mod gear_facts;
 pub mod gear_info;
 pub mod homebrew_api;
@@ -148,6 +156,7 @@ pub mod self_update_plugin;
 pub mod semantic_api;
 #[cfg(all(desktop, feature = "llama"))]
 pub mod semantic_backend;
+#[cfg(feature = "shell")]
 pub mod semantic_device;
 pub mod semantic_service;
 pub mod session;
@@ -157,6 +166,7 @@ pub mod sheet_api;
 pub mod snapshot_map;
 pub mod start_over;
 pub mod startup;
+#[cfg(feature = "shell")]
 pub mod startup_boot;
 pub mod state;
 pub mod sync_dto;
@@ -165,11 +175,14 @@ pub mod vault;
 pub mod vector_service;
 pub mod vector_status;
 pub mod version_rows;
+#[cfg(feature = "shell")]
 pub mod webview_args;
 pub mod zip_read;
 
 use state::{AppState, LoadStep};
+#[cfg(feature = "shell")]
 use std::path::PathBuf;
+#[cfg(feature = "shell")]
 use tauri::{AppHandle, Manager};
 
 /// Resolve where the bundled content lives (bundled resources, or the source tree in dev builds).
@@ -177,7 +190,7 @@ use tauri::{AppHandle, Manager};
 /// Android resources are APK assets, not files: the packs are extracted into the app data folder
 /// (re-extracted when the app version or the bundled bytes change). A failure is logged and
 /// returned as the diagnostic; the caller then runs with an empty content store.
-#[cfg(target_os = "android")]
+#[cfg(all(feature = "shell", target_os = "android"))]
 fn content_root(app: &AppHandle) -> (PathBuf, Option<String>) {
     let target = match app.path().app_data_dir() {
         Ok(d) => d.join("bundled-content"),
@@ -212,7 +225,7 @@ fn content_root(app: &AppHandle) -> (PathBuf, Option<String>) {
 }
 
 /// Resolve where the bundled content lives (bundled resources, or the source tree in dev builds).
-#[cfg(not(target_os = "android"))]
+#[cfg(all(feature = "shell", not(target_os = "android")))]
 fn content_root(app: &AppHandle) -> (PathBuf, Option<String>) {
     let bundled = app
         .path()
@@ -295,6 +308,7 @@ fn setup_ai_profile(app: &AppHandle, state: &AppState, ai: &ai_service::AiServic
 }
 
 /// Build and run the Tauri application.
+#[cfg(feature = "shell")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // x86_64 Windows / Linux (B-49): llama.cpp's CPU backend modules are in the install folder.

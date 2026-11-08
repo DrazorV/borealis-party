@@ -2,6 +2,8 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter } from "react-router";
 import { createApi } from "./api";
+import { signedIn } from "./api/server/session";
+import { ConnectPage } from "./pages/party/ConnectPage";
 import { App } from "./App";
 import { AppProviders } from "./AppProviders";
 import { SplashWindow } from "./components/splash/SplashWindow";
@@ -51,7 +53,7 @@ if (window.location.hash.startsWith("#/splash")) {
   const forceMock = import.meta.env.VITE_USE_MOCK === "1";
   createRoot(root).render(
     <React.StrictMode>
-      {isTauri() && !forceMock ? (
+      {!forceMock && !signedIn() ? <ConnectPage /> : isTauri() && !forceMock ? (
         <StartupGate bridge={tauriStartupBridge} version={__APP_VERSION__}>{app()}</StartupGate>
       ) : app()}
     </React.StrictMode>,

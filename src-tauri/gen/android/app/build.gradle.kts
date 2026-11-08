@@ -30,8 +30,9 @@ android {
     compileSdk = 37
     namespace = "app.borealis"
     defaultConfig {
-        manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "app.borealis"
+        // Party servers on a home network speak plain HTTP.
+        manifestPlaceholders["usesCleartextTraffic"] = "true"
+        applicationId = "app.borealis.party"
         minSdk = 24
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()

@@ -1,5 +1,6 @@
 import type { IconName } from "../Icon";
 import { LINKS } from "../../lib/links";
+import { isDm, loadSession, signedIn } from "../../api/server/session";
 
 export interface MainTabDef {
   id: string;
@@ -17,7 +18,7 @@ export interface MainTabDef {
 
 /** Classic builder main tab order, plus PLAY (Borealis play mode). START also owns every non-character screen. */
 export const MAIN_TABS: readonly MainTabDef[] = [
-  { id: "start", label: "Start", short: "Start", to: "/characters", icon: "users", needsCharacter: false, match: ["/characters", "/compendium", "/search", "/content", "/notes", "/import", "/ai", "/setup", "/settings", "/more"] },
+  { id: "start", label: "Start", short: "Start", to: "/characters", icon: "users", needsCharacter: false, match: ["/party", "/characters", "/compendium", "/search", "/content", "/notes", "/import", "/ai", "/setup", "/settings", "/more"] },
   { id: "build", label: "Build", short: "Build", to: "/builder", icon: "hammer", needsCharacter: true, match: ["/builder"] },
   { id: "magic", label: "Magic", short: "Magic", to: "/spells", icon: "sparkles", needsCharacter: true, match: ["/spells"] },
   { id: "equipment", label: "Equipment", short: "Gear", to: "/equipment", icon: "backpack", needsCharacter: true, match: ["/equipment"] },
@@ -25,6 +26,13 @@ export const MAIN_TABS: readonly MainTabDef[] = [
   { id: "sheet", label: "Character Sheet", short: "Sheet", to: "/sheet", icon: "scroll", needsCharacter: true, match: ["/sheet"], secondary: true },
   { id: "play", label: "Play", short: "Play", to: "/play", icon: "shield", needsCharacter: true, match: ["/play"] },
 ];
+
+/** The tabs to show: a Dungeon Master has no character open unless they are viewing one of their players'. */
+export function mainTabs(): readonly MainTabDef[] {
+  if (!signedIn()) return MAIN_TABS;
+  const tabs = MAIN_TABS.map((t) => (t.id === "start" ? { ...t, to: "/party" } : t));
+  return isDm() && !loadSession()?.view ? tabs.filter((t) => !t.needsCharacter) : tabs;
+}
 
 /**
  * Route-based sub-tabs for the START section: the classic builder's CHARACTER COLLECTION | SOURCES | ADDITIONAL CONTENT, then
@@ -40,7 +48,11 @@ export const START_SUBNAV: readonly { to: string; label: string; desktopOnly?: b
 
 /** The START sub-tabs this build shows. */
 export function startSubnav(mobile: boolean): readonly { to: string; label: string }[] {
-  return START_SUBNAV.filter((s) => !(mobile && s.desktopOnly));
+  const shown = START_SUBNAV.filter((s) => !(mobile && s.desktopOnly));
+  if (!signedIn()) return shown;
+  // On a server the party comes first; characters belong to players, and adding content to Dungeon Masters.
+  const hidden = isDm() ? ["/characters"] : ["/content/sources", "/content"];
+  return [{ to: "/party", label: "Party" }, ...shown.filter((s) => !hidden.includes(s.to))];
 }
 
 export function activeTab(pathname: string): MainTabDef {

@@ -19,6 +19,7 @@ import { SettingsRedirect } from "./pages/settings/SettingsHost";
 import { SheetPage } from "./pages/sheet/SheetPage";
 import { SpellsPage } from "./pages/spells/SpellsPage";
 import { PlayPage } from "./pages/play/PlayPage";
+import { PartyPage } from "./pages/party/PartyPage";
 
 /** START > NOTES (GitHub #15) loads on first use: it brings the Markdown renderer, the sanitiser and the YAML reader. */
 const NotesPage = lazy(() => import("./pages/notes/NotesPage").then((m) => ({ default: m.NotesPage })));
@@ -35,7 +36,8 @@ export function App() {
     <AppShell>
       <GlobalImport />
       <Routes>
-        <Route path="/" element={<Navigate to="/characters" replace />} />
+        <Route path="/" element={<Navigate to="/party" replace />} />
+        <Route path="/party/:groupId?" element={<PartyPage />} />
         <Route path="/characters" element={<CharactersPage />} />
         <Route path="/builder/:tab?" element={<BuilderPage />} />
         <Route path="/play" element={<PlayPage />} />
