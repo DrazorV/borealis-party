@@ -5,6 +5,7 @@ import { isTauri } from "../../src/lib/tauri";
 import { loadSession } from "../api/session";
 import { PartyPage } from "../pages/PartyPage";
 import { ScopeBar } from "../pages/ScopeBar";
+import { hideDeviceTransfer } from "./hideTransfer";
 import "../pages/party.css";
 
 // Hooks for party.css, which hides the upstream controls that don't apply to this account.
@@ -13,6 +14,7 @@ const root = document.documentElement;
 root.classList.toggle("party-dm", session?.user.role === "dm" && !session.view);
 root.classList.toggle("party-player", session?.user.role === "player");
 root.classList.toggle("party-browser", !isTauri());
+hideDeviceTransfer();
 
 /** Upstream's app with the party routes in front of it. */
 export function App() {

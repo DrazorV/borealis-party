@@ -37,3 +37,4 @@ html.party-dm [data-testid^="nav-"]:not([data-testid="nav-start"]):not([data-tes
 html.party-dm .tabs.sub a[href="#/characters"] { display: none; }
 html.party-player .tabs.sub a[href="#/content"], html.party-player .tabs.sub a[href="#/content/sources"] { display: none; }
 .party-scope-host { flex: none; }
+.party-hidden { display: none !important; }
