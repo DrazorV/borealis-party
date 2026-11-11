@@ -445,6 +445,19 @@ fn upgrades_named_otherwise_fold_by_what_they_say() {
     };
     snap.features.extend([
         feature(
+            "ID_TEST_INVOKE_DUPLICITY",
+            "Channel Divinity: Invoke Duplicity",
+            2,
+            "<p>You create an illusory duplicate of yourself.</p>",
+        ),
+        // "Group: Option" named by its option alone
+        feature(
+            "ID_TEST_IMPROVED_DUPLICITY",
+            "Improved Duplicity",
+            17,
+            "<p>You create up to four duplicates when you use Invoke Duplicity.</p>",
+        ),
+        feature(
             "ID_TEST_STEEL_DEFENDER",
             "Steel Defender",
             3,
@@ -474,7 +487,7 @@ fn upgrades_named_otherwise_fold_by_what_they_say() {
     ]);
     let d = data(&(c, snap));
     let names: Vec<_> = d.features.iter().map(|f| f.name.as_str()).collect();
-    for gone in ["Improved Defender", "Wind Expansion"] {
+    for gone in ["Improved Defender", "Wind Expansion", "Improved Duplicity"] {
         assert!(!names.contains(&gone), "{gone} still listed: {names:?}");
     }
     assert!(names.contains(&"Calm Mind"), "{names:?}");
