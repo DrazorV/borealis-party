@@ -264,8 +264,109 @@ fn feature_tables(f: &FeatureDetail, text: &str) -> Vec<crate::model_types::Text
     }
 }
 
+/// Engine-generated improvement placeholders ("Ability Score Improvement (4)", "Feat (8)"): the
+/// chosen increases show in the scores and the chosen feat is listed itself, so the placeholder
+/// (template text only) is not sheet content.
+fn is_improvement_placeholder(id: &str) -> bool {
+    borealis_engine::ids::is_generated_with_class(id)
+}
+
+/// Words naming a later, stronger version of a feature ("Improved Divine Smite").
+const UPGRADE_WORDS: &[&str] = &["improved ", "greater ", "superior "];
+
+/// A name without a leading "Level N: " (2024 content).
+fn without_level_lead(name: &str) -> &str {
+    let n = name.trim();
+    strip_prefix_ci(n, "level ")
+        .and_then(|rest| rest.split_once(':'))
+        .filter(|(num, _)| !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()))
+        .map_or(n, |(_, after)| after.trim())
+}
+
+/// The name a feature and its upgrades share, lower case
+/// ("Level 14: Improved Blessed Strikes" -> "blessed strikes").
+fn upgrade_stem(name: &str) -> String {
+    let n = without_level_lead(name).to_lowercase();
+    UPGRADE_WORDS
+        .iter()
+        .find_map(|w| n.strip_prefix(w))
+        .map_or_else(|| n.clone(), |rest| rest.trim().to_string())
+}
+
+/// True when `name` carries an upgrade word ("Improved Critical", "Greater Portent").
+fn is_upgrade_name(name: &str) -> bool {
+    let n = without_level_lead(name).to_lowercase();
+    UPGRADE_WORDS.iter().any(|w| n.starts_with(w))
+}
+
+/// Appends an upgrade's text to the feature it improves: a paragraph led by the upgrade's name
+/// and level, its tables moved to the lines they now occupy. Nothing of either is dropped.
+fn fold_upgrade(host: &mut FeatureData, up: FeatureData) {
+    let offset = if host.text.is_empty() {
+        0
+    } else {
+        host.text.split('\n').count()
+    };
+    let name = without_level_lead(&up.name);
+    let lead = if up.level > 0 {
+        format!("{name} (level {})", up.level)
+    } else {
+        name.to_string()
+    };
+    // a table on the first line keeps its rows intact: the lead goes on a line of its own
+    let own_line = up.tables.iter().any(|t| t.lines.start == 0) || up.text.is_empty();
+    let block = if own_line {
+        if up.text.is_empty() {
+            format!("{lead}.")
+        } else {
+            format!("{lead}.\n{}", up.text)
+        }
+    } else {
+        format!("{lead}. {}", up.text)
+    };
+    let shift = offset + usize::from(own_line && !up.text.is_empty());
+    host.tables.extend(up.tables.into_iter().map(|mut t| {
+        t.lines = t.lines.start + shift..t.lines.end + shift;
+        t
+    }));
+    if host.text.is_empty() {
+        host.summary = short_summary(&block);
+        host.text = block;
+    } else {
+        host.text.push('\n');
+        host.text.push_str(&block);
+    }
+    for s in up.sources {
+        if !host.sources.contains(&s) {
+            host.sources.push(s);
+        }
+    }
+    host.prerequisites_unmet |= up.prerequisites_unmet;
+}
+
+/// Folds each upgrade ("Improved X", "Greater X", "Superior X") into the earliest feature of the
+/// same class section with the same stem, so a feature that grows reads as one entry.
+fn fold_upgrades(sorted: Vec<((u8, usize), FeatureData)>) -> Vec<FeatureData> {
+    let mut out: Vec<((u8, usize), FeatureData)> = Vec::new();
+    for (scope, f) in sorted {
+        let host = is_upgrade_name(&f.name)
+            .then(|| {
+                let stem = upgrade_stem(&f.name);
+                out.iter()
+                    .position(|(s, h)| *s == scope && upgrade_stem(&h.name) == stem)
+            })
+            .flatten();
+        match host {
+            Some(i) => fold_upgrade(&mut out[i].1, f),
+            None => out.push((scope, f)),
+        }
+    }
+    out.into_iter().map(|(_, f)| f).collect()
+}
+
 /// Displayed features, de-duplicated by name (sources merged), formulas evaluated and ordered:
-/// per class base before subclass at equal level, then species, feats, background.
+/// per class base before subclass at equal level, then species, feats, background. Upgrades of a
+/// feature are folded into it ([`fold_upgrades`]) and improvement placeholders left out.
 pub(crate) fn features(snap: &CharacterSnapshot) -> Vec<FeatureData> {
     struct Keyed {
         key: (u8, usize, u32, u8, usize),
@@ -275,7 +376,10 @@ pub(crate) fn features(snap: &CharacterSnapshot) -> Vec<FeatureData> {
     for (idx, f) in snap.features.iter().enumerate() {
         let name = display_name(&f.name);
         let lower = name.to_lowercase();
-        if !f.displayed || HIDDEN_FEATURES.contains(&lower.as_str()) || lower.ends_with(" subclass")
+        if !f.displayed
+            || HIDDEN_FEATURES.contains(&lower.as_str())
+            || lower.ends_with(" subclass")
+            || is_improvement_placeholder(&f.id)
         {
             continue;
         }
@@ -323,7 +427,11 @@ pub(crate) fn features(snap: &CharacterSnapshot) -> Vec<FeatureData> {
         });
     }
     out.sort_by_key(|k| k.key);
-    out.into_iter().map(|k| k.data).collect()
+    fold_upgrades(
+        out.into_iter()
+            .map(|k| ((k.key.0, k.key.1), k.data))
+            .collect(),
+    )
 }
 
 /// Registered element names of the given types, unique, in registration order.

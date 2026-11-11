@@ -315,6 +315,117 @@ fn shared_class_features_merge_their_sources() {
 }
 
 #[test]
+fn improvement_placeholders_are_left_out_but_their_feat_stays() {
+    use borealis_engine::snapshot::FeatureDetail;
+    let (c, mut snap) = fighter_wizard_2014();
+    let base: FeatureDetail = snap
+        .features
+        .iter()
+        .find(|f| f.name == "Second Wind")
+        .expect("fighter feature")
+        .clone();
+    let placeholder = FeatureDetail {
+        id: "ID_INTERNAL_CLASS_FEATURE_FEAT_8_FIGHTER".into(),
+        name: "Feat (8)".into(),
+        level: 8,
+        granted_by: Some("Ability Score Improvement".into()),
+        sheet_summary: Some(
+            "Template for taking a feat instead of an ability score improvement.".into(),
+        ),
+        ..base.clone()
+    };
+    let asi = FeatureDetail {
+        id: "ID_INTERNAL_CLASS_FEATURE_ASI_4_FIGHTER".into(),
+        name: "Ability Score Improvement (4)".into(),
+        level: 4,
+        ..placeholder.clone()
+    };
+    let feat = FeatureDetail {
+        id: "ID_TEST_FEAT_ALERT".into(),
+        name: "Alert".into(),
+        ty: "Feat".into(),
+        level: 8,
+        granted_by: Some("Feat (8)".into()),
+        sheet_summary: Some("You can't be surprised while you are conscious.".into()),
+        ..base
+    };
+    snap.features.extend([placeholder, asi, feat]);
+    let d = crate::sheet_data(&c, &snap, &SpellFactsMap::new());
+    let names: Vec<_> = d.features.iter().map(|f| f.name.as_str()).collect();
+    assert!(!names.contains(&"Feat (8)"), "{names:?}");
+    assert!(
+        !names.contains(&"Ability Score Improvement (4)"),
+        "{names:?}"
+    );
+    assert!(names.contains(&"Alert"), "{names:?}");
+}
+
+#[test]
+fn upgrades_fold_into_the_feature_they_improve() {
+    use borealis_engine::snapshot::FeatureDetail;
+    let (c, mut snap) = fighter_wizard_2014();
+    let base: FeatureDetail = snap
+        .features
+        .iter()
+        .find(|f| f.name == "Second Wind")
+        .expect("fighter feature")
+        .clone();
+    let base_text = data(&(c.clone(), snap.clone()))
+        .features
+        .into_iter()
+        .find(|f| f.name == "Second Wind")
+        .unwrap()
+        .text;
+    snap.features.push(FeatureDetail {
+        id: "ID_TEST_IMPROVED_SECOND_WIND".into(),
+        name: "Improved Second Wind".into(),
+        level: 10,
+        sheet_summary: Some("You regain 2d10 hit points instead.".into()),
+        ..base.clone()
+    });
+    snap.features.push(FeatureDetail {
+        id: "ID_TEST_SUPERIOR_SECOND_WIND".into(),
+        name: "Level 18: Superior Second Wind".into(),
+        level: 18,
+        granted_by: Some("Wizard".into()),
+        sheet_summary: Some("You regain 3d10 hit points instead.".into()),
+        ..base.clone()
+    });
+    // an "Improved" feature of another section is its own entry
+    snap.features.push(FeatureDetail {
+        id: "ID_TEST_GREATER_SECOND_WIND_TRAIT".into(),
+        name: "Greater Second Wind".into(),
+        ty: "Racial Trait".into(),
+        level: 1,
+        sheet_summary: Some("A racial version.".into()),
+        ..base
+    });
+    let d = data(&(c, snap));
+    let fighter: Vec<_> = d
+        .features
+        .iter()
+        .filter(|f| f.name.contains("Second Wind") && f.group != FeatureGroup::Species)
+        .collect();
+    assert_eq!(fighter.len(), 2, "{fighter:?}");
+    let host = fighter.iter().find(|f| f.name == "Second Wind").unwrap();
+    assert!(host.text.starts_with(&base_text), "{}", host.text);
+    assert!(
+        host.text
+            .ends_with("\nImproved Second Wind (level 10). You regain 2d10 hit points instead."),
+        "{}",
+        host.text
+    );
+    // an upgrade granted by another class is not folded into this one
+    assert!(fighter
+        .iter()
+        .any(|f| f.name == "Level 18: Superior Second Wind"));
+    assert!(d
+        .features
+        .iter()
+        .any(|f| f.group == FeatureGroup::Species && f.name == "Greater Second Wind"));
+}
+
+#[test]
 fn play_state_fields_exist_as_blank_write_ins() {
     let d = data(&wizard_2014());
     assert_eq!((d.play.current_hp, d.play.temp_hp), (None, None));
