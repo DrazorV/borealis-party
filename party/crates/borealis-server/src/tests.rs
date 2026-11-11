@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 use crate::auth::LoginLimiter;
-use crate::db::Db;
+use crate::db::{Db, Location};
 use crate::workspaces::Workspaces;
 use crate::{api_routes, AppState, Config};
 
@@ -23,10 +23,14 @@ struct Client {
     id: String,
 }
 
-fn router(data: PathBuf) -> Router {
+async fn router(data: PathBuf) -> Router {
+    router_on(data, Db::open(&Location::Memory).await.unwrap())
+}
+
+fn router_on(data: PathBuf, db: Db) -> Router {
     let content = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../content");
     let state = AppState {
-        db: Db::in_memory().unwrap(),
+        db,
         workspaces: Arc::new(Workspaces::new(data, content)),
         config: Arc::new(Config {
             open_registration: true,
@@ -136,7 +140,147 @@ async fn eventually(client: &Client, scope: &str, id: &str, want: StatusCode) {
 #[tokio::test(flavor = "multi_thread")]
 async fn accounts_groups_and_characters_follow_the_rules() {
     let dir = tempfile::tempdir().unwrap();
-    let router = router(dir.path().to_path_buf());
+    full_flow(router(dir.path().to_path_buf()).await).await;
+}
+
+async fn some_accounts(router: &Router) {
+    let dm = sign_up(router, "moving-dm", "dm").await;
+    let player = sign_up(router, "moving-player", "player").await;
+    let (_, group) = dm
+        .post("/api/groups", json!({ "name": "Moving day" }))
+        .await;
+    let group = group["id"].as_str().unwrap().to_string();
+    let (_, invite) = dm
+        .post(
+            &format!("/api/groups/{group}/invites"),
+            json!({ "username": "moving-player" }),
+        )
+        .await;
+    player
+        .post(
+            &format!("/api/invites/{}/accept", invite["id"].as_str().unwrap()),
+            json!({}),
+        )
+        .await;
+    let other = sign_up(router, "invited-only", "player").await;
+    dm.post(
+        &format!("/api/groups/{group}/invites"),
+        json!({ "username": "invited-only" }),
+    )
+    .await;
+    drop(other);
+}
+
+/// After a copy the new database answers exactly like the old one.
+async fn check_moved(router: &Router) {
+    let (status, out) = send(
+        router,
+        None,
+        "POST",
+        "/api/auth/login",
+        json!({ "username": "MOVING-DM", "password": "correct horse battery" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let token = out["token"].as_str().unwrap();
+    let (_, groups) = send(router, Some(token), "GET", "/api/groups", Value::Null).await;
+    assert_eq!(groups[0]["name"], "Moving day", "{groups}");
+    assert_eq!(groups[0]["memberCount"], 1);
+    let (_, detail) = send(
+        router,
+        Some(token),
+        "GET",
+        &format!("/api/groups/{}", groups[0]["id"].as_str().unwrap()),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(detail["invites"][0]["username"], "invited-only", "{detail}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sqlite_instance_moves_with_its_accounts() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("party.db");
+    let old = Db::open(&Location::Sqlite(file.clone())).await.unwrap();
+    some_accounts(&router_on(dir.path().join("data"), old.clone())).await;
+    let new = Db::open(&Location::Memory).await.unwrap();
+    let report = crate::migrate::adopt_sqlite(&new, &file)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        crate::migrate::describe(&report),
+        "users 3, sessions 3, party_groups 1, invites 1, members 1"
+    );
+    check_moved(&router_on(dir.path().join("data"), new.clone())).await;
+    // Once the new database has accounts, the old file is left alone.
+    assert!(crate::migrate::adopt_sqlite(&new, &file)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(matches!(
+        crate::migrate::copy(&old, &new).await,
+        Err(crate::migrate::MigrateError::TargetNotEmpty)
+    ));
+    // A missing file is nothing to do.
+    let empty = Db::open(&Location::Memory).await.unwrap();
+    assert!(
+        crate::migrate::adopt_sqlite(&empty, &dir.path().join("none.db"))
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+/// The same rules on PostgreSQL. Runs when `BOREALIS_TEST_POSTGRES_URL` names a database it may wipe.
+#[tokio::test(flavor = "multi_thread")]
+async fn accounts_groups_and_characters_follow_the_rules_on_postgres() {
+    let Ok(url) = std::env::var("BOREALIS_TEST_POSTGRES_URL") else {
+        eprintln!("skipped: set BOREALIS_TEST_POSTGRES_URL to run against PostgreSQL");
+        return;
+    };
+    {
+        sqlx::any::install_default_drivers();
+        let pool = sqlx::AnyPool::connect(&url).await.unwrap();
+        for table in [
+            "members",
+            "invites",
+            "party_groups",
+            "sessions",
+            "users",
+            "schema_version",
+        ] {
+            sqlx::query(&format!("DROP TABLE IF EXISTS {table} CASCADE"))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+    }
+    let db = Db::open(&Location::Postgres(url.clone())).await.unwrap();
+    // Opening again finds the schema already there.
+    Db::open(&Location::Postgres(url)).await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    // First a move from SQLite, as when an instance switches databases.
+    let file = dir.path().join("party.db");
+    let old = Db::open(&Location::Sqlite(file.clone())).await.unwrap();
+    some_accounts(&router_on(dir.path().join("old"), old)).await;
+    let report = crate::migrate::adopt_sqlite(&db, &file)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        crate::migrate::describe(&report),
+        "users 3, sessions 3, party_groups 1, invites 1, members 1"
+    );
+    check_moved(&router_on(dir.path().join("old"), db.clone())).await;
+    assert!(crate::migrate::adopt_sqlite(&db, &file)
+        .await
+        .unwrap()
+        .is_none());
+    full_flow(router_on(dir.path().to_path_buf(), db)).await;
+}
+
+async fn full_flow(router: Router) {
     let dm = sign_up(&router, "dungeon-master", "dm").await;
     let other_dm = sign_up(&router, "other-dm", "dm").await;
     let alice = sign_up(&router, "alice", "player").await;
@@ -354,7 +498,7 @@ async fn accounts_groups_and_characters_follow_the_rules() {
 #[tokio::test(flavor = "multi_thread")]
 async fn sessions_are_required_and_passwords_are_checked() {
     let dir = tempfile::tempdir().unwrap();
-    let router = router(dir.path().to_path_buf());
+    let router = router(dir.path().to_path_buf()).await;
     let (status, _) = send(&router, None, "GET", "/api/me", Value::Null).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     let (status, _) = send(&router, Some("nonsense"), "GET", "/api/groups", Value::Null).await;

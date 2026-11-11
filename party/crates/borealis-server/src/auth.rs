@@ -13,7 +13,6 @@ use axum::http::request::Parts;
 use axum::http::{header, HeaderMap};
 use axum::Json;
 use rand::RngCore;
-use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
@@ -90,7 +89,7 @@ impl Role {
         }
     }
 
-    fn parse(text: &str) -> Self {
+    pub(crate) fn parse(text: &str) -> Self {
         if text == "dm" {
             Self::Dm
         } else {
@@ -194,19 +193,10 @@ pub async fn create_user(db: &Db, username: &str, password: &str, role: Role) ->
         username,
         role,
     };
-    let out = user.clone();
-    db.run(move |c| {
-        let inserted = c.execute(
-            "INSERT OR IGNORE INTO users (id, username, password_hash, role, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![user.id, user.username, hash, user.role.as_str(), now()],
-        )?;
-        if inserted == 0 {
-            return Err(ApiError::Conflict("That username is taken.".into()));
-        }
-        Ok(())
-    })
-    .await?;
-    Ok(out)
+    if !db.insert_user(&user, &hash).await? {
+        return Err(ApiError::Conflict("That username is taken.".into()));
+    }
+    Ok(user)
 }
 
 async fn start_session(db: &Db, user: User) -> ApiResult<SessionOut> {
@@ -214,16 +204,8 @@ async fn start_session(db: &Db, user: User) -> ApiResult<SessionOut> {
     rand::rng().fill_bytes(&mut bytes);
     let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
     let hash = token_hash(&token);
-    let user_id = user.id.clone();
-    db.run(move |c| {
-        c.execute("DELETE FROM sessions WHERE expires_at < ?1", params![now()])?;
-        c.execute(
-            "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?1, ?2, ?3)",
-            params![hash, user_id, now() + SESSION_SECONDS],
-        )?;
-        Ok(())
-    })
-    .await?;
+    db.insert_session(&hash, &user.id, now() + SESSION_SECONDS)
+        .await?;
     Ok(SessionOut { token, user })
 }
 
@@ -252,27 +234,7 @@ pub async fn login(
     if state.login_limiter.blocked(&key) {
         return Err(ApiError::TooMany);
     }
-    let lookup = username.clone();
-    let found = state
-        .db
-        .run(move |c| {
-            Ok(c.query_row(
-                "SELECT id, username, role, password_hash FROM users WHERE username = ?1",
-                params![lookup],
-                |r| {
-                    Ok((
-                        User {
-                            id: r.get(0)?,
-                            username: r.get(1)?,
-                            role: Role::parse(&r.get::<_, String>(2)?),
-                        },
-                        r.get::<_, String>(3)?,
-                    ))
-                },
-            )
-            .optional()?)
-        })
-        .await?;
+    let found = state.db.find_login(&username).await?;
     let (user, hash) = found.map_or((None, None), |(u, h)| (Some(u), Some(h)));
     let password = form.password;
     let matches = hashing(move || {
@@ -309,14 +271,7 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
 /// `POST /api/auth/logout`.
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<()> {
     if let Some(token) = bearer(&headers) {
-        let hash = token_hash(token);
-        state
-            .db
-            .run(move |c| {
-                c.execute("DELETE FROM sessions WHERE token_hash = ?1", params![hash])?;
-                Ok(())
-            })
-            .await?;
+        state.db.delete_session(&token_hash(token)).await?;
     }
     Ok(())
 }
@@ -337,24 +292,9 @@ where
         let state = AppState::from_ref(state);
         let unauthorized = || ApiError::Unauthorized("Please sign in.".into());
         let token = bearer(&parts.headers).ok_or_else(unauthorized)?;
-        let hash = token_hash(token);
         state
             .db
-            .run(move |c| {
-                Ok(c.query_row(
-                    "SELECT u.id, u.username, u.role FROM sessions s JOIN users u ON u.id = s.user_id
-                     WHERE s.token_hash = ?1 AND s.expires_at > ?2",
-                    params![hash, now()],
-                    |r| {
-                        Ok(User {
-                            id: r.get(0)?,
-                            username: r.get(1)?,
-                            role: Role::parse(&r.get::<_, String>(2)?),
-                        })
-                    },
-                )
-                .optional()?)
-            })
+            .session_user(&token_hash(token))
             .await?
             .ok_or_else(unauthorized)
     }

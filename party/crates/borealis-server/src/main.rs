@@ -19,15 +19,18 @@ use tower_http::set_header::SetResponseHeaderLayer;
 
 mod auth;
 mod backend;
+mod config;
 mod db;
 mod error;
 mod groups;
+mod migrate;
 mod rpc;
 #[cfg(test)]
 mod tests;
 mod workspaces;
 
 use auth::{LoginLimiter, Role};
+use config::Settings;
 use db::Db;
 use workspaces::Workspaces;
 
@@ -38,39 +41,12 @@ const CSP: &str = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src
 #[command(
     name = "borealis-server",
     version,
-    about = "Multi-user Borealis server"
+    about = "Multi-user Borealis server. Settings are in <config dir>/config.toml and BOREALIS__<SECTION>__<KEY> variables."
 )]
 struct Args {
-    /// Address to listen on.
-    #[arg(long, env = "BOREALIS_BIND", default_value = "0.0.0.0:8787")]
-    bind: SocketAddr,
-    /// Where accounts, characters and content live.
-    #[arg(
-        long,
-        env = "BOREALIS_DATA_DIR",
-        default_value = "/var/lib/borealis-party"
-    )]
-    data_dir: PathBuf,
-    /// The bundled content packs (the repository's `content` folder).
-    #[arg(
-        long,
-        env = "BOREALIS_CONTENT_DIR",
-        default_value = "/opt/borealis-party/content"
-    )]
-    content_dir: PathBuf,
-    /// The built web app (`ui/dist`). The API works without it.
-    #[arg(
-        long,
-        env = "BOREALIS_WEB_DIR",
-        default_value = "/opt/borealis-party/web"
-    )]
-    web_dir: PathBuf,
-    /// Let anyone reach the sign-up form. When off, accounts come from `add-user`.
-    #[arg(long, env = "BOREALIS_OPEN_REGISTRATION", default_value_t = true, action = clap::ArgAction::Set)]
-    open_registration: bool,
-    /// Largest request, in megabytes (content imports arrive as base64).
-    #[arg(long, env = "BOREALIS_MAX_UPLOAD_MB", default_value_t = 512)]
-    max_upload_mb: usize,
+    /// The folder holding config.toml and, by default, the database and data.
+    #[arg(long, env = "BOREALIS_CONFIG_DIR", default_value = "/config")]
+    config_dir: PathBuf,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -84,6 +60,15 @@ enum Command {
         /// `dm` or `player`.
         #[arg(value_parser = parse_role)]
         role: Role,
+    },
+    /// Exit 0 when the running server answers (for container health checks).
+    Health,
+    /// Copy accounts and groups from a SQLite file into the configured PostgreSQL database, which must have none yet.
+    /// The server does this by itself on its first start with PostgreSQL; this is for doing it by hand.
+    MigrateSqlite {
+        /// The SQLite file; by default the one `[sqlite] path` names.
+        #[arg(long)]
+        from: Option<PathBuf>,
     },
 }
 
@@ -210,17 +195,89 @@ async fn shutdown_signal() {
     }
 }
 
+/// The folder next to the program, where the packaged content and web app sit.
+fn beside_program(name: &str) -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join(name)))
+        .unwrap_or_else(|| PathBuf::from(name))
+}
+
+/// Ask the server on this machine for `/api/server`.
+fn health(bind: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::{Read, Write};
+    let ip = if bind.ip().is_unspecified() {
+        std::net::IpAddr::from([127, 0, 0, 1])
+    } else {
+        bind.ip()
+    };
+    let timeout = std::time::Duration::from_secs(5);
+    let mut stream =
+        std::net::TcpStream::connect_timeout(&SocketAddr::new(ip, bind.port()), timeout)?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.write_all(b"GET /api/server HTTP/1.0\r\nHost: localhost\r\n\r\n")?;
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply)?;
+    if reply.starts_with("HTTP/1.0 200") || reply.starts_with("HTTP/1.1 200") {
+        Ok(())
+    } else {
+        Err("the server did not answer 200".into())
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+    let settings = Settings::load(&args.config_dir)?;
+    if matches!(args.command, Some(Command::Health)) {
+        return health(settings.server.bind);
+    }
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,tantivy=warn".into()),
+                .unwrap_or_else(|_| format!("{},tantivy=warn", settings.log.level).into()),
         )
         .init();
-    let args = Args::parse();
-    std::fs::create_dir_all(&args.data_dir)?;
-    let db = Db::open(&args.data_dir.join("party.db"))?;
+    let dir = &args.config_dir;
+    let location = settings.database(dir)?;
+    tracing::info!(
+        "config {}, database {}",
+        dir.join("config.toml").display(),
+        match &location {
+            db::Location::Postgres(_) => format!(
+                "postgres at {}:{}/{}",
+                settings.postgres.host, settings.postgres.port, settings.postgres.database
+            ),
+            other => format!("{other:?}"),
+        }
+    );
+    let db = Db::open(&location).await?;
+    let sqlite_file = Settings::resolve(dir, &settings.sqlite.path);
+    if let Some(Command::MigrateSqlite { from }) = &args.command {
+        if !matches!(location, db::Location::Postgres(_)) {
+            return Err(
+                "set database.type = postgres (BOREALIS__DATABASE__TYPE=postgres) first".into(),
+            );
+        }
+        let file = from.clone().unwrap_or(sqlite_file);
+        if !file.is_file() {
+            return Err(format!("no SQLite database at {}", file.display()).into());
+        }
+        let source = Db::open(&db::Location::Sqlite(file)).await?;
+        let report = migrate::copy(&source, &db).await?;
+        println!("Copied {}.", migrate::describe(&report));
+        return Ok(());
+    }
+    if matches!(location, db::Location::Postgres(_)) {
+        // Switched from SQLite: bring the accounts along, once.
+        if let Some(report) = migrate::adopt_sqlite(&db, &sqlite_file).await? {
+            tracing::info!(
+                "moved to PostgreSQL: {}. {} was left as it was",
+                migrate::describe(&report),
+                sqlite_file.display()
+            );
+        }
+    }
     if let Some(Command::AddUser { username, role }) = args.command {
         let mut password = String::new();
         std::io::stdin().lock().read_line(&mut password)?;
@@ -235,31 +292,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Created {} ({}).", user.username, role.as_str());
         return Ok(());
     }
-    if !args.content_dir.join("core").join("pack.json").is_file() {
+    if let (Some(username), Some(password)) =
+        (&settings.initial_dm.username, &settings.initial_dm.password)
+    {
+        if db.user_count().await.map_err(|e| format!("{e:?}"))? == 0 {
+            auth::create_user(&db, username, password, Role::Dm)
+                .await
+                .map_err(|e| format!("initial_dm: {e:?}"))?;
+            tracing::info!("created the initial Dungeon Master account {username}");
+        }
+    }
+    let content = settings
+        .paths
+        .content
+        .clone()
+        .unwrap_or_else(|| beside_program("content"));
+    let web = settings
+        .paths
+        .web
+        .clone()
+        .unwrap_or_else(|| beside_program("web"));
+    if !content.join("core").join("pack.json").is_file() {
         return Err(format!(
-            "no bundled content in {}: set BOREALIS_CONTENT_DIR",
-            args.content_dir.display()
+            "no bundled content in {}: set paths.content (BOREALIS__PATHS__CONTENT)",
+            content.display()
         )
         .into());
     }
-    let workspaces = Arc::new(Workspaces::new(args.data_dir.clone(), args.content_dir));
+    let data = Settings::resolve(dir, &settings.paths.data);
+    std::fs::create_dir_all(&data)?;
+    let workspaces = Arc::new(Workspaces::new(data, content));
     tokio::spawn(Arc::clone(&workspaces).evict_loop());
     let state = AppState {
         db,
         workspaces: Arc::clone(&workspaces),
         config: Arc::new(Config {
-            open_registration: args.open_registration,
+            open_registration: settings.server.open_registration,
         }),
         login_limiter: LoginLimiter::default(),
         membership: Arc::new(tokio::sync::Mutex::new(())),
     };
     let router = app(
         state,
-        &args.web_dir,
-        args.max_upload_mb.saturating_mul(1024 * 1024),
+        &web,
+        settings.server.max_upload_mb.saturating_mul(1024 * 1024),
     );
-    let listener = tokio::net::TcpListener::bind(args.bind).await?;
-    tracing::info!("listening on {}", args.bind);
+    let listener = tokio::net::TcpListener::bind(settings.server.bind).await?;
+    tracing::info!("listening on {}", settings.server.bind);
     axum::serve(
         listener,
         router.into_make_service_with_connect_info::<SocketAddr>(),
