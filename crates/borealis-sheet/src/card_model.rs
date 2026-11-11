@@ -287,7 +287,6 @@ fn feature_cards(snap: &CharacterSnapshot) -> Vec<Card> {
         .filter(|f| {
             !f.name.starts_with("Ability Score Increase")
                 && !f.name.starts_with("Ability Score Improvement")
-                && !borealis_engine::ids::is_generated_with_class(&f.id)
         })
         .map(|f| Card {
             title: f.name.clone(),
