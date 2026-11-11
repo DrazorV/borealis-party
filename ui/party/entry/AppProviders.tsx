@@ -1,9 +1,13 @@
 import type { ComponentProps } from "react";
 import { AppProviders as UpstreamProviders } from "../../src/AppProviders";
-import { signedIn } from "../api/session";
+import { loadSession } from "../api/session";
+import { ChangePasswordPage } from "../pages/ChangePasswordPage";
 import { ConnectPage } from "../pages/ConnectPage";
 
-/** Nobody signed in on this device: the connect screen instead of the app. */
+/** Nobody signed in on this device: the connect screen instead of the app. A password to replace comes first too. */
 export function AppProviders(props: ComponentProps<typeof UpstreamProviders>) {
-  return signedIn() ? <UpstreamProviders {...props} /> : <ConnectPage />;
+  const session = loadSession();
+  if (!session) return <ConnectPage />;
+  if (session.user.mustChangePassword) return <ChangePasswordPage />;
+  return <UpstreamProviders {...props} />;
 }

@@ -6,8 +6,9 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::auth::{Role, User};
-use crate::db::InviteOutcome;
+use crate::admin::record;
+use crate::auth::User;
+use crate::db::{Activity, InviteOutcome};
 use crate::error::{ApiError, ApiResult};
 use crate::rpc::group_role;
 use crate::workspaces::{Workspace, WsKey};
@@ -16,22 +17,8 @@ use crate::AppState;
 /// Read commands that make no sense against someone else's workspace.
 const VIEW_REFUSED: [&str; 3] = ["list_characters", "close_character", "save_settings"];
 
-fn require_dm(user: &User) -> ApiResult<()> {
-    if user.role == Role::Dm {
-        Ok(())
-    } else {
-        Err(ApiError::Forbidden(
-            "Only Dungeon Masters can do that.".into(),
-        ))
-    }
-}
-
-fn require_player(user: &User) -> ApiResult<()> {
-    if user.role == Role::Player {
-        Ok(())
-    } else {
-        Err(ApiError::Forbidden("Only players can do that.".into()))
-    }
+fn not_as_dm() -> ApiError {
+    ApiError::Forbidden("You run this group: its characters belong to its players.".into())
 }
 
 fn group_name(name: &str) -> ApiResult<String> {
@@ -53,6 +40,8 @@ pub struct GroupOut {
     dm_name: String,
     member_count: i64,
     character_id: Option<String>,
+    /// The caller runs it; otherwise they play in it.
+    is_dm: bool,
 }
 
 /// The name in a form.
@@ -69,6 +58,7 @@ pub async fn list(State(state): State<AppState>, user: User) -> ApiResult<Json<V
         .await?
         .into_iter()
         .map(|g| GroupOut {
+            is_dm: g.dm_id == user.id,
             id: g.id,
             name: g.name,
             dm_name: g.dm_name,
@@ -85,20 +75,30 @@ pub async fn create(
     user: User,
     Json(form): Json<NameForm>,
 ) -> ApiResult<Json<Value>> {
-    require_dm(&user)?;
     let name = group_name(&form.name)?;
     let id = uuid::Uuid::new_v4().to_string();
     let out = json!({ "id": id, "name": name });
     state.db.insert_group(&id, &name, &user.id).await?;
+    record(
+        &state,
+        Activity::new("group_created").by(&user).on(&id, &name),
+    )
+    .await;
     Ok(Json(out))
 }
 
+/// Only the group's DM gets past; its players are refused and everyone else is told there is no such group.
 async fn owned_group(state: &AppState, user: &User, group: &str) -> ApiResult<()> {
-    require_dm(user)?;
-    group_role(&state.db, user, group)
+    let role = group_role(&state.db, user, group)
         .await?
-        .map(|_| ())
-        .ok_or_else(ApiError::group_not_found)
+        .ok_or_else(ApiError::group_not_found)?;
+    if role.is_dm {
+        Ok(())
+    } else {
+        Err(ApiError::Forbidden(
+            "Only the group's Dungeon Master can do that.".into(),
+        ))
+    }
 }
 
 /// `PATCH /api/groups/{id}`.
@@ -133,7 +133,7 @@ async fn members_of(state: &AppState, group: &str) -> ApiResult<Vec<Member>> {
 }
 
 /// Give a member's character back to their personal list.
-async fn release_character(
+pub(crate) async fn release_character(
     state: &AppState,
     group: &str,
     dm: &str,
@@ -158,14 +158,29 @@ pub async fn delete(
     Path(group): Path<String>,
 ) -> ApiResult<()> {
     owned_group(&state, &user, &group).await?;
+    let name = state.db.group_header(&group).await?.map(|(name, _)| name);
     let _guard = state.membership.lock().await;
-    for member in members_of(&state, &group).await? {
+    delete_group_now(&state, &group, &user.id).await?;
+    record(
+        &state,
+        Activity::new("group_deleted")
+            .by(&user)
+            .on(&group, name.as_deref().unwrap_or_default()),
+    )
+    .await;
+    Ok(())
+}
+
+/// Hand every character back to its player, then delete the group and its folder. The caller holds the membership
+/// lock.
+pub(crate) async fn delete_group_now(state: &AppState, group: &str, dm: &str) -> ApiResult<()> {
+    for member in members_of(state, group).await? {
         if let Some(character) = member.character {
-            release_character(&state, &group, &user.id, &member.player, &character).await?;
+            release_character(state, group, dm, &member.player, &character).await?;
         }
     }
-    state.db.delete_group(&group).await?;
-    state.workspaces.remove_group(&group).await
+    state.db.delete_group(group).await?;
+    state.workspaces.remove_group(group).await
 }
 
 /// `GET /api/groups/{id}`: members and, for the DM, pending invitations.
@@ -177,7 +192,7 @@ pub async fn detail(
     let role = group_role(&state.db, &user, &group)
         .await?
         .ok_or_else(ApiError::group_not_found)?;
-    let is_dm = user.role == Role::Dm;
+    let is_dm = role.is_dm;
     let (name, dm_name) = state
         .db
         .group_header(&group)
@@ -201,7 +216,9 @@ pub async fn detail(
     } else {
         Vec::new()
     };
-    let mut out = json!({ "id": group, "name": name, "dmName": dm_name, "members": members, "invites": invites });
+    let mut out = json!({
+        "id": group, "name": name, "dmName": dm_name, "isDm": is_dm, "members": members, "invites": invites,
+    });
     if let Some(character) = role.character {
         out["characterId"] = json!(character);
     }
@@ -230,8 +247,8 @@ pub async fn invite(
         InviteOutcome::NoAccount => Err(ApiError::NotFound(
             "There is no account with that username.".into(),
         )),
-        InviteOutcome::NotAPlayer => Err(ApiError::Invalid(
-            "Only player accounts can join a group.".into(),
+        InviteOutcome::OwnGroup => Err(ApiError::Invalid(
+            "You run this group, so you can't join it as a player.".into(),
         )),
         InviteOutcome::AlreadyMember => Err(ApiError::Conflict(
             "That player is already in this group.".into(),
@@ -270,7 +287,6 @@ pub async fn accept(
     user: User,
     Path(invite): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    require_player(&user)?;
     let group = state
         .db
         .accept_invite(&invite, &user.id)
@@ -297,7 +313,7 @@ pub async fn remove_member(
     let role = group_role(&state.db, &user, &group)
         .await?
         .ok_or_else(ApiError::group_not_found)?;
-    if user.role == Role::Player && player != user.id {
+    if !role.is_dm && player != user.id {
         return Err(ApiError::Forbidden(
             "You can only remove yourself from a group.".into(),
         ));
@@ -334,11 +350,13 @@ pub async fn set_character(
     Path(group): Path<String>,
     Json(form): Json<CharacterForm>,
 ) -> ApiResult<()> {
-    require_player(&user)?;
     let _guard = state.membership.lock().await;
     let role = group_role(&state.db, &user, &group)
         .await?
         .ok_or_else(ApiError::group_not_found)?;
+    if role.is_dm {
+        return Err(not_as_dm());
+    }
     if role.character.is_some() {
         return Err(ApiError::Conflict(
             "You already have a character in this group.".into(),
@@ -379,11 +397,13 @@ pub async fn clear_character(
     user: User,
     Path(group): Path<String>,
 ) -> ApiResult<()> {
-    require_player(&user)?;
     let _guard = state.membership.lock().await;
     let role = group_role(&state.db, &user, &group)
         .await?
         .ok_or_else(ApiError::group_not_found)?;
+    if role.is_dm {
+        return Err(not_as_dm());
+    }
     let Some(character) = role.character else {
         return Ok(());
     };
@@ -396,7 +416,6 @@ pub async fn my_characters(
     State(state): State<AppState>,
     user: User,
 ) -> ApiResult<Json<Vec<Value>>> {
-    require_player(&user)?;
     let groups = state.db.character_groups(&user.id).await?;
     let mut out = Vec::new();
     let personal = state

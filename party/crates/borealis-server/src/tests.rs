@@ -12,10 +12,13 @@ use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
-use crate::auth::LoginLimiter;
+use crate::auth::RateLimiter;
 use crate::db::{Db, Location};
+use crate::mail::{Mailer, Recorder};
 use crate::workspaces::Workspaces;
 use crate::{api_routes, AppState, Config};
+
+const PASSWORD: &str = "correct horse battery";
 
 struct Client {
     router: Router,
@@ -23,20 +26,50 @@ struct Client {
     id: String,
 }
 
+/// How a test server is set up.
+struct Setup {
+    require_approval: bool,
+    mailer: Option<Arc<Recorder>>,
+    signups_allowed: usize,
+}
+
+impl Default for Setup {
+    fn default() -> Self {
+        Self {
+            require_approval: false,
+            mailer: None,
+            signups_allowed: 1000,
+        }
+    }
+}
+
 async fn router(data: PathBuf) -> Router {
     router_on(data, Db::open(&Location::Memory).await.unwrap())
 }
 
 fn router_on(data: PathBuf, db: Db) -> Router {
+    router_with(data, db, Setup::default())
+}
+
+fn router_with(data: PathBuf, db: Db, setup: Setup) -> Router {
     let content = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../content");
+    let mailer = setup.mailer.map(|m| m as Arc<dyn Mailer>);
     let state = AppState {
         db,
         workspaces: Arc::new(Workspaces::new(data, content)),
         config: Arc::new(Config {
             open_registration: true,
+            require_approval: setup.require_approval,
+            public_url: mailer
+                .as_ref()
+                .map(|_| "https://party.example.com".to_string()),
         }),
-        login_limiter: LoginLimiter::default(),
+        login_limiter: RateLimiter::logins(),
+        signup_limiter: RateLimiter::new(setup.signups_allowed, Duration::from_secs(3600)),
+        mailer,
         membership: Arc::new(tokio::sync::Mutex::new(())),
+        accounts: Arc::new(tokio::sync::Mutex::new(())),
+        started: std::time::Instant::now(),
     };
     api_routes(state, 64 * 1024 * 1024).layer(MockConnectInfo(std::net::SocketAddr::from((
         [127, 0, 0, 1],
@@ -71,16 +104,44 @@ async fn send(
     )
 }
 
-async fn sign_up(router: &Router, name: &str, role: &str) -> Client {
-    let (status, out) = send(
+/// Ask for an account; the answer as it came.
+async fn register(router: &Router, name: &str, email: &str) -> (StatusCode, Value) {
+    send(
         router,
         None,
         "POST",
         "/api/auth/register",
-        json!({ "username": name, "password": "correct horse battery", "role": role }),
+        json!({ "username": name, "email": email, "password": PASSWORD }),
     )
-    .await;
+    .await
+}
+
+/// Sign up an account that is active straight away.
+async fn sign_up(router: &Router, name: &str) -> Client {
+    let (status, out) = register(router, name, &format!("{name}@example.com")).await;
     assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["status"], "active", "{out}");
+    Client {
+        router: router.clone(),
+        token: out["token"].as_str().unwrap().into(),
+        id: out["user"]["id"].as_str().unwrap().into(),
+    }
+}
+
+async fn login(router: &Router, name: &str, password: &str) -> (StatusCode, Value) {
+    send(
+        router,
+        None,
+        "POST",
+        "/api/auth/login",
+        json!({ "username": name, "password": password }),
+    )
+    .await
+}
+
+async fn sign_in(router: &Router, name: &str) -> Client {
+    let (status, out) = login(router, name, PASSWORD).await;
+    assert_eq!(status, StatusCode::OK, "{name}: {out}");
     Client {
         router: router.clone(),
         token: out["token"].as_str().unwrap().into(),
@@ -92,6 +153,9 @@ impl Client {
     async fn post(&self, path: &str, body: Value) -> (StatusCode, Value) {
         send(&self.router, Some(&self.token), "POST", path, body).await
     }
+    async fn patch(&self, path: &str, body: Value) -> (StatusCode, Value) {
+        send(&self.router, Some(&self.token), "PATCH", path, body).await
+    }
     async fn get(&self, path: &str) -> (StatusCode, Value) {
         send(&self.router, Some(&self.token), "GET", path, Value::Null).await
     }
@@ -101,6 +165,28 @@ impl Client {
     async fn rpc(&self, scope: &str, command: &str, args: Value) -> (StatusCode, Value) {
         self.post(&format!("/api/rpc/{scope}/{command}"), args)
             .await
+    }
+    async fn new_group(&self, name: &str) -> String {
+        let (status, group) = self.post("/api/groups", json!({ "name": name })).await;
+        assert_eq!(status, StatusCode::OK, "{group}");
+        group["id"].as_str().unwrap().to_string()
+    }
+    /// Invite `username` to `group` and have `player` accept.
+    async fn bring_in(&self, group: &str, player: &Self, username: &str) {
+        let (status, invite) = self
+            .post(
+                &format!("/api/groups/{group}/invites"),
+                json!({ "username": username }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{invite}");
+        let (status, out) = player
+            .post(
+                &format!("/api/invites/{}/accept", invite["id"].as_str().unwrap()),
+                json!({}),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{out}");
     }
 }
 
@@ -143,26 +229,23 @@ async fn accounts_groups_and_characters_follow_the_rules() {
     full_flow(router(dir.path().to_path_buf()).await).await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn admins_approve_and_manage_accounts() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = router(dir.path().to_path_buf()).await;
+    // The first account on a new server is its admin, active at once.
+    let admin = sign_up(&router, "the-admin").await;
+    let (_, me) = admin.get("/api/me").await;
+    assert_eq!(me["admin"], true, "{me}");
+    admin_flow(&router, &admin, dir.path()).await;
+}
+
 async fn some_accounts(router: &Router) {
-    let dm = sign_up(router, "moving-dm", "dm").await;
-    let player = sign_up(router, "moving-player", "player").await;
-    let (_, group) = dm
-        .post("/api/groups", json!({ "name": "Moving day" }))
-        .await;
-    let group = group["id"].as_str().unwrap().to_string();
-    let (_, invite) = dm
-        .post(
-            &format!("/api/groups/{group}/invites"),
-            json!({ "username": "moving-player" }),
-        )
-        .await;
-    player
-        .post(
-            &format!("/api/invites/{}/accept", invite["id"].as_str().unwrap()),
-            json!({}),
-        )
-        .await;
-    let other = sign_up(router, "invited-only", "player").await;
+    let dm = sign_up(router, "moving-dm").await;
+    let player = sign_up(router, "moving-player").await;
+    let group = dm.new_group("Moving day").await;
+    dm.bring_in(&group, &player, "moving-player").await;
+    let other = sign_up(router, "invited-only").await;
     dm.post(
         &format!("/api/groups/{group}/invites"),
         json!({ "username": "invited-only" }),
@@ -173,15 +256,10 @@ async fn some_accounts(router: &Router) {
 
 /// After a copy the new database answers exactly like the old one.
 async fn check_moved(router: &Router) {
-    let (status, out) = send(
-        router,
-        None,
-        "POST",
-        "/api/auth/login",
-        json!({ "username": "MOVING-DM", "password": "correct horse battery" }),
-    )
-    .await;
+    let (status, out) = login(router, "MOVING-DM", PASSWORD).await;
     assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["user"]["admin"], true, "the first account is the admin");
+    assert_eq!(out["user"]["email"], "moving-dm@example.com");
     let token = out["token"].as_str().unwrap();
     let (_, groups) = send(router, Some(token), "GET", "/api/groups", Value::Null).await;
     assert_eq!(groups[0]["name"], "Moving day", "{groups}");
@@ -195,7 +273,27 @@ async fn check_moved(router: &Router) {
     )
     .await;
     assert_eq!(detail["invites"][0]["username"], "invited-only", "{detail}");
+    let (_, log) = send(
+        router,
+        Some(token),
+        "GET",
+        "/api/admin/activity",
+        Value::Null,
+    )
+    .await;
+    assert!(
+        log["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "group_created"),
+        "the activity log moves too: {log}"
+    );
 }
+
+/// The rows `some_accounts` makes, as the copy reports them.
+const MOVED: &str =
+    "users 3, sessions 3, party_groups 1, invites 1, members 1, server_settings 0, activity 4";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_sqlite_instance_moves_with_its_accounts() {
@@ -208,10 +306,7 @@ async fn a_sqlite_instance_moves_with_its_accounts() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(
-        crate::migrate::describe(&report),
-        "users 3, sessions 3, party_groups 1, invites 1, members 1"
-    );
+    assert_eq!(crate::migrate::describe(&report), MOVED);
     check_moved(&router_on(dir.path().join("data"), new.clone())).await;
     // Once the new database has accounts, the old file is left alone.
     assert!(crate::migrate::adopt_sqlite(&new, &file)
@@ -232,6 +327,101 @@ async fn a_sqlite_instance_moves_with_its_accounts() {
     );
 }
 
+/// A database from before accounts had a status: everyone stays able to sign in, and the oldest account is the
+/// admin. `pool` must be empty.
+async fn upgrade_from_first_schema(pool: &sqlx::AnyPool, location: &Location, data: PathBuf) {
+    sqlx::query("CREATE TABLE IF NOT EXISTS schema_version (version BIGINT NOT NULL)")
+        .execute(pool)
+        .await
+        .unwrap();
+    for step in crate::db::SCHEMA_1 {
+        sqlx::query(step).execute(pool).await.unwrap();
+    }
+    sqlx::query("INSERT INTO schema_version (version) VALUES (1)")
+        .execute(pool)
+        .await
+        .unwrap();
+    let hash = crate::auth::hash_password(PASSWORD).await.unwrap();
+    for (id, name, role, created) in [
+        ("u-new", "newer-player", "player", 200),
+        ("u-old", "oldest-dm", "dm", 100),
+        ("u-mid", "middle-dm", "dm", 150),
+    ] {
+        sqlx::query(
+            "INSERT INTO users (id, username, password_hash, role, created_at) VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(&hash)
+        .bind(role)
+        .bind(created)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query("INSERT INTO party_groups (id, name, dm_id, created_at) VALUES ('g', 'Old table', 'u-mid', 1)")
+        .execute(pool)
+        .await
+        .unwrap();
+    let db = Db::open(location).await.unwrap();
+    let router = router_on(data, db);
+    for (name, admin) in [
+        ("oldest-dm", true),
+        ("middle-dm", false),
+        ("newer-player", false),
+    ] {
+        let (status, out) = login(&router, name, PASSWORD).await;
+        assert_eq!(status, StatusCode::OK, "{name}: {out}");
+        assert_eq!(out["user"]["admin"], admin, "{name}");
+    }
+    // The old DM and the old player can now both run groups and play.
+    let player = sign_in(&router, "newer-player").await;
+    let middle = sign_in(&router, "middle-dm").await;
+    let (_, groups) = middle.get("/api/groups").await;
+    assert_eq!(groups[0]["isDm"], true, "{groups}");
+    player.new_group("Player's own").await;
+    let (status, out) = middle
+        .rpc(
+            "personal",
+            "create_character",
+            new_character("Now a player too"),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn existing_accounts_survive_the_upgrade() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("old.db");
+    let location = Location::Sqlite(file.clone());
+    sqlx::any::install_default_drivers();
+    let pool = sqlx::AnyPool::connect(&format!("sqlite://{}?mode=rwc", file.display()))
+        .await
+        .unwrap();
+    upgrade_from_first_schema(&pool, &location, dir.path().join("data")).await;
+}
+
+async fn drop_all(url: &str) {
+    sqlx::any::install_default_drivers();
+    let pool = sqlx::AnyPool::connect(url).await.unwrap();
+    for table in [
+        "activity",
+        "server_settings",
+        "members",
+        "invites",
+        "party_groups",
+        "sessions",
+        "users",
+        "schema_version",
+    ] {
+        sqlx::query(&format!("DROP TABLE IF EXISTS {table} CASCADE"))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+}
+
 /// The same rules on PostgreSQL. Runs when `BOREALIS_TEST_POSTGRES_URL` names a database it may wipe.
 #[tokio::test(flavor = "multi_thread")]
 async fn accounts_groups_and_characters_follow_the_rules_on_postgres() {
@@ -239,27 +429,22 @@ async fn accounts_groups_and_characters_follow_the_rules_on_postgres() {
         eprintln!("skipped: set BOREALIS_TEST_POSTGRES_URL to run against PostgreSQL");
         return;
     };
+    let dir = tempfile::tempdir().unwrap();
+    // An instance from before accounts had a status upgrades in place.
+    drop_all(&url).await;
     {
-        sqlx::any::install_default_drivers();
         let pool = sqlx::AnyPool::connect(&url).await.unwrap();
-        for table in [
-            "members",
-            "invites",
-            "party_groups",
-            "sessions",
-            "users",
-            "schema_version",
-        ] {
-            sqlx::query(&format!("DROP TABLE IF EXISTS {table} CASCADE"))
-                .execute(&pool)
-                .await
-                .unwrap();
-        }
+        upgrade_from_first_schema(
+            &pool,
+            &Location::Postgres(url.clone()),
+            dir.path().join("upgrade"),
+        )
+        .await;
     }
+    drop_all(&url).await;
     let db = Db::open(&Location::Postgres(url.clone())).await.unwrap();
     // Opening again finds the schema already there.
     Db::open(&Location::Postgres(url)).await.unwrap();
-    let dir = tempfile::tempdir().unwrap();
     // First a move from SQLite, as when an instance switches databases.
     let file = dir.path().join("party.db");
     let old = Db::open(&Location::Sqlite(file.clone())).await.unwrap();
@@ -268,42 +453,45 @@ async fn accounts_groups_and_characters_follow_the_rules_on_postgres() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(
-        crate::migrate::describe(&report),
-        "users 3, sessions 3, party_groups 1, invites 1, members 1"
-    );
-    check_moved(&router_on(dir.path().join("old"), db.clone())).await;
+    assert_eq!(crate::migrate::describe(&report), MOVED);
+    let router = router_on(dir.path().join("old"), db.clone());
+    check_moved(&router).await;
     assert!(crate::migrate::adopt_sqlite(&db, &file)
         .await
         .unwrap()
         .is_none());
-    full_flow(router_on(dir.path().to_path_buf(), db)).await;
+    full_flow(router_on(dir.path().join("old"), db)).await;
+    // The moved first account is the admin here.
+    let admin = sign_in(&router, "moving-dm").await;
+    admin_flow(&router, &admin, &dir.path().join("old")).await;
 }
 
 async fn full_flow(router: Router) {
-    let dm = sign_up(&router, "dungeon-master", "dm").await;
-    let other_dm = sign_up(&router, "other-dm", "dm").await;
-    let alice = sign_up(&router, "alice", "player").await;
-    let bob = sign_up(&router, "bob", "player").await;
+    let dm = sign_up(&router, "dungeon-master").await;
+    let other_dm = sign_up(&router, "other-dm").await;
+    let alice = sign_up(&router, "alice").await;
+    let bob = sign_up(&router, "bob").await;
 
-    // Roles decide who runs groups.
-    let (status, _) = alice.post("/api/groups", json!({ "name": "Nope" })).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, group) = dm.post("/api/groups", json!({ "name": "Tuesday" })).await;
-    assert_eq!(status, StatusCode::OK);
-    let group_id = group["id"].as_str().unwrap().to_string();
+    // Anyone can run a group; the group decides who is its DM.
+    let group_id = dm.new_group("Tuesday").await;
     let scope = format!("group-{group_id}");
     let invites = format!("/api/groups/{group_id}/invites");
 
     // Invitations.
-    let (status, _) = dm.post(&invites, json!({ "username": "other-dm" })).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "only players join groups");
+    let (status, _) = dm
+        .post(&invites, json!({ "username": "dungeon-master" }))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "not into one's own group");
+    let (status, _) = dm.post(&invites, json!({ "username": "nobody" })).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     let (status, _) = other_dm
         .post(&invites, json!({ "username": "alice" }))
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "not their group");
     let (status, invite) = dm.post(&invites, json!({ "username": "alice" })).await;
     assert_eq!(status, StatusCode::OK);
+    let (status, _) = dm.post(&invites, json!({ "username": "ALICE" })).await;
+    assert_eq!(status, StatusCode::CONFLICT, "already invited");
     let accept = format!("/api/invites/{}/accept", invite["id"].as_str().unwrap());
     let (_, pending) = alice.get("/api/invites").await;
     assert_eq!(pending.as_array().unwrap().len(), 1);
@@ -311,6 +499,18 @@ async fn full_flow(router: Router) {
     assert_eq!(status, StatusCode::NOT_FOUND, "someone else's invitation");
     let (status, _) = alice.post(&accept, json!({})).await;
     assert_eq!(status, StatusCode::OK);
+
+    // A player of the group can't manage it.
+    let (status, _) = alice.post(&invites, json!({ "username": "bob" })).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = alice.get(&format!("/api/groups/{group_id}/party")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = alice.delete(&format!("/api/groups/{group_id}")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, detail) = alice.get(&format!("/api/groups/{group_id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["isDm"], false);
+    assert!(detail["invites"].as_array().unwrap().is_empty());
 
     // A player owns many characters, one per group.
     let (status, solo) = alice
@@ -349,6 +549,26 @@ async fn full_flow(router: Router) {
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "the group's slot is taken");
 
+    // The DM has characters of their own, but none in their own group.
+    let (status, own) = dm
+        .rpc("personal", "create_character", new_character("DM's own"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{own}");
+    dm.rpc(
+        "personal",
+        "save_character",
+        json!({ "characterId": own["id"] }),
+    )
+    .await;
+    let (status, _) = dm
+        .post(&character, json!({ "characterId": own["id"] }))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = dm
+        .rpc("library", "create_character", new_character("Lost"))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "no characters in a Library");
+
     // The DM sees the party and cannot change it.
     let (status, party) = dm.get(&format!("/api/groups/{group_id}/party")).await;
     assert_eq!(status, StatusCode::OK);
@@ -384,7 +604,7 @@ async fn full_flow(router: Router) {
     assert_eq!(status, StatusCode::FORBIDDEN);
 
     // Strangers see nothing.
-    for (who, what) in [(&bob, "player"), (&other_dm, "dm")] {
+    for (who, what) in [(&bob, "bob"), (&other_dm, "other-dm")] {
         let (status, _) = who.rpc(&scope, "list_characters", json!({})).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{what}");
         let (status, _) = who.get(&format!("/api/groups/{group_id}")).await;
@@ -409,19 +629,25 @@ async fn full_flow(router: Router) {
         assert_eq!(status, StatusCode::NOT_FOUND, "{command}");
     }
 
-    // Only DMs add content, from their Library.
+    // Content is added in a Library; in a group only its DM chooses it.
     let (status, _) = alice.rpc(&scope, "import_pack", spell_pack()).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, _) = alice
         .rpc(&scope, "stage_5etools_files", json!({ "files": [] }))
         .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "5etools homebrew files are content too");
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "5etools homebrew files are content too"
+    );
+    let (status, _) = alice.rpc("personal", "import_pack", spell_pack()).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "not into My characters");
     let (status, out) = dm
         .rpc("library", "stage_5etools_files", json!({ "files": [] }))
         .await;
-    assert_ne!(status, StatusCode::NOT_FOUND, "the server offers it to DMs: {out}");
-    let (status, _) = alice.rpc("library", "list_packs", json!({})).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_ne!(status, StatusCode::NOT_FOUND, "the server offers it: {out}");
+    let (status, packs) = alice.rpc("library", "list_packs", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "everyone has a Library: {packs}");
     let (status, _) = dm.rpc(&scope, "import_pack", spell_pack()).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     eventually(&alice, &scope, "ID_PARTY_SPARK", StatusCode::NOT_FOUND).await;
@@ -438,6 +664,14 @@ async fn full_flow(router: Router) {
         )
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = alice
+        .rpc(
+            "library",
+            "get_element",
+            json!({ "elementId": "ID_PARTY_SPARK" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "alice's Library is her own");
 
     // The DM chooses the group's packs.
     let (_, packs) = dm.rpc(&scope, "list_packs", json!({})).await;
@@ -465,6 +699,81 @@ async fn full_flow(router: Router) {
         .await;
     assert_eq!(status, StatusCode::OK, "the Library keeps it");
 
+    // Alice runs a group of her own while she plays in Tuesday, and Bob plays in hers.
+    let table = alice.new_group("Alice's table").await;
+    let table_scope = format!("group-{table}");
+    let (status, _) = alice
+        .post(
+            &format!("/api/groups/{table}/invites"),
+            json!({ "username": "alice" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "not into her own group");
+    alice.bring_in(&table, &bob, "bob").await;
+    let (status, bobs) = bob
+        .rpc(&table_scope, "create_character", new_character("Bob's"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{bobs}");
+    bob.rpc(
+        &table_scope,
+        "save_character",
+        json!({ "characterId": bobs["id"] }),
+    )
+    .await;
+    let (_, groups) = alice.get("/api/groups").await;
+    let kinds: Vec<(String, bool)> = groups
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|g| (g["name"].as_str().unwrap().to_string(), g["isDm"] == true))
+        .collect();
+    assert!(
+        kinds.contains(&("Alice's table".into(), true))
+            && kinds.contains(&("Tuesday".into(), false)),
+        "{groups}"
+    );
+    let (status, party) = alice.get(&format!("/api/groups/{table}/party")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(party[0]["name"], "Bob's", "{party}");
+    let (status, _) = alice
+        .rpc(
+            &table_scope,
+            "set_xp",
+            json!({ "characterId": bobs["id"], "xp": 900 }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "her DM role there is read-only"
+    );
+    let (status, _) = alice
+        .rpc(&table_scope, "create_character", new_character("Mine"))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    // ... and her character in Tuesday is still hers to change.
+    let (status, out) = alice
+        .rpc(
+            &scope,
+            "set_xp",
+            json!({ "characterId": hero["id"], "xp": 300 }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    // The DM of Tuesday can't see into Alice's group.
+    let (status, _) = dm.get(&format!("/api/groups/{table}")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // A character is in at most one group: Bob's, in Alice's group, can't also go into Tuesday.
+    dm.bring_in(&group_id, &bob, "bob").await;
+    let (status, _) = bob
+        .post(&character, json!({ "characterId": bobs["id"] }))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = bob
+        .delete(&format!("/api/groups/{group_id}/members/{}", bob.id))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
     // Leaving the group hands the character back.
     let (status, _) = alice
         .delete(&format!("/api/groups/{group_id}/members/{}", alice.id))
@@ -480,14 +789,7 @@ async fn full_flow(router: Router) {
     assert!(names.contains(&"Hero") && names.contains(&"Solo"), "{mine}");
 
     // An existing character can come back in, and deleting the group returns it.
-    let (status, invite) = dm.post(&invites, json!({ "username": "alice" })).await;
-    assert_eq!(status, StatusCode::OK, "{invite}");
-    alice
-        .post(
-            &format!("/api/invites/{}/accept", invite["id"].as_str().unwrap()),
-            json!({}),
-        )
-        .await;
+    dm.bring_in(&group_id, &alice, "alice").await;
     let (status, out) = alice
         .post(&character, json!({ "characterId": hero["id"] }))
         .await;
@@ -503,6 +805,484 @@ async fn full_flow(router: Router) {
         .all(|c| c["scope"] == "personal"));
 }
 
+async fn status_of(admin: &Client, name: &str) -> Value {
+    let (status, list) = admin
+        .get(&format!("/api/admin/accounts?search={name}"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["username"] == name)
+        .cloned()
+        .unwrap_or_else(|| panic!("{name} in {list}"))
+}
+
+/// Sign-up approval, the admin APIs and the activity log. `admin` is an active admin of a server with sign-up open;
+/// `data` is its data folder.
+async fn admin_flow(router: &Router, admin: &Client, data: &std::path::Path) {
+    let (status, out) = admin
+        .patch("/api/admin/settings", json!({ "requireApproval": true }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["requireApproval"], true);
+
+    // New accounts wait, and can't sign in meanwhile.
+    let (status, out) = register(router, "waiting", "waiting@example.com").await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["status"], "pending");
+    assert!(out.get("token").is_none(), "{out}");
+    let (status, out) = login(router, "waiting", PASSWORD).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(out["code"], "account_pending", "{out}");
+    let (status, out) = login(router, "waiting", "wrong password here").await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "a wrong password says nothing about the account: {out}"
+    );
+    // Email addresses are unique, whatever their case, and needed.
+    let (status, _) = register(router, "copycat", "WAITING@example.com").await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _) = register(router, "no-email", "").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = register(router, "bad-email", "not an address").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Approval lets them in; sign-in also takes the email address.
+    let waiting = status_of(admin, "waiting").await;
+    assert_eq!(waiting["status"], "pending");
+    let waiting_id = waiting["id"].as_str().unwrap().to_string();
+    let (status, out) = admin
+        .post(
+            &format!("/api/admin/accounts/{waiting_id}/status"),
+            json!({ "status": "active" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let user = sign_in(router, "Waiting@Example.com").await;
+    let (_, me) = user.get("/api/me").await;
+    assert_eq!(me["admin"], false);
+
+    // Rejected accounts stay out.
+    register(router, "turned-down", "turned-down@example.com").await;
+    let turned = status_of(admin, "turned-down").await;
+    admin
+        .post(
+            &format!(
+                "/api/admin/accounts/{}/status",
+                turned["id"].as_str().unwrap()
+            ),
+            json!({ "status": "rejected" }),
+        )
+        .await;
+    let (status, out) = login(router, "turned-down", PASSWORD).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(out["code"], "account_rejected");
+
+    // Only admins reach the admin APIs.
+    for (method, path) in [
+        ("GET", "/api/admin/stats".to_string()),
+        ("GET", "/api/admin/accounts".to_string()),
+        ("GET", "/api/admin/activity".to_string()),
+        ("GET", "/api/admin/settings".to_string()),
+        ("PATCH", "/api/admin/settings".to_string()),
+        ("POST", format!("/api/admin/accounts/{}/status", admin.id)),
+        ("POST", format!("/api/admin/accounts/{}/admin", admin.id)),
+        ("POST", format!("/api/admin/accounts/{}/password", admin.id)),
+        ("POST", format!("/api/admin/accounts/{}/sign-out", admin.id)),
+        ("DELETE", format!("/api/admin/accounts/{}", admin.id)),
+    ] {
+        let body = json!({ "status": "disabled", "admin": false, "openRegistration": false });
+        let (status, _) = send(router, Some(&user.token), method, &path, body).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}");
+    }
+
+    // Never zero admins.
+    let only_admin = admin.id.clone();
+    let (status, _) = admin
+        .post(
+            &format!("/api/admin/accounts/{only_admin}/admin"),
+            json!({ "admin": false }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "the last admin stays one");
+    let (status, _) = admin
+        .post(
+            &format!("/api/admin/accounts/{only_admin}/status"),
+            json!({ "status": "disabled" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _) = admin
+        .delete(&format!("/api/admin/accounts/{only_admin}"))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, out) = admin
+        .post(
+            &format!("/api/admin/accounts/{}/admin", user.id),
+            json!({ "admin": true }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (_, me) = user.get("/api/me").await;
+    assert_eq!(me["admin"], true);
+    let (status, _) = user
+        .post(
+            &format!("/api/admin/accounts/{}/admin", user.id),
+            json!({ "admin": false }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "another admin exists now");
+    let (status, _) = user.get("/api/admin/stats").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Disabling ends the sessions at once.
+    let (status, _) = admin
+        .post(
+            &format!("/api/admin/accounts/{}/status", user.id),
+            json!({ "status": "disabled" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = user.get("/api/me").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, out) = login(router, "waiting", PASSWORD).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(out["code"], "account_disabled");
+    admin
+        .post(
+            &format!("/api/admin/accounts/{}/status", user.id),
+            json!({ "status": "active" }),
+        )
+        .await;
+    let user = sign_in(router, "waiting").await;
+
+    // A temporary password: signed out, then a new password before anything else.
+    let (status, _) = admin
+        .post(
+            &format!("/api/admin/accounts/{}/password", user.id),
+            json!({ "password": "temporary words 42" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = user.get("/api/me").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = login(router, "waiting", PASSWORD).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "the old password is gone");
+    let (status, out) = login(router, "waiting", "temporary words 42").await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["user"]["mustChangePassword"], true);
+    let user = Client {
+        router: router.clone(),
+        token: out["token"].as_str().unwrap().into(),
+        id: user.id.clone(),
+    };
+    let (status, out) = user.get("/api/groups").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(out["code"], "password_change_required");
+    let (status, _) = user
+        .post(
+            "/api/me/password",
+            json!({ "current": "wrong", "password": "a brand new phrase" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, out) = user
+        .post(
+            "/api/me/password",
+            json!({ "current": "temporary words 42", "password": "a brand new phrase" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["mustChangePassword"], false);
+    let (status, _) = user.get("/api/groups").await;
+    assert_eq!(status, StatusCode::OK);
+    // Forcing a change without a new password keeps the old one.
+    admin
+        .post(
+            &format!("/api/admin/accounts/{}/password", user.id),
+            json!({}),
+        )
+        .await;
+    let (status, out) = login(router, "waiting", "a brand new phrase").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(out["user"]["mustChangePassword"], true);
+    let user = Client {
+        router: router.clone(),
+        token: out["token"].as_str().unwrap().into(),
+        id: user.id.clone(),
+    };
+    user.post(
+        "/api/me/password",
+        json!({ "current": "a brand new phrase", "password": PASSWORD }),
+    )
+    .await;
+
+    // Signing out everywhere.
+    let second = sign_in(router, "waiting").await;
+    let (status, out) = admin
+        .post(
+            &format!("/api/admin/accounts/{}/sign-out", user.id),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(out["ended"].as_u64().unwrap() >= 2, "{out}");
+    for client in [&user, &second] {
+        let (status, _) = client.get("/api/me").await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    // Deleting an account takes its characters out of other groups first, and deletes the groups it runs.
+    let user = sign_in(router, "waiting").await;
+    let host = admin.new_group("Admin's table").await;
+    admin.bring_in(&host, &user, "waiting").await;
+    let (status, theirs) = user
+        .rpc(
+            &format!("group-{host}"),
+            "create_character",
+            new_character("Soon gone"),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{theirs}");
+    user.rpc(
+        &format!("group-{host}"),
+        "save_character",
+        json!({ "characterId": theirs["id"] }),
+    )
+    .await;
+    let own_group = user.new_group("Waiting's table").await;
+    let (status, invite) = user
+        .post(
+            &format!("/api/groups/{own_group}/invites"),
+            json!({ "username": admin_name(admin).await }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{invite}");
+    let (status, _) = admin
+        .delete(&format!("/api/admin/accounts/{}", user.id))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = login(router, "waiting", PASSWORD).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (_, party) = admin.get(&format!("/api/groups/{host}/party")).await;
+    assert_eq!(party.as_array().unwrap().len(), 0, "{party}");
+    let (_, groups) = admin.get("/api/groups").await;
+    assert!(
+        groups
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|g| g["name"] != "Waiting's table"),
+        "{groups}"
+    );
+    assert!(!data.join("users").join(&user.id).exists());
+    let member_dir = data
+        .join("groups")
+        .join(&host)
+        .join("members")
+        .join(&user.id);
+    assert!(!member_dir.exists(), "{:?}", walk(&member_dir));
+
+    // Runtime settings: no approval, then no sign-up, without a restart.
+    admin
+        .patch("/api/admin/settings", json!({ "requireApproval": false }))
+        .await;
+    let (_, out) = register(router, "straight-in", "straight-in@example.com").await;
+    assert_eq!(out["status"], "active", "{out}");
+    let (status, out) = admin
+        .patch("/api/admin/settings", json!({ "openRegistration": false }))
+        .await;
+    assert_eq!(out["openRegistration"], false, "{out}");
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = register(router, "too-late", "too-late@example.com").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (_, info) = send(router, None, "GET", "/api/server", Value::Null).await;
+    assert_eq!(info["openRegistration"], false);
+    admin
+        .patch("/api/admin/settings", json!({ "openRegistration": true }))
+        .await;
+
+    // Statistics.
+    let (_, counted) = admin
+        .rpc("personal", "create_character", new_character("Counted"))
+        .await;
+    admin
+        .rpc(
+            "personal",
+            "save_character",
+            json!({ "characterId": counted["id"] }),
+        )
+        .await;
+    let (status, stats) = admin.get("/api/admin/stats").await;
+    assert_eq!(status, StatusCode::OK, "{stats}");
+    assert_eq!(stats["accounts"]["rejected"], 1, "{stats}");
+    assert!(stats["accounts"]["active"].as_i64().unwrap() >= 2);
+    assert!(stats["activeSessions"].as_i64().unwrap() >= 1);
+    assert!(stats["groups"].as_i64().unwrap() >= 1);
+    assert!(stats["diskBytes"].as_u64().unwrap() > 0);
+    assert!(stats["characters"].as_u64().unwrap() >= 1, "{stats}");
+    assert!(stats["version"].is_string());
+    assert!(["sqlite", "postgres"].contains(&stats["database"].as_str().unwrap()));
+    assert!(stats["uptimeSeconds"].is_u64());
+
+    // Search, and the activity log in pages.
+    let (_, found) = admin.get("/api/admin/accounts?search=STRAIGHT").await;
+    assert_eq!(found["total"], 1, "{found}");
+    let (_, rejected) = admin.get("/api/admin/accounts?status=rejected").await;
+    assert_eq!(
+        rejected["items"][0]["username"], "turned-down",
+        "{rejected}"
+    );
+    let (status, page) = admin.get("/api/admin/activity?page=0&perPage=5").await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["items"].as_array().unwrap().len(), 5);
+    assert!(page["total"].as_i64().unwrap() > 5);
+    let (_, all) = admin.get("/api/admin/activity?perPage=200").await;
+    let kinds: Vec<&str> = all["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["kind"].as_str().unwrap())
+        .collect();
+    for kind in [
+        "sign_up",
+        "approve",
+        "reject",
+        "disable",
+        "enable",
+        "sign_in",
+        "sign_in_failed",
+        "group_created",
+        "admin_granted",
+        "admin_removed",
+        "password_reset",
+        "password_changed",
+        "signed_out_everywhere",
+        "account_deleted",
+        "setting_changed",
+    ] {
+        assert!(kinds.contains(&kind), "{kind} in {kinds:?}");
+    }
+    assert!(all["items"][0]["at"].as_i64().unwrap() > 0);
+}
+
+fn walk(dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        out.push(entry.path());
+        if entry.path().symlink_metadata().is_ok_and(|m| m.is_dir()) {
+            out.extend(walk(&entry.path()));
+        }
+    }
+    out
+}
+
+async fn admin_name(admin: &Client) -> String {
+    let (_, me) = admin.get("/api/me").await;
+    me["username"].as_str().unwrap().to_string()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn email_is_confirmed_before_approval() {
+    let dir = tempfile::tempdir().unwrap();
+    let mail = Arc::new(Recorder::default());
+    let router = router_with(
+        dir.path().to_path_buf(),
+        Db::open(&Location::Memory).await.unwrap(),
+        Setup {
+            require_approval: true,
+            mailer: Some(Arc::clone(&mail)),
+            ..Setup::default()
+        },
+    );
+    // The first account needs no confirmation: there is nobody to approve it.
+    let admin = sign_up(&router, "first").await;
+    assert!(mail.0.lock().unwrap().is_empty());
+    let (status, out) = register(&router, "mailed", "mailed@example.com").await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["awaitingEmail"], true, "{out}");
+    let (status, out) = login(&router, "mailed", PASSWORD).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(out["code"], "email_unconfirmed");
+    let link = {
+        let sent = mail.0.lock().unwrap();
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert_eq!(sent[0].0, "mailed@example.com");
+        sent[0]
+            .2
+            .lines()
+            .find(|l| l.starts_with("https://party.example.com/api/auth/confirm/"))
+            .unwrap()
+            .to_string()
+    };
+    // Unconfirmed, it isn't in the approval queue yet but is listed as waiting for email.
+    let row = status_of(&admin, "mailed").await;
+    assert_eq!(row["awaitingEmail"], true, "{row}");
+    let path = link.trim_start_matches("https://party.example.com");
+    let (status, _) = send(&router, None, "GET", path, Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = send(
+        &router,
+        None,
+        "GET",
+        "/api/auth/confirm/not-a-token",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "an explanation, not an error page");
+    let (status, out) = login(&router, "mailed", PASSWORD).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(out["code"], "account_pending", "{out}");
+    // The admin hears about it.
+    let mut told = false;
+    for _ in 0..50 {
+        told = mail
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(to, subject, _)| to == "first@example.com" && subject.contains("mailed"));
+        if told {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(told, "{:?}", mail.0.lock().unwrap());
+    let row = status_of(&admin, "mailed").await;
+    assert_eq!(row["awaitingEmail"], false);
+    assert!(row["emailConfirmedAt"].is_i64(), "{row}");
+    admin
+        .post(
+            &format!("/api/admin/accounts/{}/status", row["id"].as_str().unwrap()),
+            json!({ "status": "active" }),
+        )
+        .await;
+    sign_in(&router, "mailed").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sign_ups_are_rate_limited() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = router_with(
+        dir.path().to_path_buf(),
+        Db::open(&Location::Memory).await.unwrap(),
+        Setup {
+            signups_allowed: crate::auth::SIGNUPS_ALLOWED,
+            ..Setup::default()
+        },
+    );
+    for n in 0..crate::auth::SIGNUPS_ALLOWED {
+        // Failed attempts count too.
+        let (status, _) = register(&router, &format!("u{n}"), "not an address").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+    let (status, _) = register(&router, "one-more", "one-more@example.com").await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn sessions_are_required_and_passwords_are_checked() {
     let dir = tempfile::tempdir().unwrap();
@@ -516,29 +1296,15 @@ async fn sessions_are_required_and_passwords_are_checked() {
         None,
         "POST",
         "/api/auth/register",
-        json!({ "username": "weak", "password": "password", "role": "player" }),
+        json!({ "username": "weak", "email": "weak@example.com", "password": "password" }),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    sign_up(&router, "carol", "player").await;
+    sign_up(&router, "carol").await;
     for _ in 0..10 {
-        let (status, _) = send(
-            &router,
-            None,
-            "POST",
-            "/api/auth/login",
-            json!({ "username": "carol", "password": "wrong password" }),
-        )
-        .await;
+        let (status, _) = login(&router, "carol", "wrong password").await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
-    let (status, _) = send(
-        &router,
-        None,
-        "POST",
-        "/api/auth/login",
-        json!({ "username": "carol", "password": "correct horse battery" }),
-    )
-    .await;
+    let (status, _) = login(&router, "carol", PASSWORD).await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
 }

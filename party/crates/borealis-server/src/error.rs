@@ -14,6 +14,8 @@ pub enum ApiError {
     Unauthorized(String),
     /// 403.
     Forbidden(String),
+    /// 403 with its own code, for the client to act on: an account that may not sign in yet, say.
+    Refused(&'static str, String),
     /// 404.
     NotFound(String),
     /// 409.
@@ -51,6 +53,9 @@ impl IntoResponse for ApiError {
                 StatusCode::FORBIDDEN,
                 json!({ "code": "forbidden", "message": m }),
             ),
+            Self::Refused(code, m) => {
+                (StatusCode::FORBIDDEN, json!({ "code": code, "message": m }))
+            }
             Self::NotFound(m) => (
                 StatusCode::NOT_FOUND,
                 json!({ "code": "not_found", "message": m }),

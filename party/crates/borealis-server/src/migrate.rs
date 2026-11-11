@@ -11,8 +11,12 @@ use crate::db::{Db, Location};
 
 #[derive(Clone, Copy)]
 enum Column {
+    /// Text, possibly NULL.
     Text,
+    /// A number, never NULL.
     Int,
+    /// A number, possibly NULL.
+    OptInt,
 }
 
 /// Every table, parents before children, with its columns.
@@ -25,6 +29,13 @@ const TABLES: &[(&str, &[(&str, Column)])] = &[
             ("password_hash", Column::Text),
             ("role", Column::Text),
             ("created_at", Column::Int),
+            ("email", Column::Text),
+            ("status", Column::Text),
+            ("is_admin", Column::Int),
+            ("must_change_password", Column::Int),
+            ("email_verified_at", Column::OptInt),
+            ("verify_token_hash", Column::Text),
+            ("verify_expires_at", Column::OptInt),
         ],
     ),
     (
@@ -60,6 +71,24 @@ const TABLES: &[(&str, &[(&str, Column)])] = &[
             ("player_id", Column::Text),
             ("character_id", Column::Text),
             ("joined_at", Column::Int),
+        ],
+    ),
+    (
+        "server_settings",
+        &[("key", Column::Text), ("value", Column::Text)],
+    ),
+    (
+        "activity",
+        &[
+            ("id", Column::Text),
+            ("at", Column::Int),
+            ("kind", Column::Text),
+            ("actor_id", Column::Text),
+            ("actor_name", Column::Text),
+            ("target_id", Column::Text),
+            ("target_name", Column::Text),
+            ("detail", Column::Text),
+            ("ip", Column::Text),
         ],
     ),
 ];
@@ -139,6 +168,7 @@ pub async fn copy(source: &Db, target: &Db) -> Result<Report, MigrateError> {
                 query = match kind {
                     Column::Text => query.bind(row.try_get::<Option<String>, _>(index)?),
                     Column::Int => query.bind(row.try_get::<i64, _>(index)?),
+                    Column::OptInt => query.bind(row.try_get::<Option<i64>, _>(index)?),
                 };
             }
             query.execute(&mut *tx).await?;

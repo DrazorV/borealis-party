@@ -3,9 +3,9 @@
 //! Layout under the data folder (ids are server-made UUIDs):
 //!
 //! ```text
-//! users/<player>/personal/            a player's characters that are in no group: bundled content only
-//! users/<dm>/library/                 the DM's content packs
-//! users/<dm>/studio/                  the DM's Library screen (library -> ../library)
+//! users/<account>/personal/           an account's characters that are in no group: bundled content only
+//! users/<account>/library/            the account's content packs, used by the groups it runs
+//! users/<account>/studio/             its Library screen (library -> ../library)
 //! groups/<g>/dm/                      the DM's view of a group; its content-prefs.json says which packs the group uses
 //! groups/<g>/members/<player>/        a member's character (library -> DM's, content-prefs.json -> the DM's above)
 //! ```
@@ -28,17 +28,29 @@ use crate::error::{ApiError, ApiResult};
 
 const IDLE_SECONDS: i64 = 30 * 60;
 
-/// A place to work.
+/// What the data folder holds.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Usage {
+    /// Bytes in files.
+    pub bytes: u64,
+    /// Character files.
+    pub characters: u64,
+    /// Content packs in libraries.
+    pub packs: u64,
+}
+
+/// A place to work. Every account has a `Personal` place and a `Library`, both keyed by its id; in a group it is
+/// `GroupDm` when it runs the group and `GroupMember` when it plays in it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum WsKey {
-    /// A player's characters outside any group.
+    /// An account's characters outside any group.
     Personal {
-        /// The player.
+        /// The account.
         player: String,
     },
-    /// A DM's content library.
+    /// An account's content library.
     Library {
-        /// The DM.
+        /// The account.
         dm: String,
     },
     /// A DM inside one of their groups.
@@ -274,13 +286,41 @@ impl Workspaces {
         .map_err(|e| ApiError::Internal(format!("move task: {e}")))?
     }
 
-    /// Forget a deleted group's workspaces and delete its folder.
-    pub async fn remove_group(&self, group: &str) -> ApiResult<()> {
+    /// Close the workspaces `matches` picks and wait, for a while, until none of them is still building its search
+    /// index, which writes into the workspace's folder from a thread of its own.
+    async fn close_where(&self, matches: impl Fn(&WsKey) -> bool) {
+        let mut closed = Vec::new();
         if let Ok(mut open) = self.open.lock() {
-            open.retain(|key, _| {
-                !matches!(key, WsKey::GroupDm { group: g, .. } | WsKey::GroupMember { group: g, .. } if g == group)
+            open.retain(|key, cell| {
+                if !matches(key) {
+                    return true;
+                }
+                if let Some(workspace) = cell.get() {
+                    closed.push(Arc::clone(workspace));
+                }
+                false
             });
         }
+        for workspace in closed {
+            for _ in 0..300 {
+                let status = workspace
+                    .call("search_index_status", Map::new())
+                    .await
+                    .unwrap_or_default();
+                if status.get("state").and_then(Value::as_str) != Some("building") {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        }
+    }
+
+    /// Forget a deleted group's workspaces and delete its folder.
+    pub async fn remove_group(&self, group: &str) -> ApiResult<()> {
+        self.close_where(|key| {
+            matches!(key, WsKey::GroupDm { group: g, .. } | WsKey::GroupMember { group: g, .. } if g == group)
+        })
+        .await;
         let dir = self.data.join("groups").join(group);
         tokio::task::spawn_blocking(move || match std::fs::remove_dir_all(&dir) {
             Ok(()) => Ok(()),
@@ -289,6 +329,78 @@ impl Workspaces {
         })
         .await
         .map_err(|e| ApiError::Internal(format!("remove task: {e}")))?
+    }
+
+    /// Forget a deleted account's workspaces and delete its folders: its own, and its member folders in groups (which
+    /// hold no characters any more by then).
+    pub async fn remove_user(&self, user: &str) -> ApiResult<()> {
+        self.close_where(|key| match key {
+            WsKey::Personal { player } => player == user,
+            WsKey::Library { dm } | WsKey::GroupDm { dm, .. } => dm == user,
+            WsKey::GroupMember { dm, player, .. } => dm == user || player == user,
+        })
+        .await;
+        let data = self.data.clone();
+        let user = user.to_string();
+        tokio::task::spawn_blocking(move || -> ApiResult<()> {
+            let mut dirs = vec![data.join("users").join(&user)];
+            if let Ok(groups) = std::fs::read_dir(data.join("groups")) {
+                for group in groups.flatten() {
+                    dirs.push(group.path().join("members").join(&user));
+                }
+            }
+            for dir in dirs {
+                match std::fs::remove_dir_all(&dir) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => {
+                        return Err(ApiError::Internal(format!(
+                            "removing {}: {e}",
+                            dir.display()
+                        )))
+                    }
+                }
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|e| ApiError::Internal(format!("remove task: {e}")))?
+    }
+
+    /// What the data folder holds, for the admin page. Links are not followed, so shared libraries count once.
+    pub async fn usage(&self) -> ApiResult<Usage> {
+        let data = self.data.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut usage = Usage::default();
+            let mut stack = vec![(data, false)];
+            while let Some((dir, in_library)) = stack.pop() {
+                let Ok(entries) = std::fs::read_dir(&dir) else {
+                    continue;
+                };
+                let in_characters = dir.file_name().is_some_and(|n| n == "characters");
+                for entry in entries.flatten() {
+                    let Ok(meta) = entry.path().symlink_metadata() else {
+                        continue;
+                    };
+                    let name = entry.file_name();
+                    if meta.is_dir() {
+                        stack.push((entry.path(), in_library || name == "library"));
+                    } else if meta.is_file() {
+                        usage.bytes += meta.len();
+                        let name = name.to_string_lossy();
+                        if in_characters && name.ends_with(".json") {
+                            usage.characters += 1;
+                        }
+                        if in_library && name == "pack.json" {
+                            usage.packs += 1;
+                        }
+                    }
+                }
+            }
+            usage
+        })
+        .await
+        .map_err(|e| ApiError::Internal(format!("usage task: {e}")))
     }
 
     /// Close one member's workspace after they leave.

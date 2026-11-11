@@ -1,5 +1,5 @@
 import { COMMANDS, EVENTS, type Api, type ApiError, type ApiMethods, type CommandName, type EventName } from "../../src/api/contract";
-import { clearSession, loadSession, type ServerSession } from "./session";
+import { clearSession, loadSession, saveSession, type ServerSession } from "./session";
 
 function fail(code: string, message: string): ApiError {
   return { code, message } as ApiError;
@@ -28,6 +28,14 @@ export async function serverFetch(session: Pick<ServerSession, "baseUrl" | "toke
     window.location.reload();
   }
   const error = parsed as Partial<ApiError> | null;
+  if (String(error?.code) === "password_change_required" && session.token) {
+    // An admin asked for a new password: the app shows that screen until it is chosen.
+    const current = loadSession();
+    if (current && !current.user.mustChangePassword) {
+      saveSession({ ...current, user: { ...current.user, mustChangePassword: true } });
+      window.location.reload();
+    }
+  }
   throw fail(String(error?.code ?? "internal"), String(error?.message ?? `The server answered ${response.status}.`));
 }
 
