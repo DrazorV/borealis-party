@@ -1,6 +1,22 @@
 # Upstream files we carry changes to while our pull request to TeamBorealis/borealis is open: "<path> <PR url>".
 # Each change must be exactly the PR's patch, so merging upstream after the PR lands makes the diff go away.
 # check-upstream.sh accepts these files and says when one no longer differs (then remove its line).
-crates/borealis-sheet/src/card_model.rs https://github.com/TeamBorealis/borealis/pull/42
-crates/borealis-sheet/src/model_tests.rs https://github.com/TeamBorealis/borealis/pull/42
+
+# Leave out the Ability Score Improvement / Feat placeholders
+crates/borealis-sheet/src/card_model.rs https://github.com/TeamBorealis/borealis/pull/43
+crates/borealis-sheet/src/model_tests.rs https://github.com/TeamBorealis/borealis/pull/43
+crates/borealis-sheet/src/model_text.rs https://github.com/TeamBorealis/borealis/pull/43
+
+# Opt-in "Combine Feature Upgrades" sheet option (model_text.rs is shared with the PR above)
 crates/borealis-sheet/src/model_text.rs https://github.com/TeamBorealis/borealis/pull/42
+crates/borealis-sheet/src/feature_fold.rs https://github.com/TeamBorealis/borealis/pull/42
+crates/borealis-sheet/src/lib.rs https://github.com/TeamBorealis/borealis/pull/42
+crates/borealis-sheet/src/sheet_render.rs https://github.com/TeamBorealis/borealis/pull/42
+crates/borealis-sheet/tests/render.rs https://github.com/TeamBorealis/borealis/pull/42
+src-tauri/src/settings.rs https://github.com/TeamBorealis/borealis/pull/42
+src-tauri/src/sheet_api.rs https://github.com/TeamBorealis/borealis/pull/42
+ui/src/api/generated/contract.json https://github.com/TeamBorealis/borealis/pull/42
+ui/src/api/mock/default-settings.ts https://github.com/TeamBorealis/borealis/pull/42
+ui/src/api/types/settings.ts https://github.com/TeamBorealis/borealis/pull/42
+ui/src/pages/settings/SheetTab.tsx https://github.com/TeamBorealis/borealis/pull/42
+ui/src/pages/settings/settingsForm.ts https://github.com/TeamBorealis/borealis/pull/42
