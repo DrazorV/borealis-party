@@ -4,21 +4,33 @@
 //! code runs unchanged, once per account. Only the commands listed here can be reached over the network. Everything
 //! tied to one machine (native pickers, folders on disk, the AI CLIs, device transfer, the updater) is left out on
 //! purpose, and each listed command takes only JSON, base64 or backend-issued tokens, never a path from the client.
+//!
+//! `.borealis` bundles are files, not device transfer: [`stage_bundle`] writes an uploaded bundle into the account's
+//! own `sync/incoming` folder and hands back a pick token, and upstream's `bundle_open`, `bundle_accept` and
+//! `bundle_discard` preview and apply it there. Exporting bundles, the device link (`link_*`, paired devices) and the
+//! OS inbox (`take_opened_*`, one queue for the whole process) stay out.
 
-use std::path::PathBuf;
+use std::net::Ipv4Addr;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use serde::Serialize;
 use serde_json::{Map, Value};
 use tauri::{AppHandle, Invocation, Manager};
 
-use borealis_lib::commands_content::SearchEvents;
+use borealis_lib::commands_content::{SearchEvents, TauriSink};
+use borealis_lib::commands_sync::TauriSyncEvents;
+use borealis_lib::device_sync::inbox::is_bundle_name;
+use borealis_lib::device_sync::{incoming_dir, DeviceSync, SyncConfig};
 use borealis_lib::dto::ExportResult;
 use borealis_lib::dto_ext::SheetOptionsDto;
-use borealis_lib::error::ApiResult;
+use borealis_lib::error::{ApiError, ApiResult};
+use borealis_lib::picked_files::BUNDLE_EXTENSION;
+use borealis_lib::picked_paths::PickPurpose;
 use borealis_lib::state::{AppPaths, AppState};
 use borealis_lib::{
     commands, commands_added, commands_content, commands_gear, commands_hp, commands_play,
-    commands_settings, commands_tracker,
+    commands_settings, commands_sync, commands_tracker,
 };
 
 /// Upstream's version opens a native save dialog on desktop; the server sends the bytes to the client instead.
@@ -31,6 +43,112 @@ fn export_sheet(
     Ok(state
         .sheet_file(&character_id, &options.unwrap_or_default())?
         .into_base64())
+}
+
+/// Upstream's prefix of the per-open folders under `sync/incoming`; it is crate-private there.
+const OPEN_DIR_PREFIX: &str = "open-";
+/// Uploaded bundles kept at once; staging one more removes the oldest (a later Accept of it fails, writing nothing).
+const MAX_STAGED_BUNDLES: usize = 8;
+
+/// The answer to [`stage_bundle`]: never the path on the server.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StagedBundle {
+    token: String,
+    name: String,
+}
+
+/// Longest kept name before `.borealis`: upstream's 120 characters, and at most 200 bytes (ext4 allows 255).
+const MAX_NAME_CHARS: usize = 120;
+const MAX_NAME_BYTES: usize = 200;
+
+/// One file name component ending in `.borealis`, whatever the client sent. The same rules as upstream's private
+/// `device_sync::inbox::copy_name`, so a file reads the same here as on desktop or Android, plus a byte cap.
+pub(crate) fn bundle_file_name(sent: &str) -> String {
+    let last = sent.rsplit(['/', '\\']).next().unwrap_or_default();
+    let stem = if is_bundle_name(last) {
+        &last[..last.len() - BUNDLE_EXTENSION.len() - 1]
+    } else {
+        last
+    };
+    let mut bytes = 0;
+    let clean: String = stem
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .take(MAX_NAME_CHARS)
+        .take_while(|c| {
+            bytes += c.len_utf8();
+            bytes <= MAX_NAME_BYTES
+        })
+        .collect();
+    let clean = clean.trim_matches(|c: char| c == '.' || c.is_whitespace());
+    let stem = if clean.is_empty() { "bundle" } else { clean };
+    format!("{stem}.{BUNDLE_EXTENSION}")
+}
+
+/// The `open-*` folders under `incoming`, oldest first.
+fn staged_folders(incoming: &Path) -> Vec<PathBuf> {
+    let mut found: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(incoming)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(OPEN_DIR_PREFIX))
+        .filter_map(|e| {
+            let meta = e.path().symlink_metadata().ok().filter(|m| m.is_dir())?;
+            Some((meta.modified().ok()?, e.path()))
+        })
+        .collect();
+    found.sort();
+    found.into_iter().map(|(_, path)| path).collect()
+}
+
+/// Keep an uploaded `.borealis` file in the account's own `sync/incoming` folder and hand back a `bundle-file` token
+/// for upstream's `bundle_open`. The browser has the bytes but no path, so this stands in for `pick_path`.
+#[tauri::command(async)]
+fn stage_bundle(
+    state: tauri::State<'_, AppState>,
+    file_name: String,
+    content_base64: String,
+) -> ApiResult<StagedBundle> {
+    use base64::Engine as _;
+    if !state.characters_dir().starts_with(&state.paths.data) {
+        return Err(ApiError::invalid(
+            "Bundles cannot be opened while characters are kept outside this account's folder.",
+        ));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(content_base64.trim())
+        .map_err(|_| ApiError::invalid("The file content is not valid base64."))?;
+    let incoming = incoming_dir(&state);
+    let old = staged_folders(&incoming);
+    for dir in old
+        .iter()
+        .take((old.len() + 1).saturating_sub(MAX_STAGED_BUNDLES))
+    {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    let name = bundle_file_name(&file_name);
+    let dir = incoming.join(format!(
+        "{OPEN_DIR_PREFIX}{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let path = dir.join(&name);
+    let written = std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, &bytes));
+    if let Err(e) = written {
+        let _ = std::fs::remove_dir_all(&dir);
+        return Err(ApiError::io("keep the bundle", e));
+    }
+    let picked = state.picked.grant(path, PickPurpose::BundleFile)?;
+    Ok(StagedBundle {
+        token: picked.token,
+        name,
+    })
 }
 
 /// Every command the server offers. An account runs them in its own data folder only.
@@ -170,6 +288,11 @@ fn offered(name: &str, invocation: &Invocation) -> Option<Result<Value, Value>> 
         commands_content::remove_5etools_url,
         commands_content::update_5etools_url,
         commands_content::import_5etools,
+        // Bundle files, previewed and applied in the account's own folder.
+        stage_bundle,
+        commands_sync::bundle_open,
+        commands_sync::bundle_accept,
+        commands_sync::bundle_discard,
     ])(name, invocation)
 }
 
@@ -199,6 +322,23 @@ pub fn open_workspace(
     if let Err(e) = state.start_search_index() {
         tracing::warn!("search: indexing not started: {}", e.message);
     }
+    // Uploads from before this workspace opened have no token any more.
+    for dir in staged_folders(&incoming_dir(&state)) {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    // Not `commands_sync::install`, which turns discovery on and installs the system keychain: here the link can
+    // only ever listen on localhost and has no keychain, should a `link_*` command ever be offered by mistake.
+    let sync = DeviceSync::new(
+        Arc::new(handle.clone()),
+        Arc::new(TauriSyncEvents(TauriSink(handle.clone()))),
+        SyncConfig {
+            bind_ip: Some(Ipv4Addr::LOCALHOST.into()),
+            device_name: "Borealis Party server".into(),
+            discovery: false,
+        },
+        || Err("Device transfer is not available on the server.".to_string()),
+    );
+    handle.manage(Arc::new(sync));
     Ok(handle.clone())
 }
 

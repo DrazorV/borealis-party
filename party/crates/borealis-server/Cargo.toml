@@ -12,7 +12,9 @@ path = "src/main.rs"
 
 [dependencies]
 # Upstream's `mas` feature is the one that compiles the AI CLIs and the self-updater out; on Linux it adds nothing else.
-borealis = { path = "../../../src-tauri", default-features = false, features = ["mas"] }
+# `device-link` brings the .borealis bundle code (open, preview, accept). Only those commands are offered, so the
+# device-to-device transfer it also compiles in stays unreachable (see `backend.rs`).
+borealis = { path = "../../../src-tauri", default-features = false, features = ["mas", "device-link"] }
 tauri = { path = "../tauri" }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "fs", "set-header"] }
@@ -25,6 +27,7 @@ argon2 = "0.5"
 sha2 = "0.10"
 rand = "0.9"
 uuid = { version = "1", features = ["v4", "v7"] }
+base64 = "0.22"
 # Sign-up email; rustls with ring and the webpki roots, like sqlx.
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "pool", "hostname", "tokio1-rustls", "ring", "webpki-roots"] }
 clap = { version = "4", features = ["derive", "env"] }
@@ -35,6 +38,5 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["s
 
 [dev-dependencies]
 tempfile = "3"
-base64 = "0.22"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

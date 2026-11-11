@@ -1,6 +1,7 @@
 import { COMMANDS, EVENTS, type Api, type ApiError, type ApiMethods, type CommandName, type DataDirs, type EventName } from "../../src/api/contract";
 import type { ExportResult, SheetShare } from "../../src/api/contract";
 import { phoneOs } from "../../src/lib/phone";
+import { looksLikeBundle, openBundleFromImport, pickBundleFile } from "./bundles";
 import { clearSession, loadSession, saveSession, type ServerSession } from "./session";
 
 function fail(code: string, message: string): ApiError {
@@ -119,6 +120,19 @@ export function createHttpApi(session: ServerSession): Api {
     if (phoneOs() === "android") throw unavailable();
     const file = await serverFetch(session, "POST", `/api/rpc/${COMMANDS.exportSheet}`, args ?? {}) as ExportResult;
     return { fileName: file.fileName, mime: file.mime, shared: false, dataBase64: file.dataBase64 ?? "" };
+  };
+
+  // File > Open bundle...: the browser's file chooser and an upload stand in for the native open panel (./bundles.ts).
+  // Every other pick still goes to the server, which does not offer it.
+  const serverPick = methods.pickPath as (args?: Record<string, unknown>) => Promise<unknown>;
+  methods.pickPath = (args?: Record<string, unknown>) => (args?.purpose === "bundle-file" ? pickBundleFile(session) : serverPick(args));
+
+  // Start page > Import characters with a .borealis file (or a zip under another name): the Open bundle window instead.
+  const serverImport = methods.importCharacter as (args?: Record<string, unknown>) => Promise<unknown>;
+  methods.importCharacter = (args?: Record<string, unknown>) => {
+    const fileName = String(args?.fileName ?? "");
+    const content = String(args?.contentBase64 ?? "");
+    return looksLikeBundle(fileName, content) ? openBundleFromImport(session, fileName, content) : serverImport(args);
   };
 
   const listeners = new Map<string, Set<(payload: never) => void>>();

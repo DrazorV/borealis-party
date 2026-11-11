@@ -168,6 +168,21 @@ docker exec -i borealis-party /app/borealis-server add-user <name> [--email <add
 The password is read from standard input. For a direct install, run
 `sudo -u borealis-party env BOREALIS_CONFIG_DIR=/var/lib/borealis-party /opt/borealis-party/borealis-server add-user ...`.
 
+## Bundles
+
+A `.borealis` bundle made with desktop Borealis's File > Export to bundle can be imported into an account: use
+"Import characters" on the Start page, or File > Open bundle.... Borealis's own preview opens, and Accept adds the
+characters and content packs to that account only, exactly as desktop Borealis would.
+
+- Exporting bundles from the server is not offered. Export them from desktop Borealis or the Borealis phone apps.
+- Device-to-device transfer is not offered either.
+- A bundle is uploaded as base64, so the largest one is about three quarters of `MAX_UPLOAD_MB`.
+- Uploaded bundles wait in the account's `sync/incoming` folder until they are accepted or closed. At most eight wait
+  at once (the oldest go first), and any left over are removed the next time the account's workspace opens. So one
+  account can hold at most eight uploads' worth of disk there (under 8 x `MAX_UPLOAD_MB`).
+- Dropping a `.borealis` file on the window or choosing it with "+" is not supported: those say the file cannot be
+  imported. Use "Import characters" or File > Open bundle... instead.
+
 ## How it works
 
 | Rule | Where it is enforced |

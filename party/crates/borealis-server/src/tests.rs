@@ -31,6 +31,7 @@ struct Setup {
     require_approval: bool,
     mailer: Option<Arc<Recorder>>,
     signups_allowed: usize,
+    max_upload: usize,
 }
 
 impl Default for Setup {
@@ -39,6 +40,7 @@ impl Default for Setup {
             require_approval: false,
             mailer: None,
             signups_allowed: 1000,
+            max_upload: 64 * 1024 * 1024,
         }
     }
 }
@@ -70,7 +72,7 @@ fn router_with(data: PathBuf, db: Db, setup: Setup) -> Router {
         accounts: Arc::new(tokio::sync::Mutex::new(())),
         started: std::time::Instant::now(),
     };
-    api_routes(state, 64 * 1024 * 1024).layer(MockConnectInfo(std::net::SocketAddr::from((
+    api_routes(state, setup.max_upload).layer(MockConnectInfo(std::net::SocketAddr::from((
         [127, 0, 0, 1],
         9,
     ))))
@@ -451,6 +453,7 @@ async fn each_account_has_its_own_characters_and_content_on_postgres() {
     // The moved first account is the admin here. This ends with sign-up open and no approval needed.
     let admin = sign_in(&router, "moving-admin").await;
     admin_flow(&router, &admin, &data).await;
+    bundle_flow(router.clone(), &data).await;
     full_flow(router, &data).await;
 }
 
@@ -537,6 +540,20 @@ async fn full_flow(router: Router, data: &Path) {
         "set_documents_dir",
         "get_data_dirs",
         "take_group_notes",
+        // Bundles are opened from uploads only: no export, no OS inbox (one queue for the whole process), no link.
+        "take_opened_bundles",
+        "take_opened_files",
+        "bundle_export",
+        "bundle_share",
+        "link_start_receive",
+        "link_start_send",
+        "link_connect",
+        "link_status",
+        "link_accept",
+        "link_decline",
+        "link_cancel",
+        "link_devices",
+        "link_forget_device",
     ] {
         let (status, out) = alice.rpc(command, json!({})).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{command}");
@@ -1139,4 +1156,460 @@ async fn sessions_are_required_and_passwords_are_checked() {
     }
     let (status, _) = login(&router, "carol", PASSWORD).await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+fn content_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../content")
+}
+
+/// A desktop data folder whose bundles come from upstream's own exporter, as File > Export to bundle makes them.
+struct Desktop {
+    app: tauri::AppHandle,
+    dir: tempfile::TempDir,
+}
+
+impl Desktop {
+    async fn new() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().to_path_buf();
+        let app = tokio::task::spawn_blocking(move || {
+            crate::backend::open_workspace(data, content_root(), |_, _| {}).unwrap()
+        })
+        .await
+        .unwrap();
+        Self { app, dir }
+    }
+
+    async fn run(&self, command: &str, args: Value) -> Value {
+        let app = self.app.clone();
+        let command = command.to_string();
+        tokio::task::spawn_blocking(move || {
+            let Value::Object(args) = args else {
+                panic!("{args}")
+            };
+            crate::backend::invoke(&app, &command, args)
+                .unwrap_or_else(|| panic!("{command} is offered"))
+                .unwrap_or_else(|e| panic!("{command}: {e}"))
+        })
+        .await
+        .unwrap()
+    }
+
+    /// A saved character; its id.
+    async fn character(&self, name: &str) -> String {
+        let made = self.run("create_character", new_character(name)).await;
+        let id = made["id"].as_str().unwrap().to_string();
+        self.run("save_character", json!({ "characterId": id }))
+            .await;
+        id
+    }
+
+    /// The bytes of a bundle of `ids` with `packs`.
+    async fn export(&self, ids: &[&str], packs: borealis_lib::sync_dto::LinkPackChoice) -> Vec<u8> {
+        use borealis_lib::device_sync::DeviceSync;
+        use tauri::Manager as _;
+        let app = self.app.clone();
+        let selection = borealis_lib::sync_dto::LinkSelection {
+            character_ids: ids.iter().map(|id| (*id).to_string()).collect(),
+            packs,
+        };
+        tokio::task::spawn_blocking(move || {
+            let built = app
+                .state::<Arc<DeviceSync>>()
+                .build_bundle_file(&selection)
+                .unwrap();
+            std::fs::read(built.file.path()).unwrap()
+        })
+        .await
+        .unwrap()
+    }
+}
+
+fn required() -> borealis_lib::sync_dto::LinkPackChoice {
+    borealis_lib::sync_dto::LinkPackChoice::Required
+}
+
+impl Client {
+    async fn stage_bundle(&self, name: &str, bytes: &[u8]) -> (StatusCode, Value) {
+        use base64::Engine as _;
+        self.rpc(
+            "stage_bundle",
+            json!({
+                "fileName": name,
+                "contentBase64": base64::engine::general_purpose::STANDARD.encode(bytes),
+            }),
+        )
+        .await
+    }
+
+    /// Stage and preview a bundle; the preview.
+    async fn open_bundle(&self, name: &str, bytes: &[u8]) -> Value {
+        let (status, staged) = self.stage_bundle(name, bytes).await;
+        assert_eq!(status, StatusCode::OK, "{staged}");
+        let (status, preview) = self
+            .rpc("bundle_open", json!({ "token": staged["token"] }))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{preview}");
+        preview
+    }
+
+    async fn accept_bundle(&self, preview: &Value) -> Value {
+        let (status, summary) = self
+            .rpc("bundle_accept", json!({ "bundleId": preview["bundleId"] }))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{summary}");
+        summary
+    }
+}
+
+fn incoming(data: &Path, account: &str) -> PathBuf {
+    data.join("users")
+        .join(account)
+        .join("sync")
+        .join("incoming")
+}
+
+/// Every file under the account's incoming folder.
+fn staged_files(data: &Path, account: &str) -> Vec<PathBuf> {
+    walk(&incoming(data, account))
+        .into_iter()
+        .filter(|p| p.is_file())
+        .collect()
+}
+
+fn actions(preview: &Value) -> Vec<(String, String)> {
+    preview["preview"]["items"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{preview}"))
+        .iter()
+        .map(|i| {
+            (
+                i["kind"].as_str().unwrap().to_string(),
+                i["action"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
+fn one(kind: &str, action: &str) -> Vec<(String, String)> {
+    vec![(kind.to_string(), action.to_string())]
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bundle_is_imported_into_its_own_account_only() {
+    let dir = tempfile::tempdir().unwrap();
+    bundle_flow(router(dir.path().to_path_buf()).await, dir.path()).await;
+}
+
+/// Bundles from upstream's exporter, staged, previewed and applied in one account, with another account looking on.
+async fn bundle_flow(router: Router, data: &Path) {
+    let desktop = Desktop::new().await;
+    let id = desktop.character("Umtar Rajul").await;
+    let bundle = desktop.export(&[&id], required()).await;
+    let alice = sign_up(&router, "bundle-alice").await;
+    let bob = sign_up(&router, "bundle-bob").await;
+    bob.rpc("list_characters", json!({})).await;
+    // Its search index is still being written, so look for what a bundle would leave rather than for any change.
+    let bob_untouched = || {
+        let left: Vec<PathBuf> = walk(&data.join("users").join(&bob.id))
+            .into_iter()
+            .filter(|p| {
+                let name = p.file_name().unwrap().to_string_lossy();
+                name.ends_with(".borealis")
+                    || name == format!("{id}.json")
+                    || name == "party.xml"
+                    || name == "sync"
+            })
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
+    };
+
+    // Staging answers a token and the name, never the path, and keeps one file in the account's own folder.
+    let (status, staged) = alice.stage_bundle("UMTAR RAJUL.borealis", &bundle).await;
+    assert_eq!(status, StatusCode::OK, "{staged}");
+    assert_eq!(staged["name"], "UMTAR RAJUL.borealis");
+    assert!(staged["token"].is_string(), "{staged}");
+    assert!(staged.get("path").is_none(), "{staged}");
+    let files = staged_files(data, &alice.id);
+    assert_eq!(files.len(), 1, "{files:?}");
+    let folder = files[0].parent().unwrap();
+    assert_eq!(folder.parent().unwrap(), incoming(data, &alice.id));
+    assert!(folder
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .starts_with("open-"));
+    let token = json!({ "token": staged["token"] });
+
+    // Another account cannot use the token, and its use leaves the file alone.
+    let (status, out) = bob.rpc("bundle_open", token.clone()).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{out}");
+    assert!(
+        out["message"]
+            .as_str()
+            .unwrap()
+            .contains("expired or is not valid"),
+        "{out}"
+    );
+    assert_eq!(staged_files(data, &alice.id), files);
+
+    // The preview, once per token.
+    let (status, preview) = alice.rpc("bundle_open", token.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(actions(&preview), one("character", "new"), "{preview}");
+    assert_eq!(preview["fileName"], "UMTAR RAJUL.borealis");
+    let (status, out) = alice.rpc("bundle_open", token).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{out}");
+    let opened = json!({ "bundleId": preview["bundleId"] });
+
+    // Nor can another account accept or close the preview.
+    let (status, out) = bob.rpc("bundle_accept", opened.clone()).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{out}");
+    let (status, out) = bob.rpc("bundle_discard", opened.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(staged_files(data, &alice.id), files);
+
+    // Accept adds the character to this account, and the upload is gone.
+    let summary = alice.accept_bundle(&preview).await;
+    assert_eq!(summary["added"], 1, "{summary}");
+    let (_, list) = alice.rpc("list_characters", json!({})).await;
+    assert_eq!(names(&list), ["Umtar Rajul"], "{list}");
+    assert!(character_file(data, &alice.id, &id).is_file());
+    assert!(staged_files(data, &alice.id).is_empty());
+    let (status, out) = alice.rpc("bundle_accept", opened).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "accepted once: {out}");
+    let (status, sheet) = alice
+        .rpc("load_character", json!({ "characterId": id }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{sheet}");
+    alice
+        .rpc("close_character", json!({ "characterId": id }))
+        .await;
+
+    // The other account has nothing new.
+    let (_, list) = bob.rpc("list_characters", json!({})).await;
+    assert!(names(&list).is_empty(), "{list}");
+    bob_untouched();
+
+    // The same bundle again is identical; a newer edit replaces the copy and keeps the old one in the sync trash.
+    let preview = alice.open_bundle("again.borealis", &bundle).await;
+    assert_eq!(actions(&preview), one("character", "identical"));
+    assert_eq!(alice.accept_bundle(&preview).await["identical"], 1);
+    desktop
+        .run("set_xp", json!({ "characterId": id, "xp": 300 }))
+        .await;
+    desktop
+        .run("save_character", json!({ "characterId": id }))
+        .await;
+    // Edits are compared by file time: make this one clearly later.
+    let file = desktop
+        .dir
+        .path()
+        .join("characters")
+        .join(format!("{id}.json"));
+    std::fs::File::options()
+        .write(true)
+        .open(&file)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + Duration::from_secs(60))
+        .unwrap();
+    let newer = desktop.export(&[&id], required()).await;
+    let preview = alice.open_bundle("newer.borealis", &newer).await;
+    assert_eq!(actions(&preview), one("character", "replace"), "{preview}");
+    assert_eq!(alice.accept_bundle(&preview).await["replaced"], 1);
+    let (_, sheet) = alice
+        .rpc("load_character", json!({ "characterId": id }))
+        .await;
+    assert_eq!(sheet["level"]["xp"], 300, "{}", sheet["level"]);
+    let trash = data
+        .join("users")
+        .join(&alice.id)
+        .join("sync")
+        .join("trash");
+    assert!(
+        walk(&trash).iter().any(|p| p.is_file()),
+        "the old copy is kept: {:?}",
+        walk(&trash)
+    );
+
+    // Discarding, or a file that is no bundle, leaves nothing behind.
+    let preview = alice.open_bundle("closed.borealis", &bundle).await;
+    let (status, out) = alice
+        .rpc("bundle_discard", json!({ "bundleId": preview["bundleId"] }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert!(staged_files(data, &alice.id).is_empty());
+    let (status, staged) = alice.stage_bundle("fake.borealis", b"not a bundle").await;
+    assert_eq!(status, StatusCode::OK, "{staged}");
+    let (status, out) = alice
+        .rpc("bundle_open", json!({ "token": staged["token"] }))
+        .await;
+    assert!(!status.is_success(), "{out}");
+    assert!(staged_files(data, &alice.id).is_empty());
+    let (status, out) = alice
+        .rpc(
+            "stage_bundle",
+            json!({ "fileName": "x.borealis", "contentBase64": "not base64!" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{out}");
+    assert!(staged_files(data, &alice.id).is_empty());
+
+    // A bundle with a content pack adds the pack to this account's content only.
+    desktop.run("import_pack", spell_pack()).await;
+    let with_pack = desktop
+        .export(&[&id], borealis_lib::sync_dto::LinkPackChoice::All)
+        .await;
+    let preview = alice.open_bundle("with pack.borealis", &with_pack).await;
+    assert!(
+        actions(&preview).contains(&("pack".to_string(), "new".to_string())),
+        "{preview}"
+    );
+    alice.accept_bundle(&preview).await;
+    let spark = json!({ "elementId": "ID_PARTY_SPARK" });
+    let (status, out) = alice.rpc("get_element", spark.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, _) = bob.rpc("get_element", spark).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    bob_untouched();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn uploaded_bundles_stay_few_and_inside_their_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path();
+    let router = router(data.to_path_buf()).await;
+    let alice = sign_up(&router, "names").await;
+
+    // Whatever name comes, the file is one name inside one fresh folder.
+    for (sent, kept) in [
+        ("..\\..\\x", "x.borealis"),
+        ("a/b.borealis", "b.borealis"),
+        ("con", "con.borealis"),
+        ("", "bundle.borealis"),
+        ("../..", "bundle.borealis"),
+        ("Mira: \"the bold\".BOREALIS", "Mira_ _the bold_.borealis"),
+    ] {
+        let (status, staged) = alice.stage_bundle(sent, b"PK").await;
+        assert_eq!(status, StatusCode::OK, "{staged}");
+        assert_eq!(staged["name"], kept, "{sent}");
+    }
+    let files = staged_files(data, &alice.id);
+    assert_eq!(files.len(), 6, "{files:?}");
+    for file in &files {
+        let folder = file.parent().unwrap();
+        assert_eq!(
+            folder.parent().unwrap(),
+            incoming(data, &alice.id),
+            "{file:?}"
+        );
+    }
+
+    // At most eight wait at once: the oldest go.
+    let mut last = Value::Null;
+    for n in 0..5 {
+        let (status, staged) = alice.stage_bundle(&format!("{n}.borealis"), b"PK").await;
+        assert_eq!(status, StatusCode::OK, "{staged}");
+        last = staged;
+    }
+    assert_eq!(staged_files(data, &alice.id).len(), 8);
+    assert!(
+        staged_files(data, &alice.id)
+            .iter()
+            .any(|p| p.ends_with("4.borealis")),
+        "the newest stays: {last}"
+    );
+
+    // Uploads from before the workspace opened have no token any more, and are swept when it opens.
+    let later = sign_up(&router, "names-later").await;
+    let stale = incoming(data, &later.id).join("open-stale");
+    std::fs::create_dir_all(&stale).unwrap();
+    std::fs::write(stale.join("a.borealis"), b"PK").unwrap();
+    let kept = incoming(data, &later.id).join("other");
+    std::fs::create_dir_all(&kept).unwrap();
+    let (status, _) = later.rpc("list_characters", json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!stale.exists());
+    assert!(kept.exists(), "only upload folders are swept");
+
+    // Staging needs a session.
+    let (status, _) = send(
+        &router,
+        None,
+        "POST",
+        "/api/rpc/stage_bundle",
+        json!({ "fileName": "a.borealis", "contentBase64": "UEsD" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bundle_larger_than_the_upload_limit_is_refused_unwritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = router_with(
+        dir.path().to_path_buf(),
+        Db::open(&Location::Memory).await.unwrap(),
+        Setup {
+            max_upload: 1024,
+            ..Setup::default()
+        },
+    );
+    let alice = sign_up(&router, "big").await;
+    let (status, _) = alice.stage_bundle("big.borealis", &[7u8; 4096]).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(staged_files(dir.path(), &alice.id).is_empty());
+}
+
+/// A real desktop bundle, when `BOREALIS_TEST_BUNDLE` names one: everything in it is new to a fresh account.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_real_desktop_bundle_imports() {
+    let Ok(file) = std::env::var("BOREALIS_TEST_BUNDLE") else {
+        eprintln!("skipped: set BOREALIS_TEST_BUNDLE to a .borealis file");
+        return;
+    };
+    let bytes = std::fs::read(&file).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let router = router(dir.path().to_path_buf()).await;
+    let alice = sign_up(&router, "real").await;
+    let preview = alice.open_bundle("real.borealis", &bytes).await;
+    let rows = actions(&preview);
+    assert!(rows.iter().all(|(_, action)| action == "new"), "{preview}");
+    let characters = rows.iter().filter(|(kind, _)| kind == "character").count();
+    let packs = rows.iter().filter(|(kind, _)| kind == "pack").count();
+    eprintln!("real bundle: {characters} characters, {packs} packs");
+    let summary = alice.accept_bundle(&preview).await;
+    assert_eq!(summary["added"], rows.len(), "{summary}");
+    let (_, list) = alice.rpc("list_characters", json!({})).await;
+    assert_eq!(names(&list).len(), characters, "{list}");
+    assert!(staged_files(dir.path(), &alice.id).is_empty());
+}
+
+#[test]
+fn bundle_names_are_one_component() {
+    for (sent, kept) in [
+        ("Umtar Rajul.borealis", "Umtar Rajul.borealis"),
+        ("C:\\Users\\x\\a.borealis", "a.borealis"),
+        ("...", "bundle.borealis"),
+        (" . x . ", "x.borealis"),
+        // Upstream's own copy_name cases (src-tauri/src/device_sync/inbox.rs).
+        ("Mira.BOREALIS", "Mira.borealis"),
+        ("a/b\\c.borealis", "c.borealis"),
+        ("msf:1234", "msf_1234.borealis"),
+        ("x\u{0}y\n.borealis", "x_y_.borealis"),
+        (".borealis", "bundle.borealis"),
+        ("", "bundle.borealis"),
+    ] {
+        assert_eq!(crate::backend::bundle_file_name(sent), kept, "{sent:?}");
+    }
+    assert_eq!(
+        crate::backend::bundle_file_name(&"x".repeat(500)).len(),
+        120 + ".borealis".len()
+    );
+    // Linux allows 255 bytes per name: a long name in a script with wide characters still fits.
+    for wide in ["角", "😀"] {
+        let name = crate::backend::bundle_file_name(&wide.repeat(200));
+        assert!(name.len() <= 255, "{} bytes", name.len());
+        assert!(name.ends_with(".borealis"));
+    }
 }
