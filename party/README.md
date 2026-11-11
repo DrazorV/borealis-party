@@ -153,6 +153,10 @@ sh party/check-upstream.sh
 Our code lives only in `party/` and `ui/party/`, folders upstream never touches, so merges don't conflict. The one exception
 is a 3-line hook in `src-tauri/src/state.rs`. `check-upstream.sh` fails if anything else in upstream's files changes.
 
+A fix we send upstream can be carried here before it is merged: apply exactly the pull request's commits and list each
+file with the PR's link in `party/upstream-pending.txt`. The check accepts those files, and once upstream merges the PR and
+we merge upstream, it says which lines to remove.
+
 How that works:
 
 - **Backend.** `party/` is its own Cargo workspace. It uses `src-tauri` as a path dependency, and its `[patch]` section swaps
