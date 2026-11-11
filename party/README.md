@@ -149,9 +149,14 @@ back up everything. Running `install.sh` from a newer release upgrades in place 
 ## Connect
 
 - **Browser:** open `http://<server>:8787`.
-- **Android app:** on first launch, enter `<server>:8787`.
+- **Android app and desktop app:** on first launch, enter the server's address. A domain name such as
+  `party.example.com` means `https://`; an IP address such as `192.168.1.20:8787`, `localhost`, a `.local` name or a
+  one-word name such as `raspberrypi:8787` means `http://`. Type the scheme to choose it yourself.
 
 Then sign in or create an account.
+
+If the server later moves to a new address (for example from an IP address to a domain name), change it in the app
+under Account > Server address. The app checks that the server there knows the signed-in account, so it stays signed in.
 
 On the open internet, put the server behind a reverse proxy that terminates HTTPS, and use `https://your.domain` as the
 address. Plain HTTP is only sensible on a network you trust, because passwords and session tokens would cross it
@@ -174,8 +179,8 @@ A `.borealis` bundle made with desktop Borealis's File > Export to bundle can be
 "Import characters" on the Start page, or File > Open bundle.... Borealis's own preview opens, and Accept adds the
 characters and content packs to that account only, exactly as desktop Borealis would.
 
-- Exporting bundles from the server is not offered. Export them from desktop Borealis or the Borealis phone apps.
-- Device-to-device transfer is not offered either.
+- Making bundles is not offered, by the server or by the party apps. A bundle comes from Borealis itself.
+- Device-to-device transfer is not offered either: every device of an account reads the same account on the server.
 - A bundle is uploaded as base64, so the largest one is about three quarters of `MAX_UPLOAD_MB`.
 - Uploaded bundles wait in the account's `sync/incoming` folder until they are accepted or closed. At most eight wait
   at once (the oldest go first), and any left over are removed the next time the account's workspace opens. So one
@@ -226,7 +231,8 @@ How that works:
   and the settings window with its tabs pointed at `ui/party/settings`, which leave out what an account can't change on
   a server. The build fails if upstream renames one of them. `party.css` hides controls that don't apply to an account.
 - **Android.** `party/android/party.init.gradle` sets the app id, name and HTTP permission from outside upstream's Gradle files.
-- **Tauri.** `party/tauri.party.json` overrides the front end and network policy.
+- **Tauri.** `party/tauri.party.json` overrides the front end and network policy, and `party/tauri.party.desktop.json`
+  the desktop app's name, identifier, update feed and file associations.
 
 After a merge, build and run the tests (on Linux, from `party/`):
 
@@ -252,3 +258,19 @@ Keep the signing key: Android only installs an update signed with the same key.
 
 Known limit: in the Android app the character sheet cannot be saved or shared as a PDF yet (its web view has no
 download or share sheet). Open the server in the phone's browser for that.
+
+## Build the desktop app
+
+On Windows, with Rust and the `ui` dependencies installed (`npm --prefix ui ci`), from the repository root:
+
+```powershell
+party/desktop/build-desktop.ps1              # target\party-desktop\release\borealis-party.exe
+party/desktop/build-desktop.ps1 -Installer   # also an NSIS installer
+```
+
+`party/tauri.party.desktop.json` names the app "Borealis Party" with its own identifier, `app.borealis.party`, so it
+keeps its data in `%APPDATA%\app.borealis.party`, and the app window never touches desktop Borealis's
+`%APPDATA%\app.borealis` on the same computer. The exe still has upstream's `--mcp` and command-line modes; those read
+(never write) desktop Borealis's library and search index in `%APPDATA%\app.borealis`, so don't use them. It also leaves out upstream's update feed and file associations, which belong to desktop Borealis.
+Like the Android app it is built without device transfer or on-device semantic search. Set `CARGO_HOME` to a short
+path such as `C:\c` first, as for the Android app.

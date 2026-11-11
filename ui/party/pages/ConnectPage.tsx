@@ -1,15 +1,10 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { checkServer, signIn, signUp, type ServerInfo } from "../api/party";
-import { rememberServer, rememberedServer, saveSession, type ServerUser } from "../api/session";
+import { normaliseAddress, rememberServer, rememberedServer, saveSession, type ServerUser } from "../api/session";
 import { isTauri } from "../../src/lib/tauri";
 import "./party.css";
 
 const message = (e: unknown): string => (e as { message?: string }).message ?? "Something went wrong.";
-
-function normalise(address: string): string {
-  const trimmed = address.trim().replace(/\/+$/, "");
-  return /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
-}
 
 /** The first screen on a device with no session: pick the server (installed apps only), then sign in or sign up. */
 export function ConnectPage() {
@@ -41,7 +36,7 @@ export function ConnectPage() {
 
   const submitAddress = (e: FormEvent) => {
     e.preventDefault();
-    void connect(normalise(address));
+    void connect(normaliseAddress(address));
   };
 
   const enter = (baseUrl: string, token: string, user: ServerUser) => {
@@ -93,7 +88,7 @@ export function ConnectPage() {
             <p className="muted">Enter the address of your server.</p>
             <label>
               Server address
-              <input className="aur-text" autoFocus inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="192.168.1.20:8787" value={address} onChange={(e) => setAddress(e.target.value)} required />
+              <input className="aur-text" autoFocus inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="party.example.com" value={address} onChange={(e) => setAddress(e.target.value)} required />
             </label>
             <button className="btn primary" disabled={busy}>Connect</button>
           </>

@@ -1,0 +1,29 @@
+{
+  "productName": "Borealis Party",
+  "mainBinaryName": "borealis-party",
+  "identifier": "app.borealis.party",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Borealis Party",
+        "visible": false,
+        "width": 1200,
+        "height": 800,
+        "minWidth": 360,
+        "minHeight": 480,
+        "decorations": false,
+        "backgroundColor": "#161616"
+      }
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": []
+    }
+  },
+  "bundle": {
+    "createUpdaterArtifacts": false,
+    "fileAssociations": []
+  }
+}

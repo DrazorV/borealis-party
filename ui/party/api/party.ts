@@ -37,6 +37,22 @@ export async function checkServer(baseUrl: string): Promise<ServerInfo> {
   return info;
 }
 
+/**
+ * Whether the server at `baseUrl` knows this sign-in as the same account, so it is the same server under another
+ * address. A refusal there answers false and, unlike every other request, does not sign this device out.
+ */
+export async function sameAccountAt(baseUrl: string, token: string, userId: string): Promise<boolean> {
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } });
+  } catch {
+    throw new Error("The server can't be reached. Check your connection.");
+  }
+  if (!response.ok) return false;
+  const user = (await response.json().catch(() => null)) as Partial<ServerUser> | null;
+  return user?.id === userId;
+}
+
 export const signIn = (baseUrl: string, username: string, password: string) =>
   serverFetch({ baseUrl, token: "" }, "POST", "/api/auth/login", { username, password }) as Promise<SignedIn>;
 

@@ -38,7 +38,8 @@ $rustTarget = if ($Target -eq "aarch64") { "aarch64-linux-android" } else { "x86
 # without Developer Mode this step stops at a symlink anyway.
 $cliArgs = @("android", "build", "--apk", "--target", $Target, "--config", "party/tauri.party.json")
 if ($Debug) { $cliArgs += "--debug" }
-# A party client gets its rules from the server: no device transfer or on-device semantic search.
+# Without upstream's default features: device-link (device-to-device transfer, which a party app doesn't offer) and
+# llama (on-device semantic search). The characters and rules come from the server.
 $cliArgs += @("--", "--no-default-features")
 $started = Get-Date
 $tauriLog = node ui/node_modules/@tauri-apps/cli/tauri.js @cliArgs 2>&1 | ForEach-Object { "$_" }

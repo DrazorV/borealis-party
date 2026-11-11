@@ -72,3 +72,36 @@ export function rememberedServer(): string {
 export function rememberServer(url: string): void {
   write(SERVER_KEY, url);
 }
+
+/** The same server under a new address (an IP address that became a domain name): the session stays signed in. */
+export function setServerAddress(baseUrl: string): void {
+  const session = loadSession();
+  if (session) write(KEY, JSON.stringify({ ...session, baseUrl }));
+  rememberServer(baseUrl);
+}
+
+/**
+ * What a typed address means: https for a domain name, http for an IP address, localhost, a `.local` name or a
+ * one-word name on the home network (those have no certificate). A typed scheme is kept. Scheme and host are
+ * lower-cased, so the same address typed in another case is the same string.
+ */
+export function normaliseAddress(address: string): string {
+  const trimmed = address.trim().replace(/\/+$/, "");
+  const typed = /^(https?):\/\/(.*)$/i.exec(trimmed);
+  const rest = typed?.[2] ?? trimmed;
+  const slash = rest.indexOf("/");
+  const authority = (slash < 0 ? rest : rest.slice(0, slash)).toLowerCase();
+  const path = slash < 0 ? "" : rest.slice(slash);
+  const scheme = typed?.[1]?.toLowerCase() ?? (isLocalHost(authority) ? "http" : "https");
+  return `${scheme}://${authority}${path}`;
+}
+
+/** An address on the home network (IP address, localhost, `.local` or one-word name), given a normalised URL. */
+export function isLocalAddress(baseUrl: string): boolean {
+  return isLocalHost(baseUrl.replace(/^https?:\/\//, "").split("/")[0] ?? "");
+}
+
+function isLocalHost(authority: string): boolean {
+  const host = authority.replace(/:\d+$/, "");
+  return host.startsWith("[") || /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host === "localhost" || host.endsWith(".local") || !host.includes(".");
+}

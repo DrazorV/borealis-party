@@ -24,6 +24,11 @@ function hideRows(): void {
   for (const row of document.querySelectorAll<HTMLElement>(ROWS)) {
     if (LABELS.has(row.textContent?.trim() ?? "")) (row.closest("li") ?? row).classList.add("party-hidden");
   }
+  // A phone page list left with no row (the More page's "Your other devices") would still take up space.
+  for (const list of document.querySelectorAll<HTMLElement>(".v5-list")) {
+    const items = Array.from(list.children);
+    if (items.length > 0 && items.every((li) => li.classList.contains("party-hidden"))) list.classList.add("party-hidden");
+  }
 }
 
 /** Keeps the rows hidden for the life of the page; menus and pages mount them on demand. */
