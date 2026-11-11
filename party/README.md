@@ -1,7 +1,7 @@
 # Borealis Party server
 
-Borealis Party is Borealis with a multi-user server: Dungeon Master and player accounts, groups, and a party view for the
-DM. The server runs the Borealis rules engine and stores everything. Browsers, the Android app and the desktop app are
+Borealis Party is Borealis with a multi-user server: accounts that run groups as Dungeon Master and play in
+others, a party view for the DM, and an admin page. The server runs the Borealis rules engine and stores everything. Browsers, the Android app and the desktop app are
 clients.
 
 ## Run with Docker
@@ -46,7 +46,9 @@ Put passwords in variables rather than in the file.
 | Variable | Default | Meaning |
 |---|---|---|
 | `BOREALIS__SERVER__BIND` | `0.0.0.0:8787` | Address and port |
-| `BOREALIS__SERVER__OPEN_REGISTRATION` | `true` | Anyone who can reach the server may sign up |
+| `BOREALIS__SERVER__PUBLIC_URL` | | The address people open, such as `https://party.example.com`; needed for email links |
+| `BOREALIS__SERVER__OPEN_REGISTRATION` | `true` | Anyone who can reach the server may ask for an account |
+| `BOREALIS__SERVER__REQUIRE_APPROVAL` | `true` | New accounts wait until an admin approves them |
 | `BOREALIS__SERVER__MAX_UPLOAD_MB` | `512` | Largest upload |
 | `BOREALIS__DATABASE__TYPE` | `sqlite` | `sqlite` or `postgres` |
 | `BOREALIS__SQLITE__PATH` | `party.db` | SQLite file, relative to the config folder |
@@ -57,15 +59,50 @@ Put passwords in variables rather than in the file.
 | `BOREALIS__POSTGRES__DATABASE` | `borealis_party` | Must exist; the server creates its tables |
 | `BOREALIS__POSTGRES__SSLMODE` | `prefer` | `disable`, `prefer` or `require` |
 | `BOREALIS__PATHS__DATA` | `data` | Characters and content, relative to the config folder |
-| `BOREALIS__INITIAL_DM__USERNAME` | | With the password, creates a DM on a server with no accounts |
-| `BOREALIS__INITIAL_DM__PASSWORD` | | |
+| `BOREALIS__SMTP__HOST` | | Mail server; set it to email a confirmation link at sign-up and tell admins about requests |
+| `BOREALIS__SMTP__PORT` | `587` | |
+| `BOREALIS__SMTP__USER` | | Sign-in name for the mail server, if it needs one |
+| `BOREALIS__SMTP__PASSWORD` | | |
+| `BOREALIS__SMTP__FROM` | | Sender, `Name <address>` or an address; required with a host |
+| `BOREALIS__SMTP__TLS` | `starttls` | `starttls` (port 587), `tls` (port 465) or `none` (trusted relay only) |
+| `BOREALIS__INITIAL_ADMIN__USERNAME` | | With the password, creates an admin on a server with no accounts |
+| `BOREALIS__INITIAL_ADMIN__PASSWORD` | | |
+| `BOREALIS__INITIAL_ADMIN__EMAIL` | | Optional. The old `BOREALIS__INITIAL_DM__*` names still work |
 | `BOREALIS__LOG__LEVEL` | `info` | `error` to `trace` |
+
+`OPEN_REGISTRATION` and `REQUIRE_APPROVAL` can also be changed on the admin page while the server runs. What is saved
+there is kept in the database and wins over the file and the variables.
 
 The config folder itself is `/config` in the container. For a direct install it is set by `BOREALIS_CONFIG_DIR` (one
 underscore), which the service file sets to `/var/lib/borealis-party`.
 
 Characters and content packs always stay as files in the data folder, whichever database you choose. The database holds
-accounts, sessions and groups.
+accounts, sessions, groups, the admin page's settings and its activity log.
+
+## Accounts
+
+Every account can run groups and play in them. Whoever creates a group is its Dungeon Master; the people they invite
+are its players. Each account has its own *My characters* and its own content *Library*.
+
+Sign-up asks for a username, an email address (unique, whatever its case) and a password. Then:
+
+1. With `[smtp]` set up, the server emails a link, and the account goes no further until the link is opened. Without
+   it nobody is emailed, and the admin's approval is the check.
+2. With approval required (the default), the account waits on the admin page, and admins with an email address get
+   an email about it. Signing in meanwhile says what the account is waiting for.
+
+The first account on a new server is its admin, active at once. When a server from before this existed upgrades, every
+account stays active and the oldest one becomes the admin, so nobody is locked out.
+
+The admin page (`/admin`, shown to admins only) approves, rejects, disables and re-enables accounts; resets a password,
+either to a temporary one or by asking for a new one at the next sign-in; signs an account out everywhere; makes and
+removes admins (there is always at least one); and deletes an account. Deleting takes the account's characters out of
+other groups first and deletes the groups it runs, whose characters go back to their players. The page also shows
+statistics, the sign-up settings and an activity log of sign-ups, sign-ins, failed sign-ins, groups and admin actions;
+the newest 10,000 entries are kept.
+
+Sign-ups are limited to 10 an hour per client address, and failed sign-ins to 10 per five minutes per address and name.
+Behind a reverse proxy every client has the proxy's address, so these limits are then shared.
 
 ### Moving from SQLite to PostgreSQL
 
@@ -117,11 +154,12 @@ On the open internet, put the server behind a reverse proxy that terminates HTTP
 address. Plain HTTP is only sensible on a network you trust, because passwords and session tokens would cross it
 unencrypted.
 
-If strangers can reach the server, set `BOREALIS__SERVER__OPEN_REGISTRATION=false`. Create the first DM with the
-`INITIAL_DM` variables, and other accounts with:
+New accounts wait for an admin's approval by default. To close sign-up entirely, set
+`BOREALIS__SERVER__OPEN_REGISTRATION=false` or switch it off on the admin page. Create the first admin with the
+`INITIAL_ADMIN` variables, and other accounts with:
 
 ```sh
-docker exec -i borealis-party /app/borealis-server add-user <name> <dm|player>
+docker exec -i borealis-party /app/borealis-server add-user <name> [--email <address>] [--admin]
 ```
 
 The password is read from standard input. For a direct install, run
@@ -131,10 +169,13 @@ The password is read from standard input. For a direct install, run
 
 | Rule | Where it is enforced |
 |---|---|
-| Players own characters; they create, edit and delete them | `party/crates/borealis-server/src/rpc.rs` |
-| One character per group, a character in at most one group | `members` table in `db.rs` |
+| A group's DM is its creator; its players are the people they invited | `rpc.rs`, `group_role` |
+| Characters are changed by their owners only, in My characters or a group they play in | `rpc.rs`, `check_access` |
+| One character per player per group, a character in at most one group | `members` table in `db.rs` |
 | A DM sees a member's character and cannot change it | `groups.rs`, `view` |
-| Only DMs add content, from their Library | `rpc.rs`, `check_access` |
+| Content is added in a Library; only a group's DM chooses its packs | `rpc.rs`, `check_access` |
+| Only the group's DM manages it and its invitations; nobody joins their own group | `groups.rs` |
+| Only active accounts sign in; only admins reach `/api/admin` | `auth.rs`, `admin.rs` |
 | Only commands listed in `backend.rs` are reachable | `backend.rs` |
 | Each Application Setting has one owner: the account, the group's DM (house rules), the DM's library, or the server | `party/crates/borealis-server/src/settings.rs` |
 | In a group, characters follow the DM's house rules: their own are off, and what the rules don't allow is taken out (with a note to the player) when the character opens | `workspaces.rs` `Workspace::call`, `backend.rs` `apply_group_rules` |

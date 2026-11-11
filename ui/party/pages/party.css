@@ -23,10 +23,21 @@
 .party-connect-card h1 { margin: 0; font-size: var(--fs-xl); }
 .party-connect-card label { display: flex; flex-direction: column; gap: var(--sp-1); }
 .party-connect-card input.aur-text { min-height: 36px; padding: 0 var(--sp-2); font-size: 16px; box-sizing: border-box; }
-.party-role { display: flex; gap: var(--sp-4); border: 0; padding: 0; margin: 0; }
-.party-role legend { padding: 0 0 var(--sp-1); }
-.party-role label { flex-direction: row; align-items: center; }
-@media (max-width: 480px) { .party-scope-user { display: none; } }
+.party-connect-note { margin: 0; font-size: var(--fs-sm); }
+.party-connect-note:empty { display: none; }
+.party-half { margin: var(--sp-3) 0 0; font-size: var(--fs-sm); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.75; }
+.party-form { display: flex; flex-direction: column; gap: var(--sp-3); }
+.party-form p { margin: 0; }
+.party-pager { justify-content: center; }
+.party-admin-stats dd { font-size: 22px; }
+.party-facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-1) var(--sp-4); margin: 0; }
+.party-facts div { display: contents; }
+.party-facts dt { opacity: 0.7; }
+.party-facts dd { margin: 0; }
+.party-activity .party-line { padding: var(--sp-1) 0; border-bottom: var(--border-w) solid var(--border); gap: var(--sp-2); font-size: var(--fs-sm); }
+.party-activity-time { min-width: 11em; }
+.party-activity-warn { color: var(--danger, inherit); }
+@media (max-width: 480px) { .party-scope-user { display: none; } .party-activity-time { min-width: 0; width: 100%; } }
 
 /* Upstream controls that don't apply to this account. The classes are set in entry/App.tsx. */
 html.party-browser .aur-winbtns { display: none; }

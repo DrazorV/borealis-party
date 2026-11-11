@@ -1,5 +1,5 @@
 import { serverFetch } from "./http";
-import { loadSession, type Role, type ServerUser } from "./session";
+import { loadSession, type ServerUser } from "./session";
 
 export interface GroupSummary {
   id: string;
@@ -7,12 +7,15 @@ export interface GroupSummary {
   dmName: string;
   memberCount: number;
   characterId: string | null;
+  /** This account runs the group; otherwise it plays in it. */
+  isDm: boolean;
 }
 
 export interface GroupDetail {
   id: string;
   name: string;
   dmName: string;
+  isDm: boolean;
   members: { playerId: string; username: string; hasCharacter: boolean }[];
   invites: { id: string; username: string }[];
   characterId?: string;
@@ -58,11 +61,23 @@ export interface ServerInfo {
   app: string;
   version: string;
   openRegistration: boolean;
+  requireApproval: boolean;
+  /** The server sends a confirmation email at sign-up. */
+  email: boolean;
 }
 
 interface SignedIn {
   token: string;
   user: ServerUser;
+}
+
+/** A sign-up: signed in when the account is active at once, otherwise what it waits for. */
+export interface SignUpResult {
+  status: "active" | "pending";
+  token?: string;
+  user?: ServerUser;
+  awaitingEmail?: boolean;
+  message?: string;
 }
 
 function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -81,10 +96,13 @@ export async function checkServer(baseUrl: string): Promise<ServerInfo> {
 export const signIn = (baseUrl: string, username: string, password: string) =>
   serverFetch({ baseUrl, token: "" }, "POST", "/api/auth/login", { username, password }) as Promise<SignedIn>;
 
-export const signUp = (baseUrl: string, username: string, password: string, role: Role) =>
-  serverFetch({ baseUrl, token: "" }, "POST", "/api/auth/register", { username, password, role }) as Promise<SignedIn>;
+export const signUp = (baseUrl: string, username: string, email: string, password: string) =>
+  serverFetch({ baseUrl, token: "" }, "POST", "/api/auth/register", { username, email, password }) as Promise<SignUpResult>;
 
 export const signOut = () => call<void>("POST", "/api/auth/logout");
+export const fetchMe = () => call<ServerUser>("GET", "/api/me");
+export const changeEmail = (email: string) => call<ServerUser>("PATCH", "/api/me", { email });
+export const changePassword = (current: string, password: string) => call<ServerUser>("POST", "/api/me/password", { current, password });
 
 export const listGroups = () => call<GroupSummary[]>("GET", "/api/groups");
 export const createGroup = (name: string) => call<{ id: string }>("POST", "/api/groups", { name });
@@ -101,3 +119,81 @@ export const declineInvitation = (id: string) => call<void>("POST", `/api/invite
 export const myCharacters = () => call<OwnedCharacter[]>("GET", "/api/characters");
 export const bringCharacter = (group: string, characterId: string) => call<void>("POST", `/api/groups/${group}/character`, { characterId });
 export const withdrawCharacter = (group: string) => call<void>("DELETE", `/api/groups/${group}/character`);
+
+// The admin page.
+
+export type AccountStatus = "pending" | "active" | "rejected" | "disabled";
+
+export interface Account {
+  id: string;
+  username: string;
+  email: string | null;
+  admin: boolean;
+  mustChangePassword: boolean;
+  status: AccountStatus;
+  createdAt: number;
+  emailConfirmedAt: number | null;
+  awaitingEmail: boolean;
+  sessions: number;
+}
+
+export interface Paged<T> {
+  items: T[];
+  total: number;
+}
+
+export interface ServerStats {
+  accounts: Record<AccountStatus | "total", number>;
+  admins: number;
+  groups: number;
+  characters: number;
+  groupCharacters: number;
+  contentPacks: number;
+  invites: number;
+  activeSessions: number;
+  diskBytes: number;
+  version: string;
+  database: "sqlite" | "postgres";
+  uptimeSeconds: number;
+  email: boolean;
+}
+
+export interface SignUpSettings {
+  openRegistration: boolean;
+  requireApproval: boolean;
+}
+
+export interface AdminSettings extends SignUpSettings {
+  configFile: SignUpSettings;
+  email: boolean;
+  publicUrl: string | null;
+}
+
+export interface ActivityEntry {
+  at: number;
+  kind: string;
+  actorId: string | null;
+  actorName: string | null;
+  targetId: string | null;
+  targetName: string | null;
+  detail: string | null;
+  ip: string | null;
+}
+
+const query = (params: Record<string, string | number | undefined>): string => {
+  const pairs = Object.entries(params).filter((p): p is [string, string | number] => p[1] !== undefined && p[1] !== "");
+  return pairs.length ? `?${new URLSearchParams(pairs.map(([k, v]) => [k, String(v)])).toString()}` : "";
+};
+
+export const adminStats = () => call<ServerStats>("GET", "/api/admin/stats");
+export const adminAccounts = (search: string, status: AccountStatus | "", page: number, perPage: number) =>
+  call<Paged<Account>>("GET", `/api/admin/accounts${query({ search, status, page, perPage })}`);
+export const setAccountStatus = (id: string, status: AccountStatus) => call<Account>("POST", `/api/admin/accounts/${id}/status`, { status });
+export const setAccountAdmin = (id: string, admin: boolean) => call<Account>("POST", `/api/admin/accounts/${id}/admin`, { admin });
+/** With a password, that becomes a temporary one; without, the current one has to be changed at the next sign-in. */
+export const resetPassword = (id: string, password?: string) => call<Account>("POST", `/api/admin/accounts/${id}/password`, password ? { password } : {});
+export const signOutEverywhere = (id: string) => call<{ ended: number }>("POST", `/api/admin/accounts/${id}/sign-out`, {});
+export const deleteAccount = (id: string) => call<void>("DELETE", `/api/admin/accounts/${id}`);
+export const adminSettings = () => call<AdminSettings>("GET", "/api/admin/settings");
+export const saveAdminSettings = (changes: Partial<SignUpSettings>) => call<AdminSettings>("PATCH", "/api/admin/settings", changes);
+export const adminActivity = (page: number, perPage: number) => call<Paged<ActivityEntry>>("GET", `/api/admin/activity${query({ page, perPage })}`);

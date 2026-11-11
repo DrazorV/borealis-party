@@ -14,8 +14,14 @@ services:
       - "PUID=1026"
       - "PGID=65540"
       # - "BOREALIS__SERVER__OPEN_REGISTRATION=false"
-      # - "BOREALIS__INITIAL_DM__USERNAME=dm"
-      # - "BOREALIS__INITIAL_DM__PASSWORD=change-me"
+      # - "BOREALIS__INITIAL_ADMIN__USERNAME=admin"
+      # - "BOREALIS__INITIAL_ADMIN__PASSWORD=change-me"
+      # Sign-up email (optional):
+      # - "BOREALIS__SERVER__PUBLIC_URL=https://party.example.com"
+      # - "BOREALIS__SMTP__HOST=smtp.example.com"
+      # - "BOREALIS__SMTP__USER=party@example.com"
+      # - "BOREALIS__SMTP__PASSWORD=change-me"
+      # - "BOREALIS__SMTP__FROM=Borealis Party <party@example.com>"
       # PostgreSQL instead of SQLite:
       # - "BOREALIS__DATABASE__TYPE=postgres"
       # - "BOREALIS__POSTGRES__HOST=172.20.20.247"

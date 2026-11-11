@@ -17,12 +17,14 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 
+mod admin;
 mod auth;
 mod backend;
 mod config;
 mod db;
 mod error;
 mod groups;
+mod mail;
 mod migrate;
 mod rpc;
 mod settings;
@@ -30,7 +32,7 @@ mod settings;
 mod tests;
 mod workspaces;
 
-use auth::{LoginLimiter, Role};
+use auth::{RateLimiter, Status};
 use config::Settings;
 use db::Db;
 use workspaces::Workspaces;
@@ -54,13 +56,17 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Create an account; the password is read from standard input.
+    /// Create an active account; the password is read from standard input. Every account can run groups and play
+    /// in them; the first account on a server is always an admin.
     AddUser {
         /// The username.
         username: String,
-        /// `dm` or `player`.
-        #[arg(value_parser = parse_role)]
-        role: Role,
+        /// The email address.
+        #[arg(long)]
+        email: Option<String>,
+        /// Make it an admin.
+        #[arg(long)]
+        admin: bool,
     },
     /// Exit 0 when the running server answers (for container health checks).
     Health,
@@ -73,17 +79,12 @@ enum Command {
     },
 }
 
-fn parse_role(text: &str) -> Result<Role, String> {
-    match text {
-        "dm" => Ok(Role::Dm),
-        "player" => Ok(Role::Player),
-        _ => Err("use dm or player".into()),
-    }
-}
-
-/// Server settings the routes need.
+/// Server settings the routes need, from `config.toml`. The admin page can override sign-up and approval.
 pub struct Config {
     open_registration: bool,
+    require_approval: bool,
+    /// `server.public_url`, without a trailing slash.
+    public_url: Option<String>,
 }
 
 /// Shared by every route.
@@ -92,17 +93,29 @@ pub struct AppState {
     db: Db,
     workspaces: Arc<Workspaces>,
     config: Arc<Config>,
-    login_limiter: LoginLimiter,
+    login_limiter: RateLimiter,
+    signup_limiter: RateLimiter,
+    /// Sends sign-up email, when `[smtp]` is set up.
+    mailer: Option<Arc<dyn mail::Mailer>>,
     /// Serialises anything that moves characters in or out of groups.
     membership: Arc<tokio::sync::Mutex<()>>,
+    /// Serialises sign-ups, so only one can be the first account.
+    accounts: Arc<tokio::sync::Mutex<()>>,
+    /// When the server started.
+    started: std::time::Instant,
 }
 
-async fn server_info(axum::extract::State(state): axum::extract::State<AppState>) -> Json<Value> {
-    Json(json!({
+async fn server_info(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> error::ApiResult<Json<Value>> {
+    let settings = admin::runtime_settings(&state).await?;
+    Ok(Json(json!({
         "app": "borealis-party",
         "version": env!("CARGO_PKG_VERSION"),
-        "openRegistration": state.config.open_registration,
-    }))
+        "openRegistration": settings.open_registration,
+        "requireApproval": settings.require_approval,
+        "email": state.mailer.is_some(),
+    })))
 }
 
 /// Every route under `/api`.
@@ -112,7 +125,27 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
         .route("/api/auth/register", post(auth::register))
         .route("/api/auth/login", post(auth::login))
         .route("/api/auth/logout", post(auth::logout))
-        .route("/api/me", get(auth::me))
+        .route("/api/auth/confirm/{token}", get(auth::confirm))
+        .route("/api/me", get(auth::me).patch(auth::update_me))
+        .route("/api/me/password", post(auth::change_password))
+        .route("/api/admin/stats", get(admin::stats))
+        .route(
+            "/api/admin/settings",
+            get(admin::settings).patch(admin::save_settings),
+        )
+        .route("/api/admin/activity", get(admin::activity))
+        .route("/api/admin/accounts", get(admin::accounts))
+        .route("/api/admin/accounts/{id}", delete(admin::delete_account))
+        .route("/api/admin/accounts/{id}/status", post(admin::set_status))
+        .route("/api/admin/accounts/{id}/admin", post(admin::set_admin))
+        .route(
+            "/api/admin/accounts/{id}/password",
+            post(admin::reset_password),
+        )
+        .route(
+            "/api/admin/accounts/{id}/sign-out",
+            post(admin::sign_out_everywhere),
+        )
         .route("/api/groups", get(groups::list).post(groups::create))
         .route(
             "/api/groups/{id}",
@@ -279,30 +312,61 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     }
-    if let Some(Command::AddUser { username, role }) = args.command {
+    if let Some(Command::AddUser {
+        username,
+        email,
+        admin,
+    }) = args.command
+    {
         let mut password = String::new();
         std::io::stdin().lock().read_line(&mut password)?;
-        let user = auth::create_user(
+        let (user, _) = auth::create_account(
             &db,
-            &username,
-            password.trim_end_matches(['\r', '\n']),
-            role,
+            auth::AccountSpec {
+                username: &username,
+                email: email.as_deref(),
+                password: password.trim_end_matches(['\r', '\n']),
+                status: Status::Active,
+                admin,
+                confirm_token_hash: None,
+            },
         )
         .await
         .map_err(|e| format!("{e:?}"))?;
-        println!("Created {} ({}).", user.username, role.as_str());
+        let kind = if user.admin { "admin" } else { "account" };
+        println!("Created the {kind} {}.", user.username);
         return Ok(());
     }
-    if let (Some(username), Some(password)) =
-        (&settings.initial_dm.username, &settings.initial_dm.password)
-    {
+    let initial = &settings.initial_admin;
+    if let (Some(username), Some(password)) = (&initial.username, &initial.password) {
         if db.user_count().await.map_err(|e| format!("{e:?}"))? == 0 {
-            auth::create_user(&db, username, password, Role::Dm)
-                .await
-                .map_err(|e| format!("initial_dm: {e:?}"))?;
-            tracing::info!("created the initial Dungeon Master account {username}");
+            auth::create_account(
+                &db,
+                auth::AccountSpec {
+                    username,
+                    email: initial.email.as_deref(),
+                    password,
+                    status: Status::Active,
+                    admin: true,
+                    confirm_token_hash: None,
+                },
+            )
+            .await
+            .map_err(|e| format!("initial_admin: {e:?}"))?;
+            tracing::info!("created the initial admin account {username}");
         }
     }
+    let mailer = if settings.smtp.enabled() {
+        let mailer = mail::SmtpMailer::shared(&settings.smtp)?;
+        tracing::info!(
+            "sign-up email through {}:{}",
+            settings.smtp.host.as_deref().unwrap_or_default(),
+            settings.smtp.port
+        );
+        Some(mailer)
+    } else {
+        None
+    };
     let content = settings
         .paths
         .content
@@ -329,9 +393,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         workspaces: Arc::clone(&workspaces),
         config: Arc::new(Config {
             open_registration: settings.server.open_registration,
+            require_approval: settings.server.require_approval,
+            public_url: settings.public_url(),
         }),
-        login_limiter: LoginLimiter::default(),
+        login_limiter: RateLimiter::logins(),
+        signup_limiter: RateLimiter::signups(),
+        mailer,
         membership: Arc::new(tokio::sync::Mutex::new(())),
+        accounts: Arc::new(tokio::sync::Mutex::new(())),
+        started: std::time::Instant::now(),
     };
     let router = app(
         state,

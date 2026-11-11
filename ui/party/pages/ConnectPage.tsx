@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { checkServer, signIn, signUp, type ServerInfo } from "../api/party";
-import { homeScope, rememberServer, rememberedServer, saveSession, type Role } from "../api/session";
+import { homeScope, rememberServer, rememberedServer, saveSession, type ServerUser } from "../api/session";
 import { isTauri } from "../../src/lib/tauri";
 import "./party.css";
 
@@ -19,9 +19,10 @@ export function ConnectPage() {
   const [server, setServer] = useState<{ baseUrl: string; info: ServerInfo } | null>(null);
   const [mode, setMode] = useState<"in" | "up">("in");
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<Role>("player");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
   const connect = async (baseUrl: string) => {
@@ -43,22 +44,44 @@ export function ConnectPage() {
     void connect(normalise(address));
   };
 
+  const enter = (baseUrl: string, token: string, user: ServerUser) => {
+    saveSession({ baseUrl, token, user, ...homeScope() });
+    window.location.hash = "/party";
+    window.location.reload();
+  };
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!server) return;
     setBusy(true);
     setError("");
+    setNotice("");
     try {
-      const out = mode === "in"
-        ? await signIn(server.baseUrl, username, password)
-        : await signUp(server.baseUrl, username, password, role);
-      saveSession({ baseUrl: server.baseUrl, token: out.token, user: out.user, ...homeScope(out.user.role) });
-      window.location.hash = "/party";
-      window.location.reload();
+      if (mode === "in") {
+        const out = await signIn(server.baseUrl, username, password);
+        enter(server.baseUrl, out.token, out.user);
+        return;
+      }
+      const out = await signUp(server.baseUrl, username, email, password);
+      if (out.status === "active" && out.token && out.user) {
+        enter(server.baseUrl, out.token, out.user);
+        return;
+      }
+      // Waiting for the emailed link or for an admin: back to signing in, with what happens next.
+      setNotice(out.message ?? "Your account is waiting for approval.");
+      setMode("in");
+      setPassword("");
+      setBusy(false);
     } catch (err) {
       setError(message(err));
       setBusy(false);
     }
+  };
+
+  const switchMode = () => {
+    setMode(mode === "in" ? "up" : "in");
+    setError("");
+    setNotice("");
   };
 
   return (
@@ -77,24 +100,30 @@ export function ConnectPage() {
         )}
         {server && (
           <>
+            {notice && <div className="alert success" role="status"><div>{notice}</div></div>}
             <label>
-              Username
+              {mode === "in" ? "Username or email" : "Username"}
               <input className="aur-text" autoFocus autoCapitalize="none" spellCheck={false} autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
             </label>
+            {mode === "up" && (
+              <label>
+                Email
+                <input className="aur-text" type="email" autoCapitalize="none" spellCheck={false} autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              </label>
+            )}
             <label>
               Password
-              <input className="aur-text" type="password" autoComplete={mode === "in" ? "current-password" : "new-password"} value={password} onChange={(e) => setPassword(e.target.value)} required />
+              <input className="aur-text" type="password" autoComplete={mode === "in" ? "current-password" : "new-password"} value={password} onChange={(e) => setPassword(e.target.value)} required minLength={mode === "up" ? 8 : undefined} />
             </label>
             {mode === "up" && (
-              <fieldset className="party-role">
-                <legend>I am a</legend>
-                <label><input type="radio" name="role" checked={role === "player"} onChange={() => setRole("player")} /> Player</label>
-                <label><input type="radio" name="role" checked={role === "dm"} onChange={() => setRole("dm")} /> Dungeon Master</label>
-              </fieldset>
+              <p className="muted party-connect-note">
+                {server.info.email ? "We'll email you a link to confirm your address. " : ""}
+                {server.info.requireApproval ? "An admin approves new accounts before they can sign in." : ""}
+              </p>
             )}
             <button className="btn primary" disabled={busy}>{mode === "in" ? "Sign in" : "Create account"}</button>
             {server.info.openRegistration && (
-              <button type="button" className="btn" onClick={() => { setMode(mode === "in" ? "up" : "in"); setError(""); }}>
+              <button type="button" className="btn" onClick={switchMode}>
                 {mode === "in" ? "Create an account" : "I already have an account"}
               </button>
             )}

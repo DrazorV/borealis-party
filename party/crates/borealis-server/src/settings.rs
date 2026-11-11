@@ -5,7 +5,7 @@
 //! | Fields | Owner | Kept in |
 //! |---|---|---|
 //! | [`USER_FIELDS`] (look, sheet, search, confirmations, autosave, player name) | each account | the `user_settings` table |
-//! | [`DM_FIELDS`] (content library behaviour) | each Dungeon Master | the `user_settings` table |
+//! | [`DM_FIELDS`] (content library behaviour) | each account, shown where it works as a DM | the `user_settings` table |
 //! | [`RULE_FIELDS`] in a group (house rules) | the group's DM | `groups/<g>/dm/settings.json`, which members link to |
 //! | [`RULE_FIELDS`] outside groups | each player | `users/<p>/personal/settings.json` |
 //! | anything else (folders, updates, AI, devices) | the server's administrator | never changed by a client |
@@ -16,7 +16,6 @@
 use borealis_lib::settings::{AiSettings, AppSettings};
 use serde_json::{json, Map, Value};
 
-use crate::auth::{Role, User};
 use crate::error::{ApiError, ApiResult};
 use crate::workspaces::{Workspace, WsKey};
 use crate::AppState;
@@ -70,9 +69,17 @@ pub const PLATFORM_FIELDS: [&str; 3] = ["mobile", "storeBuild", "aiAvailable"];
 const MANAGED_BY_SERVER: &str = "That setting is managed by the server's administrator.";
 const SET_BY_DM: &str = "Your Dungeon Master sets this group's house rules.";
 const RULES_IN_GROUPS: &str = "House rules belong to a group. Open the group to change them.";
-const DM_ONLY: &str = "Only Dungeon Masters have a content library.";
+const DM_ONLY: &str = "Content library settings are changed in your Library.";
 
-/// Who owns a workspace, and so whose account settings it carries.
+/// What a workspace's owner is there: a Dungeon Master in their Library or a group they run, a player in My
+/// characters or a group they play in. Every account is both, in different places.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Role {
+    Dm,
+    Player,
+}
+
+/// Who owns a workspace, and so whose account settings it carries, and what they are there.
 fn owner(key: &WsKey) -> (&str, Role) {
     match key {
         WsKey::Personal { player } | WsKey::GroupMember { player, .. } => (player, Role::Player),
@@ -275,7 +282,9 @@ async fn save(
     }
     if !account.is_empty() {
         let (user, _) = owner(key);
-        let saved = account_part(&next, role)?;
+        // Keep the fields this place doesn't show: a DM's library settings when saving from My characters.
+        let mut saved = load(state, user).await?.unwrap_or_default();
+        saved.extend(account_part(&next, role)?);
         store(state, user, &saved, true).await?;
         workspace.overlay_settings(&overlay(&saved, role)?)?;
     }
@@ -286,14 +295,13 @@ async fn save(
 /// settings up to date before any other command. `None`: not a settings command, run it as usual.
 pub async fn handle(
     state: &AppState,
-    user: &User,
     key: &WsKey,
     workspace: &Workspace,
     command: &str,
     args: &Map<String, Value>,
 ) -> ApiResult<Option<Value>> {
     sync(state, key, workspace).await?;
-    let role = user.role;
+    let (_, role) = owner(key);
     let answer = match command {
         "get_settings" => shown(&current(workspace).await?, role)?,
         "save_settings" => {

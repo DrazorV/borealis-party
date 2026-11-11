@@ -36,7 +36,7 @@ export function ScopeBar() {
   const host = useHost();
   const session = loadSession();
   if (!session || !host) return null;
-  const leaveView = () => moveTo(homeScope(session.user.role), "/party");
+  const leaveView = () => moveTo(homeScope(), "/party");
   const exit = async () => {
     try { await signOut(); } catch { /* the token goes either way */ }
     clearSession();
@@ -53,6 +53,7 @@ export function ScopeBar() {
       {session.view
         ? <Button small onClick={leaveView}>Back to party</Button>
         : <Button small onClick={() => nav("/party")}>Party</Button>}
+      {session.user.admin && !session.view && <Button small onClick={() => nav("/admin")}>Admin</Button>}
       <Button small onClick={() => void exit()}>Sign out</Button>
     </div>,
     host,

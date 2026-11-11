@@ -11,7 +11,7 @@ use serde_json::{json, Map, Value};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::{Stream, StreamExt};
 
-use crate::auth::{Role, User};
+use crate::auth::User;
 use crate::db::Db;
 use crate::error::{ApiError, ApiResult};
 use crate::workspaces::{Workspace, WsKey};
@@ -40,50 +40,52 @@ const CREATING: [&str; 2] = ["create_character", "import_character"];
 /// Commands that copy a character, which a group's one slot has no room for.
 const COPYING: [&str; 2] = ["duplicate_character", "save_character_as"];
 
-/// A group as seen by a caller: who runs it and whether the caller has a character in it.
+/// A group as seen by a caller: who runs it, and whether the caller runs it or plays in it with a character.
 pub struct GroupRole {
     /// The group's DM.
     pub dm: String,
+    /// The caller runs the group.
+    pub is_dm: bool,
     /// The caller's character, when the caller is a player with one.
     pub character: Option<String>,
 }
 
-/// The caller's place in a group; `None` when they have none (reported as "no such group").
+/// The caller's place in a group: its DM (who created it) or one of its players (who accepted an invitation).
+/// `None` when they have none (reported as "no such group").
 pub async fn group_role(db: &Db, user: &User, group: &str) -> ApiResult<Option<GroupRole>> {
     let Some(dm) = db.group_dm(group).await? else {
         return Ok(None);
     };
-    if user.role == Role::Dm {
-        return Ok((dm == user.id).then_some(GroupRole {
+    if dm == user.id {
+        return Ok(Some(GroupRole {
             dm,
+            is_dm: true,
             character: None,
         }));
     }
     Ok(db
         .membership(group, &user.id)
         .await?
-        .map(|character| GroupRole { dm, character }))
+        .map(|character| GroupRole {
+            dm,
+            is_dm: false,
+            character,
+        }))
 }
 
 async fn resolve_scope(state: &AppState, user: &User, scope: &str) -> ApiResult<(WsKey, Scope)> {
-    match (scope, user.role) {
-        ("personal", Role::Player) => Ok((
+    match scope {
+        "personal" => Ok((
             WsKey::Personal {
                 player: user.id.clone(),
             },
             Scope::Personal,
         )),
-        ("library", Role::Dm) => Ok((
+        "library" => Ok((
             WsKey::Library {
                 dm: user.id.clone(),
             },
             Scope::Library,
-        )),
-        ("personal", Role::Dm) => Err(ApiError::Forbidden(
-            "Only players have personal characters.".into(),
-        )),
-        ("library", Role::Player) => Err(ApiError::Forbidden(
-            "Only Dungeon Masters have a content library.".into(),
         )),
         _ => {
             let group = scope
@@ -92,45 +94,52 @@ async fn resolve_scope(state: &AppState, user: &User, scope: &str) -> ApiResult<
             let role = group_role(&state.db, user, group)
                 .await?
                 .ok_or_else(ApiError::group_not_found)?;
-            let key = match user.role {
-                Role::Dm => WsKey::GroupDm {
+            if role.is_dm {
+                let key = WsKey::GroupDm {
                     group: group.to_string(),
                     dm: role.dm,
-                },
-                Role::Player => WsKey::GroupMember {
+                };
+                Ok((key, Scope::GroupDm))
+            } else {
+                let key = WsKey::GroupMember {
                     group: group.to_string(),
                     dm: role.dm,
                     player: user.id.clone(),
-                },
-            };
-            Ok((key, Scope::Group(group.to_string())))
+                };
+                Ok((key, Scope::GroupMember(group.to_string())))
+            }
         }
     }
 }
 
+/// Where a command runs, which decides what the caller is there: an owner of characters (their own place, or a
+/// group they play in) or a Dungeon Master (their Library, or a group they run).
 enum Scope {
     Personal,
     Library,
-    Group(String),
+    GroupDm,
+    GroupMember(String),
 }
 
-fn check_access(role: Role, scope: &Scope, access: Access, command: &str) -> ApiResult<()> {
-    match access {
-        Access::Read => Ok(()),
-        Access::Character if role == Role::Player => Ok(()),
-        Access::Character => Err(ApiError::Forbidden(
+fn check_access(scope: &Scope, access: Access, command: &str) -> ApiResult<()> {
+    match (access, scope) {
+        (Access::Read, _) | (Access::Character, Scope::Personal | Scope::GroupMember(_)) => Ok(()),
+        (Access::Character, Scope::Library) => Err(ApiError::Forbidden(
+            "Characters live in My characters or in a group, not in the Library.".into(),
+        )),
+        (Access::Character, Scope::GroupDm) => Err(ApiError::Forbidden(
             "Dungeon Masters can look at characters but not change them.".into(),
         )),
-        Access::Library if role == Role::Dm => match scope {
-            Scope::Group(_) if !GROUP_LIBRARY_COMMANDS.contains(&command) => {
-                Err(ApiError::Forbidden(
-                    "Add content from your Library, then choose which packs each group uses."
-                        .into(),
-                ))
-            }
-            _ => Ok(()),
-        },
-        Access::Library => Err(ApiError::Forbidden(
+        (Access::Library, Scope::Library) => Ok(()),
+        (Access::Library, Scope::GroupDm) if GROUP_LIBRARY_COMMANDS.contains(&command) => Ok(()),
+        (Access::Library, Scope::GroupDm) => Err(ApiError::Forbidden(
+            "Add content from your Library, then choose which packs each group uses.".into(),
+        )),
+        (Access::Library, Scope::Personal) => Err(ApiError::Forbidden(
+            "Add content from your Library; characters outside a group use the bundled rules."
+                .into(),
+        )),
+        (Access::Library, Scope::GroupMember(_)) => Err(ApiError::Forbidden(
             "Your Dungeon Master manages the content.".into(),
         )),
     }
@@ -233,17 +242,16 @@ pub async fn command(
     }
     let (key, resolved) = resolve_scope(&state, &user, &scope).await?;
     let workspace = state.workspaces.get(&key).await?;
-    if let Some(answer) =
-        crate::settings::handle(&state, &user, &key, &workspace, &command, &args).await?
+    if let Some(answer) = crate::settings::handle(&state, &key, &workspace, &command, &args).await?
     {
         return Ok(Json(answer));
     }
     let access = workspace
         .access_of(&command)
         .ok_or_else(|| ApiError::NotFound("The server does not offer that.".into()))?;
-    check_access(user.role, &resolved, access, &command)?;
+    check_access(&resolved, access, &command)?;
     let mut result = match resolved {
-        Scope::Group(id) if user.role == Role::Player => {
+        Scope::GroupMember(id) => {
             call_in_group(&state, &user, &workspace, id, &command, args).await?
         }
         _ => workspace.call(&command, args).await?,

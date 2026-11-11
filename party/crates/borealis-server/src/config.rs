@@ -18,15 +18,20 @@ pub const DEFAULT_FILE: &str = r#"# Borealis Party settings.
 #
 # Any setting can also come from an environment variable named BOREALIS__<SECTION>__<KEY>, which wins over this file.
 # Put passwords there rather than here, for example BOREALIS__POSTGRES__PASSWORD.
-# Restart the server after editing.
+# Restart the server after editing. Sign-up and approval can also be changed on the admin page without a restart;
+# what is saved there wins over this file.
 
 [server]
 # Address and port inside the container (or on the host for a direct install).
 bind = "0.0.0.0:8787"
-# true: anyone who can reach the server can create an account, Dungeon Masters included (a DM can make the
-# server download content from https addresses). false: accounts come from `borealis-server add-user`, or the
-# [initial_dm] section below.
+# The address people open the server at, for links in emails, for example "https://party.example.com".
+# public_url = ""
+# true: anyone who can reach the server can ask for an account (every account can run groups, and a group's DM
+# can make the server download content from https addresses). false: accounts come from
+# `borealis-server add-user`, or the [initial_admin] section below.
 open_registration = true
+# true: a new account waits until an admin approves it on the admin page.
+require_approval = true
 # Largest upload in megabytes (a zip of a 5etools data folder can be large).
 max_upload_mb = 512
 
@@ -56,9 +61,22 @@ data = "data"
 # content = "/app/content"
 # web = "/app/web"
 
-[initial_dm]
-# Creates this Dungeon Master account on a server with no accounts yet. Useful with open_registration = false.
-# Set BOREALIS__INITIAL_DM__USERNAME and BOREALIS__INITIAL_DM__PASSWORD.
+[smtp]
+# Email for sign-up. With a host set, a new account confirms its email address with a link before it waits for
+# approval, and admins get an email about each request. Without one, nobody is emailed and approval is the check.
+# Needs server.public_url.
+# host = "smtp.example.com"
+port = 587
+# user = "borealis@example.com"
+# password: set BOREALIS__SMTP__PASSWORD.
+# from = "Borealis Party <borealis@example.com>"
+# "starttls" (usually port 587), "tls" (usually port 465) or "none" (a relay on a trusted network only).
+tls = "starttls"
+
+[initial_admin]
+# Creates this admin account on a server with no accounts yet. Useful with open_registration = false.
+# Set BOREALIS__INITIAL_ADMIN__USERNAME and BOREALIS__INITIAL_ADMIN__PASSWORD, and optionally
+# BOREALIS__INITIAL_ADMIN__EMAIL. The old BOREALIS__INITIAL_DM__* names still work.
 
 [log]
 # error, warn, info, debug or trace. RUST_LOG, when set, wins.
@@ -79,8 +97,10 @@ pub struct Settings {
     pub postgres: PostgresSettings,
     /// Folders.
     pub paths: PathSettings,
+    /// Email.
+    pub smtp: SmtpSettings,
     /// The first account.
-    pub initial_dm: InitialDm,
+    pub initial_admin: InitialAdmin,
     /// Logging.
     pub log: LogSettings,
 }
@@ -91,8 +111,12 @@ pub struct Settings {
 pub struct ServerSettings {
     /// Listen address.
     pub bind: SocketAddr,
+    /// Where people reach the server, for links in emails.
+    pub public_url: Option<String>,
     /// Anyone may sign up.
     pub open_registration: bool,
+    /// New accounts wait for an admin.
+    pub require_approval: bool,
     /// Largest request in megabytes.
     pub max_upload_mb: usize,
 }
@@ -101,7 +125,9 @@ impl Default for ServerSettings {
     fn default() -> Self {
         Self {
             bind: SocketAddr::from(([0, 0, 0, 0], 8787)),
+            public_url: None,
             open_registration: true,
+            require_approval: true,
             max_upload_mb: 512,
         }
     }
@@ -209,22 +235,109 @@ impl Default for PathSettings {
     }
 }
 
-/// `[initial_dm]`.
+/// How the SMTP connection is secured.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SmtpTls {
+    /// Plain connection upgraded with STARTTLS (required).
+    #[default]
+    Starttls,
+    /// TLS from the start.
+    Tls,
+    /// No encryption.
+    None,
+}
+
+/// `[smtp]`.
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct SmtpSettings {
+    /// Server; no host means no email.
+    pub host: Option<String>,
+    /// Port.
+    pub port: u16,
+    /// Sign-in name, if the server wants one.
+    pub user: Option<String>,
+    /// Password, best given as `BOREALIS__SMTP__PASSWORD`.
+    pub password: Option<String>,
+    /// The sender, `Name <address>` or an address.
+    pub from: Option<String>,
+    /// Encryption.
+    pub tls: SmtpTls,
+}
+
+impl SmtpSettings {
+    /// Whether email is set up.
+    #[must_use]
+    pub fn enabled(&self) -> bool {
+        self.host.as_deref().is_some_and(|h| !h.trim().is_empty())
+    }
+}
+
+impl Default for SmtpSettings {
+    fn default() -> Self {
+        Self {
+            host: None,
+            port: 587,
+            user: None,
+            password: None,
+            from: None,
+            tls: SmtpTls::Starttls,
+        }
+    }
+}
+
+impl std::fmt::Debug for SmtpSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SmtpSettings")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("user", &self.user)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("from", &self.from)
+            .field("tls", &self.tls)
+            .finish()
+    }
+}
+
+/// `[initial_admin]` (formerly `[initial_dm]`).
 #[derive(Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default, deny_unknown_fields)]
-pub struct InitialDm {
+pub struct InitialAdmin {
     /// Username.
     pub username: Option<String>,
     /// Password.
     pub password: Option<String>,
+    /// Email address.
+    pub email: Option<String>,
 }
 
-impl std::fmt::Debug for InitialDm {
+impl std::fmt::Debug for InitialAdmin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InitialDm")
+        f.debug_struct("InitialAdmin")
             .field("username", &self.username)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("email", &self.email)
             .finish()
+    }
+}
+
+/// What `[initial_admin]` was called before accounts stopped being either a DM or a player.
+const OLD_INITIAL_ADMIN: &str = "initial_dm";
+
+/// Fold `[initial_dm]` (in a file an older version wrote, or from `BOREALIS__INITIAL_DM__*`) into
+/// `[initial_admin]`, whose own keys win.
+fn fold_old_names(table: &mut toml::Table) {
+    let Some(toml::Value::Table(old)) = table.remove(OLD_INITIAL_ADMIN) else {
+        return;
+    };
+    let entry = table
+        .entry("initial_admin")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    if let toml::Value::Table(new) = entry {
+        for (key, value) in old {
+            new.entry(key).or_insert(value);
+        }
     }
 }
 
@@ -288,8 +401,13 @@ fn overlay(
                 "{name}: use {ENV_PREFIX}<SECTION>__<KEY>, for example BOREALIS__POSTGRES__HOST"
             )));
         };
+        let looked_up = if section == OLD_INITIAL_ADMIN {
+            "initial_admin"
+        } else {
+            section
+        };
         let like = defaults
-            .get(section)
+            .get(looked_up)
             .and_then(toml::Value::as_table)
             .and_then(|t| t.get(key));
         let entry = table
@@ -333,6 +451,7 @@ impl Settings {
         let defaults = toml::Table::try_from(Self::default())
             .map_err(|e| ConfigError(format!("defaults: {e}")))?;
         overlay(&mut table, &defaults, vars)?;
+        fold_old_names(&mut table);
         let settings: Self = table
             .try_into()
             .map_err(|e: toml::de::Error| ConfigError(e.message().to_string()))?;
@@ -346,12 +465,44 @@ impl Settings {
                 "postgres.sslmode must be disable, prefer or require".into(),
             ));
         }
-        if self.initial_dm.username.is_some() != self.initial_dm.password.is_some() {
+        if self.initial_admin.username.is_some() != self.initial_admin.password.is_some() {
             return Err(ConfigError(
-                "initial_dm needs both a username and a password".into(),
+                "initial_admin needs both a username and a password".into(),
             ));
         }
+        if let Some(url) = self.public_url() {
+            let parsed = url::Url::parse(&url)
+                .map_err(|e| ConfigError(format!("server.public_url: {e}")))?;
+            if !["http", "https"].contains(&parsed.scheme()) {
+                return Err(ConfigError(
+                    "server.public_url must start with http:// or https://".into(),
+                ));
+            }
+        }
+        if self.smtp.enabled() {
+            if self.public_url().is_none() {
+                return Err(ConfigError(
+                    "smtp needs server.public_url, for the link in the email".into(),
+                ));
+            }
+            let from = self.smtp.from.as_deref().unwrap_or_default();
+            if from.parse::<lettre::message::Mailbox>().is_err() {
+                return Err(ConfigError(
+                    "smtp.from must be an address, or Name <address>".into(),
+                ));
+            }
+        }
         Ok(())
+    }
+
+    /// `server.public_url` without a trailing slash, when set.
+    #[must_use]
+    pub fn public_url(&self) -> Option<String> {
+        self.server
+            .public_url
+            .as_deref()
+            .map(|u| u.trim().trim_end_matches('/').to_string())
+            .filter(|u| !u.is_empty())
     }
 
     /// A path relative to the config folder, unless absolute.
@@ -455,6 +606,52 @@ mod tests {
             panic!("postgres");
         };
         assert!(url.contains("p%40ss%2Fw%3Ard@"), "{url}");
+    }
+
+    #[test]
+    fn the_old_initial_dm_names_still_work() {
+        // A file an older version wrote has an empty [initial_dm] section.
+        let old_file = "[initial_dm]\n";
+        let s = Settings::parse(
+            old_file,
+            vars(&[
+                ("BOREALIS__INITIAL_DM__USERNAME", "boss"),
+                ("BOREALIS__INITIAL_DM__PASSWORD", "secret words here"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(s.initial_admin.username.as_deref(), Some("boss"));
+        let s = Settings::parse(
+            old_file,
+            vars(&[
+                ("BOREALIS__INITIAL_ADMIN__USERNAME", "admin"),
+                ("BOREALIS__INITIAL_ADMIN__PASSWORD", "secret words here"),
+                ("BOREALIS__INITIAL_DM__USERNAME", "old"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(s.initial_admin.username.as_deref(), Some("admin"));
+    }
+
+    #[test]
+    fn smtp_needs_a_public_address_and_a_sender() {
+        let smtp = [
+            ("BOREALIS__SMTP__HOST", "smtp.example.com"),
+            ("BOREALIS__SMTP__PASSWORD", "mail-secret"),
+            ("BOREALIS__SMTP__FROM", "Party <party@example.com>"),
+        ];
+        assert!(Settings::parse(DEFAULT_FILE, vars(&smtp)).is_err());
+        let mut with_url = smtp.to_vec();
+        with_url.push(("BOREALIS__SERVER__PUBLIC_URL", "https://party.example.com/"));
+        let s = Settings::parse(DEFAULT_FILE, vars(&with_url)).unwrap();
+        assert!(s.smtp.enabled());
+        assert_eq!(s.smtp.port, 587);
+        assert_eq!(s.public_url().as_deref(), Some("https://party.example.com"));
+        assert!(!format!("{s:?}").contains("mail-secret"));
+        let mut bad_from = with_url.clone();
+        bad_from[2] = ("BOREALIS__SMTP__FROM", "nobody");
+        assert!(Settings::parse(DEFAULT_FILE, vars(&bad_from)).is_err());
+        assert!(!Settings::default().smtp.enabled());
     }
 
     #[test]
