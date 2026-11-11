@@ -465,6 +465,8 @@ pub struct CasterData {
     pub slots_pooled: bool,
     /// Pact magic.
     pub pact: Option<PactSlots>,
+    /// Aurora's "Other Spells" section: spells no other block lists, none of them prepared.
+    pub other: bool,
     /// Cantrips (level 0), sorted by name.
     pub cantrips: Vec<SpellRow>,
     /// Leveled spells, sorted by level then name.
@@ -486,6 +488,13 @@ impl CasterData {
             .filter(|p| usize::try_from(p.level).ok() == Some(level))
             .map_or(0, |p| p.count);
         table + pact
+    }
+
+    /// Does the block print its own spell slot tracker? Not for a caster on the pooled multiclass
+    /// table, nor for "Other Spells" (Aurora's section has no slots).
+    #[must_use]
+    pub fn has_slot_tracker(&self) -> bool {
+        !self.slots_pooled && !self.other
     }
 
     /// Leveled spells to print: all of them, or only prepared / always-prepared / non-preparing

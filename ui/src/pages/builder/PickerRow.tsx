@@ -1,5 +1,6 @@
 import { type KeyboardEvent, type MouseEvent, useRef } from "react";
 import { ConvertedTag, editionMarks, EditionNotes, EditionSuffix, PREREQ_UNMET_TEXT, PrereqUnmetMark } from "../../components";
+import { usePhone } from "../../lib/phone";
 import type { ShownRow, VersionLike } from "../../lib/versions";
 import { useApi } from "../../state/ApiContext";
 import { useAsync } from "../../state/useAsync";
@@ -30,14 +31,6 @@ export function rowLabel(row: ShownRow, mastery: string | null = null): string {
     .filter(Boolean).join(", ");
 }
 
-/** A7 / TV2 (A12): what a phone mastery picker's second line shows, instead of or beside the row's source. */
-export interface MasteryLine {
-  /** The row's weapon mastery property ("Topple"). */
-  name: string;
-  /** Every row of the list shares one source, so the line drops it. */
-  hideSource: boolean;
-}
-
 interface Props {
   row: ShownRow;
   /** List-rule slot: entries are not elements and have no source to look up. */
@@ -55,12 +48,14 @@ interface Props {
   onChoose: () => void;
   onOpenMenu: (anchor: HTMLElement) => void;
   onKeyNav: (e: KeyboardEvent<HTMLButtonElement>) => void;
-  /** Phone mastery pickers: the weapon's mastery on the source line. */
-  mastery?: MasteryLine | null;
+  /** A7 / TV2 (A12), phone mastery pickers: the row's weapon mastery property ("Topple") on the source line. */
+  mastery?: string | null;
+  /** TV2 (A12), phones: every row of the list shares one source, so the line drops it (the accessible name keeps it). */
+  hideSource?: boolean;
 }
 
 /** One picker row (B-55): one name, its shown version's source and edition mark, and the version column. */
-export function PickerRow({ row, listSlot, showDescription, versionColumn, highlighted, menuOpen, notesOpen, notesId, onToggleNotes, onDescribe, onChoose, onOpenMenu, onKeyNav, mastery = null }: Props) {
+export function PickerRow({ row, listSlot, showDescription, versionColumn, highlighted, menuOpen, notesOpen, notesId, onToggleNotes, onDescribe, onChoose, onOpenMenu, onKeyNav, mastery = null, hideSource = false }: Props) {
   const verRef = useRef<HTMLButtonElement | null>(null);
   const v = row.shown;
   const sel = row.chosen !== null;
@@ -69,10 +64,11 @@ export function PickerRow({ row, listSlot, showDescription, versionColumn, highl
   const multi = row.versions.length > 1;
   const onSource = (e: MouseEvent) => multi && (e.target as Element).closest(".pick-src-name") !== null;
   const level = levelText(v);
+  const phone = usePhone();
   return (
     <li className={`pick-row ${sel ? "selected" : ""} ${highlighted ? "hl" : ""} ${marks.converted ? "is-converted" : ""}`} data-row={row.name}>
       <button type="button" className="pick-main" aria-pressed={sel} aria-disabled={disabled || undefined} title={v.disabledReason}
-        aria-label={rowLabel(row, mastery?.name ?? null)}
+        aria-label={rowLabel(row, mastery)}
         onClick={(e) => { if (onSource(e)) { onOpenMenu(verRef.current ?? e.currentTarget); return; } onDescribe(); }}
         onKeyDown={(e) => {
           if (e.key === "Enter") { e.preventDefault(); if (!disabled && !sel) onChoose(); return; }
@@ -86,8 +82,8 @@ export function PickerRow({ row, listSlot, showDescription, versionColumn, highl
         </span>
         {showDescription && <span className="pick-desc" aria-hidden="true">{v.shortDescription}</span>}
         <span className="pick-src" aria-hidden="true">
-          {mastery && <span className="pick-mastery">{mastery.name}{mastery.hideSource ? "" : " · "}</span>}
-          {!mastery?.hideSource && (
+          {mastery && <span className="pick-mastery">{mastery}{hideSource ? "" : " · "}</span>}
+          {!hideSource && (
             <span className={`pick-src-name ${multi ? "has-versions" : ""}`} title={multi ? `${row.versions.length} versions: choose a source` : undefined}>
               {v.sourceName !== undefined
                 ? <>{v.sourceName}<EditionSuffix marks={marks} sourceName={v.sourceName} /></>
@@ -96,6 +92,11 @@ export function PickerRow({ row, listSlot, showDescription, versionColumn, highl
           )}
         </span>
       </button>
+      {/* A1 / TV1 (phones): the ring on the trailing edge is a real button that chooses the row; the name only describes it. */}
+      {phone && (
+        <button type="button" className="pick-mark" aria-label={`Choose ${row.name}`} aria-pressed={sel} aria-disabled={disabled || undefined}
+          title={v.disabledReason} onClick={() => { if (!sel && !disabled) onChoose(); }} />
+      )}
       {versionColumn && (
         <span className="pick-ver">
           {multi && <VersionButton count={row.versions.length} rowName={row.name} open={menuOpen} onOpen={onOpenMenu} ref={verRef} />}

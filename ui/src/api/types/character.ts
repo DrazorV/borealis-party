@@ -218,6 +218,14 @@ export interface AbilityState {
   pointBuy: PointBuyState | null;
   standardArray: StandardArrayState | null;
   rolls: RollRecord[];
+  /** Tester B11 (TV2): the main class's standard array from the ruleset's tables ("Suggested for Barbarian"); null without one. */
+  suggested: SuggestedScores | null;
+}
+
+/** Base scores the ruleset suggests for a class (its standard array assignment). */
+export interface SuggestedScores {
+  className: string;
+  scores: AbilityRecord<number>;
 }
 
 /* ---------- Derived stats ---------- */
@@ -273,9 +281,17 @@ export interface SpellEntry {
   ready: boolean;
   /** B3: added to this class in the builder (an extra the DM grants). */
   added?: boolean;
+  /** "Other Spells" only: where the spell came from (the invocation, the race), as Aurora's sheet appends it to the name. */
+  grantedFrom?: string;
+  /** The feature that grants it lets the character cast it without expending a spell slot (2024 Pact of the Chain's Find Familiar). */
+  noSlot?: boolean;
 }
 
 export interface ClassSpellcasting {
+  /**
+   * Id of this block: a class's slot id (`main`, `multi-N`), or `caster-<name>` for a block of no class (a feat's, an
+   * item's, Other Spells). Unique per block: the Magic page keys its tabs by it and `setSpellPrepared` takes it back.
+   */
   classSlotId: string;
   className: string;
   ability: AbilityKey;
@@ -293,6 +309,11 @@ export interface ClassSpellcasting {
   /** Pact Magic slots: a separate pool recovered on a short or long rest (never in `SpellcastingState.slots`). */
   pact: PactSlotRow | null;
   spells: SpellEntry[];
+  /**
+   * Aurora's "Other Spells": spells no other block lists (granted with no spellcasting name: an invocation's spell, a
+   * race's innate spells). Play lists them without a Cast button; the Magic page leaves them out, as Aurora does.
+   */
+  other?: boolean;
 }
 
 /** Pact Magic slots: all of one level. */
@@ -438,8 +459,8 @@ export interface Attack {
   auto: boolean;
   showInCombat: boolean;
   card: boolean;
-  /** Computed (auto) attacks only: 2024 weapon mastery property; `mastered` once chosen. */
-  mastery?: AttackMastery | null;
+  /** Computed (auto) attacks only: the weapon's 2024 mastery properties (usually one); `mastered` once chosen. */
+  masteries?: AttackMastery[];
   /** Lowest d20 roll that is a critical hit (20 unless a feature lowers it). */
   critRange?: number;
   /** Damage dice never roll below this (Great Weapon Fighting). */
@@ -493,6 +514,14 @@ export interface CompanionState {
   burrowSpeed: number;
   skills: CompanionSkill[];
   passivePerception: number;
+  /** The six saving throws, STR to CHA (`name` is the ability, `ability` its abbreviation). */
+  saves: CompanionSkill[];
+  /** Special senses as printed ("Darkvision 60 ft."); empty when the creature has none. */
+  senses: string;
+  /** Languages as printed ("—" when the creature has none). */
+  languages: string;
+  /** Damage and condition lines ("Damage Resistances": "Poison"), in stat block order. */
+  defenses: CompanionFeature[];
   /** The creature's traits, then the user's own (`customTraits`). */
   traits: CompanionFeature[];
   actions: CompanionFeature[];
@@ -519,6 +548,7 @@ export interface CompanionPatch {
   creatureId?: string | null;
 }
 
+/** One companion skill or saving throw line. */
 export interface CompanionSkill {
   name: string;
   /** Key ability abbreviation (DEX). */
@@ -567,6 +597,8 @@ export interface CharacterSnapshot {
   sourceRestrictions: string[] | null;
   /** Informational diagnostics (e.g. legacy divergences on import). */
   notices: string[];
+  /** Content the file names that was not found on import (still missing after the last re-check): what the import notice counts (GitHub #37). */
+  missingContent: MissingContentItem[];
   /** Resources, toggles, defences, senses, notes, Wild Shape, packages, compatibility, features. */
   play: PlayState;
   /** B3 (GitHub #35): feats, spells, languages and proficiencies added in the builder; their lines are not in `inventory`. */

@@ -7,6 +7,8 @@ import { useCharacter } from "../../state/CharacterContext";
 import { useAsync } from "../../state/useAsync";
 import { groupKey } from "../../lib/versions";
 import { fetchAllSlotOptions } from "../builder/usePickerRows";
+import { usePhone } from "../../lib/phone";
+import { BUY_OWN } from "./startingPackages";
 
 /** Weapon Mastery slots are `weapon` selects titled after the feature (backend `is_mastery_slot`); their count is the capacity. */
 export const masterySlots = (slots: SelectionSlot[]): SelectionSlot[] => slots.filter((s) => s.elementType === "weapon" && s.title.toLowerCase().includes("mastery"));
@@ -43,10 +45,12 @@ export function MasteryChooser({ capacity, play, weapons }: { capacity: number; 
           const m = textFor(w);
           // A saved choice the slots no longer offer can only be dropped.
           if (w.stale && !on) return null;
-          const detail = w.stale ? "No longer available for Weapon Mastery; unmaster it to choose another weapon." : m ? `${m.property}: ${m.text}` : w.shortDescription;
+          // A chosen weapon lists each of its mastery properties with its text, one per line.
+          const details = w.stale ? ["No longer available for Weapon Mastery; unmaster it to choose another weapon."]
+            : m ? m.properties.map((p) => `${p.name}: ${p.text}`) : [w.shortDescription];
           return (
             <li key={w.id} className="resource-row">
-              <span className="grow"><strong>{w.name}</strong> {w.sourceName && <span className="mastery-src muted small">{w.sourceName}</span>}<span className="muted small" style={{ display: "block" }}>{detail}</span></span>
+              <span className="grow"><strong>{w.name}</strong> {w.sourceName && <span className="mastery-src muted small">{w.sourceName}</span>}{details.map((d, i) => <span key={i} className="muted small" style={{ display: "block" }}>{d}</span>)}</span>
               <Button small variant={on ? "primary" : "default"} aria-pressed={on} disabled={!on && full} aria-label={`${on ? "Unmaster" : "Master"} ${w.name}`} onClick={() => toggle(w)}>{on ? "Mastered" : "Master"}</Button>
             </li>
           );
@@ -80,11 +84,18 @@ export function WildShapeChooser({ ws }: { ws: PlayWildShape }) {
   );
 }
 
+/**
+ * The starting-equipment packages of the class and background: one option each, or (tester B3, TV2) "I'll buy my own". It
+ * opens while a package is untaken and folds once every one is taken or declined.
+ */
 export function PackageChooser({ packages }: { packages: PlayState["equipmentPackages"] }) {
   const { mutate } = useCharacter();
   const [picked, setPicked] = useState<Record<string, string>>({});
+  const settled = packages.every((p) => p.chosen || p.declined);
+  const take = (pkg: string, option: string) => void mutate((api, id) => api.chooseEquipmentPackage({ characterId: id, packageId: pkg, option }));
   return (
-    <Expander title="Starting equipment">
+    <div role="region" aria-label="Starting equipment" className="eq-start">
+    <Expander key={settled ? "settled" : "open"} title="Starting equipment" defaultOpen={!settled || packages.length === 0}>
       {packages.length === 0 ? <EmptyState title="No starting equipment to choose" /> : (
         <div className="stack">
           {packages.map((p) => {
@@ -92,20 +103,26 @@ export function PackageChooser({ packages }: { packages: PlayState["equipmentPac
             const sel = p.chosen ?? picked[p.package] ?? "";
             return (
               <fieldset key={p.package} className="pkg" disabled={!!p.chosen}>
-                <legend><strong>{p.name}</strong>{p.owner ? <span className="muted small"> · {p.owner}</span> : null}{p.chosen ? <> <Chip tone="success">Option {p.chosen} taken</Chip></> : null}</legend>
+                <legend><strong>{p.name}</strong>{p.owner ? <span className="muted small"> · {p.owner}</span> : null}{p.chosen ? <> <Chip tone="success">Option {p.chosen} taken</Chip></> : null}{p.declined ? <> <Chip>Buying your own</Chip></> : null}</legend>
                 {p.options.map((o) => (
                   <label key={o.id} className="check">
                     <input type="radio" name={group} checked={sel === o.id} onChange={() => setPicked((cur) => ({ ...cur, [p.package]: o.id }))} />
                     <span className="check-text"><span>Option {o.id}</span><span className="hint">{[...o.items.map((it) => (it.qty > 1 ? `${it.qty} x ${it.name}` : it.name)), ...(o.coins.gp > 0 ? [`${o.coins.gp} gp`] : [])].join(", ")}</span></span>
                   </label>
                 ))}
-                {!p.chosen && <Button variant="primary" disabled={!sel} onClick={() => void mutate((api, id) => api.chooseEquipmentPackage({ characterId: id, packageId: p.package, option: sel }))}>Take option {sel}</Button>}
+                {!p.chosen && (
+                  <span className="pkg-actions">
+                    <Button variant="primary" disabled={!sel} onClick={() => take(p.package, sel)}>Take option {sel}</Button>
+                    {!p.declined && <Button aria-label={`I'll buy my own (${p.name})`} onClick={() => take(p.package, BUY_OWN)}>I'll buy my own</Button>}
+                  </span>
+                )}
               </fieldset>
             );
           })}
         </div>
       )}
     </Expander>
+    </div>
   );
 }
 
@@ -126,6 +143,7 @@ export async function masteryOptions(api: Api, characterId: string, slots: reado
 
 export function LoadoutTab() {
   const { snapshot } = useCharacter();
+  const phone = usePhone();
   const api = useApi();
   const slots = snapshot ? masterySlots(snapshot.slots) : [];
   const capacity = slots.length;
@@ -134,13 +152,14 @@ export function LoadoutTab() {
   const slotKey = snapshot ? JSON.stringify([slots.map((s) => [s.id, s.chosen?.id ?? ""]), snapshot.ruleset, snapshot.sourceRestrictions]) : "";
   const weapons = useAsync(
     () => (capacity > 0 && id ? masteryOptions(api, id, slots) : Promise.resolve([] as ElementSummary[])),
-    [api, capacity, id, slotKey], // eslint-disable-line react-hooks/exhaustive-deps
+    [api, capacity, id, slotKey],
   );
   if (!snapshot) return null;
   const { play } = snapshot;
   return (
     <div className="eq-load page-pad">
-      <PackageChooser packages={play.equipmentPackages} />
+      {/* B3: on a phone the chooser lives at the top of Gear > Equipment (EquipmentPage). */}
+      {!phone && <PackageChooser packages={play.equipmentPackages} />}
       {capacity > 0 && <MasteryChooser capacity={capacity} play={play} weapons={masteryRows(weapons.data ?? [], play.masteries)} />}
       {play.wildShape && <WildShapeChooser ws={play.wildShape} />}
       {capacity === 0 && !play.wildShape && <p className="muted small">Weapon Mastery and Wild Shape appear here when the character's classes grant them.</p>}

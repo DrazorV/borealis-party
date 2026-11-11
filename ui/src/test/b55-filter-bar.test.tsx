@@ -150,6 +150,29 @@ describe("filters", () => {
   });
 });
 
+describe("edition segments (A5, B-116)", () => {
+  // Nine 2024 rows and one edition-neutral row: more than eight rows, so the bar shows.
+  const ONE_EDITION = [
+    ...Array.from({ length: 9 }, (_, i) => row(ver(`c${i}`, `Class ${i}`, "Sample Reference 5.2", ["dnd2024"]))),
+    row(ver("any", "Neutral Entry", "Sample Reference 5.2", ["dnd2014", "dnd2024"])),
+  ];
+
+  it("edition segments only offer editions present in the list", async () => {
+    // A 2024 character's Class list never holds 2014 rows (R4): its 2014 segment could only ever answer "Nothing matches".
+    renderPicker(ONE_EDITION);
+    const b = await bar();
+    expect(within(b).queryByRole("group", { name: "Edition" })).toBeNull();
+    expect(await names()).toHaveLength(10);
+  });
+
+  it("a list with both editions keeps All, 2024 and 2014", async () => {
+    renderPicker(ROWS);
+    const b = await bar();
+    const seg = within(b).getByRole("group", { name: "Edition" });
+    expect(within(seg).getAllByRole("button").map((x) => x.textContent)).toEqual(["All", "2024", "2014"]);
+  });
+});
+
 describe("count on phones (B-125)", () => {
   afterEach(() => {
     setPhoneForTests(false);
@@ -173,6 +196,37 @@ describe("count on phones (B-125)", () => {
     const rule = parseRules(readCss("styles/phone/lists.css")).find((r) => r.selectors.includes("html.phone .pick-fcount"))!;
     expect(rule.body).not.toMatch(/text-overflow|overflow\s*:/);
     expect(rule.body).toMatch(/flex:\s*1 0 auto/);
+  });
+});
+
+describe("the character's edition (TV1 A4, B-115)", () => {
+  const editionOf = (b: HTMLElement) => within(within(b).getByRole("group", { name: "Edition" })).getAllByRole("button")
+    .find((x) => x.getAttribute("aria-pressed") === "true")?.textContent;
+
+  it("edition filter defaults to the character's edition", async () => {
+    const api = new MockApi({ aiChunkDelayMs: 1 });
+    const snap = await api.createCharacter({ request: { name: "Ed", ruleset: "dnd2024", startingLevel: 1, gender: "", abilityMethod: "point_buy", options: {} } });
+    renderApp("/builder/race", { api, openCharacterId: snap.id });
+    expect(editionOf(await screen.findByRole("search", { name: "Filter Species" }))).toBe("2024");
+  });
+
+  it("a choice carries to the next list, and Clear returns to the character's edition", async () => {
+    const api = new MockApi({ aiChunkDelayMs: 1 });
+    const snap = await api.createCharacter({ request: { name: "Ed", ruleset: "dnd2024", startingLevel: 1, gender: "", abilityMethod: "point_buy", options: {} } });
+    renderApp("/builder/race", { api, openCharacterId: snap.id });
+    const user = userEvent.setup();
+    const b = await screen.findByRole("search", { name: "Filter Species" });
+    await user.click(within(b).getByRole("button", { name: "All" }));
+    // The equipment add list shares the value (TV1: it applies there too).
+    await user.click(screen.getByTestId("nav-equipment"));
+    const edition = await screen.findByRole("group", { name: "Edition" });
+    expect(within(edition).getByRole("button", { name: "All" }).getAttribute("aria-pressed")).toBe("true");
+    await user.click(within(edition).getByRole("button", { name: "2014" }));
+    await user.click(screen.getByTestId("nav-build"));
+    const again = await screen.findByRole("search", { name: "Filter Species" });
+    expect(editionOf(again)).toBe("2014");
+    await user.click(within(again).getByRole("button", { name: "Clear" }));
+    expect(editionOf(again)).toBe("2024");
   });
 });
 

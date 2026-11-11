@@ -1976,6 +1976,16 @@
     "name": "CharacterSnapshot"
    }
   },
+  "stage_5etools_files": {
+   "args": {
+    "files": false
+   },
+   "method": "stage5etoolsFiles",
+   "response": {
+    "k": "ref",
+    "name": "PickedPath"
+   }
+  },
   "stage_5etools_url": {
    "args": {
     "url": false
@@ -2833,6 +2843,13 @@
       "k": "ref",
       "name": "StandardArrayState"
      }
+    },
+    "suggested": {
+     "opt": false,
+     "t": {
+      "k": "ref",
+      "name": "SuggestedScores"
+     }
     }
    }
   },
@@ -3680,11 +3697,14 @@
       "k": "prim"
      }
     },
-    "mastery": {
+    "masteries": {
      "opt": true,
      "t": {
-      "k": "ref",
-      "name": "AttackMastery"
+      "k": "array",
+      "t": {
+       "k": "ref",
+       "name": "AttackMastery"
+      }
      }
     },
     "name": {
@@ -4197,6 +4217,16 @@
       "name": "LevelState"
      }
     },
+    "missingContent": {
+     "opt": false,
+     "t": {
+      "k": "array",
+      "t": {
+       "k": "ref",
+       "name": "MissingContentItem"
+      }
+     }
+    },
     "name": {
      "opt": false,
      "t": {
@@ -4707,6 +4737,12 @@
       "k": "prim"
      }
     },
+    "other": {
+     "opt": true,
+     "t": {
+      "k": "prim"
+     }
+    },
     "pact": {
      "opt": false,
      "t": {
@@ -4958,6 +4994,16 @@
       }
      }
     },
+    "defenses": {
+     "opt": false,
+     "t": {
+      "k": "array",
+      "t": {
+       "k": "ref",
+       "name": "CompanionFeature"
+      }
+     }
+    },
     "flySpeed": {
      "opt": false,
      "t": {
@@ -4995,6 +5041,12 @@
      }
     },
     "initiative": {
+     "opt": false,
+     "t": {
+      "k": "prim"
+     }
+    },
+    "languages": {
      "opt": false,
      "t": {
       "k": "prim"
@@ -5038,6 +5090,22 @@
        "k": "ref",
        "name": "CompanionFeature"
       }
+     }
+    },
+    "saves": {
+     "opt": false,
+     "t": {
+      "k": "array",
+      "t": {
+       "k": "ref",
+       "name": "CompanionSkill"
+      }
+     }
+    },
+    "senses": {
+     "opt": false,
+     "t": {
+      "k": "prim"
      }
     },
     "skills": {
@@ -5787,7 +5855,8 @@
      "t": {
       "k": "array",
       "t": {
-       "k": "prim"
+       "k": "ref",
+       "name": "ElementGrant"
       }
      }
     },
@@ -5889,6 +5958,29 @@
      }
     },
     "value": {
+     "opt": false,
+     "t": {
+      "k": "prim"
+     }
+    }
+   }
+  },
+  "ElementGrant": {
+   "k": "object",
+   "props": {
+    "descriptionHtml": {
+     "opt": false,
+     "t": {
+      "k": "prim"
+     }
+    },
+    "level": {
+     "opt": false,
+     "t": {
+      "k": "prim"
+     }
+    },
+    "name": {
      "opt": false,
      "t": {
       "k": "prim"
@@ -6211,10 +6303,28 @@
       "k": "prim"
      }
     },
+    "needs": {
+     "opt": false,
+     "t": {
+      "k": "array",
+      "t": {
+       "k": "prim"
+      }
+     }
+    },
     "ruleset": {
      "opt": false,
      "t": {
       "k": "prim"
+     }
+    },
+    "unsupported": {
+     "opt": false,
+     "t": {
+      "k": "record",
+      "t": {
+       "k": "prim"
+      }
      }
     }
    }
@@ -7826,6 +7936,23 @@
     }
    }
   },
+  "MasteryProperty": {
+   "k": "object",
+   "props": {
+    "name": {
+     "opt": false,
+     "t": {
+      "k": "prim"
+     }
+    },
+    "text": {
+     "opt": false,
+     "t": {
+      "k": "prim"
+     }
+    }
+   }
+  },
   "MigrationIssue": {
    "k": "object",
    "props": {
@@ -8402,6 +8529,12 @@
       "k": "prim"
      }
     },
+    "declined": {
+     "opt": true,
+     "t": {
+      "k": "prim"
+     }
+    },
     "name": {
      "opt": false,
      "t": {
@@ -8657,16 +8790,14 @@
       "k": "prim"
      }
     },
-    "property": {
+    "properties": {
      "opt": false,
      "t": {
-      "k": "prim"
-     }
-    },
-    "text": {
-     "opt": false,
-     "t": {
-      "k": "prim"
+      "k": "array",
+      "t": {
+       "k": "ref",
+       "name": "MasteryProperty"
+      }
      }
     },
     "weapon": {
@@ -10610,7 +10741,19 @@
   "SheetShare": {
    "k": "object",
    "props": {
+    "dataBase64": {
+     "opt": false,
+     "t": {
+      "k": "prim"
+     }
+    },
     "fileName": {
+     "opt": false,
+     "t": {
+      "k": "prim"
+     }
+    },
+    "mime": {
      "opt": false,
      "t": {
       "k": "prim"
@@ -11047,6 +11190,12 @@
       "k": "prim"
      }
     },
+    "grantedFrom": {
+     "opt": true,
+     "t": {
+      "k": "prim"
+     }
+    },
     "id": {
      "opt": false,
      "t": {
@@ -11061,6 +11210,12 @@
     },
     "name": {
      "opt": false,
+     "t": {
+      "k": "prim"
+     }
+    },
+    "noSlot": {
+     "opt": true,
      "t": {
       "k": "prim"
      }
@@ -11332,6 +11487,61 @@
      "opt": false,
      "t": {
       "k": "prim"
+     }
+    }
+   }
+  },
+  "SuggestedScores": {
+   "k": "object",
+   "props": {
+    "className": {
+     "opt": false,
+     "t": {
+      "k": "prim"
+     }
+    },
+    "scores": {
+     "opt": false,
+     "t": {
+      "k": "object",
+      "props": {
+       "cha": {
+        "opt": false,
+        "t": {
+         "k": "prim"
+        }
+       },
+       "con": {
+        "opt": false,
+        "t": {
+         "k": "prim"
+        }
+       },
+       "dex": {
+        "opt": false,
+        "t": {
+         "k": "prim"
+        }
+       },
+       "int": {
+        "opt": false,
+        "t": {
+         "k": "prim"
+        }
+       },
+       "str": {
+        "opt": false,
+        "t": {
+         "k": "prim"
+        }
+       },
+       "wis": {
+        "opt": false,
+        "t": {
+         "k": "prim"
+        }
+       }
+      }
      }
     }
    }

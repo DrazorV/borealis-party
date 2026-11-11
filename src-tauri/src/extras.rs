@@ -8,7 +8,7 @@ use crate::dto::{
 };
 use crate::elements::plain_text;
 use crate::gear_info;
-use crate::ids::{ability_index, ability_key, encode_class_slot, encode_slot};
+use crate::ids::{ability_index, ability_key, encode_slot};
 use crate::snapshot_map::MapInput;
 use crate::state::ContentHub;
 use base64::engine::general_purpose::STANDARD;
@@ -18,7 +18,6 @@ use borealis_content::Ruleset;
 use borealis_engine::ids as engine_ids;
 use borealis_engine::snapshot::{CharacterSnapshot as Engine, SlotSnapshot, SpellcastingSnapshot};
 use borealis_engine::state::EquipSlot;
-use borealis_engine::ClassSlot;
 use serde::{Deserialize, Serialize};
 
 const UI_KEY: &str = "ui";
@@ -199,35 +198,23 @@ fn counts_toward_cantrips(store: &borealis_content::ContentStore, slot: &SlotSna
     }
 }
 
-/// Class progression of the spellcasting entry named `name` (`main` when no class carries it).
-fn caster_slot(snap: &Engine, name: &str) -> ClassSlot {
-    snap.classes
-        .iter()
-        .find(|k| k.class.as_ref().is_some_and(|e| e.name == name))
-        .map_or(ClassSlot::Main, |k| k.slot.clone())
-}
-
-/// `ClassSpellcasting.classSlotId` of the spellcasting entry a spell selection slot feeds, if
-/// that entry is listed on the Magic page.
-#[must_use]
-pub fn slot_caster_id(snap: &Engine, slot: &SlotSnapshot) -> Option<String> {
-    let name = slot.spellcasting.as_deref()?;
-    snap.spellcasting
-        .iter()
-        .any(|c| c.name == name)
-        .then(|| encode_class_slot(&caster_slot(snap, name)))
-}
-
-fn caster(input: &MapInput<'_>, snap: &Engine, c: &SpellcastingSnapshot) -> ClassSpellcasting {
+fn caster(
+    input: &MapInput<'_>,
+    snap: &Engine,
+    c: &SpellcastingSnapshot,
+    id: String,
+) -> ClassSpellcasting {
     let store = &input.hub.store;
-    let slot = caster_slot(snap, &c.name);
     let restricted = borealis_content::SourceRestriction::excluding(
         input.character.build.restricted_sources.iter().cloned(),
     );
     let own_slots = || {
-        snap.slots
-            .iter()
-            .filter(|s| s.spellcasting.as_deref() == Some(c.name.as_str()) && s.rejected.is_none())
+        snap.slots.iter().filter(|s| {
+            s.spellcasting
+                .as_deref()
+                .is_some_and(|n| borealis_engine::spells::same_spellcasting(n, &c.name))
+                && s.rejected.is_none()
+        })
     };
     let spells: Vec<SpellEntry> = c
         .spells
@@ -269,6 +256,11 @@ fn caster(input: &MapInput<'_>, snap: &Engine, c: &SpellcastingSnapshot) -> Clas
                     s,
                 ),
                 added: crate::added_picks::is_added_spell(snap, &c.name, &s.id),
+                granted_from: c
+                    .other
+                    .then(|| borealis_engine::other_spells::source_label(s))
+                    .flatten(),
+                no_slot: s.no_slot,
             }
         })
         .collect();
@@ -303,7 +295,7 @@ fn caster(input: &MapInput<'_>, snap: &Engine, c: &SpellcastingSnapshot) -> Clas
         total,
     });
     ClassSpellcasting {
-        class_slot_id: encode_class_slot(&slot),
+        class_slot_id: id,
         class_name: c.name.clone(),
         ability: ability_key(&c.ability),
         save_dc: c.dc,
@@ -322,6 +314,7 @@ fn caster(input: &MapInput<'_>, snap: &Engine, c: &SpellcastingSnapshot) -> Clas
             .max(pact.map_or(0, |p| p.level)),
         pact,
         spells,
+        other: c.other,
     }
 }
 
@@ -344,7 +337,8 @@ pub fn spellcasting(input: &MapInput<'_>, snap: &Engine) -> SpellcastingState {
         classes: snap
             .spellcasting
             .iter()
-            .map(|c| caster(input, snap, c))
+            .zip(crate::caster_ids::caster_ids(snap))
+            .map(|(c, id)| caster(input, snap, c, id))
             .collect(),
         slots: multi.clone().or(single).unwrap_or_default(),
         multiclass_slots: multi.filter(|_| snap.spellcasting.len() > 1),
@@ -361,7 +355,11 @@ fn equip_name(e: EquipSlot, both_hands: bool) -> &'static str {
 }
 
 /// Weapon facts for the attack flow, read from the weapon's setters and tags.
-fn weapon_info(el: Option<&borealis_content::Element>, snap: &Engine) -> WeaponInfo {
+fn weapon_info(
+    store: &borealis_content::ContentStore,
+    el: Option<&borealis_content::Element>,
+    snap: &Engine,
+) -> WeaponInfo {
     let Some(el) = el else {
         return WeaponInfo::default();
     };
@@ -388,10 +386,7 @@ fn weapon_info(el: Option<&borealis_content::Element>, snap: &Engine) -> WeaponI
             .to_string(),
         properties: gear_info::weapon_properties(el).join(", "),
         ability: ability.into(),
-        mastery: el
-            .setter_value("mastery")
-            .map(|m| crate::ids::title_case(m.trim()))
-            .filter(|m| !m.is_empty()),
+        mastery: crate::gear_facts::mastery_names(store, el),
         range: el
             .setter_value("range")
             .map(|r| r.trim().to_string())
@@ -469,7 +464,7 @@ pub fn inventory(input: &MapInput<'_>, snap: &Engine) -> InventoryState {
                 pack_contents: contents,
                 is_weapon,
                 equippable: i.equippable,
-                weapon: is_weapon.then(|| weapon_info(el, snap)),
+                weapon: is_weapon.then(|| weapon_info(store, el, snap)),
                 armor: el.and_then(crate::gear_facts::armor_facts),
                 rolled_charges: rolled_charges(snap, &i.uid),
                 override_requirements: i.override_requirements,
@@ -708,10 +703,17 @@ pub fn notices(input: &MapInput<'_>, snap: &Engine) -> Vec<String> {
         .map(|d| d.message.clone())
         .collect();
     if let Some(i) = &input.character.import {
-        if i.missing_content > 0 {
+        // the listed references when the file kept them (GitHub #37: the notice counts the list
+        // the UI shows), else the count alone
+        let count = if i.missing.is_empty() {
+            i.missing_content as usize
+        } else {
+            i.missing.len()
+        };
+        if count > 0 {
             out.push(format!(
-                "Imported from {} {}: {} content element(s) were not found.",
-                i.source, i.source_version, i.missing_content
+                "Imported from {} {}: {count} content element(s) were not found.",
+                i.source, i.source_version
             ));
         }
     }
@@ -719,6 +721,19 @@ pub fn notices(input: &MapInput<'_>, snap: &Engine) -> Vec<String> {
     out.extend(input.hub.load_warnings.iter().cloned());
     out.dedup();
     out
+}
+
+/// GitHub #37: the content references the character's import could not resolve, as the import
+/// report lists them (ids, names and types the file recorded, the source its ids name). A
+/// re-check after content is installed takes the ones it finds off the list.
+#[must_use]
+pub fn missing_content(input: &MapInput<'_>) -> Vec<crate::dto::MissingContentDto> {
+    input
+        .character
+        .import
+        .as_ref()
+        .map(|i| i.missing.iter().map(crate::library::missing_dto).collect())
+        .unwrap_or_default()
 }
 
 /// HR3: a pick a prerequisite house rule allowed, kept but not applied now the rule is off.

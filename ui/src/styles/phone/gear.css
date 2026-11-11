@@ -44,7 +44,7 @@ html.phone .eq-qtybox {
 html.phone .eq-filter-tile { margin: 0; }
 html.phone .eq-tools .eq-filter { flex: 1 1 0; margin: 0; }
 html.phone .eq-source { flex: 1 1 100%; width: auto; margin: 0; }
-html.phone .eq-tools .eq-source select, html.phone .eq-tools .eq-source .aur-combo select { height: auto; min-height: var(--ph-hit); color: var(--ph-text); }
+html.phone .eq-tools .eq-source select, html.phone .eq-tools .eq-source .ph-select { height: auto; min-height: var(--ph-hit); color: var(--ph-text); }
 html.phone .eq-coins, html.phone .eq-tools .eq-coins {
   flex: 1 1 100%; width: auto; height: auto; min-height: var(--ph-hit); margin: 0; border-radius: var(--ph-r-md); background: var(--ph-fill); color: var(--ph-text);
   font: 600 var(--ph-t-sub)/1.2 var(--ph-font-ui); text-transform: none;
@@ -112,3 +112,8 @@ html.phone .eq-load .resource-row { min-height: var(--ph-row); padding: 8px 0; f
 /* U12: the override toggle is a full touch target on phones. */
 html.phone .eq-override { display: flex; }
 html.phone .eq-override-toggle { min-height: var(--ph-hit); }
+
+/* Tester B3 (B-129): the starting-equipment chooser on top of Gear > Equipment while a package is open. */
+html.phone .eq-start-wrap { padding: 12px var(--ph-gutter) 0; }
+html.phone .pkg-actions { display: flex; gap: 8px; }
+html.phone .pkg-actions .btn { flex: 1 1 0; min-height: var(--ph-hit); }

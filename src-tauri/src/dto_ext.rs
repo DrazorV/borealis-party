@@ -107,6 +107,25 @@ pub struct SheetShare {
     pub file_name: String,
     /// True when the backend opened the system share sheet (Android).
     pub shared: bool,
+    /// Media type of the file.
+    pub mime: String,
+    /// The bytes, for the web view's own share sheet, when the backend did not share (iOS).
+    pub data_base64: Option<String>,
+}
+
+impl SheetShare {
+    /// The answer for `file`: its bytes go back only when the backend did not share it.
+    #[must_use]
+    pub fn new(file: crate::sheet_api::SheetFile, shared: bool) -> Self {
+        use base64::engine::general_purpose::STANDARD;
+        use base64::Engine as _;
+        Self {
+            data_base64: (!shared).then(|| STANDARD.encode(&file.bytes)),
+            mime: file.mime.into(),
+            file_name: file.file_name,
+            shared,
+        }
+    }
 }
 
 /// HTML preview of the sheet.
@@ -185,8 +204,21 @@ pub struct ElementDetail {
     pub description_html: String,
     /// Fact lines.
     pub facts: Vec<ElementFact>,
-    /// What choosing the element grants.
-    pub grants: Vec<String>,
+    /// What choosing the element grants, in level order.
+    pub grants: Vec<ElementGrant>,
+}
+
+/// One line of a description's Grants list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElementGrant {
+    /// What is granted or chosen ("Rage", "Choose 2: Skill Proficiency (Barbarian)").
+    pub name: String,
+    /// The character level it comes at (1 when ungated).
+    pub level: u32,
+    /// A3: a granted trait, feature or feat's sanitised text, so the card says what it does;
+    /// empty for one-line grants (proficiencies, languages, choices).
+    pub description_html: String,
 }
 
 /// A diagnostic touching a trace.

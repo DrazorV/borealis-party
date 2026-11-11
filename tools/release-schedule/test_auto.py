@@ -230,7 +230,7 @@ def run_150(name: str, **overrides):
 
 
 class UpdaterFilesFrom150(unittest.TestCase):
-    """B-215 (decision FU1): from 1.5.0 a missing latest.json or Windows/AppImage .sig fails the release check."""
+    """B-215 (decisions FU1, RL11): from 1.4.1 a missing latest.json or Windows/AppImage .sig fails the release check."""
 
     def test_the_scenario_retold_as_1_5_0_is_a_normal_week(self):
         self.assertEqual(run_150("normal-3-gonogo")[:2], (0, ["go/2026-11-12"]))
@@ -239,7 +239,7 @@ class UpdaterFilesFrom150(unittest.TestCase):
     def test_go_no_go_is_no_go_without_the_feed_and_still_warns_about_the_mac_archive(self):
         status, keys, out = run_150("updater-missing-gonogo")
         self.assertEqual((status, keys), (0, ["nogo/2026-11-12"]))
-        self.assertIn("- in-app updates: the draft lacks latest.json (required from 1.5.0)", out)
+        self.assertIn("- in-app updates: the draft lacks latest.json (required from 1.4.1)", out)
         self.assertIn("**Warning (not blocking):** in-app updates: the draft lacks Borealis_1.5.0_aarch64.app.tar.gz, "
                       "Borealis_1.5.0_aarch64.app.tar.gz.sig.", out)
 
@@ -248,7 +248,7 @@ class UpdaterFilesFrom150(unittest.TestCase):
         rel = {**rel, "assets": [a for a in rel["assets"] if a["name"] != "Borealis_1.5.0_amd64.AppImage.sig"]}
         status, keys, out = run_150("normal-3-gonogo", release=rel)
         self.assertEqual(keys, ["nogo/2026-11-12"])
-        self.assertIn("the draft lacks Borealis_1.5.0_amd64.AppImage.sig (required from 1.5.0)", out)
+        self.assertIn("the draft lacks Borealis_1.5.0_amd64.AppImage.sig (required from 1.4.1)", out)
 
     def test_monday_calls_a_draft_without_the_feed_not_ready(self):
         done = {"id": 41, "status": "completed", "conclusion": "success", "run_attempt": 1, "created_at": "1"}
@@ -324,6 +324,40 @@ class Handmade(unittest.TestCase):
         finally:
             auto.log = print
         self.assertIn("1.3.0: tagged by hand before the takeover; left alone", lines)
+
+
+class UntaggedDraft(unittest.TestCase):
+    """A draft can lose its tag (GitHub shows `untagged-...`): it is still found and its tag is put back."""
+
+    DRAFT = {"id": 7, "draft": True, "name": "Borealis 1.3.0", "tag_name": "untagged-3486686083108756938a"}
+
+    def test_an_untagged_draft_is_found_by_its_title(self):
+        other = {"id": 8, "draft": True, "name": "Borealis 1.2.2", "tag_name": "untagged-ffff"}
+        self.assertIs(clients.find_release([other, self.DRAFT], "v1.3.0"), self.DRAFT)
+
+    def test_the_tagged_release_wins_and_a_published_one_is_never_guessed(self):
+        tagged = {"id": 9, "draft": True, "name": "Borealis 1.3.0", "tag_name": "v1.3.0"}
+        self.assertIs(clients.find_release([self.DRAFT, tagged], "v1.3.0"), tagged)
+        published = {**self.DRAFT, "draft": False}
+        self.assertIsNone(clients.find_release([published], "v1.3.0"))
+
+    def test_every_draft_edit_sends_the_tag(self):
+        sent: list[dict] = []
+        for name in ("normal-1-signed", "normal-4-publish"):
+            t, _, lines = tick(name)
+            t.gh.write = lambda method, path, body, what, sent=sent: sent.append(body)  # type: ignore[method-assign]
+            run_from((t, _, lines), SCHEDULE)
+        edits = [b for b in sent if "body" in b and "name" in b]
+        self.assertGreaterEqual(len(edits), 2)
+        self.assertTrue(all(b.get("tag_name") == "v1.3.0" for b in edits), edits)
+
+    def test_a_draft_that_lost_its_tag_gets_it_back(self):
+        t, _, lines = tick("normal-1-signed")
+        sent: list[dict] = []
+        t.gh.write = lambda method, path, body, what: sent.append(body)  # type: ignore[method-assign]
+        rel = {**t.release("1.3.0"), "tag_name": "untagged-1"}
+        t.sync_draft("1.3.0", rel)
+        self.assertEqual([b.get("tag_name") for b in sent], ["v1.3.0"])
 
 
 if __name__ == "__main__":

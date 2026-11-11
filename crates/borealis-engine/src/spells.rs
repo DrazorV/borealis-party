@@ -1,6 +1,7 @@
 //! Spellcasting: per-class slots, DC, attack, prepared limits and the pure multiclass
 //! slot computation.
 
+use crate::custom_rules::X_SPELL_MODE;
 use crate::diag::{code, DiagSink, Diagnostic, Severity};
 use crate::eval::{supports_match, NoDynamics};
 use crate::graph::{Graph, NodeId, Origin};
@@ -184,8 +185,48 @@ fn add_prepared_extensions(
             known: true,
             damage: None,
             granted_by: Some(extension_grant(graph, *node)),
+            no_slot: false,
         });
     }
+}
+
+/// A levelled spell a feature grants to a class that does not prepare is always prepared (#39).
+/// Such a spell is never learned in a known-spell slot. Aurora-format content grants subclass
+/// spells of its known casters (2024 Bard, Paladin, Warlock and others) with a plain
+/// `<grant type="Spell" spellcasting=..>`, without `prepared="true"`. Picks stay learned spells,
+/// and a class that prepares still needs the grant's own `prepared` flag.
+fn feature_given(n: &crate::graph::Node<'_>, class_prepares: bool) -> bool {
+    !class_prepares && matches!(n.origin, Origin::Granted(_)) && spell_level(n.e) > 0
+}
+
+/// The `grant_spell` mode of the grant that put spell node `n` on the character, if any.
+fn grant_mode<'g>(graph: &'g Graph<'_>, n: &crate::graph::Node<'_>) -> Option<&'g str> {
+    let (Some(parent), Origin::Granted(ri)) = (n.parent, n.origin) else {
+        return None;
+    };
+    match graph.nodes[parent].e.el.rules.get(ri) {
+        Some(borealis_content::Rule::Grant(g)) => {
+            g.extra.attributes.get(X_SPELL_MODE).map(String::as_str)
+        }
+        _ => None,
+    }
+}
+
+/// A levelled spell a feature lets the character cast itself, at will without a slot or as a
+/// ritual (`grant_spell` mode `at_will_no_slot` or `ritual_only`: Pact of the Chain's Find
+/// Familiar), is ready without being prepared and never counts against the prepared spells, in
+/// a class that prepares as well. The feature casts it, not the class's preparation.
+fn feature_cast(mode: Option<&str>, n: &crate::graph::Node<'_>) -> bool {
+    matches!(mode, Some("at_will_no_slot" | "ritual_only")) && spell_level(n.e) > 0
+}
+
+/// Does a grant's or select's `spellcasting` name `named` name the spellcasting `block`? Aurora
+/// compares them ignoring case (`SpellcasterSelectionControlViewModel`,
+/// `StringComparison.OrdinalIgnoreCase`), and community content writes `spellcasting="paladin"`
+/// for the Paladin's oath spells.
+#[must_use]
+pub fn same_spellcasting(named: &str, block: &str) -> bool {
+    named == block || named.to_lowercase() == block.to_lowercase()
 }
 
 pub(crate) fn spell_level(e: &crate::universe::UElem) -> u32 {
@@ -272,11 +313,13 @@ pub fn spellcasting_snapshots(
         // spells picked in this class's selection slots (Spellbook (Wizard n), Evocation Savant)
         // are written in the spellbook; always-prepared picks and cantrips are not
         let mut picked_into_book: Vec<SpellEntry> = Vec::new();
-        for (_, n) in graph
-            .nodes_of_type("Spell")
-            .filter(|(_, n)| n.spell_class.as_deref() == Some(info.name.as_str()))
-        {
-            let always = n.always_prepared;
+        for (_, n) in graph.nodes_of_type("Spell").filter(|(_, n)| {
+            n.spell_class
+                .as_deref()
+                .is_some_and(|c| same_spellcasting(c, &info.name))
+        }) {
+            let mode = grant_mode(graph, n);
+            let always = n.always_prepared || feature_given(n, prepare) || feature_cast(mode, n);
             let entry = SpellEntry {
                 id: n.e.el.id.clone(),
                 name: n.e.el.name.clone(),
@@ -286,6 +329,7 @@ pub fn spellcasting_snapshots(
                 known: true,
                 damage: cantrip_damage(n.e, graph.total_level()),
                 granted_by: spell_grant(graph, n),
+                no_slot: mode == Some("at_will_no_slot"),
             };
             if rules.spellbook.is_some()
                 && !always
@@ -298,6 +342,7 @@ pub fn spellcasting_snapshots(
             if let Some(known) = spells.iter_mut().find(|s| s.id == entry.id) {
                 known.prepared |= entry.prepared;
                 known.always_prepared |= entry.always_prepared;
+                known.no_slot |= entry.no_slot;
                 continue;
             }
             spells.push(entry);
@@ -318,6 +363,7 @@ pub fn spellcasting_snapshots(
                 known: true,
                 damage: cantrip_damage(e, graph.total_level()),
                 granted_by: None,
+                no_slot: false,
             })
         };
         let book: Vec<SpellEntry> = if rules.spellbook.is_some() {
@@ -375,6 +421,7 @@ pub fn spellcasting_snapshots(
                             known: false,
                             damage: cantrip_damage(cand, graph.total_level()),
                             granted_by: None,
+                            no_slot: false,
                         });
                     }
                 }
@@ -480,11 +527,13 @@ pub fn spellcasting_snapshots(
             prepared_change: rules.prepared_change.clone(),
             ritual_source: rules.ritual_source.clone(),
             extended_lists: rules.extend_lists.clone(),
+            other: false,
         });
         let _ = abbr;
     }
     crate::item_spells::add_item_blocks(graph, stats, &mut out);
     crate::granted_casting::add_granted_blocks(graph, stats, &mut out);
+    crate::other_spells::add_other_spells(graph, stats, &mut out);
     out
 }
 
@@ -627,5 +676,14 @@ mod tests {
         assert_eq!(caster_contribution("THIRD_UP", 20, d), 7);
         assert_eq!(caster_contribution("FOURTH_UP", 18, d), 5);
         assert_eq!(caster_contribution("SOLO", 18, d), 0);
+    }
+
+    #[test]
+    fn spellcasting_names_match_ignoring_case_only() {
+        assert!(same_spellcasting("Paladin", "Paladin"));
+        assert!(same_spellcasting("paladin", "Paladin"));
+        assert!(same_spellcasting("SORCERER", "Sorcerer"));
+        assert!(!same_spellcasting("Paladin ", "Paladin"));
+        assert!(!same_spellcasting("charisma", "Paladin"));
     }
 }

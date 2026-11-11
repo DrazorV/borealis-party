@@ -287,6 +287,7 @@ export interface ApiMethods {
   chooseWeaponMasteries(args: Cid & { weaponIds: string[] }): Promise<CharacterSnapshot>;
   setWildShapeForms(args: Cid & { formIds: string[] }): Promise<CharacterSnapshot>;
   /** Takes starting-equipment option `option` ("A", "B", ...) of a package from `play.equipmentPackages`. */
+  /** `option` "none" declines the package ("I'll buy my own"): nothing is added, and an option can still be taken later. */
   chooseEquipmentPackage(args: Cid & { packageId: string; option: string }): Promise<CharacterSnapshot>;
 
   /* Equipment */
@@ -353,9 +354,12 @@ export interface ApiMethods {
 
   /* Sheet */
   renderSheet(args: Cid & { options?: SheetOptions }): Promise<SheetPreview>;
+  /** Save Character Sheet. Desktop: the save dialog (`path` set; neither path nor bytes when cancelled). Phones (B-148): the
+   * system save picker; `path` names where the file went (Android then opens it in the PDF viewer), nothing when cancelled.
+   * The browser mock answers the bytes to download. */
   exportSheet(args: Cid & { options?: SheetOptions }): Promise<ExportResult>;
   /** Phones (TV2, B-144): open the system share sheet with the sheet PDF. Android opens it from the backend (`shared` true);
-   * elsewhere `shared` is false and the web view shares the bytes `exportSheet` gave it. */
+   * elsewhere `shared` is false and the bytes come back (`dataBase64`) for the web view's share sheet. */
   shareSheet(args: Cid & { options?: SheetOptions }): Promise<SheetShare>;
 
   /* Compendium */
@@ -408,6 +412,8 @@ export interface ApiMethods {
   scan5etoolsFolder(args: { folder: string }): Promise<FiveToolsScan>;
   /** Unpack a `.zip` of the user's 5etools `data/` folder (phones have no folder picker; desktop accepts it too). Returns a `5etools-folder` token for `scan5etoolsFolder` and `import5etools`. */
   stage5etoolsZip(args: { file: ImportFileInput }): Promise<PickedPath>;
+  /** Stage 5etools-format homebrew `.json` files (several at once, optionally beside one `.zip` of a `data/` folder they build on). A file that is not 5etools-format JSON is refused with a reason. Returns a `5etools-folder` token for `scan5etoolsFolder` and `import5etools`. */
+  stage5etoolsFiles(args: { files: ImportFileInput[] }): Promise<PickedPath>;
   /** Download the 5etools `data/` folder at an address the user pasted (a GitHub repository or any https:// folder address; none ships with the app). Emits `import5etools:progress` while downloading. Returns a `5etools-folder` token for `scan5etoolsFolder` and `import5etools`; importing from it remembers the address. */
   stage5etoolsUrl(args: { url: string }): Promise<PickedPath>;
   /** Addresses 5etools data was imported from. */
@@ -734,6 +740,7 @@ export const COMMANDS = {
   clearDownloadedContent: "clear_downloaded_content",
   scan5etoolsFolder: "scan_5etools_folder",
   stage5etoolsZip: "stage_5etools_zip",
+  stage5etoolsFiles: "stage_5etools_files",
   stage5etoolsUrl: "stage_5etools_url",
   list5etoolsUrls: "list_5etools_urls",
   remove5etoolsUrl: "remove_5etools_url",

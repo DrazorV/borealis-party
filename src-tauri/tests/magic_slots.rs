@@ -5,6 +5,7 @@
 use borealis_lib::dto::{
     AbilityMethodDto, CharacterSnapshot, NewCharacterRequest, OptionsPatch, Ruleset,
 };
+use borealis_lib::error::ErrorCode;
 use borealis_lib::state::{AppPaths, AppState};
 use std::path::PathBuf;
 
@@ -389,4 +390,196 @@ fn sage_ability_scores_is_a_list_slot_whose_options_are_not_elements() {
         .and_then(|s| s.chosen.clone())
         .expect("chosen");
     assert_eq!(chosen.ty, "list");
+}
+
+/// A Sage Wizard 1 with every Magic Initiate pick made (the ability and the three spells), so the
+/// feat's own spellcasting block exists next to the Wizard's.
+fn sage_wizard_with_magic_initiate(app: &AppState) -> CharacterSnapshot {
+    let mut snap = sage_wizard(app);
+    for title in [
+        "Spellcasting Ability",
+        "Magic Initiate Cantrips",
+        "Magic Initiate Cantrips",
+        "Magic Initiate Level 1 Spell",
+    ] {
+        let open = snap
+            .slots
+            .iter()
+            .find(|s| s.title == title && s.chosen.is_none())
+            .unwrap_or_else(|| panic!("open {title}"))
+            .id
+            .clone();
+        let held: Vec<String> = snap
+            .slots
+            .iter()
+            .filter_map(|s| s.chosen.as_ref().map(|c| c.id.clone()))
+            .collect();
+        let pick = app
+            .get_slot_options(&snap.id, &open, None, Some(500), None)
+            .expect("options")
+            .items
+            .iter()
+            .map(|o| o.base.summary.id.clone())
+            .find(|o| !held.contains(o))
+            .unwrap_or_else(|| panic!("an option for {title}"));
+        snap = app.apply_selection(&snap.id, &open, &pick).expect("pick");
+    }
+    snap
+}
+
+/// A feat's spellcasting block (Magic Initiate) has an id of its own: the Magic page keys its
+/// tabs by `classSlotId`, so a feat block sharing the Wizard's `main` showed the Wizard's spells
+/// on the feat's tab, and a prepare tick there addressed the Wizard.
+#[test]
+fn a_feat_spellcasting_block_has_its_own_id_next_to_the_class() {
+    let (_dir, app) = app();
+    let snap = sage_wizard_with_magic_initiate(&app);
+    let blocks: Vec<(&str, &str)> = snap
+        .spellcasting
+        .classes
+        .iter()
+        .map(|c| (c.class_name.as_str(), c.class_slot_id.as_str()))
+        .collect();
+    let wizard = snap
+        .spellcasting
+        .classes
+        .iter()
+        .find(|c| c.class_name == "Wizard")
+        .expect("wizard block");
+    let feat = snap
+        .spellcasting
+        .classes
+        .iter()
+        .find(|c| c.class_name.starts_with("Magic Initiate"))
+        .unwrap_or_else(|| panic!("feat block in {blocks:?}"));
+    assert_eq!(wizard.class_slot_id, "main", "class ids are unchanged");
+    let mut ids: Vec<&str> = blocks.iter().map(|b| b.1).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(
+        ids.len(),
+        blocks.len(),
+        "every block has its own id: {blocks:?}"
+    );
+    assert!(
+        feat.class_slot_id != "main" && !feat.class_slot_id.starts_with("multi-"),
+        "{blocks:?}"
+    );
+    assert!(
+        !feat.class_slot_id.contains(char::is_whitespace),
+        "the id is used in HTML ids: {}",
+        feat.class_slot_id
+    );
+
+    // The same feat block keeps its id across derives.
+    let again = app.get_snapshot(&snap.id).expect("snapshot");
+    assert!(again
+        .spellcasting
+        .classes
+        .iter()
+        .any(|c| c.class_name == feat.class_name && c.class_slot_id == feat.class_slot_id));
+
+    // Preparing addresses the block the id names: the feat's spells are not prepared spells, and
+    // the Wizard's list is untouched.
+    let spell = feat
+        .spells
+        .iter()
+        .find(|s| s.level > 0)
+        .expect("the feat's level 1 spell");
+    let err = app
+        .set_spell_prepared(&snap.id, &feat.class_slot_id, &spell.id, true)
+        .expect_err("a feat's spell is not prepared");
+    assert_eq!(err.code, ErrorCode::RequirementFailed, "{err:?}");
+    let after = app.get_snapshot(&snap.id).expect("snapshot");
+    let wizard_after = after
+        .spellcasting
+        .classes
+        .iter()
+        .find(|c| c.class_name == "Wizard")
+        .expect("wizard");
+    assert_eq!(wizard_after.prepared_count, wizard.prepared_count);
+    let err = app
+        .set_spell_prepared(&snap.id, "caster-no-such-block", &spell.id, true)
+        .expect_err("unknown block");
+    assert_eq!(err.code, ErrorCode::NotFound, "{err:?}");
+}
+
+/// A Sacred Oath whose spells name the Paladin's spellcasting in lower and upper case, as
+/// community Aurora content writes it (`spellcasting="paladin"`).
+fn install_lowercase_oath(app: &AppState) {
+    let xml = r#"<elements><info><name>Ward Oath</name><update version="0.0.1"><file name="ward.xml" url="https://example.invalid/ward.xml"/></update></info>
+<element name="Oath of the Test Ward" type="Archetype" source="Ward Oath" id="ID_T_MS_ARCHETYPE_OATH_TEST_WARD"><supports>Sacred Oath</supports><description><p>Synthetic.</p></description><rules><grant type="Archetype Feature" id="ID_T_MS_ARCHETYPE_FEATURE_WARD_SPELLS" level="3" /></rules></element>
+<element name="Ward Spells" type="Archetype Feature" source="Ward Oath" id="ID_T_MS_ARCHETYPE_FEATURE_WARD_SPELLS"><description><p>Synthetic.</p></description><rules><grant type="Spell" id="ID_PHB_SPELL_SANCTUARY" spellcasting="paladin" prepared="true" /><select type="Spell" name="Ward Pick" supports="Cleric,1" spellcasting="PALADIN" /></rules></element>
+</elements>"#;
+    use base64::Engine as _;
+    let req = borealis_lib::content_dto::ImportPackRequest {
+        file_name: "ward.xml".into(),
+        content_base64: base64::engine::general_purpose::STANDARD.encode(xml),
+        format: None,
+    };
+    app.import_pack(&req, &borealis_lib::content_packs::NullSink)
+        .expect("install");
+}
+
+/// Aurora matches a spell's `spellcasting` name to the class ignoring case: the oath's spells
+/// join the Paladin block (with its save DC), its spell slot feeds the Paladin's Magic tab, and
+/// no "Other Spells" block is made for them.
+#[test]
+fn a_lowercase_spellcasting_name_feeds_the_paladin_block_and_its_magic_tab() {
+    let (_dir, app) = app();
+    install_lowercase_oath(&app);
+    let request = NewCharacterRequest {
+        name: "Ward".into(),
+        ruleset: Ruleset::Dnd2014,
+        starting_level: 3,
+        gender: String::new(),
+        ability_method: AbilityMethodDto::PointBuy,
+        options: OptionsPatch::default(),
+        portrait: None,
+        group: None,
+    };
+    let s = app
+        .create_character(Ruleset::Dnd2014, &request)
+        .expect("create");
+    let id = s.id.clone();
+    let s = app
+        .apply_selection(&id, &slot_id(&s, "Race"), "ID_RACE_HUMAN")
+        .expect("race");
+    let s = app
+        .apply_selection(&id, &slot_id(&s, "Class"), "ID_WOTC_PHB_CLASS_PALADIN")
+        .expect("class");
+    let s = app
+        .apply_selection(
+            &id,
+            &slot_id(&s, "Sacred Oath"),
+            "ID_T_MS_ARCHETYPE_OATH_TEST_WARD",
+        )
+        .expect("oath");
+    let s = app
+        .apply_selection(&id, &slot_id(&s, "Ward Pick"), "ID_PHB_SPELL_BLESS")
+        .expect("ward pick");
+    let names: Vec<&str> = s
+        .spellcasting
+        .classes
+        .iter()
+        .map(|c| c.class_name.as_str())
+        .collect();
+    assert_eq!(names, ["Paladin"], "no Other Spells block");
+    let paladin = &s.spellcasting.classes[0];
+    assert!(paladin.save_dc >= 8, "a real save DC: {}", paladin.save_dc);
+    for spell in ["Sanctuary", "Bless"] {
+        assert!(
+            paladin.spells.iter().any(|x| x.name == spell),
+            "{spell} in the Paladin block"
+        );
+    }
+    let pick = s
+        .slots
+        .iter()
+        .find(|x| x.title == "Ward Pick")
+        .expect("Ward Pick slot");
+    assert_eq!(
+        pick.class_slot_id.as_deref(),
+        Some(paladin.class_slot_id.as_str())
+    );
 }

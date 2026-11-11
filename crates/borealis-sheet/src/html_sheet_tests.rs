@@ -32,8 +32,23 @@ fn both_editions_render_complete_documents_with_every_field_once() {
         cleric_wizard_2014(),
     ] {
         let d = with_story(data(&pair));
-        let html = render_sheet(&d, &HtmlOptions::default());
+        let o = HtmlOptions::default();
+        let html = render_sheet(&d, &o);
         assert!(html.starts_with("<!doctype html>") && html.ends_with("</html>"));
+        // B-146: page 1's equipment summary has the PDF's lines, not always all 15.
+        let lines = crate::layout::page_one_band(
+            &d,
+            &super::layout_options(&o),
+            &crate::layout::Grid::new(o.paper),
+        )
+        .map_or(0, |b| {
+            let (shown, hidden) = b.equipment_cut(d.gear.items.len());
+            if hidden == 0 {
+                b.rows
+            } else {
+                shown
+            }
+        });
         assert!(!html.contains("<script"), "no scripts");
         let pooled: Vec<usize> = d
             .spellcasting
@@ -50,9 +65,13 @@ fn both_editions_render_complete_documents_with_every_field_once() {
             {
                 continue;
             }
+            let past = (lines + 1..=crate::model_ids::SUMMARY_ROWS).any(|n| {
+                f.id == crate::model_ids::summary_equip(n, "qty")
+                    || f.id == crate::model_ids::summary_equip(n, "name")
+            });
             assert_eq!(
                 count(&html, &f.id),
-                1,
+                usize::from(!past),
                 "{:?}: field {} (play: {})",
                 d.edition,
                 f.id,
@@ -306,8 +325,17 @@ fn html_sheet_sample() {
             let file = format!("{dir}/{name}-{}.html", if ink { "ink" } else { "colour" });
             std::fs::write(file, html).unwrap();
         }
-        // B-145: both papers, with the page 1 vitals at their widest.
+        // B-145: both papers, with the page 1 vitals at their widest; B-146: both papers as is
+        // (the 2014 cleric's page 1 has its band, and its spells run over two pages).
         for (paper, tag) in [(Paper::Letter, "letter"), (Paper::A4, "a4")] {
+            let html = render_sheet(
+                &d,
+                &HtmlOptions {
+                    paper,
+                    ..HtmlOptions::default()
+                },
+            );
+            std::fs::write(format!("{dir}/{name}-{tag}.html"), html).unwrap();
             let html = render_sheet(
                 &crate::model_fixtures::long_vitals(d.clone()),
                 &HtmlOptions {
@@ -433,13 +461,14 @@ fn size_word_shrinks_to_fit_its_cell() {
     );
 }
 
-/// #38: the block of spells a feat picks with no casting ability (Aurora-format content) prints
-/// its spells, with blank modifier, DC and attack boxes to fill in, never a made-up 0.
+/// A block with no casting ability (an item's spells when the content names none; since U19 a
+/// feat's picks without an ability go to Other Spells instead) prints its spells, with blank
+/// modifier, DC and attack boxes to fill in, never a made-up 0.
 #[test]
 fn a_block_without_a_casting_ability_lists_its_spells_with_blank_dc_and_attack() {
     let (character, mut snap) = wizard_2024();
     let mut block = snap.spellcasting[0].clone();
-    block.name = "Spark Initiate".into();
+    block.name = "Staff of Sparks".into();
     block.ability = String::new();
     block.dc = 0;
     block.attack = 0;
@@ -453,7 +482,7 @@ fn a_block_without_a_casting_ability_lists_its_spells_with_blank_dc_and_attack()
     snap.spellcasting.push(block);
     let d = data(&(character, snap));
     let html = render_sheet(&d, &HtmlOptions::default());
-    assert!(html.contains("Spark Initiate"));
+    assert!(html.contains("Staff of Sparks"));
     for part in ["mod", "dc", "attack"] {
         assert!(
             html.contains(&format!("data-field=\"spell.2.{part}\"></span>")),
@@ -464,5 +493,149 @@ fn a_block_without_a_casting_ability_lists_its_spells_with_blank_dc_and_attack()
     assert!(
         html.matches(cantrip.as_str()).count() >= 2,
         "{cantrip} listed in both blocks"
+    );
+}
+
+/// Aurora's "Other Spells" block (spells granted with no spellcasting name) made from the first
+/// cantrip and the first levelled spell of `snap`'s first block: the cantrip from a racial trait
+/// the subrace "Gloom Elf" granted, the spell from an invocation.
+fn other_spells_block(
+    snap: &borealis_engine::CharacterSnapshot,
+) -> borealis_engine::snapshot::SpellcastingSnapshot {
+    use borealis_engine::snapshot::SpellGrant;
+    let mut block = snap.spellcasting[0].clone();
+    block.name = borealis_engine::other_spells::OTHER_SPELLS.into();
+    block.other = true;
+    block.ability = String::new();
+    block.dc = 0;
+    block.attack = 0;
+    block.slots = [0; 9];
+    block.pact = None;
+    block.prepare = false;
+    block.prepare_limit = None;
+    block.spellbook = None;
+    let cantrip = block.spells.iter().find(|s| s.level == 0).cloned().unwrap();
+    let spell = block.spells.iter().find(|s| s.level > 0).cloned().unwrap();
+    let grant = |name: &str, ty: &str, outer: &str| SpellGrant {
+        name: name.into(),
+        ty: ty.into(),
+        granted_by: Some(outer.into()),
+        class_name: None,
+    };
+    block.spells = vec![cantrip, spell];
+    for (s, g) in block.spells.iter_mut().zip([
+        grant("Gloom Magic", "Racial Trait", "Gloom Elf"),
+        grant("Veil of Dusk", "Class Feature", "Eldritch Invocations"),
+    ]) {
+        s.known = true;
+        s.prepared = false;
+        s.always_prepared = false;
+        s.granted_by = Some(g);
+    }
+    block
+}
+
+/// U19: a feat's spells picked with no casting ability print in Other Spells, named after the
+/// element holding the select as Aurora names them (a feat's spell list option, `Wizard`).
+#[test]
+fn feat_picks_without_an_ability_print_in_other_spells_named_after_their_option() {
+    let (character, mut snap) = wizard_2024();
+    let mut block = other_spells_block(&snap);
+    for s in &mut block.spells {
+        s.granted_by = Some(borealis_engine::snapshot::SpellGrant {
+            name: "Wizard".into(),
+            ty: "Feat Feature".into(),
+            granted_by: Some("Spark Initiate".into()),
+            class_name: None,
+        });
+    }
+    let cantrip = block.spells[0].name.clone();
+    snap.spellcasting.push(block);
+    let d = data(&(character, snap));
+    let other = d.spellcasting.casters.last().unwrap();
+    assert!(other.other);
+    assert_eq!(other.cantrips[0].name, format!("{cantrip} (Wizard)"));
+    let html = render_sheet(&d, &HtmlOptions::default());
+    assert!(html.contains(&format!("{cantrip} (Wizard)")));
+    assert!(!html.contains("Spark Initiate"));
+}
+
+/// The class of the pip span carrying `id`.
+fn pip_class(html: &str, id: &str) -> String {
+    let at = html
+        .find(&format!("data-field=\"{id}\""))
+        .unwrap_or_else(|| panic!("no {id}"));
+    let open = html[..at].rfind("<span class=\"").unwrap() + "<span class=\"".len();
+    html[open..at].trim_end_matches("\" ").to_string()
+}
+
+/// Aurora prints the spells no class page lists in a last "Other Spells" section: no ability,
+/// attack or save, every spell unprepared and named with where it came from (a racial trait's
+/// spell after the race that granted the trait).
+#[test]
+fn other_spells_print_last_unprepared_and_named_with_their_source() {
+    let (character, mut snap) = wizard_2024();
+    let block = other_spells_block(&snap);
+    let (cantrip, spell) = (block.spells[0].name.clone(), block.spells[1].name.clone());
+    snap.spellcasting.push(block);
+    let d = data(&(character, snap));
+    let n = d.spellcasting.casters.len();
+    let other = &d.spellcasting.casters[n - 1];
+    assert_eq!(other.class, "Other Spells");
+    assert!(other.other);
+    assert_eq!(other.cantrips[0].name, format!("{cantrip} (Gloom Elf)"));
+    assert_eq!(other.spells[0].name, format!("{spell} (Veil of Dusk)"));
+    let html = render_sheet(&d, &HtmlOptions::default());
+    assert!(html.contains(&format!("{spell} (Veil of Dusk)")));
+    for part in ["mod", "dc", "attack", "prepared"] {
+        assert!(
+            html.contains(&format!("data-field=\"spell.{n}.{part}\"></span>")),
+            "spell.{n}.{part} is blank"
+        );
+    }
+    // no slot tracker (Aurora's section has no slots)
+    assert!(!html.contains(&format!("data-field=\"spell.{n}.slot.")));
+    assert!(html.contains("data-field=\"spell.1.slot.1.total\""));
+    // the levelled spell's prepared mark is empty, and the row is not a spellbook entry
+    let prep = crate::model_ids::spell_row(n, 2, "prep");
+    assert_eq!(pip_class(&html, &prep), "pip ");
+    assert!(!html.contains(&format!(
+        "<tr class=\"book\"><td class=\"c\"><span class=\"pip \" data-field=\"{prep}\""
+    )));
+    let legacy = render_sheet(
+        &d,
+        &HtmlOptions {
+            legacy_spellcasting: true,
+            ..HtmlOptions::default()
+        },
+    );
+    assert!(legacy.contains(&format!("{cantrip} (Gloom Elf)")));
+    let row = legacy
+        .find(&format!("{spell} (Veil of Dusk)"))
+        .expect("levelled spell on the basic page");
+    let pip = legacy[..row].rfind("<span class=\"pip").unwrap();
+    assert!(legacy[pip..row].starts_with("<span class=\"pip \""));
+}
+
+/// Aurora prints no spellcasting page for a character without a spellcasting class: "Other
+/// Spells" alone (a non-caster's racial spells) adds none, but its spells still get cards.
+#[test]
+fn other_spells_alone_add_no_spellcasting_page_but_keep_their_cards() {
+    let (character, mut snap) = wizard_2024();
+    let block = other_spells_block(&snap);
+    let spell = block.spells[1].name.clone();
+    snap.spellcasting = vec![block];
+    snap.multiclass_slots = None;
+    let d = data(&(character.clone(), snap.clone()));
+    assert!(d.spellcasting.casters.is_empty());
+    let html = render_sheet(&d, &HtmlOptions::default());
+    assert!(!html.contains("data-page=\"spellcasting\""));
+    let mut options = crate::SheetOptions::default();
+    options.cards.spell = true;
+    let cards =
+        crate::card_model::pages(&character, &snap, &options, &crate::SheetContent::default());
+    assert!(
+        cards.iter().flatten().any(|c| c.title == spell),
+        "{spell} has a card"
     );
 }

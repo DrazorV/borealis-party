@@ -322,6 +322,10 @@ pub struct SpellEntry {
     /// The element that granted the spell (none for spells prepared from a class list).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub granted_by: Option<SpellGrant>,
+    /// The feature that grants it lets the character cast it without expending a spell slot
+    /// (`grant_spell` mode `at_will_no_slot`: 2024 Pact of the Chain's Find Familiar).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_slot: bool,
 }
 
 /// The granting element of a spell (feeds the spell card footer).
@@ -385,6 +389,9 @@ pub struct SpellcastingSnapshot {
     /// Extra class lists prepared spells may come from (`spell_list_extend`).
     #[serde(default)]
     pub extended_lists: Vec<String>,
+    /// Aurora's "Other Spells": the spells no other block lists (`other_spells`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub other: bool,
 }
 
 /// A spellbook (spells copied into it, capacity from the class level).
@@ -553,10 +560,10 @@ pub struct AttackSnapshot {
     pub ability: String,
     /// Proficient with the weapon.
     pub proficient: bool,
-    /// The weapon's Mastery property when the character has mastered this kind of weapon
-    /// (2024); `Some` with `mastered: false` is informational only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mastery: Option<MasteryRef>,
+    /// The weapon's Mastery properties (2024), usually one, each `mastered` when the character
+    /// has mastered this kind of weapon; `mastered: false` is informational only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub masteries: Vec<MasteryRef>,
     /// Lowest d20 roll that is a critical hit (20 normally, 19 for Improved Critical).
     #[serde(default = "default_crit_range")]
     pub crit_range: u8,
@@ -724,9 +731,16 @@ pub struct MasteryPick {
     pub weapon: String,
     /// Weapon name.
     pub name: String,
-    /// Mastery property name.
-    pub property: String,
-    /// Mastery property text.
+    /// The weapon's Mastery properties, usually one.
+    pub properties: Vec<MasteryProperty>,
+}
+
+/// One Mastery property of a weapon.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MasteryProperty {
+    /// Property name such as `Topple`.
+    pub name: String,
+    /// Plain text of the property (empty when no element defines it).
     pub text: String,
 }
 

@@ -66,7 +66,9 @@ export interface PlayDefenses {
 export interface PlaySense { name: string; range: number; source: string; note?: string }
 export interface PlayAdvantage { roll: string; text: string; source: string; active: boolean; whileToggle?: string }
 export interface PlayNote { kind: string; text: string; source: string; [k: string]: unknown }
-export interface PlayMastery { weapon: string; name: string; property: string; text: string }
+/** A Weapon Mastery pick: the weapon and every Mastery property it has (usually one). */
+export interface PlayMastery { weapon: string; name: string; properties: MasteryProperty[] }
+export interface MasteryProperty { name: string; text: string }
 export interface PlayInspirationSource { source: string; trigger: string }
 export interface PlayMartialArts { die: string; active: boolean; bonusUnarmedStrike: boolean }
 
@@ -106,6 +108,8 @@ export interface PlayEquipmentPackage {
   owner: string;
   /** Option id already taken (A/B/C); null until chosen. */
   chosen: string | null;
+  /** Declined with "I'll buy my own" (option `"none"`) and no option taken since; absent when false. */
+  declined?: boolean;
   options: PackageOption[];
 }
 

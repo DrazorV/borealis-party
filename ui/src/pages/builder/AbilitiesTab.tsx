@@ -8,6 +8,7 @@ import { AbilityGrid } from "./AbilityTile";
 import { AbilityMethodField } from "./AbilityMethodField";
 import { SlotList } from "./SlotList";
 import type { DescribeFn } from "./PickerGroup";
+import { SuggestedScoresCard } from "./SuggestedScores";
 
 const HELP: { name: string; text: string }[] = [
   { name: "Strength", text: "Raw physical power. It drives melee attacks, carrying capacity and Athletics." },
@@ -72,6 +73,8 @@ export function AbilitiesTab({ describedId, onDescribe }: { describedId: string 
         onMethod={(method) => void mutate((api, id) => api.setAbilityMethod({ characterId: id, method }))}
         onRoll={() => void mutate((api, id) => api.rollAbilities({ characterId: id }))}
         onReset={() => void mutate((api, id) => api.resetAbilities({ characterId: id }))} />
+      {/* Tester B11 (TV2, U24): the class's standard array, offered with Apply on phones and desktop (an addition beyond Aurora). */}
+      {a.suggested && <SuggestedScoresCard abilities={a} suggested={a.suggested} />}
       {a.method === "standard_array" && a.standardArray && (
         <p className="small muted abil-note" role="status">Unassigned values: {a.standardArray.unassigned.length ? a.standardArray.unassigned.join(", ") : "none"}. Choosing a value that is already used swaps it.</p>
       )}
