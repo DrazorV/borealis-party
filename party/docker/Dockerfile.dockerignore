@@ -1,0 +1,13 @@
+# Build context filter for party/docker/Dockerfile (BuildKit reads <Dockerfile>.dockerignore).
+**/target
+**/node_modules
+ui/dist
+ui/party/dist
+src-tauri/gen
+.git
+.github
+e2e
+release-notes
+tools
+content-tools
+**/*.apk

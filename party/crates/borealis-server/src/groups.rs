@@ -3,12 +3,11 @@
 use crate::backend::Access;
 use axum::extract::{Path, State};
 use axum::Json;
-use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::auth::{Role, User};
-use crate::db::now;
+use crate::db::InviteOutcome;
 use crate::error::{ApiError, ApiResult};
 use crate::rpc::group_role;
 use crate::workspaces::{Workspace, WsKey};
@@ -66,26 +65,17 @@ pub struct NameForm {
 pub async fn list(State(state): State<AppState>, user: User) -> ApiResult<Json<Vec<GroupOut>>> {
     let groups = state
         .db
-        .run(move |c| {
-            let sql = "SELECT g.id, g.name, d.username,
-                    (SELECT COUNT(*) FROM members m WHERE m.group_id = g.id),
-                    (SELECT m.character_id FROM members m WHERE m.group_id = g.id AND m.player_id = ?1)
-                 FROM groups g JOIN users d ON d.id = g.dm_id
-                 WHERE g.dm_id = ?1 OR EXISTS (SELECT 1 FROM members m WHERE m.group_id = g.id AND m.player_id = ?1)
-                 ORDER BY g.name COLLATE NOCASE";
-            let mut stmt = c.prepare(sql)?;
-            let rows = stmt.query_map(params![user.id], |r| {
-                Ok(GroupOut {
-                    id: r.get(0)?,
-                    name: r.get(1)?,
-                    dm_name: r.get(2)?,
-                    member_count: r.get(3)?,
-                    character_id: r.get(4)?,
-                })
-            })?;
-            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        .groups_of(&user.id)
+        .await?
+        .into_iter()
+        .map(|g| GroupOut {
+            id: g.id,
+            name: g.name,
+            dm_name: g.dm_name,
+            member_count: g.member_count,
+            character_id: g.character_id,
         })
-        .await?;
+        .collect();
     Ok(Json(groups))
 }
 
@@ -99,16 +89,7 @@ pub async fn create(
     let name = group_name(&form.name)?;
     let id = uuid::Uuid::new_v4().to_string();
     let out = json!({ "id": id, "name": name });
-    state
-        .db
-        .run(move |c| {
-            c.execute(
-                "INSERT INTO groups (id, name, dm_id, created_at) VALUES (?1, ?2, ?3, ?4)",
-                params![id, name, user.id, now()],
-            )?;
-            Ok(())
-        })
-        .await?;
+    state.db.insert_group(&id, &name, &user.id).await?;
     Ok(Json(out))
 }
 
@@ -129,16 +110,7 @@ pub async fn rename(
 ) -> ApiResult<()> {
     owned_group(&state, &user, &group).await?;
     let name = group_name(&form.name)?;
-    state
-        .db
-        .run(move |c| {
-            c.execute(
-                "UPDATE groups SET name = ?1 WHERE id = ?2",
-                params![name, group],
-            )?;
-            Ok(())
-        })
-        .await
+    state.db.rename_group(&group, &name).await
 }
 
 #[derive(Clone)]
@@ -148,21 +120,16 @@ struct Member {
 }
 
 async fn members_of(state: &AppState, group: &str) -> ApiResult<Vec<Member>> {
-    let group = group.to_string();
-    state
+    Ok(state
         .db
-        .run(move |c| {
-            let mut stmt =
-                c.prepare("SELECT player_id, character_id FROM members WHERE group_id = ?1")?;
-            let rows = stmt.query_map(params![group], |r| {
-                Ok(Member {
-                    player: r.get(0)?,
-                    character: r.get(1)?,
-                })
-            })?;
-            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        .members(group)
+        .await?
+        .into_iter()
+        .map(|m| Member {
+            player: m.player,
+            character: m.character,
         })
-        .await
+        .collect())
 }
 
 /// Give a member's character back to their personal list.
@@ -197,14 +164,7 @@ pub async fn delete(
             release_character(&state, &group, &user.id, &member.player, &character).await?;
         }
     }
-    let id = group.clone();
-    state
-        .db
-        .run(move |c| {
-            c.execute("DELETE FROM groups WHERE id = ?1", params![id])?;
-            Ok(())
-        })
-        .await?;
+    state.db.delete_group(&group).await?;
     state.workspaces.remove_group(&group).await
 }
 
@@ -218,43 +178,30 @@ pub async fn detail(
         .await?
         .ok_or_else(ApiError::group_not_found)?;
     let is_dm = user.role == Role::Dm;
-    let out = state
+    let (name, dm_name) = state
         .db
-        .run(move |c| {
-            let (name, dm_name): (String, String) = c.query_row(
-                "SELECT g.name, d.username FROM groups g JOIN users d ON d.id = g.dm_id WHERE g.id = ?1",
-                params![group],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )?;
-            let mut stmt = c.prepare(
-                "SELECT u.id, u.username, m.character_id IS NOT NULL FROM members m JOIN users u ON u.id = m.player_id
-                 WHERE m.group_id = ?1 ORDER BY u.username COLLATE NOCASE",
-            )?;
-            let members = stmt
-                .query_map(params![group], |r| {
-                    Ok(json!({
-                        "playerId": r.get::<_, String>(0)?,
-                        "username": r.get::<_, String>(1)?,
-                        "hasCharacter": r.get::<_, bool>(2)?,
-                    }))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            let invites = if is_dm {
-                let mut stmt = c.prepare(
-                    "SELECT i.id, u.username FROM invites i JOIN users u ON u.id = i.player_id
-                     WHERE i.group_id = ?1 ORDER BY u.username COLLATE NOCASE",
-                )?;
-                let rows = stmt.query_map(params![group], |r| {
-                    Ok(json!({ "id": r.get::<_, String>(0)?, "username": r.get::<_, String>(1)? }))
-                })?;
-                rows.collect::<Result<Vec<_>, _>>()?
-            } else {
-                Vec::new()
-            };
-            Ok(json!({ "id": group, "name": name, "dmName": dm_name, "members": members, "invites": invites }))
-        })
-        .await?;
-    let mut out = out;
+        .group_header(&group)
+        .await?
+        .ok_or_else(ApiError::group_not_found)?;
+    let members: Vec<Value> = state
+        .db
+        .members(&group)
+        .await?
+        .into_iter()
+        .map(|m| json!({ "playerId": m.player, "username": m.username, "hasCharacter": m.character.is_some() }))
+        .collect();
+    let invites: Vec<Value> = if is_dm {
+        state
+            .db
+            .group_invites(&group)
+            .await?
+            .into_iter()
+            .map(|(id, username)| json!({ "id": id, "username": username }))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let mut out = json!({ "id": group, "name": name, "dmName": dm_name, "members": members, "invites": invites });
     if let Some(character) = role.character {
         out["characterId"] = json!(character);
     }
@@ -278,43 +225,21 @@ pub async fn invite(
     let username = form.username.trim().to_string();
     let id = uuid::Uuid::new_v4().to_string();
     let out = json!({ "id": id, "username": username });
-    state
-        .db
-        .run(move |c| {
-            let tx = c.transaction()?;
-            let player: Option<(String, String)> = tx
-                .query_row(
-                    "SELECT id, role FROM users WHERE username = ?1",
-                    params![username],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-                .optional()?;
-            let Some((player, role)) = player else {
-                return Err(ApiError::NotFound("There is no account with that username.".into()));
-            };
-            if role != "player" {
-                return Err(ApiError::Invalid("Only player accounts can join a group.".into()));
-            }
-            let member: bool = tx.query_row(
-                "SELECT EXISTS (SELECT 1 FROM members WHERE group_id = ?1 AND player_id = ?2)",
-                params![group, player],
-                |r| r.get(0),
-            )?;
-            if member {
-                return Err(ApiError::Conflict("That player is already in this group.".into()));
-            }
-            let added = tx.execute(
-                "INSERT OR IGNORE INTO invites (id, group_id, player_id, created_at) VALUES (?1, ?2, ?3, ?4)",
-                params![id, group, player, now()],
-            )?;
-            if added == 0 {
-                return Err(ApiError::Conflict("That player has already been invited.".into()));
-            }
-            tx.commit()?;
-            Ok(())
-        })
-        .await?;
-    Ok(Json(out))
+    match state.db.invite(&id, &group, &username).await? {
+        InviteOutcome::Sent => Ok(Json(out)),
+        InviteOutcome::NoAccount => Err(ApiError::NotFound(
+            "There is no account with that username.".into(),
+        )),
+        InviteOutcome::NotAPlayer => Err(ApiError::Invalid(
+            "Only player accounts can join a group.".into(),
+        )),
+        InviteOutcome::AlreadyMember => Err(ApiError::Conflict(
+            "That player is already in this group.".into(),
+        )),
+        InviteOutcome::AlreadyInvited => Err(ApiError::Conflict(
+            "That player has already been invited.".into(),
+        )),
+    }
 }
 
 /// `DELETE /api/groups/{id}/invites/{invite}`.
@@ -324,38 +249,18 @@ pub async fn cancel_invite(
     Path((group, invite)): Path<(String, String)>,
 ) -> ApiResult<()> {
     owned_group(&state, &user, &group).await?;
-    state
-        .db
-        .run(move |c| {
-            c.execute(
-                "DELETE FROM invites WHERE id = ?1 AND group_id = ?2",
-                params![invite, group],
-            )?;
-            Ok(())
-        })
-        .await
+    state.db.cancel_invite(&invite, &group).await
 }
 
 /// `GET /api/invites`: a player's pending invitations.
 pub async fn my_invites(State(state): State<AppState>, user: User) -> ApiResult<Json<Vec<Value>>> {
     let invites = state
         .db
-        .run(move |c| {
-            let mut stmt = c.prepare(
-                "SELECT i.id, g.name, d.username FROM invites i
-                 JOIN groups g ON g.id = i.group_id JOIN users d ON d.id = g.dm_id
-                 WHERE i.player_id = ?1 ORDER BY i.created_at",
-            )?;
-            let rows = stmt.query_map(params![user.id], |r| {
-                Ok(json!({
-                    "id": r.get::<_, String>(0)?,
-                    "groupName": r.get::<_, String>(1)?,
-                    "dmName": r.get::<_, String>(2)?,
-                }))
-            })?;
-            Ok(rows.collect::<Result<Vec<_>, _>>()?)
-        })
-        .await?;
+        .invites_for(&user.id)
+        .await?
+        .into_iter()
+        .map(|(id, group, dm)| json!({ "id": id, "groupName": group, "dmName": dm }))
+        .collect();
     Ok(Json(invites))
 }
 
@@ -368,27 +273,9 @@ pub async fn accept(
     require_player(&user)?;
     let group = state
         .db
-        .run(move |c| {
-            let tx = c.transaction()?;
-            let group: Option<String> = tx
-                .query_row(
-                    "SELECT group_id FROM invites WHERE id = ?1 AND player_id = ?2",
-                    params![invite, user.id],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            let Some(group) = group else {
-                return Err(ApiError::NotFound("That invitation no longer exists.".into()));
-            };
-            tx.execute("DELETE FROM invites WHERE id = ?1", params![invite])?;
-            tx.execute(
-                "INSERT OR IGNORE INTO members (group_id, player_id, character_id, joined_at) VALUES (?1, ?2, NULL, ?3)",
-                params![group, user.id, now()],
-            )?;
-            tx.commit()?;
-            Ok(group)
-        })
-        .await?;
+        .accept_invite(&invite, &user.id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("That invitation no longer exists.".into()))?;
     Ok(Json(json!({ "groupId": group })))
 }
 
@@ -398,16 +285,7 @@ pub async fn decline(
     user: User,
     Path(invite): Path<String>,
 ) -> ApiResult<()> {
-    state
-        .db
-        .run(move |c| {
-            c.execute(
-                "DELETE FROM invites WHERE id = ?1 AND player_id = ?2",
-                params![invite, user.id],
-            )?;
-            Ok(())
-        })
-        .await
+    state.db.decline_invite(&invite, &user.id).await
 }
 
 /// `DELETE /api/groups/{id}/members/{player}`: the DM removes someone, or a player leaves.
@@ -433,17 +311,7 @@ pub async fn remove_member(
     if let Some(character) = member.character {
         release_character(&state, &group, &role.dm, &player, &character).await?;
     }
-    let (g, p) = (group.clone(), player.clone());
-    state
-        .db
-        .run(move |c| {
-            c.execute(
-                "DELETE FROM members WHERE group_id = ?1 AND player_id = ?2",
-                params![g, p],
-            )?;
-            Ok(())
-        })
-        .await?;
+    state.db.delete_member(&group, &player).await?;
     state.workspaces.forget(&WsKey::GroupMember {
         group,
         dm: role.dm,
@@ -489,19 +357,10 @@ pub async fn set_character(
         .move_character(&from, &to, &form.character_id)
         .await?;
     let character = form.character_id;
-    let saved = {
-        let (g, u, ch) = (group, user.id, character.clone());
-        state
-            .db
-            .run(move |c| {
-                c.execute(
-                    "UPDATE members SET character_id = ?1 WHERE group_id = ?2 AND player_id = ?3",
-                    params![ch, g, u],
-                )?;
-                Ok(())
-            })
-            .await
-    };
+    let saved = state
+        .db
+        .set_member_character(Some(&character), &group, &user.id)
+        .await;
     if let Err(e) = saved {
         // The record failed: put the file back so the character isn't stranded.
         state
@@ -529,16 +388,7 @@ pub async fn clear_character(
         return Ok(());
     };
     release_character(&state, &group, &role.dm, &user.id, &character).await?;
-    state
-        .db
-        .run(move |c| {
-            c.execute(
-                "UPDATE members SET character_id = NULL WHERE group_id = ?1 AND player_id = ?2",
-                params![group, user.id],
-            )?;
-            Ok(())
-        })
-        .await
+    state.db.set_member_character(None, &group, &user.id).await
 }
 
 /// `GET /api/characters`: everything a player owns, and where it is.
@@ -547,24 +397,7 @@ pub async fn my_characters(
     user: User,
 ) -> ApiResult<Json<Vec<Value>>> {
     require_player(&user)?;
-    let player = user.id.clone();
-    let groups = state
-        .db
-        .run(move |c| {
-            let mut stmt = c.prepare(
-                "SELECT g.id, g.name, g.dm_id FROM members m JOIN groups g ON g.id = m.group_id
-                 WHERE m.player_id = ?1 AND m.character_id IS NOT NULL",
-            )?;
-            let rows = stmt.query_map(params![player], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                ))
-            })?;
-            Ok(rows.collect::<Result<Vec<_>, _>>()?)
-        })
-        .await?;
+    let groups = state.db.character_groups(&user.id).await?;
     let mut out = Vec::new();
     let personal = state
         .workspaces
@@ -666,26 +499,14 @@ pub async fn party(
     Path(group): Path<String>,
 ) -> ApiResult<Json<Vec<Value>>> {
     owned_group(&state, &user, &group).await?;
-    let id = group.clone();
-    let names = state
-        .db
-        .run(move |c| {
-            let mut stmt = c.prepare(
-                "SELECT u.id, u.username, m.character_id FROM members m JOIN users u ON u.id = m.player_id
-                 WHERE m.group_id = ?1 ORDER BY u.username COLLATE NOCASE",
-            )?;
-            let rows = stmt.query_map(params![id], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, Option<String>>(2)?,
-                ))
-            })?;
-            Ok(rows.collect::<Result<Vec<_>, _>>()?)
-        })
-        .await?;
+    let names = state.db.members(&group).await?;
     let mut rows = Vec::with_capacity(names.len());
-    for (player, username, character) in names {
+    for crate::db::MemberRow {
+        player,
+        username,
+        character,
+    } in names
+    {
         let Some(character) = character else {
             rows.push(json!({ "playerId": player, "username": username, "characterId": null }));
             continue;

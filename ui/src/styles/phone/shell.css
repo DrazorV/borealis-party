@@ -6,6 +6,11 @@
 /* The window: no 1 px frame on a phone; the keyboard inset lifts the bottom chrome above an open keyboard (sec. 5.4). */
 /* The tab bar keeps its own home-indicator padding, so the shell lifts by what the keyboard covers beyond that inset. */
 html.phone .aur-window { border: 0; background: var(--ph-bg); padding-bottom: max(0px, var(--kb) - var(--safe-b)); }
+/* Tester B15 (B-131): while the keyboard is open (`kb-open`, lib/keyboardInset.ts) the status line, Next selection and the tab
+   bar hide, so the field and the list keep that room; the shell then lifts by the whole keyboard. They return when it closes. */
+html.phone.kb-open .aur-window { padding-bottom: var(--kb); }
+html.phone.kb-open .aur-window.narrow .aur-status { display: none; }
+html.phone.kb-open .aur-bottombar { display: none; }
 
 /* Title bar: hamburger, mark, title, settings. With a character, its name in a system serif, gold, over a 2 px aurora line. */
 html.phone .aur-title.mobile {
@@ -81,6 +86,12 @@ html.phone .aur-window.narrow .aur-status .next::before { content: ""; position:
 html.phone.android .aur-window.narrow .aur-status .next::before { top: -8px; bottom: -8px; }
 html.phone .aur-window.narrow .aur-status .next:active { transform: scale(0.97); }
 html.phone .aur-window.narrow .aur-status .next .icon { width: 16px; height: 16px; }
+/* TV1 C10 / U23 (B-143): View sheet and Play take Next selection's place when the last open pick is made; accent, not the pending gold. */
+html.phone .aur-window.narrow .aur-status .complete { display: inline-flex; flex: none; gap: 8px; }
+html.phone .aur-window.narrow .aur-status .complete .next { background: var(--ph-accent-soft); color: var(--ph-accent); }
+/* U23: the moment's dismiss control, an icon-only pill of the same height and colours (32 pt, its hit area as the pills'). */
+html.phone .aur-window.narrow .aur-status .complete .next.dismiss { width: 32px; padding: 0; justify-content: center; }
+html.phone .aur-window.narrow .aur-status .complete .next.dismiss .icon { width: 12px; height: 12px; }
 
 /* Bottom tab bar (O1): six items, 26 px icons, 11 px sentence-case labels, never disabled. The current tab gets the accent plus a
    shape cue: a bar over the icon on iOS, a pill behind it on Android. The Build badge is gold. */

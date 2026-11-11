@@ -7,7 +7,6 @@ use crate::backend::Access;
 use axum::extract::{Path, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::Json;
-use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Map, Value};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::{Stream, StreamExt};
@@ -51,36 +50,19 @@ pub struct GroupRole {
 
 /// The caller's place in a group; `None` when they have none (reported as "no such group").
 pub async fn group_role(db: &Db, user: &User, group: &str) -> ApiResult<Option<GroupRole>> {
-    let group = group.to_string();
-    let user_id = user.id.clone();
-    let role = user.role;
-    db.run(move |c| {
-        let dm: Option<String> = c
-            .query_row(
-                "SELECT dm_id FROM groups WHERE id = ?1",
-                params![group],
-                |r| r.get(0),
-            )
-            .optional()?;
-        let Some(dm) = dm else {
-            return Ok(None);
-        };
-        if role == Role::Dm {
-            return Ok((dm == user_id).then_some(GroupRole {
-                dm,
-                character: None,
-            }));
-        }
-        let member: Option<Option<String>> = c
-            .query_row(
-                "SELECT character_id FROM members WHERE group_id = ?1 AND player_id = ?2",
-                params![group, user_id],
-                |r| r.get(0),
-            )
-            .optional()?;
-        Ok(member.map(|character| GroupRole { dm, character }))
-    })
-    .await
+    let Some(dm) = db.group_dm(group).await? else {
+        return Ok(None);
+    };
+    if user.role == Role::Dm {
+        return Ok((dm == user.id).then_some(GroupRole {
+            dm,
+            character: None,
+        }));
+    }
+    Ok(db
+        .membership(group, &user.id)
+        .await?
+        .map(|character| GroupRole { dm, character }))
 }
 
 async fn resolve_scope(state: &AppState, user: &User, scope: &str) -> ApiResult<(WsKey, Scope)> {
@@ -184,14 +166,8 @@ async fn set_character(
     player: String,
     character: Option<String>,
 ) -> ApiResult<()> {
-    db.run(move |c| {
-        c.execute(
-            "UPDATE members SET character_id = ?1 WHERE group_id = ?2 AND player_id = ?3",
-            params![character, group, player],
-        )?;
-        Ok(())
-    })
-    .await
+    db.set_member_character(character.as_deref(), &group, &player)
+        .await
 }
 
 async fn call_in_group(
@@ -231,21 +207,12 @@ async fn call_in_group(
     let result = workspace.call(command, args).await?;
     if let Some(deleted) = deleted {
         let _guard = state.membership.lock().await;
-        let group_check = group.clone();
-        let player = user.id.clone();
         let matches = state
             .db
-            .run(move |c| {
-                Ok(c.query_row(
-                    "SELECT character_id = ?1 FROM members WHERE group_id = ?2 AND player_id = ?3",
-                    params![deleted, group_check, player],
-                    |r| r.get::<_, Option<bool>>(0),
-                )
-                .optional()?
-                .flatten()
-                .unwrap_or(false))
-            })
-            .await?;
+            .membership(&group, &user.id)
+            .await?
+            .flatten()
+            .is_some_and(|current| current == deleted);
         if matches {
             set_character(&state.db, group, user.id.clone(), None).await?;
         }

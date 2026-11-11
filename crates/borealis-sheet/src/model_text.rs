@@ -264,18 +264,240 @@ fn feature_tables(f: &FeatureDetail, text: &str) -> Vec<crate::model_types::Text
     }
 }
 
+/// Engine-generated improvement placeholders ("Ability Score Improvement (4)", "Feat (8)"): the
+/// chosen increases show in the scores and the chosen feat is listed itself, so the placeholder
+/// (template text only) is not sheet content.
+fn is_improvement_placeholder(id: &str) -> bool {
+    borealis_engine::ids::is_generated_with_class(id)
+}
+
+/// Words naming a later, stronger version of a feature ("Improved Divine Smite").
+const UPGRADE_WORDS: &[&str] = &["improved ", "greater ", "superior "];
+
+/// A name without a leading "Level N: " (2024 content).
+fn without_level_lead(name: &str) -> &str {
+    let n = name.trim();
+    strip_prefix_ci(n, "level ")
+        .and_then(|rest| rest.split_once(':'))
+        .filter(|(num, _)| !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()))
+        .map_or(n, |(_, after)| after.trim())
+}
+
+/// The name a feature and its upgrades share, lower case
+/// ("Level 14: Improved Blessed Strikes" -> "blessed strikes").
+fn upgrade_stem(name: &str) -> String {
+    let n = without_level_lead(name).to_lowercase();
+    UPGRADE_WORDS
+        .iter()
+        .find_map(|w| n.strip_prefix(w))
+        .map_or_else(|| n.clone(), |rest| rest.trim().to_string())
+}
+
+/// True when `name` carries an upgrade word ("Improved Critical", "Greater Portent").
+fn is_upgrade_name(name: &str) -> bool {
+    let n = without_level_lead(name).to_lowercase();
+    UPGRADE_WORDS.iter().any(|w| n.starts_with(w))
+}
+
+/// Appends an upgrade's text to the feature it improves: a paragraph led by the upgrade's name
+/// and level, its tables moved to the lines they now occupy. Nothing of either is dropped.
+fn fold_upgrade(host: &mut FeatureData, up: FeatureData) {
+    let offset = if host.text.is_empty() {
+        0
+    } else {
+        host.text.split('\n').count()
+    };
+    let name = without_level_lead(&up.name);
+    let lead = if up.level > 0 {
+        format!("{name} (level {})", up.level)
+    } else {
+        name.to_string()
+    };
+    // a table on the first line keeps its rows intact: the lead goes on a line of its own
+    let own_line = up.tables.iter().any(|t| t.lines.start == 0) || up.text.is_empty();
+    let block = if own_line {
+        if up.text.is_empty() {
+            format!("{lead}.")
+        } else {
+            format!("{lead}.\n{}", up.text)
+        }
+    } else {
+        format!("{lead}. {}", up.text)
+    };
+    let shift = offset + usize::from(own_line && !up.text.is_empty());
+    host.tables.extend(up.tables.into_iter().map(|mut t| {
+        t.lines = t.lines.start + shift..t.lines.end + shift;
+        t
+    }));
+    if host.text.is_empty() {
+        host.summary = short_summary(&block);
+        host.text = block;
+    } else {
+        host.text.push('\n');
+        host.text.push_str(&block);
+    }
+    for s in up.sources {
+        if !host.sources.contains(&s) {
+            host.sources.push(s);
+        }
+    }
+    host.prerequisites_unmet |= up.prerequisites_unmet;
+}
+
+/// Lower case, typographic apostrophes made plain, whitespace collapsed: the form names and
+/// descriptions are compared in.
+fn fold_form(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+        .replace(['\u{2019}', '\u{2018}', '\u{fffd}'], "'")
+}
+
+/// Words that say a feature named just before them gets stronger ("Your Aura of Protection is
+/// now a 30-foot Emanation", "the extra damage of your Giant's Might feature increases to 1d8").
+const GROWTH_WORDS: &[&str] = &[
+    "improve",
+    "improves",
+    "increase",
+    "increases",
+    "grow",
+    "grows",
+    "become",
+    "becomes",
+    "now",
+];
+/// Words allowed between a feature's name and its growth word.
+const GROWTH_GAP: usize = 5;
+/// Shortest feature name a description is searched for (shorter ones are common words).
+const MIN_HOST_NAME: usize = 4;
+
+/// Byte offset of the first place `probe` (in [`fold_form`]) says the feature `host` (in
+/// [`fold_form`]) improves: "your/the <host> [feature] ... <growth word>" within one sentence, or
+/// "improves/enhances your/the <host>".
+fn growth_mention(probe: &str, host: &str) -> Option<usize> {
+    if host.chars().count() < MIN_HOST_NAME {
+        return None;
+    }
+    let is_word = |c: char| c.is_alphanumeric();
+    for (pos, _) in probe.match_indices(host) {
+        let end = pos + host.len();
+        let before = &probe[..pos];
+        let bounded = !before.chars().next_back().is_some_and(is_word)
+            && !probe[end..].chars().next().is_some_and(is_word);
+        if !bounded {
+            continue;
+        }
+        let improves = [
+            "improves your ",
+            "improves the ",
+            "enhances your ",
+            "enhances the ",
+        ]
+        .iter()
+        .any(|p| before.ends_with(p));
+        if improves {
+            return Some(pos);
+        }
+        if !(before.ends_with("your ") || before.ends_with("the ")) {
+            continue;
+        }
+        // up to the clause end: "While in your Starry Form, you become ..." is a condition
+        let sentence = probe[end..]
+            .split(['.', '!', '?', ';', ',', ':'])
+            .next()
+            .unwrap_or("");
+        let grows = sentence
+            .split_whitespace()
+            .map(|w| w.trim_matches(|c: char| !is_word(c)))
+            .filter(|w| !matches!(*w, "feature" | "features"))
+            .take(GROWTH_GAP + 1)
+            .any(|w| GROWTH_WORDS.contains(&w));
+        if grows {
+            return Some(pos);
+        }
+    }
+    None
+}
+
+/// One sheet entry before upgrades are folded: its class section, and its description in
+/// [`fold_form`] (what an upgrade says about the feature it improves).
+struct FoldEntry {
+    scope: (u8, usize),
+    probe: String,
+    data: FeatureData,
+}
+
+/// The entry an upgrade is folded into, among the earlier entries of its class section.
+///
+/// - Name: "Improved X", "Greater X" or "Superior X" goes to X ("Greater Portent" -> "Portent"),
+///   or to a feature whose name ends with X when its description names that feature or, for a
+///   "Group: Option" name, the option ("Improved Defender" -> "Steel Defender", "Improved
+///   Duplicity" -> "Channel Divinity: Invoke Duplicity").
+/// - Text (class and subclass features only): a feature whose description says an earlier one
+///   improves ("Aura Expansion": "Your Aura of Protection is now ...") goes to the one it names
+///   first.
+fn upgrade_host(out: &[FoldEntry], up: &FoldEntry) -> Option<usize> {
+    let peers = || out.iter().enumerate().filter(|(_, h)| h.scope == up.scope);
+    if is_upgrade_name(&up.data.name) {
+        let stem = upgrade_stem(&up.data.name);
+        if let Some((i, _)) = peers().find(|(_, h)| upgrade_stem(&h.data.name) == stem) {
+            return Some(i);
+        }
+        let suffix = format!(" {stem}");
+        let named = peers().find(|(_, h)| {
+            let host = fold_form(without_level_lead(&h.data.name));
+            // the text may name an option by itself ("Invoke Duplicity" for
+            // "Channel Divinity: Invoke Duplicity")
+            let option = host.rsplit_once(": ").map_or(host.as_str(), |(_, o)| o);
+            host.ends_with(&suffix) && (up.probe.contains(&host) || up.probe.contains(option))
+        });
+        if let Some((i, _)) = named {
+            return Some(i);
+        }
+    }
+    if up.scope.0 != section_rank(FeatureGroup::Class) {
+        return None;
+    }
+    peers()
+        .filter_map(|(i, h)| {
+            growth_mention(&up.probe, &fold_form(without_level_lead(&h.data.name)))
+                .map(|pos| (pos, i))
+        })
+        .min()
+        .map(|(_, i)| i)
+}
+
+/// Folds each upgrade into the feature it improves ([`upgrade_host`]), so a feature that grows
+/// reads as one entry.
+fn fold_upgrades(sorted: Vec<FoldEntry>) -> Vec<FeatureData> {
+    let mut out: Vec<FoldEntry> = Vec::new();
+    for f in sorted {
+        match upgrade_host(&out, &f) {
+            Some(i) => fold_upgrade(&mut out[i].data, f.data),
+            None => out.push(f),
+        }
+    }
+    out.into_iter().map(|f| f.data).collect()
+}
+
 /// Displayed features, de-duplicated by name (sources merged), formulas evaluated and ordered:
-/// per class base before subclass at equal level, then species, feats, background.
+/// per class base before subclass at equal level, then species, feats, background. Upgrades of a
+/// feature are folded into it ([`fold_upgrades`]) and improvement placeholders left out.
 pub(crate) fn features(snap: &CharacterSnapshot) -> Vec<FeatureData> {
     struct Keyed {
         key: (u8, usize, u32, u8, usize),
+        probe: String,
         data: FeatureData,
     }
     let mut out: Vec<Keyed> = Vec::new();
     for (idx, f) in snap.features.iter().enumerate() {
         let name = display_name(&f.name);
         let lower = name.to_lowercase();
-        if !f.displayed || HIDDEN_FEATURES.contains(&lower.as_str()) || lower.ends_with(" subclass")
+        if !f.displayed
+            || HIDDEN_FEATURES.contains(&lower.as_str())
+            || lower.ends_with(" subclass")
+            || is_improvement_placeholder(&f.id)
         {
             continue;
         }
@@ -306,6 +528,11 @@ pub(crate) fn features(snap: &CharacterSnapshot) -> Vec<FeatureData> {
                 ty_rank,
                 idx,
             ),
+            probe: fold_form(&format!(
+                "{} {}",
+                crate::card_model::plain_paragraphs(&f.description),
+                f.sheet_summary.as_deref().unwrap_or_default()
+            )),
             data: FeatureData {
                 id: f.id.clone(),
                 name,
@@ -323,7 +550,15 @@ pub(crate) fn features(snap: &CharacterSnapshot) -> Vec<FeatureData> {
         });
     }
     out.sort_by_key(|k| k.key);
-    out.into_iter().map(|k| k.data).collect()
+    fold_upgrades(
+        out.into_iter()
+            .map(|k| FoldEntry {
+                scope: (k.key.0, k.key.1),
+                probe: k.probe,
+                data: k.data,
+            })
+            .collect(),
+    )
 }
 
 /// Registered element names of the given types, unique, in registration order.

@@ -1,0 +1,6 @@
+# Upstream files we carry changes to while our pull request to TeamBorealis/borealis is open: "<path> <PR url>".
+# Each change must be exactly the PR's patch, so merging upstream after the PR lands makes the diff go away.
+# check-upstream.sh accepts these files and says when one no longer differs (then remove its line).
+crates/borealis-sheet/src/card_model.rs https://github.com/TeamBorealis/borealis/pull/42
+crates/borealis-sheet/src/model_tests.rs https://github.com/TeamBorealis/borealis/pull/42
+crates/borealis-sheet/src/model_text.rs https://github.com/TeamBorealis/borealis/pull/42

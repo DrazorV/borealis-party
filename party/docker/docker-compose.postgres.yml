@@ -1,0 +1,40 @@
+# Borealis Party with its own PostgreSQL, both in this file.
+# Put the passwords in a .env file next to this one (BOREALIS_DB_PASSWORD=...), not in the file itself.
+services:
+  borealis-party:
+    container_name: "borealis-party"
+    image: "ghcr.io/drazorv/borealis-party:latest"
+    depends_on:
+      db:
+        condition: "service_healthy"
+    environment:
+      - "TZ=Europe/Athens"
+      - "PUID=1026"
+      - "PGID=65540"
+      - "BOREALIS__DATABASE__TYPE=postgres"
+      - "BOREALIS__POSTGRES__HOST=db"
+      - "BOREALIS__POSTGRES__PORT=5432"
+      - "BOREALIS__POSTGRES__USER=borealis"
+      - "BOREALIS__POSTGRES__PASSWORD=${BOREALIS_DB_PASSWORD:?set BOREALIS_DB_PASSWORD in .env}"
+      - "BOREALIS__POSTGRES__DATABASE=borealis_party"
+      - "BOREALIS__POSTGRES__SSLMODE=disable"
+    ports:
+      - "8787:8787/tcp"
+    restart: "unless-stopped"
+    volumes:
+      - "/docker/borealis-party/config:/config"
+
+  db:
+    container_name: "borealis-party-db"
+    image: "postgres:18"
+    environment:
+      - "POSTGRES_USER=borealis"
+      - "POSTGRES_PASSWORD=${BOREALIS_DB_PASSWORD:?set BOREALIS_DB_PASSWORD in .env}"
+      - "POSTGRES_DB=borealis_party"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U borealis -d borealis_party"]
+      interval: "10s"
+      retries: 10
+    restart: "unless-stopped"
+    volumes:
+      - "/docker/borealis-party/postgres:/var/lib/postgresql"

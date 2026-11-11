@@ -414,16 +414,52 @@ impl Workspaces {
     }
 }
 
+/// `to` as seen from the folder `from`, so links keep working when the data folder moves (a direct install's data
+/// mounted into the container, say).
+fn relative(from: &Path, to: &Path) -> PathBuf {
+    let from: Vec<_> = from.components().collect();
+    let to: Vec<_> = to.components().collect();
+    let shared = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let mut path = PathBuf::new();
+    for _ in shared..from.len() {
+        path.push("..");
+    }
+    for part in &to[shared..] {
+        path.push(part);
+    }
+    path
+}
+
 /// Make `link_path` a symlink to `target`, if nothing is there yet.
 #[cfg(unix)]
 fn link(target: &Path, link_path: &Path) -> std::io::Result<()> {
     match std::fs::symlink_metadata(link_path) {
         Ok(_) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            std::os::unix::fs::symlink(target, link_path)
+            let from = link_path.parent().unwrap_or(Path::new("."));
+            std::os::unix::fs::symlink(relative(from, target), link_path)
         }
         Err(e) => Err(e),
     }
+}
+
+#[cfg(test)]
+#[test]
+fn links_are_relative() {
+    assert_eq!(
+        relative(
+            Path::new("/config/data/groups/g/members/p"),
+            Path::new("/config/data/users/dm/library")
+        ),
+        Path::new("../../../../users/dm/library")
+    );
+    assert_eq!(
+        relative(
+            Path::new("/d/users/dm/studio"),
+            Path::new("/d/users/dm/library")
+        ),
+        Path::new("../library")
+    );
 }
 
 #[cfg(not(unix))]

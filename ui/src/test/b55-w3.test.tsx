@@ -23,6 +23,11 @@ async function category(user: ReturnType<typeof userEvent.setup>, name: string) 
   return screen.findByRole("table", { name: "Item catalog" });
 }
 
+/** TV1 (A4): the list opens on the character's edition; these cases look at every edition's versions. */
+async function showAllEditions(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(within(await screen.findByRole("group", { name: "Edition" })).getByRole("button", { name: "All" }));
+}
+
 const rowOf = (grid: HTMLElement, name: string) => within(grid).getByRole("button", { name }).closest("tr")!;
 const sourceText = (row: HTMLElement) => row.querySelector(".eq-src")?.textContent;
 
@@ -30,6 +35,7 @@ describe("B-55 W3 equipment add-item list", () => {
   it("groups same-name items into one row; the shown version is the character's edition, imported first", async () => {
     const { user } = await openEquipment();
     const grid = await category(user, "Adventuring Gear");
+    await showAllEditions(user);
     await within(grid).findByRole("button", { name: "Hooded Lantern" });
     expect(within(grid).getAllByRole("button", { name: "Hooded Lantern" })).toHaveLength(1);
     const row = rowOf(grid, "Hooded Lantern");
@@ -43,6 +49,7 @@ describe("B-55 W3 equipment add-item list", () => {
   it("the version menu changes the shown version, and Add adds that version", async () => {
     const { user, api, id } = await openEquipment();
     const grid = await category(user, "Adventuring Gear");
+    await showAllEditions(user);
     await within(grid).findByRole("button", { name: "Hooded Lantern" });
     await user.click(within(rowOf(grid, "Hooded Lantern")).getByRole("button", { name: "3 versions of Hooded Lantern" }));
     const menu = await screen.findByRole("listbox", { name: "Versions of Hooded Lantern" });
@@ -54,6 +61,20 @@ describe("B-55 W3 equipment add-item list", () => {
       const items = (await api.getSnapshot({ characterId: id })).inventory.items;
       expect(items.find((i) => i.itemId === "hooded-lantern")?.quantity).toBe(1);
     });
+  });
+
+  it("gear catalogue opens filtered to the character's edition, and All shows the other edition (TV1 A4, C3)", async () => {
+    const { user } = await openEquipment();
+    const grid = await category(user, "Adventuring Gear");
+    await within(grid).findByRole("button", { name: "Hooded Lantern" });
+    const edition = screen.getByRole("group", { name: "Edition" });
+    expect(within(edition).getByRole("button", { name: "2024" }).getAttribute("aria-pressed")).toBe("true");
+    expect(within(rowOf(grid, "Hooded Lantern")).getByRole("button", { name: "2 versions of Hooded Lantern" })).toBeTruthy();
+    const weapons = await category(user, "Weapons");
+    await within(weapons).findByRole("button", { name: "Dagger" });
+    expect(within(weapons).queryByRole("button", { name: "Trident" })).toBeNull();
+    await showAllEditions(user);
+    expect(await within(weapons).findByRole("button", { name: "Trident" })).toBeTruthy();
   });
 
   it("the Edition filter keeps versions of that edition and edition-neutral items", async () => {
@@ -78,6 +99,7 @@ describe("B-55 W3 equipment add-item list", () => {
   it("the Source checklist keeps several sources", async () => {
     const { user } = await openEquipment();
     const grid = await category(user, "Adventuring Gear");
+    await showAllEditions(user);
     await within(grid).findByRole("button", { name: "Hooded Lantern" });
     await user.click(screen.getByRole("button", { name: "Source: All sources" }));
     const list = await screen.findByRole("dialog", { name: "Sources" });
@@ -91,6 +113,32 @@ describe("B-55 W3 equipment add-item list", () => {
     await user.click(within(list).getByRole("checkbox", { name: /Sample Reference 5\.1/ }));
     await waitFor(() => expect(within(grid).queryByRole("button", { name: "Rope" })).toBeNull());
     expect(within(rowOf(grid, "Hooded Lantern")).queryByRole("button", { name: /versions of/ })).toBeNull();
+  });
+
+  it("a category holding only the other edition lists its items under the character's edition filter (A5)", async () => {
+    // A 2024 character's Trade Goods are all 2014 items (SRD 5.1): the category counted them while the 2024 filter emptied
+    // its list. Here the 2014-only Trident stands in as that category's one item.
+    const api = new MockApi();
+    const id = await seededId(api, "Seraphine");
+    const weapons = await api.searchItems({ category: "Weapons", limit: 1000, characterId: id });
+    const trident = { ...weapons.items.find((i) => i.id === "trident")!, category: "Trade Goods" };
+    const categories = await api.listItemCategories({ characterId: id });
+    vi.spyOn(api, "listItemCategories").mockResolvedValue([...categories, { name: "Trade Goods", count: 1 }]);
+    const search = api.searchItems.bind(api);
+    vi.spyOn(api, "searchItems").mockImplementation(async (q) => (q.category === "Trade Goods" ? { total: 1, items: q.offset ? [] : [trident] } : search(q)));
+    const user = userEvent.setup();
+    renderApp("/equipment", { api, openCharacterId: id });
+    // The filter holds the character's edition (TV1 A4), as the other categories show.
+    await category(user, "Adventuring Gear");
+    expect(within(await screen.findByRole("group", { name: "Edition" })).getByRole("button", { name: "2024" }).getAttribute("aria-pressed")).toBe("true");
+    const goods = await category(user, "Trade Goods");
+    expect(await within(goods).findByRole("button", { name: "Trident" })).toBeTruthy();
+    expect(within(goods).queryByText(/Nothing matches/)).toBeNull();
+    // A list of one edition offers no Edition choice; the next mixed list still holds the character's edition.
+    expect(screen.queryByRole("group", { name: "Edition" })).toBeNull();
+    const gear = await category(user, "Adventuring Gear");
+    await within(gear).findByRole("button", { name: "Hooded Lantern" });
+    expect(within(await screen.findByRole("group", { name: "Edition" })).getByRole("button", { name: "2024" }).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("with strict mode on only the character's edition is listed", async () => {

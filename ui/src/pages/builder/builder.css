@@ -42,6 +42,12 @@
 .desc-source { padding: 0; background: none; border: 0; font: inherit; color: #1e50e6; font-style: italic; text-decoration: underline; text-decoration-color: #1e50e6; text-underline-offset: 2px; cursor: pointer; text-align: left; }
 :root[data-theme="light"] .desc-source { color: #0044aa; text-decoration-color: #0044aa; }
 .desc-pane ul { margin: 0 0 6px; padding-left: 18px; }
+/* A6: a class's later-level grants fold under "Later levels"; each line leads with its level. */
+.desc-grant-lvl { color: var(--gray-5); }
+p.desc-grant-lvl { margin: 0 0 2px; font-style: italic; }
+/* A3: a granted trait's name heads its text, like the trait headings of the element's own description. */
+.desc-grant-h { margin: 10px 0 3px; }
+.desc-later > summary { margin: 4px 0 6px; cursor: pointer; font-weight: 600; color: var(--desc-head); }
 @media (max-width: 899px) {
   .bp-right { border-top: 2px solid var(--highlight); }
   .desc-scroll { overflow: visible; padding: 16px 15px 24px 15px; margin-left: 0; }
@@ -218,6 +224,8 @@
 /* phones: a 44 px tall touch target around the inline action, without moving the text */
 html.phone .pick-why-act { padding: 12px 4px; margin: -12px 0 -12px 2px; }
 html.phone .bp-notices-toggle { min-height: 44px; width: 100%; }
+/* GitHub #37: the notice's Show missing content action, a 44 px touch target on phones */
+html.phone .bp-notices .bp-linkbtn { padding: 12px 4px; margin: -12px 0 -12px 2px; }
 
 /* B3 (GitHub #35): a section's extras the DM grants. The heading row carries "Add <kind>"; each pick is a chosen-pick line
    (a picker's footer) with the "Added" chip (neutral, the square chip of the edition marks) and the remove button. */
@@ -246,3 +254,22 @@ html.phone .bp-notices-toggle { min-height: 44px; width: 100%; }
   .added-add { min-height: 44px; }
   .addpick-list button { min-height: 44px; }
 }
+
+/* U24 (tester B5, B8, B11 on desktop): additions beyond Aurora, drawn with the page's own Aurora pieces. Phones keep their
+   own look (styles/phone/build.css), so these rules stay off `html.phone`. */
+/* B8: the granted feats lead the Feats tab as locked chosen-pick lines (the Added feats section's look). */
+html:not(.phone) .added-picks.granted-feats { margin: 0 0 14px 10px; }
+/* B5: a background ability option's scores, read like the description pane's fact lines: "Intelligence. 8 → 9 (−1 → +0)". */
+html:not(.phone) .abil-opt { margin: 0 0 6px; }
+html:not(.phone) .abil-opt-row { display: flex; flex-wrap: wrap; gap: 0 5px; margin: 0 0 6px; }
+html:not(.phone) .abil-opt-row dt { font-style: italic; }
+html:not(.phone) .abil-opt-row dt::after { content: "."; }
+html:not(.phone) .abil-opt-row dd { margin: 0; font-variant-numeric: tabular-nums; }
+html:not(.phone) .abil-opt-mod { color: var(--gray-5); }
+html:not(.phone) .abil-opt-mod::before { content: "("; }
+html:not(.phone) .abil-opt-mod::after { content: ")"; }
+/* B11: "Suggested for <class>" sits under the method row, labelled like it (10 px caps), with the six values and an Aurora button. */
+html:not(.phone) .abil-suggest { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; min-width: 0; font-size: var(--fs-xs); text-transform: uppercase; }
+html:not(.phone) .abil-suggest-text { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; min-width: 0; }
+html:not(.phone) .abil-suggest-title { margin: 0; font-size: 10px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+html:not(.phone) .abil-suggest-scores { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }

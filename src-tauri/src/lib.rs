@@ -29,6 +29,7 @@ pub mod attack_rows;
 pub mod book_editions;
 pub mod builder;
 pub mod bundled_content;
+pub mod caster_ids;
 pub mod commands;
 #[cfg(debug_assertions)]
 pub mod commands_acceptance;
@@ -58,8 +59,10 @@ pub mod companion;
 pub mod companion_api;
 pub mod companion_block;
 pub mod companion_list;
+pub mod companion_stat_lines;
 pub mod compendium;
 mod compendium_monster;
+mod element_grants;
 // The only module allowed `unsafe` (Windows console FFI); see src-tauri/Cargo.toml [lints].
 pub mod base_items;
 #[allow(unsafe_code)]
@@ -71,6 +74,7 @@ pub mod content_fetch_retry;
 pub mod content_fetch_text;
 pub mod content_fetch_tls;
 pub mod content_fivetools_fetch;
+pub mod content_fivetools_files;
 pub mod content_fivetools_remote;
 pub mod content_fivetools_url;
 pub mod content_fivetools_zip;
@@ -157,6 +161,7 @@ pub mod session;
 pub mod settings;
 pub mod settings_dto;
 pub mod sheet_api;
+pub mod sheet_save;
 pub mod snapshot_map;
 pub mod start_over;
 pub mod startup;
@@ -465,6 +470,7 @@ pub fn run() {
             commands_content::clear_downloaded_content,
             commands_content::scan_5etools_folder,
             commands_content::stage_5etools_zip,
+            commands_content::stage_5etools_files,
             commands_content::stage_5etools_url,
             commands_content::list_5etools_urls,
             commands_content::remove_5etools_url,

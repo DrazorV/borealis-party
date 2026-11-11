@@ -4,7 +4,87 @@ Borealis Party is Borealis with a multi-user server: Dungeon Master and player a
 DM. The server runs the Borealis rules engine and stores everything. Browsers, the Android app and the desktop app are
 clients.
 
-## Install on Linux
+## Run with Docker
+
+`docker-compose.yml` and `docker-compose.postgres.yml` are in `party/docker`. With SQLite:
+
+```yaml
+services:
+  borealis-party:
+    container_name: "borealis-party"
+    image: "ghcr.io/drazorv/borealis-party:latest"
+    environment:
+      - "TZ=Europe/Athens"
+      - "PUID=1026"
+      - "PGID=65540"
+    network_mode: "bridge"
+    ports:
+      - "8787:8787/tcp"
+    restart: "unless-stopped"
+    volumes:
+      - "/docker/borealis-party/config:/config"
+```
+
+Everything the server keeps is in `/config`: `config.toml`, the SQLite database and the `data` folder with characters
+and content. Back up that folder to back up the instance. `PUID` and `PGID` choose who owns those files on the host,
+and `TZ` sets the time zone.
+
+To build the image yourself, from the repository root:
+
+```sh
+docker build -f party/docker/Dockerfile -t ghcr.io/drazorv/borealis-party:latest .
+```
+
+## Settings
+
+On first start the server writes `config.toml` into its config folder, with every setting explained. Edit it and
+restart, or set any setting as an environment variable named `BOREALIS__<SECTION>__<KEY>`, which wins over the file.
+Put passwords in variables rather than in the file.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `BOREALIS__SERVER__BIND` | `0.0.0.0:8787` | Address and port |
+| `BOREALIS__SERVER__OPEN_REGISTRATION` | `true` | Anyone who can reach the server may sign up |
+| `BOREALIS__SERVER__MAX_UPLOAD_MB` | `512` | Largest upload |
+| `BOREALIS__DATABASE__TYPE` | `sqlite` | `sqlite` or `postgres` |
+| `BOREALIS__SQLITE__PATH` | `party.db` | SQLite file, relative to the config folder |
+| `BOREALIS__POSTGRES__HOST` | `localhost` | PostgreSQL server |
+| `BOREALIS__POSTGRES__PORT` | `5432` | |
+| `BOREALIS__POSTGRES__USER` | `borealis` | |
+| `BOREALIS__POSTGRES__PASSWORD` | | Required with `postgres` |
+| `BOREALIS__POSTGRES__DATABASE` | `borealis_party` | Must exist; the server creates its tables |
+| `BOREALIS__POSTGRES__SSLMODE` | `prefer` | `disable`, `prefer` or `require` |
+| `BOREALIS__PATHS__DATA` | `data` | Characters and content, relative to the config folder |
+| `BOREALIS__INITIAL_DM__USERNAME` | | With the password, creates a DM on a server with no accounts |
+| `BOREALIS__INITIAL_DM__PASSWORD` | | |
+| `BOREALIS__LOG__LEVEL` | `info` | `error` to `trace` |
+
+The config folder itself is `/config` in the container. For a direct install it is set by `BOREALIS_CONFIG_DIR` (one
+underscore), which the service file sets to `/var/lib/borealis-party`.
+
+Characters and content packs always stay as files in the data folder, whichever database you choose. The database holds
+accounts, sessions and groups.
+
+### Moving from SQLite to PostgreSQL
+
+1. Create an empty PostgreSQL database and a user that owns it.
+2. Set `BOREALIS__DATABASE__TYPE=postgres` and the `BOREALIS__POSTGRES__*` variables, then restart.
+
+On that first start the server finds PostgreSQL empty and the old SQLite file still in the config folder, and copies
+accounts, sign-ins, groups, invitations and memberships across in one transaction. Everyone stays signed in. The log
+says what was copied, for example `moved to PostgreSQL: users 3, sessions 4, party_groups 1, invites 0, members 2`.
+
+The SQLite file is left as it was, so you can go back by setting the type to `sqlite` again. Once PostgreSQL has
+accounts the file is never copied again. Delete it when you are happy. To run the copy by hand instead, for example
+from another file:
+
+```sh
+docker exec borealis-party /app/borealis-server migrate-sqlite --from /config/party.db
+```
+
+It refuses if PostgreSQL already has accounts or groups, and saves nothing if anything fails.
+
+## Install on Linux without Docker
 
 Build the release on a Linux machine of the same architecture (needs Rust and Node 20+):
 
@@ -20,10 +100,9 @@ cd borealis-party-*/
 sudo ./install.sh
 ```
 
-The service is `borealis-party`. It listens on port 8787 and keeps its data in `/var/lib/borealis-party`. Settings are in
-`/etc/borealis-party/server.env`. Back up `/var/lib/borealis-party` to back up everything.
-
-Running `install.sh` from a newer release upgrades in place and leaves the data alone.
+The service is `borealis-party`. Its config folder is `/var/lib/borealis-party`, holding `config.toml`, the database and
+the data. Passwords and other variables go in `/etc/borealis-party/server.env`. Back up `/var/lib/borealis-party` to
+back up everything. Running `install.sh` from a newer release upgrades in place and leaves the data alone.
 
 ## Connect
 
@@ -36,14 +115,15 @@ On the open internet, put the server behind a reverse proxy that terminates HTTP
 address. Plain HTTP is only sensible on a network you trust, because passwords and session tokens would cross it
 unencrypted.
 
-Set `BOREALIS_OPEN_REGISTRATION=false` if strangers can reach the server, and create accounts with:
+If strangers can reach the server, set `BOREALIS__SERVER__OPEN_REGISTRATION=false`. Create the first DM with the
+`INITIAL_DM` variables, and other accounts with:
 
 ```sh
-sudo -u borealis-party /opt/borealis-party/borealis-server add-user <name> <dm|player>
+docker exec -i borealis-party /app/borealis-server add-user <name> <dm|player>
 ```
 
-The password is read from standard input. The command needs the same `BOREALIS_*` settings as the service, or the default
-paths.
+The password is read from standard input. For a direct install, run
+`sudo -u borealis-party env BOREALIS_CONFIG_DIR=/var/lib/borealis-party /opt/borealis-party/borealis-server add-user ...`.
 
 ## How it works
 
@@ -74,6 +154,10 @@ sh party/check-upstream.sh
 
 Our code lives only in `party/` and `ui/party/`, folders upstream never touches, so merges don't conflict. The one exception
 is a 3-line hook in `src-tauri/src/state.rs`. `check-upstream.sh` fails if anything else in upstream's files changes.
+
+A fix we send upstream can be carried here before it is merged: apply exactly the pull request's commits and list each
+file with the PR's link in `party/upstream-pending.txt`. The check accepts those files, and once upstream merges the PR and
+we merge upstream, it says which lines to remove.
 
 How that works:
 

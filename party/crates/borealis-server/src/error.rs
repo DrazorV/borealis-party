@@ -36,12 +36,6 @@ impl ApiError {
     }
 }
 
-impl From<rusqlite::Error> for ApiError {
-    fn from(e: rusqlite::Error) -> Self {
-        Self::Internal(format!("database: {e}"))
-    }
-}
-
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, body) = match self {

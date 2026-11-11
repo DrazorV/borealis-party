@@ -315,6 +315,198 @@ fn shared_class_features_merge_their_sources() {
 }
 
 #[test]
+fn improvement_placeholders_are_left_out_but_their_feat_stays() {
+    use borealis_engine::snapshot::FeatureDetail;
+    let (c, mut snap) = fighter_wizard_2014();
+    let base: FeatureDetail = snap
+        .features
+        .iter()
+        .find(|f| f.name == "Second Wind")
+        .expect("fighter feature")
+        .clone();
+    let placeholder = FeatureDetail {
+        id: "ID_INTERNAL_CLASS_FEATURE_FEAT_8_FIGHTER".into(),
+        name: "Feat (8)".into(),
+        level: 8,
+        granted_by: Some("Ability Score Improvement".into()),
+        sheet_summary: Some(
+            "Template for taking a feat instead of an ability score improvement.".into(),
+        ),
+        ..base.clone()
+    };
+    let asi = FeatureDetail {
+        id: "ID_INTERNAL_CLASS_FEATURE_ASI_4_FIGHTER".into(),
+        name: "Ability Score Improvement (4)".into(),
+        level: 4,
+        ..placeholder.clone()
+    };
+    let feat = FeatureDetail {
+        id: "ID_TEST_FEAT_ALERT".into(),
+        name: "Alert".into(),
+        ty: "Feat".into(),
+        level: 8,
+        granted_by: Some("Feat (8)".into()),
+        sheet_summary: Some("You can't be surprised while you are conscious.".into()),
+        ..base
+    };
+    snap.features.extend([placeholder, asi, feat]);
+    let d = crate::sheet_data(&c, &snap, &SpellFactsMap::new());
+    let names: Vec<_> = d.features.iter().map(|f| f.name.as_str()).collect();
+    assert!(!names.contains(&"Feat (8)"), "{names:?}");
+    assert!(
+        !names.contains(&"Ability Score Improvement (4)"),
+        "{names:?}"
+    );
+    assert!(names.contains(&"Alert"), "{names:?}");
+}
+
+#[test]
+fn upgrades_fold_into_the_feature_they_improve() {
+    use borealis_engine::snapshot::FeatureDetail;
+    let (c, mut snap) = fighter_wizard_2014();
+    let base: FeatureDetail = snap
+        .features
+        .iter()
+        .find(|f| f.name == "Second Wind")
+        .expect("fighter feature")
+        .clone();
+    let base_text = data(&(c.clone(), snap.clone()))
+        .features
+        .into_iter()
+        .find(|f| f.name == "Second Wind")
+        .unwrap()
+        .text;
+    snap.features.push(FeatureDetail {
+        id: "ID_TEST_IMPROVED_SECOND_WIND".into(),
+        name: "Improved Second Wind".into(),
+        level: 10,
+        sheet_summary: Some("You regain 2d10 hit points instead.".into()),
+        ..base.clone()
+    });
+    snap.features.push(FeatureDetail {
+        id: "ID_TEST_SUPERIOR_SECOND_WIND".into(),
+        name: "Level 18: Superior Second Wind".into(),
+        level: 18,
+        granted_by: Some("Wizard".into()),
+        sheet_summary: Some("You regain 3d10 hit points instead.".into()),
+        ..base.clone()
+    });
+    // an "Improved" feature of another section is its own entry
+    snap.features.push(FeatureDetail {
+        id: "ID_TEST_GREATER_SECOND_WIND_TRAIT".into(),
+        name: "Greater Second Wind".into(),
+        ty: "Racial Trait".into(),
+        level: 1,
+        sheet_summary: Some("A racial version.".into()),
+        ..base
+    });
+    let d = data(&(c, snap));
+    let fighter: Vec<_> = d
+        .features
+        .iter()
+        .filter(|f| f.name.contains("Second Wind") && f.group != FeatureGroup::Species)
+        .collect();
+    assert_eq!(fighter.len(), 2, "{fighter:?}");
+    let host = fighter.iter().find(|f| f.name == "Second Wind").unwrap();
+    assert!(host.text.starts_with(&base_text), "{}", host.text);
+    assert!(
+        host.text
+            .ends_with("\nImproved Second Wind (level 10). You regain 2d10 hit points instead."),
+        "{}",
+        host.text
+    );
+    // an upgrade granted by another class is not folded into this one
+    assert!(fighter
+        .iter()
+        .any(|f| f.name == "Level 18: Superior Second Wind"));
+    assert!(d
+        .features
+        .iter()
+        .any(|f| f.group == FeatureGroup::Species && f.name == "Greater Second Wind"));
+}
+
+#[test]
+fn upgrades_named_otherwise_fold_by_what_they_say() {
+    use borealis_engine::snapshot::FeatureDetail;
+    let (c, mut snap) = fighter_wizard_2014();
+    let base: FeatureDetail = snap
+        .features
+        .iter()
+        .find(|f| f.name == "Second Wind")
+        .expect("fighter feature")
+        .clone();
+    let feature = |id: &str, name: &str, level: u32, html: &str| FeatureDetail {
+        id: id.into(),
+        name: name.into(),
+        level,
+        description: html.into(),
+        sheet_summary: None,
+        ..base.clone()
+    };
+    snap.features.extend([
+        feature(
+            "ID_TEST_INVOKE_DUPLICITY",
+            "Channel Divinity: Invoke Duplicity",
+            2,
+            "<p>You create an illusory duplicate of yourself.</p>",
+        ),
+        // "Group: Option" named by its option alone
+        feature(
+            "ID_TEST_IMPROVED_DUPLICITY",
+            "Improved Duplicity",
+            17,
+            "<p>You create up to four duplicates when you use Invoke Duplicity.</p>",
+        ),
+        feature(
+            "ID_TEST_STEEL_DEFENDER",
+            "Steel Defender",
+            3,
+            "<p>A construct defends you.</p>",
+        ),
+        // "Improved X" whose X ends a longer name the text spells out
+        feature(
+            "ID_TEST_IMPROVED_DEFENDER",
+            "Improved Defender",
+            15,
+            "<p>Your Steel Defender gains a +2 bonus to Armor Class.</p>",
+        ),
+        // a name sharing nothing, a description that says the earlier feature improves
+        feature(
+            "ID_TEST_WIND_EXPANSION",
+            "Wind Expansion",
+            18,
+            "<p>18th-level feature. Your Second Wind now also ends one condition.</p>",
+        ),
+        // a condition on the earlier feature, not an improvement of it
+        feature(
+            "ID_TEST_CALM_MIND",
+            "Calm Mind",
+            7,
+            "<p>While in your Second Wind, you become calm.</p>",
+        ),
+    ]);
+    let d = data(&(c, snap));
+    let names: Vec<_> = d.features.iter().map(|f| f.name.as_str()).collect();
+    for gone in ["Improved Defender", "Wind Expansion", "Improved Duplicity"] {
+        assert!(!names.contains(&gone), "{gone} still listed: {names:?}");
+    }
+    assert!(names.contains(&"Calm Mind"), "{names:?}");
+    let text = |n: &str| &d.features.iter().find(|f| f.name == n).unwrap().text;
+    assert!(
+        text("Steel Defender").ends_with(
+            "\nImproved Defender (level 15). Your Steel Defender gains a +2 bonus to Armor Class."
+        ),
+        "{}",
+        text("Steel Defender")
+    );
+    assert!(
+        text("Second Wind").contains("\nWind Expansion (level 18). "),
+        "{}",
+        text("Second Wind")
+    );
+}
+
+#[test]
 fn play_state_fields_exist_as_blank_write_ins() {
     let d = data(&wizard_2014());
     assert_eq!((d.play.current_hp, d.play.temp_hp), (None, None));
@@ -545,7 +737,14 @@ fn caster_modifier_matches_the_ability_and_the_save_dc() {
         fighter_wizard_2014(),
     ] {
         let d = data(&pair);
-        for c in &d.spellcasting.casters {
+        // a block without a casting ability ("Other Spells", a feat's spells before its ability
+        // is chosen) prints blank modifier and DC boxes instead
+        for c in d
+            .spellcasting
+            .casters
+            .iter()
+            .filter(|c| !c.ability_name.is_empty())
+        {
             let ability = d
                 .abilities
                 .iter()

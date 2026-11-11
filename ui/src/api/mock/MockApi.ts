@@ -18,6 +18,7 @@ import * as rolled from "./rolled-charges";
 import * as added from "./added-picks";
 import { MockAppUpdate, recordOpenedLink } from "./app-update";
 import { classCounts, setClasslessEdition, startedOver } from "./edition-classes";
+import { setBackgroundAbilityList } from "./background-options";
 import { MockDataFiles } from "./data-files";
 import { MockPortraitLibrary } from "./portrait-library";
 import { MockVault } from "./vault";
@@ -78,6 +79,8 @@ export interface MockApiOptions {
   semantic?: Partial<MockSemanticOptions>;
   /** U14 scenario: this edition has no classes (as with every book of it switched off). */
   classlessEdition?: Ruleset | null;
+  /** Tester B5: 2024 backgrounds offer their ability increases as one list of options, as the engine does (`?mockAbilityOptions=1`). */
+  backgroundAbilityList?: boolean;
   /** C1 scenario (GitHub #11): the seeded characters carry content notices, as with a large homebrew set installed. */
   contentNotices?: boolean;
   /** B-191: Deity element names the content offers (Manage > Deity lists them; default none, as the SRD). */
@@ -137,6 +140,7 @@ export class MockApi implements Api {
     this.settings = { ...this.settings, mobile: this.mobile, storeBuild: this.storeBuild, aiAvailable: this.aiCli, ai: { ...this.settings.ai, enabled: this.aiCli && (opts.aiEnabled ?? false) } };
     this.rng = opts.rng ?? Math.random;
     setClasslessEdition(opts.classlessEdition ?? null);
+    setBackgroundAbilityList(opts.backgroundAbilityList ?? false);
     setMockDeities(opts.deities ?? []);
     this.content = new ContentService((p) => this.emit("content:progress", p), () => this.emit("content:reloaded", { reason: "content changed" }), (p) => this.emit("import5etools:progress", p));
     this.ai = new MockAi((e) => this.emit("ai:event", e), { chunkDelayMs: opts.aiChunkDelayMs ?? 25, available: opts.aiAvailable ?? true });
@@ -183,7 +187,10 @@ export class MockApi implements Api {
   private snap(c: MockCharacter): CharacterSnapshot {
     const { character, snapshot } = buildSnapshot(c, this.rules);
     this.chars.set(character.id, character);
-    return snapshot;
+    // As the backend: the import notice counts what is missing, and the snapshot lists it (GitHub #37).
+    const missing = this.missingByChar.get(character.id) ?? [];
+    if (missing.length === 0) return snapshot;
+    return { ...snapshot, missingContent: missing, notices: [...snapshot.notices, `Imported from mock-import 1.0: ${missing.length} content element(s) were not found.`] };
   }
 
   /** Runs a pure update, marks the character dirty, clears transient warnings, returns the snapshot. */
@@ -617,10 +624,11 @@ export class MockApi implements Api {
     return { fileName: `${this.get(characterId).name}.html`, mime: "text/html", path: null, dataBase64: b64(html) };
   }
 
-  /** The web mock has no native share sheet: the UI shares the exported bytes itself. */
-  async shareSheet({ characterId }: Parameters<Api["shareSheet"]>[0]): Promise<SheetShare> {
+  /** The web mock has no native share sheet: it answers the bytes and the UI shares them itself. */
+  async shareSheet({ characterId, options }: Parameters<Api["shareSheet"]>[0]): Promise<SheetShare> {
     await this.tick();
-    return { fileName: `${this.get(characterId).name}.pdf`, shared: false };
+    const html = renderSheetHtml(this.snap(this.get(characterId)), this.sheetPaper(options));
+    return { fileName: `${this.get(characterId).name}.html`, shared: false, mime: "text/html", dataBase64: b64(html) };
   }
 
   /* ---------- compendium & content ---------- */
@@ -665,6 +673,7 @@ export class MockApi implements Api {
   async updateIndexes() { await this.tick(); return this.content.update(); }
   async scan5etoolsFolder({ folder }: { folder: string }) { await this.tick(); return this.content.scan5etools(this.picks.resolve(folder, "5etools-folder")); }
   async stage5etoolsZip({ file }: Parameters<Api["stage5etoolsZip"]>[0]) { await this.tick(); return this.picks.stageZip(file); }
+  async stage5etoolsFiles({ files }: Parameters<Api["stage5etoolsFiles"]>[0]) { await this.tick(); return this.picks.stageFiles(files); }
   async import5etools({ request }: Parameters<Api["import5etools"]>[0]) {
     await this.tick();
     const report = this.content.import5etools(this.picks.resolve(request.folder, "5etools-folder"), request);

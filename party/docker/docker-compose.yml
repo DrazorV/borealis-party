@@ -1,0 +1,31 @@
+# Borealis Party with SQLite: everything lives in the mounted /config folder.
+# On first start the server writes /config/config.toml with every setting explained.
+# Any setting can be set here instead, as BOREALIS__<SECTION>__<KEY>.
+services:
+  borealis-party:
+    container_name: "borealis-party"
+    image: "ghcr.io/drazorv/borealis-party:latest"
+    # Or build it yourself from a checkout of the repository:
+    # build:
+    #   context: "../.."
+    #   dockerfile: "party/docker/Dockerfile"
+    environment:
+      - "TZ=Europe/Athens"
+      - "PUID=1026"
+      - "PGID=65540"
+      # - "BOREALIS__SERVER__OPEN_REGISTRATION=false"
+      # - "BOREALIS__INITIAL_DM__USERNAME=dm"
+      # - "BOREALIS__INITIAL_DM__PASSWORD=change-me"
+      # PostgreSQL instead of SQLite:
+      # - "BOREALIS__DATABASE__TYPE=postgres"
+      # - "BOREALIS__POSTGRES__HOST=172.20.20.247"
+      # - "BOREALIS__POSTGRES__PORT=5432"
+      # - "BOREALIS__POSTGRES__USER=borealis_user"
+      # - "BOREALIS__POSTGRES__PASSWORD=change-me"
+      # - "BOREALIS__POSTGRES__DATABASE=borealis_party"
+    network_mode: "bridge"
+    ports:
+      - "8787:8787/tcp"
+    restart: "unless-stopped"
+    volumes:
+      - "/docker/borealis-party/config:/config"

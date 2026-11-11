@@ -1,12 +1,14 @@
-import { useState, type CSSProperties, type KeyboardEvent } from "react";
+import { Fragment, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router";
-import type { RowHeight, SelectionSlot } from "../../api/contract";
+import type { RowHeight, Ruleset, SelectionSlot } from "../../api/contract";
 import { Expander, FocusBar, Icon, PrereqUnmetMark } from "../../components";
 import { useSettings } from "../../state/SettingsContext";
 import { usePhone } from "../../lib/phone";
-import { NO_FILTER, type ShownRow, type VersionLike } from "../../lib/versions";
+import { slotTitle } from "../../lib/terminology";
+import type { ShownRow, VersionLike } from "../../lib/versions";
+import { DescriptionPane } from "./DescriptionPane";
 import { PickerFilterBar } from "./PickerFilterBar";
-import { ElementSource, type MasteryLine, PickerRow } from "./PickerRow";
+import { ElementSource, PickerRow } from "./PickerRow";
 import { usePickerRows, useSwitchVersion } from "./usePickerRows";
 import { VersionMenu } from "./VersionMenu";
 import { EmptyListNote } from "./EmptyListNote";
@@ -23,10 +25,13 @@ export const PICKER_ROW_PX: Record<RowHeight, number> = { small: 17, medium: 21,
 
 export interface SlotGroup { key: string; label: string | null; title: string; slots: SelectionSlot[] }
 
-/** One expander per pick: a "2 of 3" rule is three separate pickers, each with its own footer line. */
-export function groupSlots(slots: SelectionSlot[]): SlotGroup[] {
+/**
+ * One expander per pick: a "2 of 3" rule is three separate pickers, each with its own footer line. The species picker takes
+ * the character's ruleset word (A15), as its tab does.
+ */
+export function groupSlots(slots: SelectionSlot[], ruleset?: Ruleset | null): SlotGroup[] {
   // E31 SO-3: a locked slot (sole defaulted option, held) cannot change or clear and Aurora does not show it.
-  return slots.filter((s) => !s.locked).map((s) => ({ key: s.id, label: s.groupLabel, title: s.title, slots: [s] }));
+  return slots.filter((s) => !s.locked).map((s) => ({ key: s.id, label: s.groupLabel, title: slotTitle(s, ruleset), slots: [s] }));
 }
 
 /**
@@ -41,11 +46,18 @@ export const isMasterySlot = (slot: Pick<SelectionSlot, "elementType" | "title">
 /** A row that can still be chosen: phones show "Choose <name>" for it under the list (B-48 O2). */
 export interface PickChoice { slotId: string; name: string; choose: () => void }
 
+/** Where a description came from: a picker row (A2: phones open it under that row). */
+export interface DescribeAt {
+  slotId: string;
+  /** A tap on the row itself (not a version pick): on phones a second tap on the open row closes it. */
+  toggle: boolean;
+}
+
 /**
  * Describe callback: `isElement` is false for list entries, which highlight but have no element description. `choice` is
- * set when the described row can be chosen (not already chosen, not disabled).
+ * set when the described row can be chosen (not already chosen, not disabled); `at` when a picker row asked.
  */
-export type DescribeFn = (id: string, isElement?: boolean, choice?: PickChoice) => void;
+export type DescribeFn = (id: string, isElement?: boolean, choice?: PickChoice, at?: DescribeAt) => void;
 
 interface Props {
   characterId: string;
@@ -57,6 +69,8 @@ interface Props {
   onDescribe: DescribeFn;
   onChoose: (slotId: string, elementId: string) => void;
   onClear: (slotId: string) => void;
+  /** A2 / TV1 (phones): the element whose description opens inline, directly under its row in this picker. */
+  inlineId?: string | null;
 }
 
 /** Up/Down on a row moves to the next or previous row and describes it. */
@@ -64,7 +78,10 @@ function onKeyNav(e: KeyboardEvent<HTMLButtonElement>) {
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
   e.preventDefault();
   const li = e.currentTarget.closest("li") as HTMLElement | null;
-  const sib = (e.key === "ArrowDown" ? li?.nextElementSibling : li?.previousElementSibling) as HTMLElement | null;
+  const step = (el: Element | null | undefined) => (e.key === "ArrowDown" ? el?.nextElementSibling : el?.previousElementSibling);
+  // A2: an open inline description sits between rows; skip it.
+  let sib = step(li);
+  while (sib && !sib.classList.contains("pick-row")) sib = step(sib);
   const btn = sib?.querySelector<HTMLButtonElement>("button.pick-main");
   if (btn) { btn.focus(); btn.click(); }
 }
@@ -73,7 +90,7 @@ function onKeyNav(e: KeyboardEvent<HTMLButtonElement>) {
  * One classic builder selection picker: focus bar + expander (filter bar, one row per name) + chosen/remaining footer.
  * B-55: rows group same-name versions; the version column's menu picks the shown version (and switches a chosen row).
  */
-export function PickerGroup({ characterId, group, isNext, open, onToggle, describedId, onDescribe, onChoose, onClear }: Props) {
+export function PickerGroup({ characterId, group, isNext, open, onToggle, describedId, onDescribe, onChoose, onClear, inlineId = null }: Props) {
   const navigate = useNavigate();
   const { settings } = useSettings();
   const rowPx = PICKER_ROW_PX[settings.rowHeight] ?? PICKER_ROW_PX.medium;
@@ -92,17 +109,16 @@ export function PickerGroup({ characterId, group, isNext, open, onToggle, descri
   const [notesFor, setNotesFor] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ key: string; anchor: HTMLElement } | null>(null);
   const menuRow = menu ? visible.find((r) => r.key === menu.key) ?? null : null;
-  // A7 / TV2 (A12): on phones a Weapon Mastery row names its mastery on the source line (the source only when rows differ).
+  // TV2 (A12): on phones a list whose rows share one source drops the per-row source line (the row's name still says it).
+  const hideSource = phone && new Set(visible.map((r) => r.shown.sourceName)).size <= 1;
+  // A7 / TV2 (A12): on phones a Weapon Mastery row names its mastery on that line instead.
   const masteryRows = phone && isMasterySlot(slot);
-  const oneSource = new Set(visible.map((r) => r.shown.sourceName)).size <= 1;
-  const masteryOf = (row: ShownRow): MasteryLine | null => {
-    const name = masteryRows ? row.shown.weapon?.mastery : null;
-    return name ? { name, hideSource: oneSource } : null;
-  };
+  const masteryOf = (row: ShownRow): string | null => (masteryRows ? row.shown.weapon?.mastery ?? null : null);
 
   const choiceOf = (row: ShownRow, v: VersionLike): PickChoice | undefined =>
     row.chosen || v.disabledReason ? undefined : { slotId: slot.id, name: row.name, choose: () => onChoose(slot.id, v.id) };
-  const describe = (row: ShownRow, v: VersionLike = row.shown) => onDescribe(v.id, !list, choiceOf(row, v));
+  const describe = (row: ShownRow, v: VersionLike = row.shown, toggle = false) =>
+    onDescribe(v.id, !list, choiceOf(row, v), { slotId: slot.id, toggle });
   /** Sec. 1.4: the picked version becomes the row's shown version; on the chosen row it also switches the choice. */
   const pickVersion = (row: ShownRow, v: VersionLike) => {
     menu?.anchor.focus();
@@ -127,21 +143,27 @@ export function PickerGroup({ characterId, group, isNext, open, onToggle, descri
             <EmptyListNote slot={slot} ruleset={ruleset} onManageSources={() => navigate(SOURCES_ROUTE)} onStartOver={(ed) => void startOver(ed)} onEditionOptions={openEditionFlyout} />
           )}
           {picker.showBar && (
-            <PickerFilterBar title={group.title} filter={picker.filter} onChange={picker.setFilter} sources={picker.sources} shown={visible.length} total={rows.length} />
+            <PickerFilterBar title={group.title} filter={picker.filter} onChange={picker.setFilter} sources={picker.sources} editions={picker.editions} cleared={picker.cleared} shown={visible.length} total={rows.length} />
           )}
           {rows.length > 0 && visible.length === 0 && (
-            <p className="pick-empty pick-fempty">Nothing matches these filters. <button type="button" className="pick-fclear" onClick={() => picker.setFilter(NO_FILTER)}>Clear</button></p>
+            <p className="pick-empty pick-fempty">Nothing matches these filters. <button type="button" className="pick-fclear" onClick={() => picker.setFilter(picker.cleared)}>Clear</button></p>
           )}
           <ul className={`pick-list ${showDescription ? "with-desc" : ""}`} aria-label={`${group.title} options`}>
             {/* Phones: skeleton rows in the list's own shape while the options load (spec sec. 3.4 Loading). */}
             {phone && !allLocked && options.loading && !options.data && SKELETON_ROWS.map((k) => <li key={k} className="pick-skel" aria-hidden="true" />)}
             {visible.map((row) => (
-              <PickerRow key={row.key} row={row} listSlot={list} showDescription={showDescription} versionColumn={picker.versionColumn}
-                highlighted={row.versions.some((v) => v.id === describedId)} menuOpen={menu?.key === row.key}
-                notesOpen={notesFor === row.key} notesId={`pick-notes-${slot.id}-${row.shown.id}`}
-                onToggleNotes={() => setNotesFor(notesFor === row.key ? null : row.key)}
-                onDescribe={() => describe(row)} onChoose={() => onChoose(slot.id, row.shown.id)}
-                onOpenMenu={(anchor) => setMenu(menu?.key === row.key ? null : { key: row.key, anchor })} onKeyNav={onKeyNav} mastery={masteryOf(row)} />
+              <Fragment key={row.key}>
+                <PickerRow row={row} listSlot={list} showDescription={showDescription} versionColumn={picker.versionColumn}
+                  highlighted={row.versions.some((v) => v.id === describedId)} menuOpen={menu?.key === row.key}
+                  notesOpen={notesFor === row.key} notesId={`pick-notes-${slot.id}-${row.shown.id}`}
+                  onToggleNotes={() => setNotesFor(notesFor === row.key ? null : row.key)}
+                  onDescribe={() => describe(row, row.shown, true)} onChoose={() => onChoose(slot.id, row.shown.id)}
+                  onOpenMenu={(anchor) => setMenu(menu?.key === row.key ? null : { key: row.key, anchor })} onKeyNav={onKeyNav} mastery={masteryOf(row)} hideSource={hideSource} />
+                {/* A2 / TV1 (phones): the tapped row's description, directly under it. */}
+                {inlineId && !list && row.versions.some((v) => v.id === inlineId) && (
+                  <li className="pick-inline"><DescriptionPane elementId={inlineId} fallback={null} /></li>
+                )}
+              </Fragment>
             ))}
           </ul>
         </Expander>

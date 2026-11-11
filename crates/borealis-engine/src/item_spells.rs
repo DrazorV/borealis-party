@@ -50,6 +50,7 @@ pub(crate) fn entry(graph: &Graph<'_>, node: &Node<'_>) -> SpellEntry {
         known: true,
         damage: crate::spells::cantrip_damage(node.e, graph.total_level()),
         granted_by: crate::spells::spell_grant(graph, node),
+        no_slot: false,
     }
 }
 
@@ -83,6 +84,7 @@ pub(crate) fn block(
         prepared_change: None,
         ritual_source: None,
         extended_lists: Vec::new(),
+        other: false,
     }
 }
 

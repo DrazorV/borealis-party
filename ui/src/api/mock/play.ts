@@ -1,4 +1,4 @@
-import type { ConversionPreview, PlayHitDice, PlayResource, PlayState, PlayToggle, PlayWildShape, SpellcastingState } from "../types";
+import type { ConversionPreview, PlayFeature, PlayHitDice, PlayResource, PlayState, PlayToggle, PlayWildShape, SpellcastingState } from "../types";
 import { getClass, getElement, getItem, titleCase } from "./content";
 import { apiError } from "./errors";
 import { chargeResources } from "./rolled-charges";
@@ -25,6 +25,10 @@ export interface MockPlay {
 export const emptyPlay = (): MockPlay => ({ used: {}, toggles: [], exhaustion: 0, inspiration: false, masteries: [], forms: [], packages: {} });
 const playOf = (c: MockCharacter): MockPlay => c.play ?? emptyPlay();
 const MAX_EXHAUSTION = 6;
+/** The mastery properties of a mock weapon (its `mastery` text, a comma list), each with a short text. */
+const masteryProperties = (weapon: string) =>
+  (getItem(weapon)?.weapon?.mastery ?? "Graze").split(",").map((n) => n.trim()).filter(Boolean)
+    .map((name) => ({ name, text: name === "Graze" ? "Deal ability-modifier damage on a miss." : `The ${name} mastery property.` }));
 /** Weapon Mastery picks the classes of a 2024 character allow. */
 const masteryCapacity = (c: MockCharacter): number =>
   c.ruleset === "dnd2024" ? c.classes.reduce((n, cs) => n + (getClass(classIdOf(c, cs.slotId))?.masteries ?? 0), 0) : 0;
@@ -55,6 +59,16 @@ function itemToggles(c: MockCharacter): (Omit<PlayToggle, "on" | "active"> & { f
 }
 const togglesOf = (c: MockCharacter) => [...TOGGLES.map((t) => ({ ...t, factor: 1 })), ...itemToggles(c)];
 
+const MOCK_FEATURE: PlayFeature = { id: "mock-feature", name: "Mock Feature", ty: "class_feature", source: "Mock class", level: 1, description: "<p>A <strong>mock</strong> feature description.</p>", displayed: true };
+
+/** A 2024 background's origin feat, which the host lists among the features as a Feat granted by the background (tester B8). */
+function originFeatFeatures(c: MockCharacter): PlayFeature[] {
+  const feat = c.ruleset === "dnd2024" ? getElement(c.choices["bg:feat"] ?? "") : undefined;
+  const background = getElement(c.choices["bg:background"] ?? "");
+  if (!feat || !background) return [];
+  return [{ id: feat.id, name: feat.name, ty: "Feat", source: feat.sourceName, level: 1, grantedBy: background.name, description: feat.description, displayed: true }];
+}
+
 /** The mock's `CharacterSnapshot.play` (`sc` = the snapshot's spellcasting, for the spell tracker). */
 export function buildPlay(c: MockCharacter, sc: SpellcastingState, conMod = 0, hpMax = 0): PlayState {
   const p = playOf(c);
@@ -67,8 +81,8 @@ export function buildPlay(c: MockCharacter, sc: SpellcastingState, conMod = 0, h
     resources, resourceCosts: [], toggles,
     exhaustion: { linear: c.ruleset === "dnd2024", level: p.exhaustion, maxLevels: MAX_EXHAUSTION, d20Penalty: -2 * p.exhaustion, speedPenalty: -5 * p.exhaustion, dead: p.exhaustion >= MAX_EXHAUSTION },
     inspiration: p.inspiration, inspirationSources: [], martialArts: null,
-    // As the host: `weapon` is the element id, `name` the weapon's name.
-    masteries: p.masteries.map((w) => ({ weapon: w, name: getElement(w)?.name ?? w, property: "Graze", text: "Deal ability-modifier damage on a miss." })),
+    // As the host: `weapon` is the element id, `name` the weapon's name, then each mastery property.
+    masteries: p.masteries.map((w) => ({ weapon: w, name: getElement(w)?.name ?? w, properties: masteryProperties(w) })),
     defenses: {
       resistances: ["bludgeoning", "piercing", "slashing"].map((name) => ({ name, source: "Rage", active: raging, whileToggle: "rage" })),
       immunities: [], vulnerabilities: [], conditionImmunities: [],
@@ -77,14 +91,15 @@ export function buildPlay(c: MockCharacter, sc: SpellcastingState, conMod = 0, h
     initiativeAdvantage: false, notes: [{ kind: "note", text: "Mock note.", source: "Mock class" }], carry: null,
     wildShape: buildWildShape(c),
     equipmentPackages: [{
-      package: "Mock starting equipment", name: "Mock starting equipment", owner: "Mock class", chosen: p.packages["Mock starting equipment"] ?? null,
+      package: "Mock starting equipment", name: "Mock starting equipment", owner: "Mock class",
+      ...packageChoice(p.packages["Mock starting equipment"]),
       options: [
         { id: "A", items: [{ id: null, name: "Longsword", qty: 1, note: null }, { id: null, name: "Shield", qty: 1, note: null }], coins: zeroCoins },
         { id: "B", items: [{ id: null, name: "Greataxe", qty: 1, note: null }], coins: { ...zeroCoins, gp: 10 } },
       ],
     }],
     compatibility: { strict: c.ruleset === "dnd2014", entries: [] },
-    features: [{ id: "mock-feature", name: "Mock Feature", ty: "class_feature", source: "Mock class", level: 1, description: "<p>A <strong>mock</strong> feature description.</p>", displayed: true }],
+    features: [MOCK_FEATURE, ...originFeatFeatures(c)],
     freeCasts: [], saveDcs: [],
     ...trackerPlay(p.tracking, sc),
     hitDice: hitDiceOf(c, conMod),
@@ -121,7 +136,11 @@ export const restore = (c: MockCharacter, id: string, uses: number): MockCharact
   withPlay(c, (p) => ({ ...p, used: { ...p.used, [id]: Math.max(0, (p.used[id] ?? 0) - uses) } }));
 
 export const shortRest = (c: MockCharacter): MockCharacter =>
-  withPlay(c, (p) => ({ ...p, toggles: [], used: Object.fromEntries(Object.entries(p.used).map(([k, v]) => [k, Math.max(0, v - 1)])), tracking: afterRest(p.tracking, "short") }));
+  withPlay(c, (p) => {
+    // As the host: a pool gets back its `shortRestRegain` uses; a long-rest-only pool gets nothing.
+    const back = (id: string): number => resourcesFor(c).find((r) => r.id === id)?.shortRestRegain ?? 0;
+    return { ...p, toggles: [], used: Object.fromEntries(Object.entries(p.used).map(([k, v]) => [k, Math.max(0, v - back(k))])), tracking: afterRest(p.tracking, "short") };
+  });
 
 export const longRest = (c: MockCharacter): MockCharacter =>
   withPlay(c, (p) => ({
@@ -201,8 +220,13 @@ export function setForms(c: MockCharacter, forms: string[]): MockCharacter {
   return withPlay(c, (p) => ({ ...p, forms }));
 }
 
+/** As the host: "none" ("I'll buy my own") declines a package and leaves it open to an option. */
+const packageChoice = (stored: string | undefined): { chosen: string | null; declined?: boolean } =>
+  stored === "none" ? { chosen: null, declined: true } : { chosen: stored ?? null };
+
 export function choosePackage(c: MockCharacter, pkg: string, option: string): MockCharacter {
-  if (playOf(c).packages[pkg]) throw apiError("requirement_failed", `${pkg} was already taken.`);
+  const stored = playOf(c).packages[pkg];
+  if (stored && stored !== "none") throw apiError("requirement_failed", `${pkg} was already taken.`);
   return withPlay(c, (p) => ({ ...p, packages: { ...p.packages, [pkg]: option } }));
 }
 

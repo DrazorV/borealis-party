@@ -14,7 +14,6 @@
 //! commands (a new character's player name, the sheet's look) see the right values without knowing any of this.
 
 use borealis_lib::settings::{AiSettings, AppSettings};
-use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Map, Value};
 
 use crate::auth::{Role, User};
@@ -138,18 +137,7 @@ fn overlay(saved: &Map<String, Value>, role: Role) -> ApiResult<Map<String, Valu
 }
 
 async fn load(state: &AppState, user: &str) -> ApiResult<Option<Map<String, Value>>> {
-    let user = user.to_string();
-    let text: Option<String> = state
-        .db
-        .run(move |c| {
-            Ok(c.query_row(
-                "SELECT settings FROM user_settings WHERE user_id = ?1",
-                params![user],
-                |r| r.get(0),
-            )
-            .optional()?)
-        })
-        .await?;
+    let text = state.db.user_settings(user).await?;
     Ok(text.map(|t| match serde_json::from_str::<Value>(&t) {
         Ok(Value::Object(map)) => map,
         _ => Map::new(),
@@ -163,21 +151,8 @@ async fn store(
     settings: &Map<String, Value>,
     replace: bool,
 ) -> ApiResult<()> {
-    let user = user.to_string();
     let text = Value::Object(settings.clone()).to_string();
-    let sql = if replace {
-        "INSERT INTO user_settings (user_id, settings) VALUES (?1, ?2) \
-         ON CONFLICT (user_id) DO UPDATE SET settings = excluded.settings"
-    } else {
-        "INSERT OR IGNORE INTO user_settings (user_id, settings) VALUES (?1, ?2)"
-    };
-    state
-        .db
-        .run(move |c| {
-            c.execute(sql, params![user, text])?;
-            Ok(())
-        })
-        .await
+    state.db.set_user_settings(user, &text, replace).await
 }
 
 async fn current(workspace: &Workspace) -> ApiResult<AppSettings> {

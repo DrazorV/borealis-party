@@ -191,7 +191,7 @@ Clean-room note: sample data in the mock is original and SRD-generic.
 
 ### 2024 play state and Convert to 2024
 
-Every command returns the full `CharacterSnapshot`; the new blocks live in `snapshot.play` (`PlayState`, camelCase) and on `attacks[]` (`mastery`, `critRange`, `dieFloor`, `offhandDamage`).
+Every command returns the full `CharacterSnapshot`; the new blocks live in `snapshot.play` (`PlayState`, camelCase) and on `attacks[]` (`masteries`, `critRange`, `dieFloor`, `offhandDamage`). A weapon may have several mastery properties (RL10): `attacks[].masteries` is `[{name, text, mastered}]` (one entry per property, omitted when none) and each `play.masteries[]` pick is `{weapon, name, properties: [{name, text}]}`.
 
 | Command | Args (camelCase keys) | Returns |
 |---|---|---|
@@ -204,7 +204,7 @@ Every command returns the full `CharacterSnapshot`; the new blocks live in `snap
 | `set_heroic_inspiration` | `characterId, has` | `CharacterSnapshot` |
 | `choose_weapon_masteries` | `characterId, weaponIds: string[]` | replaces all picks in slot order (slots = `Weapon` selects named "...Mastery"); `invalid_argument` for duplicates, `requirement_failed` for too many / not allowed |
 | `set_wild_shape_forms` | `characterId, formIds: string[]` | `CharacterSnapshot` (limits in `play.wildShape`) |
-| `choose_equipment_package` | `characterId, packageId, option` | `CharacterSnapshot` (once per package; items + coins added) |
+| `choose_equipment_package` | `characterId, packageId, option` | `CharacterSnapshot` (once per package; items + coins added; option `none` declines it, "I'll buy my own", and leaves it takeable) |
 | `spend_spell_slot` / `restore_spell_slot` | `characterId, level, pact?, uses?` (default 1) | `CharacterSnapshot`: relative, like `spend_resource` (one more used / one given back, never below none; so quick presses add up and a press after a rest never undoes it). With `pact` the Pact Magic pool. `requirement_failed` without such slots or when too few are left |
 | `set_concentration` | `characterId, spellId: string \| null` | `CharacterSnapshot` (a known or prepared concentration spell, replacing any other; `null` ends it; else `requirement_failed`) |
 | `add_tracker` / `update_tracker` | `characterId, (trackerId,) name, max, reset: short_rest \| long_rest \| never, countsUp?` | `CharacterSnapshot` (bidi and zero-width characters are stripped from the name; name 1-60 characters, max 1-999, at most 50 trackers, else `invalid_argument`; an edit clamps the used count; unknown id `not_found`) |
@@ -503,7 +503,7 @@ All additive; read from content setters (`armorClass`, `strength`, `stealth`, `a
 
 - `ElementSummary` (so `ItemSummary`, compendium rows, slot options and `ElementDetail`) gains optional `spell: SpellFacts`, `armor: ArmorFacts`, `weapon: WeaponFacts`, each omitted when it does not apply. Weight and cost stay on `ItemSummary` (`weight`, `costCp`).
   - `ArmorFacts`: `group`, `acText`, `acBase`, `addsDex`, `dexCap | null`, `strength | null`, `stealthDisadvantage`.
-  - `WeaponFacts`: `damage`, `damageType`, `properties[]`, `mastery | null`, `range | null`, `proficiency` (Simple/Martial), `kind` (Melee/Ranged).
+  - `WeaponFacts`: `damage`, `damageType`, `properties[]`, `mastery | null` (every property name, comma-joined: `Topple, Push`), `range | null`, `proficiency` (Simple/Martial), `kind` (Melee/Ranged).
   - `SpellFacts`: `castingTime`, `range`, `duration`, `verbal`, `somatic`, `material`, `materialText`, `concentration`, `ritual`.
 - `SpellEntry.casting: SpellFacts | null` (spellcasting rows).
 - `InventoryItem.weapon` gains `mastery | null`, `range | null`; new `InventoryItem.armor: ArmorFacts | null`.

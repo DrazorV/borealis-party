@@ -31,5 +31,5 @@ install -m 0644 "$here/borealis-party.service" /etc/systemd/system/borealis-part
 systemctl daemon-reload
 systemctl enable --now borealis-party
 
-echo "Borealis Party is running. Settings: /etc/borealis-party/server.env"
+echo "Borealis Party is running. Settings: /var/lib/borealis-party/config.toml (passwords: /etc/borealis-party/server.env)"
 echo "Logs: journalctl -u borealis-party -f"

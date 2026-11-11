@@ -2,12 +2,13 @@ import { useMemo, useState } from "react";
 import type { Api, CharacterSnapshot, ItemCategory, ItemSummary, Page } from "../../api/contract";
 import { isApiError } from "../../api/contract";
 import { Alert, Button, ComboBox, useConfirm } from "../../components";
-import { groupVersions, sourcesOf, visibleRows, type EditionFilter, type PickerFilter, type VersionLike } from "../../lib/versions";
+import { editionsOf, effectiveFilter, groupVersions, sourcesOf, visibleRows, type PickerFilter, type VersionLike } from "../../lib/versions";
 import { EditionSegments, SourceFilterButton } from "../builder/PickerFilterBar";
 import { VersionMenu } from "../builder/VersionMenu";
 import { usePhone } from "../../lib/phone";
 import { useApi } from "../../state/ApiContext";
 import { useCharacter } from "../../state/CharacterContext";
+import { useEditionFilter } from "../../state/editionFilter";
 import { useAsync, useDebounced } from "../../state/useAsync";
 import { Band, TwoPane } from "../spells/TwoPane";
 import { CoinsDialog } from "./CoinsDialog";
@@ -60,7 +61,8 @@ export function EquipmentTab({ view = "all" }: { view?: GearView }) {
   const [query, setQuery] = useState("");
   const [filterOn, setFilterOn] = useState(true);
   // B-55 W3: the Edition filter holds for the whole screen, the Source checklist per category (its sources differ).
-  const [edition, setEdition] = useState<EditionFilter>("all");
+  // TV1 (A4, C3): it starts on the character's edition and is the one the builder's pickers share.
+  const { edition, initial: initialEdition, setEdition } = useEditionFilter();
   const [sourcesByCategory, setSourcesByCategory] = useState<Readonly<Record<string, readonly string[] | null>>>({});
   const [menuPicks, setMenuPicks] = useState<Readonly<Record<string, string>>>({});
   const [menu, setMenu] = useState<{ key: string; anchor: HTMLElement } | null>(null);
@@ -80,7 +82,10 @@ export function EquipmentTab({ view = "all" }: { view?: GearView }) {
   const rows = useMemo(() => groupVersions(items.data?.items ?? []), [items.data]);
   const charEd = snapshot?.ruleset ?? "dnd2024";
   const filter: PickerFilter = { text: "", edition, sources: sourcesByCategory[category] ?? null };
-  const visible = visibleRows(rows, filter, charEd, null, menuPicks);
+  // A5: the Edition filter applies only to a category holding both editions. A 2024 character's Trade Goods are all 2014
+  // items; filtering them to 2024 emptied the list while the category still counted them.
+  const editions = useMemo(() => editionsOf(rows), [rows]);
+  const visible = visibleRows(rows, effectiveFilter(filter, editions), charEd, null, menuPicks);
   const listSources = useMemo(() => sourcesOf(rows), [rows]);
   const pickedId = pickedItem?.id ?? "";
   // A generic magic weapon or armor is added on a base picked in a second list, as in the classic builder.
@@ -110,7 +115,7 @@ export function EquipmentTab({ view = "all" }: { view?: GearView }) {
   };
   const pick = (i: ItemSummary) => { setPickedItem(i); setDescId(i.id); if (i.id !== pickedId) setBase(null); };
   const setFilter = (f: PickerFilter) => { setEdition(f.edition); setSourcesByCategory((cur) => ({ ...cur, [category]: f.sources })); };
-  const clearFilters = () => setFilter({ text: "", edition: "all", sources: null });
+  const clearFilters = () => setFilter({ text: "", edition: initialEdition, sources: null });
   const menuRow = menu ? visible.find((r) => r.key === menu.key) ?? null : null;
   // Sec. 1.2 rule 2: a menu pick becomes the row's shown version (and is selected, as a click on the row would).
   const pickVersion = (row: ItemListRow, v: VersionLike) => {
@@ -142,7 +147,7 @@ export function EquipmentTab({ view = "all" }: { view?: GearView }) {
       <div className="eq-items">
         <Band title={category === "Equipment Packs" ? "Equipment Packs" : category} stats={COIN_LABELS.map(([n, k]) => [n, inv.coins[k]] as [string, number])} />
         <div className="eq-cats-narrow" style={{ padding: "6px 0" }}>
-          <ComboBox aria-label="Category" value={category} onChange={(e) => setCategory(e.target.value)} options={listed.map((c) => ({ value: c.name, label: label(c) }))} />
+          <ComboBox aria-label="Category" value={category} onChange={(v) => setCategory(v)} options={listed.map((c) => ({ value: c.name, label: label(c) }))} />
         </div>
         {cats.error && <Alert tone="danger">{cats.error}</Alert>}
         {items.error && <Alert tone="danger">{items.error}</Alert>}
@@ -166,7 +171,7 @@ export function EquipmentTab({ view = "all" }: { view?: GearView }) {
         {!phone && cmds}
         <button type="button" className="eq-filter-tile" aria-label="Filter items" aria-pressed={filterOn} title="Turn the name filter on or off" onClick={() => setFilterOn((v) => !v)}><Glyph name="filter" /></button>
         <span className="eq-filter"><input type="text" aria-label="Filter text" placeholder="filter name and keywords..." value={query} onChange={(e) => setQuery(e.target.value)} /><button type="button" aria-label="Clear" onClick={() => setQuery("")}><Glyph name="x" /></button></span>
-        <span className="eq-edition"><EditionSegments value={edition} onChange={setEdition} /></span>
+        {editions.length > 1 && <span className="eq-edition"><EditionSegments value={edition} onChange={setEdition} /></span>}
         <span className="eq-source"><SourceFilterButton filter={filter} onChange={setFilter} sources={listSources} /></span>
         <Button className="eq-coins" onClick={() => setCoins(true)}>Manage coins: {inv.totalGp} gp</Button>
       </div>

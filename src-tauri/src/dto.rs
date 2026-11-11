@@ -460,6 +460,16 @@ pub struct AbilityState {
     pub point_buy: Option<PointBuyState>,
     pub standard_array: Option<StandardArrayState>,
     pub rolls: Vec<RollRecord>,
+    /// Tester B11 (TV2): the main class's standard array from the ruleset's tables; none without one.
+    pub suggested: Option<SuggestedScores>,
+}
+
+/// Base scores the ruleset suggests for a class (its standard array assignment).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestedScores {
+    pub class_name: String,
+    pub scores: AbilityRecord<i32>,
 }
 
 /// One skill row.
@@ -529,6 +539,14 @@ pub struct SpellEntry {
     /// B3: added to this class in the builder (an extra the DM grants).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub added: bool,
+    /// "Other Spells" only: where the spell came from (the invocation, the race), as Aurora's
+    /// sheet appends it to the name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub granted_from: Option<String>,
+    /// The feature that grants it lets the character cast it without expending a spell slot
+    /// (2024 Pact of the Chain's Find Familiar): Play offers that first.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub no_slot: bool,
 }
 
 /// Spellcasting of one class.
@@ -552,6 +570,10 @@ pub struct ClassSpellcasting {
     /// (never part of `SpellcastingState.slots`).
     pub pact: Option<PactSlotRow>,
     pub spells: Vec<SpellEntry>,
+    /// Aurora's "Other Spells": spells no other block lists (granted with no spellcasting name).
+    /// Play lists them without a Cast button; the Magic page leaves them out, as Aurora does.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub other: bool,
 }
 
 /// Pact Magic slots: all of one level, recovered on a short or long rest.
@@ -741,8 +763,8 @@ pub struct Attack {
     pub auto: bool,
     pub show_in_combat: bool,
     pub card: bool,
-    /// The weapon's mastery property (2024), with `mastered` when chosen.
-    pub mastery: Option<crate::play_dto::MasteryDto>,
+    /// The weapon's mastery properties (2024), usually one, each `mastered` when chosen.
+    pub masteries: Vec<crate::play_dto::MasteryDto>,
     /// Lowest d20 roll that is a critical hit.
     pub crit_range: u8,
     /// Damage dice never roll below this (Great Weapon Fighting).
@@ -809,6 +831,9 @@ pub struct CharacterSnapshot {
     pub available_options: Vec<OptionDef>,
     pub source_restrictions: Option<Vec<String>>,
     pub notices: Vec<String>,
+    /// Content the character's file names that was not found when it was imported (still
+    /// missing after the last re-check): what the import notice counts (GitHub #37).
+    pub missing_content: Vec<MissingContentDto>,
     /// Resources, toggles, defences, senses, notes, Wild Shape, packages, compatibility, features.
     pub play: crate::play_dto::PlayStateDto,
     /// B3 (GitHub #35): the feats, spells, languages and proficiencies added in the builder for
@@ -934,7 +959,7 @@ mod gear_dto_tests {
             auto: true,
             show_in_combat: true,
             card: true,
-            mastery: None,
+            masteries: Vec::new(),
             crit_range: 20,
             die_floor: None,
             offhand_damage: None,

@@ -3,7 +3,7 @@
 use crate::dto::{
     AbilityRecord, AbilityState, CharacterSnapshot, CharacterStats, ClassLevelInfo, FeatureEntry,
     LevelState, PointBuyState, ProficiencyGroup, RollRecord, SaveEntry, SelectionProgress,
-    SelectionSlot, SkillEntry, StandardArrayState,
+    SelectionSlot, SkillEntry, StandardArrayState, SuggestedScores,
 };
 use crate::extras::{self, ui_extras};
 use crate::ids::{
@@ -88,6 +88,7 @@ pub fn build_snapshot(input: &MapInput<'_>) -> CharacterSnapshot {
         available_options: extras::available_options(input),
         source_restrictions: extras::source_restrictions(input),
         notices: extras::notices(input, &engine_snap),
+        missing_content: extras::missing_content(input),
         play: crate::play_dto::play_state(
             &engine_snap,
             &borealis_engine::spell_tracker::tracker_view(
@@ -339,7 +340,28 @@ fn abilities(input: &MapInput<'_>, snap: &Engine) -> AbilityState {
         point_buy,
         standard_array,
         rolls: input.rolls.to_vec(),
+        suggested: suggested_scores(input, snap),
     }
+}
+
+/// Tester B11 (B-135): the main class's standard array assignment, when the ruleset's tables have one.
+fn suggested_scores(input: &MapInput<'_>, snap: &Engine) -> Option<SuggestedScores> {
+    let class = snap
+        .classes
+        .iter()
+        .find(|c| c.slot == ClassSlot::Main)?
+        .class
+        .as_ref()?;
+    let array = input
+        .hub
+        .engine
+        .universe(input.character.build.ruleset)
+        .tables()
+        .standard_array_for(&class.name)?;
+    Some(SuggestedScores {
+        class_name: class.name.clone(),
+        scores: AbilityRecord::from_fn(|i| array[i]),
+    })
 }
 
 fn stats(snap: &Engine) -> CharacterStats {
@@ -524,7 +546,7 @@ fn slots(snap: &Engine) -> (Vec<SelectionSlot>, SelectionProgress) {
                 ranked.push((flow_tab_rank(tab), slot_priority(s), out.len()));
             }
         }
-        let class_slot_id = extras::slot_caster_id(snap, s);
+        let class_slot_id = crate::caster_ids::slot_caster_id(snap, s);
         let (group_id, group_label) = if s.owner.ty == "Multiclass" {
             (Some(s.owner.id.clone()), Some(s.owner.name.clone()))
         } else if tab == "spells" && class_slot_id.is_none() {
