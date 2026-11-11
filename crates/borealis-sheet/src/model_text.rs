@@ -431,9 +431,8 @@ struct FoldEntry {
 /// The entry an upgrade is folded into, among the earlier entries of its class section.
 ///
 /// - Name: "Improved X", "Greater X" or "Superior X" goes to X ("Greater Portent" -> "Portent"),
-///   or to a feature whose name ends with X when its description names that feature or, for a
-///   "Group: Option" name, the option ("Improved Defender" -> "Steel Defender", "Improved
-///   Duplicity" -> "Channel Divinity: Invoke Duplicity").
+///   or to a feature whose name ends with X when its description names that feature
+///   ("Improved Defender" -> "Steel Defender").
 /// - Text (class and subclass features only): a feature whose description says an earlier one
 ///   improves ("Aura Expansion": "Your Aura of Protection is now ...") goes to the one it names
 ///   first.
@@ -447,10 +446,7 @@ fn upgrade_host(out: &[FoldEntry], up: &FoldEntry) -> Option<usize> {
         let suffix = format!(" {stem}");
         let named = peers().find(|(_, h)| {
             let host = fold_form(without_level_lead(&h.data.name));
-            // the text may name an option by itself ("Invoke Duplicity" for
-            // "Channel Divinity: Invoke Duplicity")
-            let option = host.rsplit_once(": ").map_or(host.as_str(), |(_, o)| o);
-            host.ends_with(&suffix) && (up.probe.contains(&host) || up.probe.contains(option))
+            host.ends_with(&suffix) && up.probe.contains(&host)
         });
         if let Some((i, _)) = named {
             return Some(i);
