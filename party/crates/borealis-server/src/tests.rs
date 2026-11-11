@@ -412,6 +412,14 @@ async fn full_flow(router: Router) {
     // Only DMs add content, from their Library.
     let (status, _) = alice.rpc(&scope, "import_pack", spell_pack()).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = alice
+        .rpc(&scope, "stage_5etools_files", json!({ "files": [] }))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "5etools homebrew files are content too");
+    let (status, out) = dm
+        .rpc("library", "stage_5etools_files", json!({ "files": [] }))
+        .await;
+    assert_ne!(status, StatusCode::NOT_FOUND, "the server offers it to DMs: {out}");
     let (status, _) = alice.rpc("library", "list_packs", json!({})).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, _) = dm.rpc(&scope, "import_pack", spell_pack()).await;
