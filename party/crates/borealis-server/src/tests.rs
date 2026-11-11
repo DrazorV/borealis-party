@@ -645,3 +645,156 @@ async fn settings_are_scoped_by_account_group_and_server() {
     assert_eq!(dms["pointBuyBudget"], 32);
     assert_eq!(dms["accentColor"], "green");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::too_many_lines)]
+async fn a_character_joining_a_group_takes_the_groups_rules() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = router(dir.path().to_path_buf());
+    let dm = sign_up(&router, "rules-dm", "dm").await;
+    let alice = sign_up(&router, "rules-alice", "player").await;
+    let (_, group) = dm.post("/api/groups", json!({ "name": "Strict" })).await;
+    let group_id = group["id"].as_str().unwrap().to_string();
+    let scope = format!("group-{group_id}");
+    let (_, invite) = dm
+        .post(
+            &format!("/api/groups/{group_id}/invites"),
+            json!({ "username": "rules-alice" }),
+        )
+        .await;
+    alice
+        .post(
+            &format!("/api/invites/{}/accept", invite["id"].as_str().unwrap()),
+            json!({}),
+        )
+        .await;
+    let (status, out) = dm
+        .rpc(
+            &scope,
+            "save_settings",
+            patch(json!({ "abilityMethod": "point_buy", "pointBuyBudget": 20 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+
+    // Outside any group a player's character has its own house rules and spends the usual 27 points.
+    let (_, solo) = alice
+        .rpc("personal", "create_character", new_character("Solo"))
+        .await;
+    let id = solo["id"].clone();
+    let (status, out) = alice
+        .rpc(
+            "personal",
+            "set_character_options",
+            json!({ "characterId": id, "options": {
+                "pointBuyUnrestricted": true, "ignoreFeatPrerequisites": true, "attunementLimit": 5,
+            }}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    for ability in ["str", "dex", "con"] {
+        let (status, out) = alice
+            .rpc(
+                "personal",
+                "set_base_score",
+                json!({ "characterId": id, "ability": ability, "value": 15 }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{out}");
+    }
+    alice
+        .rpc("personal", "save_character", json!({ "characterId": id }))
+        .await;
+
+    // In the group the DM's rules apply: what they don't allow is taken out, and the player is told once.
+    let (status, out) = alice
+        .post(
+            &format!("/api/groups/{group_id}/character"),
+            json!({ "characterId": id }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, joined) = alice
+        .rpc(&scope, "load_character", json!({ "characterId": id }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{joined}");
+    assert_eq!(joined["options"]["pointBuyUnrestricted"], false, "{joined}");
+    assert_eq!(joined["options"]["ignoreFeatPrerequisites"], false);
+    assert_ne!(joined["options"]["attunementLimit"], 5);
+    assert_eq!(joined["abilities"]["pointBuy"]["budget"], 20);
+    assert_eq!(joined["abilities"]["pointBuy"]["spent"], 0, "scores reset");
+    assert_eq!(joined["dirty"], false, "and saved");
+    let (status, notes) = alice
+        .rpc(&scope, "take_group_notes", json!({ "characterId": id }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{notes}");
+    let notes = notes.as_array().unwrap().clone();
+    assert_eq!(notes.len(), 2, "{notes:?}");
+    assert!(notes
+        .iter()
+        .any(|n| n.as_str().unwrap().contains("house rules")));
+    assert!(notes
+        .iter()
+        .any(|n| n.as_str().unwrap().contains("point buy with 20 points")));
+    let (_, again) = alice
+        .rpc(&scope, "take_group_notes", json!({ "characterId": id }))
+        .await;
+    assert_eq!(again, json!([]), "told once");
+    let (status, _) = dm
+        .rpc(&scope, "take_group_notes", json!({ "characterId": id }))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "the player's notes");
+
+    // Nor can the player switch them back on in the group.
+    for (command, args) in [
+        (
+            "set_character_options",
+            json!({ "characterId": id, "options": { "ignoreFeatPrerequisites": true } }),
+        ),
+        (
+            "set_character_options",
+            json!({ "characterId": id, "options": { "pointBuyUnrestricted": true } }),
+        ),
+        (
+            "set_ability_method",
+            json!({ "characterId": id, "method": "roll_4d6" }),
+        ),
+    ] {
+        let (status, out) = alice.rpc(&scope, command, args.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{args}: {out}");
+        assert_eq!(
+            out["message"],
+            "Your Dungeon Master sets this group's house rules."
+        );
+    }
+    let (status, out) = alice
+        .rpc(
+            &scope,
+            "set_character_options",
+            json!({ "characterId": id, "options": { "averageHp": false } }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "other options are the player's: {out}"
+    );
+    for ability in ["str", "dex"] {
+        let (status, out) = alice
+            .rpc(
+                &scope,
+                "set_base_score",
+                json!({ "characterId": id, "ability": ability, "value": 15 }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{out}");
+    }
+    let (status, _) = alice
+        .rpc(
+            &scope,
+            "set_base_score",
+            json!({ "characterId": id, "ability": "con", "value": 15 }),
+        )
+        .await;
+    assert_ne!(status, StatusCode::OK, "27 points is over the group's 20");
+}

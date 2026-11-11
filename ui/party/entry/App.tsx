@@ -3,6 +3,7 @@ import { App as UpstreamApp } from "../../src/App";
 import { AppShell } from "../../src/components/shell/AppShell";
 import { isTauri } from "../../src/lib/tauri";
 import { loadSession } from "../api/session";
+import { GroupRulesNotice } from "../pages/GroupRulesNotice";
 import { PartyPage } from "../pages/PartyPage";
 import { ScopeBar } from "../pages/ScopeBar";
 import { hideDeviceTransfer } from "./hideTransfer";
@@ -22,6 +23,7 @@ export function App() {
   return (
     <>
       <ScopeBar />
+      <GroupRulesNotice />
       <Routes>
         <Route path="/" element={<Navigate to="/party" replace />} />
         {dungeonMaster && <Route path="/characters" element={<Navigate to="/party" replace />} />}

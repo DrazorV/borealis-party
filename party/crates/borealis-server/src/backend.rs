@@ -15,7 +15,7 @@ use tauri::{AppHandle, Invocation, Manager};
 
 use borealis_lib::commands_content::{SearchEvents, TauriSink};
 use borealis_lib::content_prefs::ContentPrefs;
-use borealis_lib::dto::ExportResult;
+use borealis_lib::dto::{AbilityMethodDto, CharacterSnapshot, ExportResult};
 use borealis_lib::dto_ext::SheetOptionsDto;
 use borealis_lib::error::ApiResult;
 use borealis_lib::settings::AppSettings;
@@ -90,6 +90,7 @@ fn read_commands(name: &str, invocation: &Invocation) -> Option<Result<Value, Va
 
 fn character_commands(name: &str, invocation: &Invocation) -> Option<Result<Value, Value>> {
     (tauri::generate_handler![
+        take_group_notes,
         commands::create_character,
         commands::save_character,
         commands::save_character_as,
@@ -385,6 +386,212 @@ pub fn overlay_settings(app: &AppHandle, fields: &Map<String, Value>) -> Result<
         state.refresh_semantic_index();
     }
     Ok(())
+}
+
+/// The character options that are house rules. In a group they are the Dungeon Master's, so a member's character keeps
+/// the defaults (see `Workspace::call`).
+pub const HOUSE_RULE_OPTIONS: [&str; 4] = [
+    "pointBuyUnrestricted",
+    "attunementLimit",
+    "ignoreFeatPrerequisites",
+    "ignoreMulticlassPrerequisites",
+];
+
+fn has_house_rules(character: &borealis_lib::state::Session) -> bool {
+    let rules = &character.character.build.house_rules;
+    rules.use_default_ability_maximum.is_some()
+        || rules.attunement_limit.is_some()
+        || rules.point_buy_budget.is_some()
+        || rules.ignore_feat_prerequisites
+        || rules.ignore_multiclass_prerequisites
+        || borealis_lib::extras::ui_extras(&character.character).point_buy_unrestricted
+}
+
+fn clear_own_house_rules(state: &AppState, id: &str) -> ApiResult<()> {
+    state
+        .mutate(id, |_, draft| {
+            let character = &mut draft.character;
+            let rules = &mut character.build.house_rules;
+            rules.use_default_ability_maximum = None;
+            rules.attunement_limit = None;
+            rules.point_buy_budget = None;
+            rules.ignore_feat_prerequisites = false;
+            rules.ignore_multiclass_prerequisites = false;
+            let mut extras = borealis_lib::extras::ui_extras(character);
+            extras.point_buy_unrestricted = false;
+            borealis_lib::extras::set_ui_extras(character, &extras);
+            Ok(())
+        })
+        .map(|_| ())
+}
+
+fn method_text(method: AbilityMethodDto, budget: i32) -> String {
+    match method {
+        AbilityMethodDto::PointBuy => format!("point buy with {budget} points"),
+        AbilityMethodDto::StandardArray => "the standard array".into(),
+        AbilityMethodDto::Roll3d6 => "rolling 3d6".into(),
+        AbilityMethodDto::Roll4d6 => "rolling 4d6 and dropping the lowest".into(),
+        AbilityMethodDto::Manual => "scores entered by hand".into(),
+    }
+}
+
+/// True when the group's method, budget or score range doesn't allow a character's ability scores.
+fn ability_problem(snapshot: &CharacterSnapshot, settings: &AppSettings) -> bool {
+    let abilities = &snapshot.abilities;
+    let base = &abilities.base;
+    let scores = [base.str, base.dex, base.con, base.int, base.wis, base.cha];
+    abilities.method != settings.ability_method
+        || abilities
+            .point_buy
+            .as_ref()
+            .is_some_and(|p| p.remaining < 0)
+        || scores
+            .iter()
+            .any(|s| *s < settings.ability_min_base || *s > settings.ability_max_base)
+}
+
+/// Bring an open character in a group's workspace in line with the group's rules, which its Dungeon Master sets: its
+/// own house rules go, picks only those rules allowed are taken out, and ability scores the group's method, budget or
+/// range don't allow are reset. What changed is saved, and kept for the player to read (`take_group_notes`).
+/// `None` when nothing had to change.
+///
+/// # Errors
+/// When the character is not open or cannot be saved.
+pub fn apply_group_rules(app: &AppHandle, id: &str) -> Result<Option<Value>, String> {
+    let state = app.state::<AppState>();
+    let message = |e: borealis_lib::error::ApiError| e.message;
+    let settings = state.settings().map_err(message)?;
+    let mut notes = Vec::new();
+    if state
+        .read(id, |_, session| Ok(has_house_rules(session)))
+        .map_err(message)?
+    {
+        clear_own_house_rules(&state, id).map_err(message)?;
+        notes.push(
+            "This character's own house rules are off. In this group your Dungeon Master sets the rules."
+                .to_string(),
+        );
+    }
+    // A cleared pick can take others with it, so look again after each one.
+    for _ in 0..64 {
+        let snapshot = state.get_snapshot(id).map_err(message)?;
+        let Some(slot) = snapshot
+            .slots
+            .iter()
+            .find(|s| s.prerequisites_unmet && s.chosen.is_some())
+        else {
+            break;
+        };
+        let name = slot.chosen.as_ref().map_or("", |c| c.name.as_str());
+        notes.push(format!(
+            "{}: {name} doesn't meet its prerequisites, so it was taken out. Choose again.",
+            slot.title
+        ));
+        state.clear_selection(id, &slot.id).map_err(message)?;
+    }
+    let before = state.get_snapshot(id).map_err(message)?;
+    if ability_problem(&before, &settings) {
+        state
+            .set_ability_method(id, settings.ability_method)
+            .map_err(message)?;
+        let after = state.reset_abilities(id).map_err(message)?;
+        if after.abilities != before.abilities {
+            notes.push(format!(
+                "Ability scores were reset: this group uses {}. Set them again.",
+                method_text(settings.ability_method, settings.point_buy_budget)
+            ));
+        }
+    }
+    if notes.is_empty() {
+        return Ok(None);
+    }
+    let snapshot = state.save_character(id).map_err(message)?;
+    add_group_notes(&state.paths, id, notes)?;
+    serde_json::to_value(snapshot)
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
+fn notes_file(paths: &AppPaths, id: &str) -> Option<PathBuf> {
+    let safe = !id.is_empty()
+        && id.len() <= 128
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    safe.then(|| paths.data.join("party-notes").join(format!("{id}.json")))
+}
+
+fn read_notes(file: &Path) -> Vec<String> {
+    std::fs::read_to_string(file)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+fn add_group_notes(paths: &AppPaths, id: &str, notes: Vec<String>) -> Result<(), String> {
+    let Some(file) = notes_file(paths, id) else {
+        return Ok(());
+    };
+    let mut all = read_notes(&file);
+    for note in notes {
+        if !all.contains(&note) {
+            all.push(note);
+        }
+    }
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let text = serde_json::to_string(&all).map_err(|e| e.to_string())?;
+    std::fs::write(&file, text).map_err(|e| e.to_string())
+}
+
+/// What the group's rules changed on a character since its player last looked, once: reading clears it.
+#[tauri::command(async)]
+fn take_group_notes(
+    state: tauri::State<'_, AppState>,
+    character_id: String,
+) -> ApiResult<Vec<String>> {
+    let Some(file) = notes_file(&state.paths, &character_id) else {
+        return Ok(Vec::new());
+    };
+    let notes = read_notes(&file);
+    let _ = std::fs::remove_file(&file);
+    Ok(notes)
+}
+
+/// The ability score method of the workspace's rules (a group's DM's, in a member's workspace).
+#[must_use]
+pub fn group_ability_method(app: &AppHandle) -> Value {
+    app.state::<AppState>()
+        .settings()
+        .ok()
+        .and_then(|s| serde_json::to_value(s.ability_method).ok())
+        .unwrap_or(Value::Null)
+}
+
+/// The house-rule options a `set_character_options` patch would change on an open character.
+///
+/// # Errors
+/// When the character is not open.
+pub fn changed_house_rules(
+    app: &AppHandle,
+    id: &str,
+    options: &Value,
+) -> Result<Vec<String>, String> {
+    let snapshot = app
+        .state::<AppState>()
+        .get_snapshot(id)
+        .map_err(|e| e.message)?;
+    let current = serde_json::to_value(snapshot.options).map_err(|e| e.to_string())?;
+    Ok(HOUSE_RULE_OPTIONS
+        .iter()
+        .filter(|key| {
+            options
+                .get(**key)
+                .is_some_and(|v| !v.is_null() && Some(v) != current.get(**key))
+        })
+        .map(|key| (*key).to_string())
+        .collect())
 }
 
 /// True when the workspace holds unsaved edits and must stay open.

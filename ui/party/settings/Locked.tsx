@@ -7,6 +7,9 @@ type Pick = (root: HTMLElement) => HTMLElement[];
 /** Every form control, and no buttons: a tab's buttons open other screens. */
 export const formControls: Pick = (root) => [...root.querySelectorAll<HTMLElement>("input, select, textarea")];
 
+/** Every control, buttons too. */
+export const allControls: Pick = (root) => [...root.querySelectorAll<HTMLElement>("input, select, textarea, button")];
+
 /**
  * The control a field label belongs to, with its label. Upstream's fields carry no attribute to match, so they are found
  * by their label as it appears (phones change its case). If upstream rewords one, it simply comes back editable and the
@@ -40,7 +43,7 @@ export function Locked({ children, mode, pick, note }: { children: ReactNode; mo
     const apply = () => {
       for (const element of pick(root)) {
         if (mode === "hide") element.classList.add("party-hidden");
-        else if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement) element.disabled = true;
+        else if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement || element instanceof HTMLButtonElement) element.disabled = true;
       }
     };
     apply();

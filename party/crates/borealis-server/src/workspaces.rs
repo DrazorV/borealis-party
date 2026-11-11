@@ -75,6 +75,8 @@ pub struct Workspace {
     /// The workspace's event stream.
     pub events: broadcast::Sender<WorkspaceEvent>,
     last_used: AtomicI64,
+    /// A group member's: the house rules are the DM's, so its characters keep none of their own.
+    group_rules: bool,
 }
 
 impl Workspace {
@@ -83,9 +85,22 @@ impl Workspace {
         self.last_used.store(now(), Ordering::Relaxed);
         let handle = self.handle.clone();
         let name = command.to_string();
-        let outcome = tokio::task::spawn_blocking(move || headless::invoke(&handle, &name, args))
-            .await
-            .map_err(|e| ApiError::Internal(format!("command task: {e}")))?;
+        let group_rules = self.group_rules;
+        let mut args = args;
+        let outcome = tokio::task::spawn_blocking(move || -> ApiResult<_> {
+            if group_rules {
+                house_rules_first(&handle, &name, &mut args)?;
+            }
+            let outcome = headless::invoke(&handle, &name, args);
+            Ok(match outcome {
+                Some(Ok(value)) if group_rules => {
+                    Some(Ok(house_rules_after(&handle, &name, value)?))
+                }
+                other => other,
+            })
+        })
+        .await
+        .map_err(|e| ApiError::Internal(format!("command task: {e}")))??;
         self.last_used.store(now(), Ordering::Relaxed);
         match outcome {
             Some(Ok(value)) => Ok(value),
@@ -103,6 +118,64 @@ impl Workspace {
     pub fn access_of(&self, command: &str) -> Option<headless::Access> {
         headless::access_of(&self.handle, command)
     }
+}
+
+const SET_BY_DM: &str = "Your Dungeon Master sets this group's house rules.";
+
+/// In a group the house rules are the Dungeon Master's: a character's own can't be switched on, its ability method is
+/// the group's, and a new character starts that way.
+fn house_rules_first(
+    handle: &AppHandle,
+    command: &str,
+    args: &mut Map<String, Value>,
+) -> ApiResult<()> {
+    let id = args
+        .get("characterId")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let refused = match command {
+        "set_character_options" => {
+            let options = args.get("options").cloned().unwrap_or(Value::Null);
+            !headless::changed_house_rules(handle, &id, &options)
+                .map_err(ApiError::Internal)?
+                .is_empty()
+        }
+        "set_ability_method" => args.get("method") != Some(&headless::group_ability_method(handle)),
+        "create_character" => {
+            if let Some(request) = args.get_mut("request").and_then(Value::as_object_mut) {
+                request.insert(
+                    "abilityMethod".into(),
+                    headless::group_ability_method(handle),
+                );
+                if let Some(options) = request.get_mut("options").and_then(Value::as_object_mut) {
+                    for key in headless::HOUSE_RULE_OPTIONS {
+                        options.remove(key);
+                    }
+                }
+            }
+            false
+        }
+        _ => false,
+    };
+    if refused {
+        Err(ApiError::Forbidden(SET_BY_DM.into()))
+    } else {
+        Ok(())
+    }
+}
+
+/// A character that comes into a group (made here, imported, moved in from outside any group, or there before the DM
+/// changed the rules) is brought in line with the group's rules the moment it opens, whoever opens it.
+fn house_rules_after(handle: &AppHandle, command: &str, value: Value) -> ApiResult<Value> {
+    if !matches!(command, "load_character" | "create_character") {
+        return Ok(value);
+    }
+    let Some(id) = value.get("id").and_then(Value::as_str) else {
+        return Ok(value);
+    };
+    let cleared = headless::apply_group_rules(handle, id).map_err(ApiError::Internal)?;
+    Ok(cleared.unwrap_or(value))
 }
 
 type Cell = Arc<OnceCell<Arc<Workspace>>>;
@@ -222,6 +295,7 @@ impl Workspaces {
             handle,
             events,
             last_used: AtomicI64::new(now()),
+            group_rules: matches!(key, WsKey::GroupMember { .. }),
         }))
     }
 

@@ -55,6 +55,7 @@ paths.
 | Only DMs add content, from their Library | `rpc.rs`, `check_access` |
 | Only commands listed in `backend.rs` are reachable | `backend.rs` |
 | Each Application Setting has one owner: the account, the group's DM (house rules), the DM's library, or the server | `party/crates/borealis-server/src/settings.rs` |
+| In a group, characters follow the DM's house rules: their own are off, and what the rules don't allow is taken out (with a note to the player) when the character opens | `workspaces.rs` `Workspace::call`, `backend.rs` `apply_group_rules` |
 
 Content follows the character's folder. A character outside a group sees the bundled SRD. A character in a group sees the
 bundled SRD plus the DM's library, minus the packs the DM turned off for that group. See the layout comment at the top of
