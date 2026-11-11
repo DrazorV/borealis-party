@@ -1,5 +1,6 @@
 #!/bin/sh
-# Fails if the fork has changed any upstream file beyond the agreed hook. Our code belongs in party/ and ui/party/.
+# Fails if the fork has changed any upstream file beyond the agreed hook. Our code belongs in party/ and ui/party/
+# (and our own workflows, .github/workflows/party-*.yml).
 # Files of an open upstream pull request listed in party/upstream-pending.txt are accepted too.
 # Usage: git fetch upstream && sh party/check-upstream.sh
 set -eu
@@ -7,7 +8,7 @@ set -eu
 allowed='src-tauri/src/state.rs'
 pending="$(dirname "$0")/upstream-pending.txt"
 base=$(git merge-base upstream/main HEAD)
-changed=$(git diff --name-only "$base" -- . ':(exclude)party' ':(exclude)ui/party')
+changed=$(git diff --name-only "$base" -- . ':(exclude)party' ':(exclude)ui/party' ':(glob,exclude).github/workflows/party-*.yml')
 
 # "<path> <PR url>" lines, comments and blank lines skipped
 pending_pr() {

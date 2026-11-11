@@ -29,7 +29,9 @@ Everything the server keeps is in `/config`: `config.toml`, the SQLite database 
 and content. Back up that folder to back up the instance. `PUID` and `PGID` choose who owns those files on the host,
 and `TZ` sets the time zone.
 
-To build the image yourself, from the repository root:
+Every push to `main` that touches the server or web app builds the image and publishes it as `latest`, `sha-<commit>`
+and the version in `party/Cargo.toml` (`.github/workflows/party-image.yml`; start it by hand under Actions > Party
+image). To build the image yourself, from the repository root:
 
 ```sh
 docker build -f party/docker/Dockerfile -t ghcr.io/drazorv/borealis-party:latest .

@@ -1,0 +1,76 @@
+name: Party image
+
+# Builds the Borealis Party server image from main and pushes it to ghcr.io/drazorv/borealis-party.
+# Tags: latest, sha-<short commit>, and the version in party/Cargo.toml.
+# This file belongs to the fork (party/check-upstream.sh accepts .github/workflows/party-*.yml).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "party/**"
+      - "ui/**"
+      - "src-tauri/**"
+      - "crates/**"
+      - "content/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/party-image.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: party-image
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/drazorv/borealis-party
+
+jobs:
+  image:
+    if: github.repository == 'DrazorV/borealis-party'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the party version
+        id: version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' party/Cargo.toml | head -n1)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
+            type=raw,value=${{ steps.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.title=Borealis Party
+            org.opencontainers.image.description=Multi-user Borealis server for Dungeon Masters and their players
+            org.opencontainers.image.licenses=MIT OR Apache-2.0
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: party/docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=party-image
+          cache-to: type=gha,scope=party-image,mode=max
