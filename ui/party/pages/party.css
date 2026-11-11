@@ -38,3 +38,6 @@ html.party-dm .tabs.sub a[href="#/characters"] { display: none; }
 html.party-player .tabs.sub a[href="#/content"], html.party-player .tabs.sub a[href="#/content/sources"] { display: none; }
 .party-scope-host { flex: none; }
 .party-hidden { display: none !important; }
+/* Settings tabs a server partly locks (settings/Locked.tsx): the wrapper adds no box of its own. */
+.party-locked { display: contents; }
+.party-locked.read .aur-set-check { pointer-events: none; }

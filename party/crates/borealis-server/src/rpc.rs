@@ -19,7 +19,8 @@ use crate::workspaces::{Workspace, WsKey};
 use crate::AppState;
 
 /// In a group, a DM may choose packs; everything else about content happens in their Library.
-const GROUP_LIBRARY_COMMANDS: [&str; 2] = ["set_pack_enabled", "set_source_edition"];
+const GROUP_LIBRARY_COMMANDS: [&str; 3] =
+    ["set_pack_enabled", "set_source_edition", "clear_caches"];
 
 /// Commands after which other workspaces have to pick up new content.
 const CONTENT_CHANGING: [&str; 9] = [
@@ -33,9 +34,6 @@ const CONTENT_CHANGING: [&str; 9] = [
     "set_pack_enabled",
     "set_source_edition",
 ];
-
-/// Commands answering with the settings.
-const SETTINGS_RESULT: [&str; 2] = ["get_settings", "save_settings"];
 
 /// Commands that make a new character.
 const CREATING: [&str; 2] = ["create_character", "import_character"];
@@ -268,6 +266,11 @@ pub async fn command(
     }
     let (key, resolved) = resolve_scope(&state, &user, &scope).await?;
     let workspace = state.workspaces.get(&key).await?;
+    if let Some(answer) =
+        crate::settings::handle(&state, &user, &key, &workspace, &command, &args).await?
+    {
+        return Ok(Json(answer));
+    }
     let access = workspace
         .access_of(&command)
         .ok_or_else(|| ApiError::NotFound("The server does not offer that.".into()))?;
@@ -280,10 +283,6 @@ pub async fn command(
     };
     if CONTENT_CHANGING.contains(&command.as_str()) {
         reload_others(&state, &key);
-    }
-    if SETTINGS_RESULT.contains(&command.as_str()) {
-        // Upstream's flag for "no native file pickers": every client of the server is in that position.
-        result["mobile"] = json!(true);
     }
     scrub_paths(&mut result);
     Ok(Json(result))

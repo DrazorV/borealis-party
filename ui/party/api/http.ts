@@ -1,4 +1,4 @@
-import { COMMANDS, EVENTS, type Api, type ApiError, type ApiMethods, type CommandName, type EventName } from "../../src/api/contract";
+import { COMMANDS, EVENTS, type Api, type ApiError, type ApiMethods, type CommandName, type DataDirs, type EventName } from "../../src/api/contract";
 import { clearSession, loadSession, type ServerSession } from "./session";
 
 function fail(code: string, message: string): ApiError {
@@ -39,7 +39,11 @@ const LOCAL: Partial<Record<CommandName, Local>> = {
   takeOpenedBundles: () => [],
   takePickedFiles: () => [],
   openLink: ({ url }) => { window.open(String(url), "_blank", "noopener"); },
-  getDataDirs: () => { throw unavailable(); },
+  // The settings window reads these to show the folders, which are the server's own and not shown.
+  getDataDirs: (): DataDirs => ({
+    documentsDir: "", defaultDocumentsDir: "", isDefault: true, charactersDir: "", documentsDirUnavailable: null, secondaryContentDir: null,
+    secondaryContentUnavailable: false, portraitLibraryDir: null, portraitLibraryUnavailable: false, vaultDir: null, vaultLabel: null, vaultUnavailable: false,
+  }),
   appUpdateStatus: () => { throw unavailable(); },
   checkAppUpdate: () => { throw unavailable(); },
   semanticStatus: () => { throw unavailable(); },

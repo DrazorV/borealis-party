@@ -46,6 +46,11 @@ CREATE TABLE IF NOT EXISTS members (
     PRIMARY KEY (group_id, player_id)
 );
 CREATE INDEX IF NOT EXISTS members_player ON members(player_id);
+-- Each account's own Application Settings (settings.rs), as a JSON object.
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    settings TEXT NOT NULL
+);
 ";
 
 /// The database. Calls are short, so one connection behind a mutex is enough for a table's worth of friends.

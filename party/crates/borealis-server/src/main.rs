@@ -23,6 +23,7 @@ mod db;
 mod error;
 mod groups;
 mod rpc;
+mod settings;
 #[cfg(test)]
 mod tests;
 mod workspaces;

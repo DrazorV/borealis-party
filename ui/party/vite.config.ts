@@ -5,14 +5,25 @@ import upstream from "../vite.config";
 const local = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
 /**
- * The party build is upstream's app with three imports of `src/main.tsx` pointed at ours, so upstream's own files stay
- * as they are. The build fails if upstream renames one of them, rather than silently shipping the plain app.
+ * The party build is upstream's app with some of its imports pointed at ours, so upstream's own files stay as they are:
+ * the entry points in `src/main.tsx`, and the settings window's tabs, which a server splits by who may change what
+ * (`settings/`). The build fails if upstream renames one of them, rather than silently shipping the plain app.
  */
-const REPLACED: Readonly<Record<string, string>> = {
-  "./api": local("./entry/api.ts"),
-  "./App": local("./entry/App.tsx"),
-  "./AppProviders": local("./entry/AppProviders.tsx"),
+const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  "src/main.tsx": {
+    "./api": local("./entry/api.ts"),
+    "./App": local("./entry/App.tsx"),
+    "./AppProviders": local("./entry/AppProviders.tsx"),
+  },
+  "src/pages/settings/ApplicationSettings.tsx": {
+    "./settingsTabs": local("./settings/settingsTabs.ts"),
+    "./GeneralBuildTabs": local("./settings/GeneralBuildTabs.tsx"),
+    "./BorealisTabs": local("./settings/BorealisTabs.tsx"),
+    "./DataFilesTab": local("./settings/DataFilesTab.tsx"),
+  },
 };
+
+const wanted = Object.entries(REPLACED).flatMap(([file, sources]) => Object.keys(sources).map((source) => `${file}: ${source}`));
 
 function partyEntry(): Plugin {
   const seen = new Set<string>();
@@ -20,16 +31,17 @@ function partyEntry(): Plugin {
     name: "party-entry",
     enforce: "pre",
     resolveId(source, importer) {
-      if (!importer?.replace(/\\/g, "/").endsWith("/src/main.tsx")) return null;
-      const target = REPLACED[source];
+      const from = importer?.replace(/\\/g, "/");
+      const file = from && Object.keys(REPLACED).find((f) => from.endsWith(`/ui/${f}`));
+      const target = file && REPLACED[file]?.[source];
       if (!target) return null;
-      seen.add(source);
+      seen.add(`${file}: ${source}`);
       return target;
     },
     buildEnd(error) {
       if (error) return;
-      const missing = Object.keys(REPLACED).filter((s) => !seen.has(s));
-      if (missing.length > 0) this.error(`upstream's src/main.tsx no longer imports: ${missing.join(", ")}`);
+      const missing = wanted.filter((s) => !seen.has(s));
+      if (missing.length > 0) this.error(`upstream no longer imports: ${missing.join(", ")}`);
     },
   };
 }

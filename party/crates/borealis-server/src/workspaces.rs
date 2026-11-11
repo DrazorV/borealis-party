@@ -7,7 +7,8 @@
 //! users/<dm>/library/                 the DM's content packs
 //! users/<dm>/studio/                  the DM's Library screen (library -> ../library)
 //! groups/<g>/dm/                      the DM's view of a group; its content-prefs.json says which packs the group uses
-//! groups/<g>/members/<player>/        a member's character (library -> DM's, content-prefs.json -> the DM's above)
+//! groups/<g>/members/<player>/        a member's character (library -> DM's; content-prefs.json and settings.json,
+//!                                     the house rules, -> the DM's above)
 //! ```
 //!
 //! Which content a character sees is therefore decided purely by the folder its file sits in.
@@ -93,6 +94,11 @@ impl Workspace {
         }
     }
 
+    /// Replace some settings in memory only (an account's own settings).
+    pub fn overlay_settings(&self, fields: &Map<String, Value>) -> ApiResult<()> {
+        headless::overlay_settings(&self.handle, fields).map_err(ApiError::Internal)
+    }
+
     /// What a command requires, or `None` when the server does not offer it.
     pub fn access_of(&self, command: &str) -> Option<headless::Access> {
         headless::access_of(&self.handle, command)
@@ -169,6 +175,8 @@ impl Workspaces {
                 &owner.join("content-prefs.json"),
                 &dir.join("content-prefs.json"),
             )?;
+            // The group's house rules: the DM's settings, never the member's own (an older member folder has one).
+            relink(&owner.join("settings.json"), &dir.join("settings.json"))?;
         }
         Ok(dir)
     }
@@ -347,4 +355,13 @@ fn link(target: &Path, link_path: &Path) -> std::io::Result<()> {
 #[cfg(not(unix))]
 fn link(_: &Path, _: &Path) -> std::io::Result<()> {
     Err(std::io::Error::other("the server runs on Linux"))
+}
+
+/// Like [`link`], replacing a file that is there instead of the link.
+fn relink(target: &Path, link_path: &Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(link_path) {
+        Ok(meta) if !meta.file_type().is_symlink() => std::fs::remove_file(link_path)?,
+        _ => {}
+    }
+    link(target, link_path)
 }

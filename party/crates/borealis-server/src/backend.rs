@@ -185,6 +185,7 @@ fn library_commands(name: &str, invocation: &Invocation) -> Option<Result<Value,
         commands_content::remove_index,
         commands_content::update_indexes,
         commands_content::clear_downloaded_content,
+        commands_settings::clear_caches,
         commands_content::scan_5etools_folder,
         commands_content::stage_5etools_zip,
         commands_content::stage_5etools_url,
@@ -335,14 +336,54 @@ pub fn invoke(
 pub fn reload_shared_content(app: &AppHandle, reason: &str) -> Result<(), String> {
     use borealis_lib::content_packs::EventSink;
     let state = app.state::<AppState>();
-    let settings = state.settings().map_err(|e| e.message)?;
+    let settings = rules_from_file(&state)?;
     let prefs = ContentPrefs::load(&state.paths.prefs_file());
     let hub = shared_hub(&state.paths, &settings, &prefs)?;
     state.party_set_shared_hub(hub).map_err(|e| e.message)?;
+    // Only now, so nobody sees the new rules before the engine that applies them.
+    state
+        .set_settings(rules_from_file(&state)?)
+        .map_err(|e| e.message)?;
     if let Err(e) = state.recheck_missing_content() {
         tracing::warn!("re-checking imported characters failed: {e}");
     }
     TauriSink(app.clone()).content_reloaded(reason);
+    Ok(())
+}
+
+/// The settings in memory with the house rules from the file, which a group member's workspace shares with the
+/// group's Dungeon Master.
+fn rules_from_file(state: &AppState) -> Result<AppSettings, String> {
+    let file = serde_json::to_value(AppSettings::load(&state.paths.settings_file()))
+        .map_err(|e| e.to_string())?;
+    let mut settings = serde_json::to_value(state.settings().map_err(|e| e.message)?)
+        .map_err(|e| e.to_string())?;
+    for field in crate::settings::RULE_FIELDS {
+        settings[field] = file[field].clone();
+    }
+    serde_json::from_value(settings).map_err(|e| e.to_string())
+}
+
+/// Replace some settings in memory only, leaving the file alone (an account's own settings, see `settings.rs`).
+///
+/// # Errors
+/// When a value does not fit its field.
+pub fn overlay_settings(app: &AppHandle, fields: &Map<String, Value>) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let current = state.settings().map_err(|e| e.message)?;
+    let mut value = serde_json::to_value(&current).map_err(|e| e.to_string())?;
+    for (field, v) in fields {
+        value[field] = v.clone();
+    }
+    let next: AppSettings = serde_json::from_value(value).map_err(|e| e.to_string())?;
+    if next == current {
+        return Ok(());
+    }
+    let search_changed = next.search != current.search;
+    state.set_settings(next).map_err(|e| e.message)?;
+    if search_changed {
+        state.refresh_semantic_index();
+    }
     Ok(())
 }
 

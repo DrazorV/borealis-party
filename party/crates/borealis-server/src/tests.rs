@@ -390,3 +390,258 @@ async fn sessions_are_required_and_passwords_are_checked() {
     .await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
 }
+
+/// A setting as `client` sees it in `scope`, once the background reloads have caught up.
+async fn eventually_setting(client: &Client, scope: &str, field: &str, want: &Value) {
+    let mut last = Value::Null;
+    for _ in 0..100 {
+        let (status, settings) = client.rpc(scope, "get_settings", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{settings}");
+        last = settings[field].clone();
+        if last == *want {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("{field} in {scope}: wanted {want}, last {last}");
+}
+
+fn patch(fields: Value) -> Value {
+    json!({ "patch": fields })
+}
+
+#[test]
+fn every_setting_has_one_owner() {
+    use crate::settings::{DM_FIELDS, PLATFORM_FIELDS, RULE_FIELDS, SERVER_FIELDS, USER_FIELDS};
+    let all = serde_json::to_value(borealis_lib::settings::AppSettings::default()).unwrap();
+    for field in all.as_object().unwrap().keys() {
+        let owners = [
+            &USER_FIELDS[..],
+            &DM_FIELDS,
+            &RULE_FIELDS,
+            &SERVER_FIELDS,
+            &PLATFORM_FIELDS,
+        ]
+        .iter()
+        .filter(|list| list.contains(&field.as_str()))
+        .count();
+        assert_eq!(owners, 1, "{field}: say in settings.rs who owns it");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::too_many_lines)]
+async fn settings_are_scoped_by_account_group_and_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = router(dir.path().to_path_buf());
+    let dm = sign_up(&router, "settings-dm", "dm").await;
+    let alice = sign_up(&router, "settings-alice", "player").await;
+    let bob = sign_up(&router, "settings-bob", "player").await;
+    let (_, group) = dm.post("/api/groups", json!({ "name": "Rules" })).await;
+    let group_id = group["id"].as_str().unwrap().to_string();
+    let scope = format!("group-{group_id}");
+    for (who, name) in [(&alice, "settings-alice"), (&bob, "settings-bob")] {
+        let (_, invite) = dm
+            .post(
+                &format!("/api/groups/{group_id}/invites"),
+                json!({ "username": name }),
+            )
+            .await;
+        let (status, _) = who
+            .post(
+                &format!("/api/invites/{}/accept", invite["id"].as_str().unwrap()),
+                json!({}),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    // Server-wide settings are nobody's to see or change.
+    let (status, settings) = alice.rpc(&scope, "get_settings", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    assert_eq!(settings["documentsDir"], Value::Null);
+    assert_eq!(settings["ai"]["enabled"], false);
+    assert_eq!(settings["checkAppUpdates"], false);
+    assert_eq!(settings["mobile"], true);
+    for (who, place) in [
+        (&dm, "library"),
+        (&dm, scope.as_str()),
+        (&alice, "personal"),
+    ] {
+        for change in [
+            json!({ "checkAppUpdates": true }),
+            json!({ "documentsDir": "/etc" }),
+            json!({ "vaultDir": "/home" }),
+            json!({ "ai": { "enabled": true } }),
+        ] {
+            let (status, out) = who.rpc(place, "save_settings", patch(change.clone())).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{change} in {place}: {out}");
+            assert_eq!(
+                out["message"],
+                "That setting is managed by the server's administrator."
+            );
+        }
+    }
+
+    // An account's own settings follow it into every workspace, and stay its own.
+    let (status, out) = alice
+        .rpc(
+            "personal",
+            "save_settings",
+            patch(json!({ "theme": "dark", "sheet": { "formFillable": true } })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["theme"], "dark");
+    let (_, there) = alice.rpc(&scope, "get_settings", json!({})).await;
+    assert_eq!(there["theme"], "dark");
+    assert_eq!(there["sheet"]["formFillable"], true);
+    let (_, theirs) = bob.rpc(&scope, "get_settings", json!({})).await;
+    assert_eq!(theirs["theme"], "system", "bob's own");
+    let (_, dms) = dm.rpc(&scope, "get_settings", json!({})).await;
+    assert_eq!(dms["theme"], "system", "the DM's own");
+    let (status, out) = dm
+        .rpc(
+            "library",
+            "save_settings",
+            patch(json!({ "accentColor": "green" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (_, dms) = dm.rpc(&scope, "get_settings", json!({})).await;
+    assert_eq!(dms["accentColor"], "green");
+    let (_, theirs) = alice.rpc(&scope, "get_settings", json!({})).await;
+    assert_eq!(
+        theirs["accentColor"], "default",
+        "the member's file is the DM's, the look is not"
+    );
+    let (status, _) = alice
+        .rpc(
+            "personal",
+            "save_settings",
+            patch(json!({ "theme": "purple" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "values are still checked");
+
+    // A group's house rules are its DM's: members read them and cannot change them.
+    let (status, out) = dm
+        .rpc(
+            &scope,
+            "save_settings",
+            patch(json!({ "pointBuyBudget": 32, "abilityMethod": "point_buy" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    eventually_setting(&alice, &scope, "pointBuyBudget", &json!(32)).await;
+    eventually_setting(&bob, &scope, "abilityMethod", &json!("point_buy")).await;
+    let (status, out) = alice
+        .rpc(
+            &scope,
+            "save_settings",
+            patch(json!({ "pointBuyBudget": 40 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{out}");
+    assert_eq!(
+        out["message"],
+        "Your Dungeon Master sets this group's house rules."
+    );
+    let (status, out) = dm
+        .rpc(
+            "library",
+            "save_settings",
+            patch(json!({ "pointBuyBudget": 40 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{out}");
+
+    // The settings window sends everything back: what the caller was shown is no change.
+    let (_, mut everything) = alice.rpc(&scope, "get_settings", json!({})).await;
+    everything["tileSize"] = json!(200);
+    let (status, out) = alice.rpc(&scope, "save_settings", patch(everything)).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["tileSize"], 200);
+    assert_eq!(out["pointBuyBudget"], 32);
+
+    // Outside groups a player keeps their own rules.
+    let (_, personal) = alice.rpc("personal", "get_settings", json!({})).await;
+    assert_eq!(personal["pointBuyBudget"], 27);
+    let (status, out) = alice
+        .rpc(
+            "personal",
+            "save_settings",
+            patch(json!({ "pointBuyBudget": 30 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (_, there) = alice.rpc(&scope, "get_settings", json!({})).await;
+    assert_eq!(
+        there["pointBuyBudget"], 32,
+        "the group's rules are untouched"
+    );
+
+    // The DM and the member's character derive the same numbers; the DM's view can't change settings.
+    let (status, hero) = alice
+        .rpc(&scope, "create_character", new_character("Ruled"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{hero}");
+    let view = format!("/api/groups/{group_id}/members/{}/view", alice.id);
+    let (status, seen) = dm.post(&format!("{view}/get_snapshot"), json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{seen}");
+    assert_eq!(hero["abilities"]["pointBuy"]["budget"], 32, "{hero}");
+    assert_eq!(seen["abilities"], hero["abilities"]);
+    let (status, _) = dm
+        .post(
+            &format!("{view}/save_settings"),
+            patch(json!({ "theme": "dark" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // The content library's settings are the DM's account's; players neither see nor change them.
+    let (status, out) = dm
+        .rpc(
+            "library",
+            "save_settings",
+            patch(json!({ "showImportNotice": false })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (_, dms) = dm.rpc(&scope, "get_settings", json!({})).await;
+    assert_eq!(dms["showImportNotice"], false);
+    let (_, players) = alice.rpc("personal", "get_settings", json!({})).await;
+    assert_eq!(players["autoContentUpdate"], false, "hidden from players");
+    let (status, out) = alice
+        .rpc(
+            "personal",
+            "save_settings",
+            patch(json!({ "autoContentUpdate": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{out}");
+    assert_eq!(
+        out["message"],
+        "Only Dungeon Masters have a content library."
+    );
+    for place in ["personal", scope.as_str()] {
+        let (status, _) = alice.rpc(place, "clear_caches", json!({})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{place}");
+    }
+    for place in ["library", scope.as_str()] {
+        let (status, out) = dm.rpc(place, "clear_caches", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{place}: {out}");
+    }
+
+    // Restore defaults resets only what the caller owns.
+    let (status, out) = alice
+        .rpc(&scope, "restore_default_settings", json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["theme"], "system");
+    assert_eq!(out["tileSize"], 160);
+    assert_eq!(out["pointBuyBudget"], 32, "still the DM's");
+    let (_, dms) = dm.rpc(&scope, "get_settings", json!({})).await;
+    assert_eq!(dms["pointBuyBudget"], 32);
+    assert_eq!(dms["accentColor"], "green");
+}

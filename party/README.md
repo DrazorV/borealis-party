@@ -54,6 +54,7 @@ paths.
 | A DM sees a member's character and cannot change it | `groups.rs`, `view` |
 | Only DMs add content, from their Library | `rpc.rs`, `check_access` |
 | Only commands listed in `backend.rs` are reachable | `backend.rs` |
+| Each Application Setting has one owner: the account, the group's DM (house rules), the DM's library, or the server | `party/crates/borealis-server/src/settings.rs` |
 
 Content follows the character's folder. A character outside a group sees the bundled SRD. A character in a group sees the
 bundled SRD plus the DM's library, minus the packs the DM turned off for that group. See the layout comment at the top of
@@ -77,8 +78,9 @@ How that works:
 
 - **Backend.** `party/` is its own Cargo workspace. It uses `src-tauri` as a path dependency, and its `[patch]` section swaps
   the `tauri` crates for the webview-free stand-ins in `party/crates`. Upstream's source compiles unchanged.
-- **Web app.** `ui/party/vite.config.ts` builds upstream's `src/main.tsx` with three of its imports pointed at `ui/party/entry`.
-  The build fails if upstream renames one of them. `party.css` hides controls that don't apply to an account.
+- **Web app.** `ui/party/vite.config.ts` builds upstream's `src/main.tsx` with three of its imports pointed at `ui/party/entry`,
+  and the settings window with its tabs pointed at `ui/party/settings`, which leave out what an account can't change on
+  a server. The build fails if upstream renames one of them. `party.css` hides controls that don't apply to an account.
 - **Android.** `party/android/party.init.gradle` sets the app id, name and HTTP permission from outside upstream's Gradle files.
 - **Tauri.** `party/tauri.party.json` overrides the front end and network policy.
 
