@@ -344,24 +344,137 @@ fn fold_upgrade(host: &mut FeatureData, up: FeatureData) {
     host.prerequisites_unmet |= up.prerequisites_unmet;
 }
 
-/// Folds each upgrade ("Improved X", "Greater X", "Superior X") into the earliest feature of the
-/// same class section with the same stem, so a feature that grows reads as one entry.
-fn fold_upgrades(sorted: Vec<((u8, usize), FeatureData)>) -> Vec<FeatureData> {
-    let mut out: Vec<((u8, usize), FeatureData)> = Vec::new();
-    for (scope, f) in sorted {
-        let host = is_upgrade_name(&f.name)
-            .then(|| {
-                let stem = upgrade_stem(&f.name);
-                out.iter()
-                    .position(|(s, h)| *s == scope && upgrade_stem(&h.name) == stem)
-            })
-            .flatten();
-        match host {
-            Some(i) => fold_upgrade(&mut out[i].1, f),
-            None => out.push((scope, f)),
+/// Lower case, typographic apostrophes made plain, whitespace collapsed: the form names and
+/// descriptions are compared in.
+fn fold_form(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+        .replace(['\u{2019}', '\u{2018}', '\u{fffd}'], "'")
+}
+
+/// Words that say a feature named just before them gets stronger ("Your Aura of Protection is
+/// now a 30-foot Emanation", "the extra damage of your Giant's Might feature increases to 1d8").
+const GROWTH_WORDS: &[&str] = &[
+    "improve",
+    "improves",
+    "increase",
+    "increases",
+    "grow",
+    "grows",
+    "become",
+    "becomes",
+    "now",
+];
+/// Words allowed between a feature's name and its growth word.
+const GROWTH_GAP: usize = 5;
+/// Shortest feature name a description is searched for (shorter ones are common words).
+const MIN_HOST_NAME: usize = 4;
+
+/// Byte offset of the first place `probe` (in [`fold_form`]) says the feature `host` (in
+/// [`fold_form`]) improves: "your/the <host> [feature] ... <growth word>" within one sentence, or
+/// "improves/enhances your/the <host>".
+fn growth_mention(probe: &str, host: &str) -> Option<usize> {
+    if host.chars().count() < MIN_HOST_NAME {
+        return None;
+    }
+    let is_word = |c: char| c.is_alphanumeric();
+    for (pos, _) in probe.match_indices(host) {
+        let end = pos + host.len();
+        let before = &probe[..pos];
+        let bounded = !before.chars().next_back().is_some_and(is_word)
+            && !probe[end..].chars().next().is_some_and(is_word);
+        if !bounded {
+            continue;
+        }
+        let improves = [
+            "improves your ",
+            "improves the ",
+            "enhances your ",
+            "enhances the ",
+        ]
+        .iter()
+        .any(|p| before.ends_with(p));
+        if improves {
+            return Some(pos);
+        }
+        if !(before.ends_with("your ") || before.ends_with("the ")) {
+            continue;
+        }
+        // up to the clause end: "While in your Starry Form, you become ..." is a condition
+        let sentence = probe[end..]
+            .split(['.', '!', '?', ';', ',', ':'])
+            .next()
+            .unwrap_or("");
+        let grows = sentence
+            .split_whitespace()
+            .map(|w| w.trim_matches(|c: char| !is_word(c)))
+            .filter(|w| !matches!(*w, "feature" | "features"))
+            .take(GROWTH_GAP + 1)
+            .any(|w| GROWTH_WORDS.contains(&w));
+        if grows {
+            return Some(pos);
         }
     }
-    out.into_iter().map(|(_, f)| f).collect()
+    None
+}
+
+/// One sheet entry before upgrades are folded: its class section, and its description in
+/// [`fold_form`] (what an upgrade says about the feature it improves).
+struct FoldEntry {
+    scope: (u8, usize),
+    probe: String,
+    data: FeatureData,
+}
+
+/// The entry an upgrade is folded into, among the earlier entries of its class section.
+///
+/// - Name: "Improved X", "Greater X" or "Superior X" goes to X ("Greater Portent" -> "Portent"),
+///   or to a feature whose name ends with X when its description names that feature
+///   ("Improved Defender" -> "Steel Defender").
+/// - Text (class and subclass features only): a feature whose description says an earlier one
+///   improves ("Aura Expansion": "Your Aura of Protection is now ...") goes to the one it names
+///   first.
+fn upgrade_host(out: &[FoldEntry], up: &FoldEntry) -> Option<usize> {
+    let peers = || out.iter().enumerate().filter(|(_, h)| h.scope == up.scope);
+    if is_upgrade_name(&up.data.name) {
+        let stem = upgrade_stem(&up.data.name);
+        if let Some((i, _)) = peers().find(|(_, h)| upgrade_stem(&h.data.name) == stem) {
+            return Some(i);
+        }
+        let suffix = format!(" {stem}");
+        let named = peers().find(|(_, h)| {
+            let host = fold_form(without_level_lead(&h.data.name));
+            host.ends_with(&suffix) && up.probe.contains(&host)
+        });
+        if let Some((i, _)) = named {
+            return Some(i);
+        }
+    }
+    if up.scope.0 != section_rank(FeatureGroup::Class) {
+        return None;
+    }
+    peers()
+        .filter_map(|(i, h)| {
+            growth_mention(&up.probe, &fold_form(without_level_lead(&h.data.name)))
+                .map(|pos| (pos, i))
+        })
+        .min()
+        .map(|(_, i)| i)
+}
+
+/// Folds each upgrade into the feature it improves ([`upgrade_host`]), so a feature that grows
+/// reads as one entry.
+fn fold_upgrades(sorted: Vec<FoldEntry>) -> Vec<FeatureData> {
+    let mut out: Vec<FoldEntry> = Vec::new();
+    for f in sorted {
+        match upgrade_host(&out, &f) {
+            Some(i) => fold_upgrade(&mut out[i].data, f.data),
+            None => out.push(f),
+        }
+    }
+    out.into_iter().map(|f| f.data).collect()
 }
 
 /// Displayed features, de-duplicated by name (sources merged), formulas evaluated and ordered:
@@ -370,6 +483,7 @@ fn fold_upgrades(sorted: Vec<((u8, usize), FeatureData)>) -> Vec<FeatureData> {
 pub(crate) fn features(snap: &CharacterSnapshot) -> Vec<FeatureData> {
     struct Keyed {
         key: (u8, usize, u32, u8, usize),
+        probe: String,
         data: FeatureData,
     }
     let mut out: Vec<Keyed> = Vec::new();
@@ -410,6 +524,11 @@ pub(crate) fn features(snap: &CharacterSnapshot) -> Vec<FeatureData> {
                 ty_rank,
                 idx,
             ),
+            probe: fold_form(&format!(
+                "{} {}",
+                crate::card_model::plain_paragraphs(&f.description),
+                f.sheet_summary.as_deref().unwrap_or_default()
+            )),
             data: FeatureData {
                 id: f.id.clone(),
                 name,
@@ -429,7 +548,11 @@ pub(crate) fn features(snap: &CharacterSnapshot) -> Vec<FeatureData> {
     out.sort_by_key(|k| k.key);
     fold_upgrades(
         out.into_iter()
-            .map(|k| ((k.key.0, k.key.1), k.data))
+            .map(|k| FoldEntry {
+                scope: (k.key.0, k.key.1),
+                probe: k.probe,
+                data: k.data,
+            })
             .collect(),
     )
 }
