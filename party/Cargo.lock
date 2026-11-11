@@ -873,6 +873,8 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "borealis",
+ "borealis-bundle",
+ "borealis-content",
  "clap",
  "http-body-util",
  "lettre",

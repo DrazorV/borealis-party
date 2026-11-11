@@ -27,6 +27,7 @@ mod mail;
 mod migrate;
 mod rpc;
 mod settings;
+mod sync;
 #[cfg(test)]
 mod tests;
 mod workspaces;

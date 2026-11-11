@@ -45,10 +45,40 @@ pub struct Workspace {
     handle: AppHandle,
     /// The workspace's event stream.
     pub events: broadcast::Sender<WorkspaceEvent>,
+    /// Held by the sync commands and by the commands that delete or replace character files, so a sync never sees
+    /// one half done. `call` alone holds nothing between commands.
+    pub sync_lock: tokio::sync::Mutex<()>,
     last_used: AtomicI64,
 }
 
 impl Workspace {
+    /// Run `work` on the workspace's backend, off the async threads.
+    pub async fn blocking<T: Send + 'static>(
+        &self,
+        work: impl FnOnce(&AppHandle) -> ApiResult<T> + Send + 'static,
+    ) -> ApiResult<T> {
+        self.last_used.store(now(), Ordering::Relaxed);
+        let handle = self.handle.clone();
+        let outcome = tokio::task::spawn_blocking(move || work(&handle))
+            .await
+            .map_err(|e| ApiError::Internal(format!("command task: {e}")))?;
+        self.last_used.store(now(), Ordering::Relaxed);
+        outcome
+    }
+
+    /// True when the character is open with unsaved edits.
+    pub fn is_dirty(&self, character: &str) -> bool {
+        headless::is_dirty(&self.handle, character)
+    }
+
+    /// Send an event to the account's clients (none listening is fine).
+    pub fn emit(&self, name: &str, payload: Value) {
+        let _ = self.events.send(WorkspaceEvent {
+            name: name.to_string(),
+            payload,
+        });
+    }
+
     /// Run a command, off the async threads.
     pub async fn call(&self, command: &str, args: Map<String, Value>) -> ApiResult<Value> {
         self.last_used.store(now(), Ordering::Relaxed);
@@ -247,6 +277,7 @@ fn open_now(dir: PathBuf, content: PathBuf) -> ApiResult<Arc<Workspace>> {
     Ok(Arc::new(Workspace {
         handle,
         events,
+        sync_lock: tokio::sync::Mutex::new(()),
         last_used: AtomicI64::new(now()),
     }))
 }

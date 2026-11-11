@@ -364,6 +364,14 @@ pub fn has_unsaved_changes(app: &AppHandle) -> bool {
         .map_or(true, |sessions| sessions.values().any(|s| s.dirty))
 }
 
+/// True when the character is open with unsaved edits.
+#[must_use]
+pub fn is_dirty(app: &AppHandle, character: &str) -> bool {
+    app.state::<AppState>()
+        .sessions()
+        .is_ok_and(|sessions| sessions.get(character).is_some_and(|s| s.dirty))
+}
+
 /// Write every unsaved character to its file.
 ///
 /// # Errors

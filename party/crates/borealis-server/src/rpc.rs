@@ -11,8 +11,8 @@ use tokio_stream::{Stream, StreamExt};
 
 use crate::auth::User;
 use crate::error::{ApiError, ApiResult};
-use crate::settings;
 use crate::AppState;
+use crate::{settings, sync};
 
 /// Server paths are nobody's business: the commands report them for the desktop app's benefit.
 fn scrub_paths(value: &mut Value) {
@@ -49,7 +49,8 @@ pub async fn command(
             }
             workspace.call(&command, args).await?
         }
-        _ => workspace.call(&command, args).await?,
+        name if sync::COMMANDS.contains(&name) => sync::call(&workspace, name, &args).await?,
+        _ => sync::call_upstream(&workspace, &command, args).await?,
     };
     if settings::COMMANDS.contains(&command.as_str()) {
         result = settings::shown(result);

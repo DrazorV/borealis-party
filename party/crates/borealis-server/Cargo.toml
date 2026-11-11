@@ -16,6 +16,9 @@ path = "src/main.rs"
 # device-to-device transfer it also compiles in stays unreachable (see `backend.rs`).
 borealis = { path = "../../../src-tauri", default-features = false, features = ["mas", "device-link"] }
 tauri = { path = "../tauri" }
+# Sync for the apps: the same digests, edit stamps and trash as upstream's bundles, and its content file format.
+borealis-bundle = { path = "../../../crates/borealis-bundle" }
+borealis-content = { path = "../../../crates/borealis-content" }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "fs", "set-header"] }
 tokio = { version = "1", features = ["full"] }

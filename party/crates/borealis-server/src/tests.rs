@@ -18,6 +18,9 @@ use crate::mail::{Mailer, Recorder};
 use crate::workspaces::Workspaces;
 use crate::{api_routes, AppState, Config};
 
+#[path = "sync_tests.rs"]
+mod sync_tests;
+
 const PASSWORD: &str = "correct horse battery";
 
 struct Client {
@@ -454,6 +457,7 @@ async fn each_account_has_its_own_characters_and_content_on_postgres() {
     let admin = sign_in(&router, "moving-admin").await;
     admin_flow(&router, &admin, &data).await;
     bundle_flow(router.clone(), &data).await;
+    sync_tests::sync_flow(router.clone(), &data).await;
     full_flow(router, &data).await;
 }
 
