@@ -20,3 +20,6 @@ ui/src/api/mock/default-settings.ts https://github.com/TeamBorealis/borealis/pul
 ui/src/api/types/settings.ts https://github.com/TeamBorealis/borealis/pull/42
 ui/src/pages/settings/SheetTab.tsx https://github.com/TeamBorealis/borealis/pull/42
 ui/src/pages/settings/settingsForm.ts https://github.com/TeamBorealis/borealis/pull/42
+
+# Import characters names Borealis files too
+ui/src/pages/characters/CharactersPage.tsx https://github.com/TeamBorealis/borealis/pull/44
