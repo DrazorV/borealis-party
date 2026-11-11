@@ -462,17 +462,9 @@ pub fn apply_group_rules(app: &AppHandle, id: &str) -> Result<Option<Value>, Str
     let message = |e: borealis_lib::error::ApiError| e.message;
     let settings = state.settings().map_err(message)?;
     let mut notes = Vec::new();
-    if state
-        .read(id, |_, session| Ok(has_house_rules(session)))
-        .map_err(message)?
-    {
-        clear_own_house_rules(&state, id).map_err(message)?;
-        notes.push(
-            "This character's own house rules are off. In this group your Dungeon Master sets the rules."
-                .to_string(),
-        );
-    }
-    // A cleared pick can take others with it, so look again after each one.
+    // Picks that stand only because the character ignores prerequisites go first: once that rule is off they stay
+    // stored but unapplied, and no longer show as such. A cleared pick can take others with it, so look again after
+    // each one.
     for _ in 0..64 {
         let snapshot = state.get_snapshot(id).map_err(message)?;
         let Some(slot) = snapshot
@@ -488,6 +480,16 @@ pub fn apply_group_rules(app: &AppHandle, id: &str) -> Result<Option<Value>, Str
             slot.title
         ));
         state.clear_selection(id, &slot.id).map_err(message)?;
+    }
+    if state
+        .read(id, |_, session| Ok(has_house_rules(session)))
+        .map_err(message)?
+    {
+        clear_own_house_rules(&state, id).map_err(message)?;
+        notes.push(
+            "This character's own house rules are off. In this group your Dungeon Master sets the rules."
+                .to_string(),
+        );
     }
     let before = state.get_snapshot(id).map_err(message)?;
     if ability_problem(&before, &settings) {

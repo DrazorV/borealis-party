@@ -798,3 +798,168 @@ async fn a_character_joining_a_group_takes_the_groups_rules() {
         .await;
     assert_ne!(status, StatusCode::OK, "27 points is over the group's 20");
 }
+
+fn slot<'a>(snapshot: &'a Value, title: &str) -> &'a Value {
+    snapshot["slots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["title"] == title)
+        .unwrap_or_else(|| panic!("no slot {title}: {snapshot}"))
+}
+
+fn has_class(snapshot: &Value, name: &str) -> bool {
+    snapshot["level"]["classes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c["name"] == name)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pick_made_by_ignoring_prerequisites_is_taken_out_in_a_group() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = router(dir.path().to_path_buf());
+    let dm = sign_up(&router, "prereq-dm", "dm").await;
+    let alice = sign_up(&router, "prereq-alice", "player").await;
+    let (_, group) = dm
+        .post("/api/groups", json!({ "name": "By the book" }))
+        .await;
+    let group_id = group["id"].as_str().unwrap().to_string();
+    let scope = format!("group-{group_id}");
+    let (_, invite) = dm
+        .post(
+            &format!("/api/groups/{group_id}/invites"),
+            json!({ "username": "prereq-alice" }),
+        )
+        .await;
+    alice
+        .post(
+            &format!("/api/invites/{}/accept", invite["id"].as_str().unwrap()),
+            json!({}),
+        )
+        .await;
+    // Scores by hand, so only the multiclass is at odds with the group.
+    let (status, out) = dm
+        .rpc(
+            &scope,
+            "save_settings",
+            patch(json!({ "abilityMethod": "manual" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+
+    // Outside any group: a CHA 8 wizard multiclasses into Bard by ignoring its CHA 13 prerequisite.
+    let (status, wizard) = alice
+        .rpc(
+            "personal",
+            "create_character",
+            json!({ "request": {
+                "name": "Seraphine", "ruleset": "dnd2014", "abilityMethod": "manual",
+                "options": { "multiclassing": true },
+            }}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{wizard}");
+    let id = wizard["id"].clone();
+    let mut snapshot = wizard;
+    for (title, element) in [
+        ("Race", "ID_RACE_ELF"),
+        ("Class", "ID_WOTC_PHB_CLASS_WIZARD"),
+        ("Background", "ID_BACKGROUND_ACOLYTE"),
+    ] {
+        let (status, out) = alice
+            .rpc(
+                "personal",
+                "apply_selection",
+                json!({ "characterId": id, "slotId": slot(&snapshot, title)["id"], "elementId": element }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{title}: {out}");
+        snapshot = out;
+    }
+    for (ability, value) in [("str", 13), ("cha", 8), ("int", 13)] {
+        let (status, out) = alice
+            .rpc(
+                "personal",
+                "set_base_score",
+                json!({ "characterId": id, "ability": ability, "value": value }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{out}");
+    }
+    let (status, out) = alice
+        .rpc(
+            "personal",
+            "set_character_options",
+            json!({ "characterId": id, "options": { "ignoreMulticlassPrerequisites": true } }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, out) = alice
+        .rpc("personal", "add_multiclass", json!({ "characterId": id }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let multiclass = slot(&out, "Multiclass (Level 2)")["id"].clone();
+    let (status, bard) = alice
+        .rpc(
+            "personal",
+            "apply_selection",
+            json!({ "characterId": id, "slotId": multiclass, "elementId": "ID_WOTC_PHB_MULTICLASS_BARD" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{bard}");
+    assert!(has_class(&bard, "Bard"), "{bard}");
+    assert_eq!(
+        slot(&bard, "Multiclass (Level 2)")["prerequisitesUnmet"],
+        true
+    );
+    alice
+        .rpc("personal", "save_character", json!({ "characterId": id }))
+        .await;
+
+    // In the group the DM's rules hold: the Bard levels go, and the player is told to choose again.
+    let (status, out) = alice
+        .post(
+            &format!("/api/groups/{group_id}/character"),
+            json!({ "characterId": id }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, joined) = alice
+        .rpc(&scope, "load_character", json!({ "characterId": id }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{joined}");
+    assert!(!has_class(&joined, "Bard"), "{joined}");
+    assert!(has_class(&joined, "Wizard"), "the main class stays");
+    assert_eq!(joined["options"]["ignoreMulticlassPrerequisites"], false);
+    assert!(joined["slots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|s| s["prerequisitesUnmet"] == false || s["chosen"].is_null()));
+    assert_eq!(joined["dirty"], false, "and saved");
+    let (_, notes) = alice
+        .rpc(&scope, "take_group_notes", json!({ "characterId": id }))
+        .await;
+    let notes: Vec<&str> = notes
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n.as_str().unwrap())
+        .collect();
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("Bard") && n.contains("Choose again")),
+        "{notes:?}"
+    );
+    assert!(notes.iter().any(|n| n.contains("house rules")), "{notes:?}");
+    assert_eq!(notes.len(), 2, "the scores were fine: {notes:?}");
+
+    // It stays out after a reopen.
+    let (_, again) = alice
+        .rpc(&scope, "load_character", json!({ "characterId": id }))
+        .await;
+    assert!(!has_class(&again, "Bard"));
+}
