@@ -1,4 +1,4 @@
-//! The Borealis party server: the Borealis backend for many accounts, plus groups.
+//! The Borealis party server: the Borealis backend for many accounts, each with its own characters and content.
 //!
 //! See `party/README.md`.
 
@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use axum::extract::DefaultBodyLimit;
 use axum::http::{header, HeaderName, HeaderValue, Method};
-use axum::routing::{delete, get, post};
+use axum::routing::{any, delete, get, post};
 use axum::{Json, Router};
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
@@ -23,7 +23,6 @@ mod backend;
 mod config;
 mod db;
 mod error;
-mod groups;
 mod mail;
 mod migrate;
 mod rpc;
@@ -56,8 +55,8 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Create an active account; the password is read from standard input. Every account can run groups and play
-    /// in them; the first account on a server is always an admin.
+    /// Create an active account; the password is read from standard input. The first account on a server is always
+    /// an admin.
     AddUser {
         /// The username.
         username: String,
@@ -70,7 +69,7 @@ enum Command {
     },
     /// Exit 0 when the running server answers (for container health checks).
     Health,
-    /// Copy accounts and groups from a SQLite file into the configured PostgreSQL database, which must have none yet.
+    /// Copy the accounts from a SQLite file into the configured PostgreSQL database, which must have none yet.
     /// The server does this by itself on its first start with PostgreSQL; this is for doing it by hand.
     MigrateSqlite {
         /// The SQLite file; by default the one `[sqlite] path` names.
@@ -97,8 +96,6 @@ pub struct AppState {
     signup_limiter: RateLimiter,
     /// Sends sign-up email, when `[smtp]` is set up.
     mailer: Option<Arc<dyn mail::Mailer>>,
-    /// Serialises anything that moves characters in or out of groups.
-    membership: Arc<tokio::sync::Mutex<()>>,
     /// Serialises sign-ups, so only one can be the first account.
     accounts: Arc<tokio::sync::Mutex<()>>,
     /// When the server started.
@@ -116,6 +113,11 @@ async fn server_info(
         "requireApproval": settings.require_approval,
         "email": state.mailer.is_some(),
     })))
+}
+
+/// Any other path under `/api`, so a client gets JSON and not the web app's page.
+async fn no_such_route() -> error::ApiError {
+    error::ApiError::NotFound("The server does not offer that.".into())
 }
 
 /// Every route under `/api`.
@@ -146,37 +148,9 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
             "/api/admin/accounts/{id}/sign-out",
             post(admin::sign_out_everywhere),
         )
-        .route("/api/groups", get(groups::list).post(groups::create))
-        .route(
-            "/api/groups/{id}",
-            get(groups::detail)
-                .patch(groups::rename)
-                .delete(groups::delete),
-        )
-        .route("/api/groups/{id}/party", get(groups::party))
-        .route("/api/groups/{id}/invites", post(groups::invite))
-        .route(
-            "/api/groups/{id}/invites/{invite}",
-            delete(groups::cancel_invite),
-        )
-        .route(
-            "/api/groups/{id}/members/{player}",
-            delete(groups::remove_member),
-        )
-        .route(
-            "/api/groups/{id}/members/{player}/view/{command}",
-            post(groups::view),
-        )
-        .route(
-            "/api/groups/{id}/character",
-            post(groups::set_character).delete(groups::clear_character),
-        )
-        .route("/api/invites", get(groups::my_invites))
-        .route("/api/invites/{id}/accept", post(groups::accept))
-        .route("/api/invites/{id}/decline", post(groups::decline))
-        .route("/api/characters", get(groups::my_characters))
-        .route("/api/rpc/{scope}/{command}", post(rpc::command))
-        .route("/api/events/{scope}", get(rpc::events))
+        .route("/api/rpc/{command}", post(rpc::command))
+        .route("/api/events", get(rpc::events))
+        .route("/api/{*rest}", any(no_such_route))
         .layer(DefaultBodyLimit::max(max_upload))
         .with_state(state)
 }
@@ -227,6 +201,36 @@ async fn shutdown_signal() {
         () = interrupt => {}
         () = terminate => {}
     }
+}
+
+/// How long requests under way get to finish once the server is told to stop.
+const STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Serve until `stop` resolves, then let requests under way finish, for a moment only: an event stream never ends by
+/// itself.
+async fn serve(
+    listener: tokio::net::TcpListener,
+    router: Router,
+    stop: impl std::future::Future<Output = ()>,
+) -> std::io::Result<()> {
+    let (closing, closed) = tokio::sync::oneshot::channel::<()>();
+    let mut server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = closed.await;
+        })
+        .await
+    });
+    tokio::select! {
+        ended = &mut server => return ended.map_err(std::io::Error::other)?,
+        () = stop => {}
+    }
+    drop(closing);
+    let _ = tokio::time::timeout(STOP_GRACE, server).await;
+    Ok(())
 }
 
 /// The folder next to the program, where the packaged content and web app sit.
@@ -285,7 +289,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             other => format!("{other:?}"),
         }
     );
-    let db = Db::open(&location).await?;
+    let db = Db::open(&location).await.map_err(|e| e.to_string())?;
     let sqlite_file = Settings::resolve(dir, &settings.sqlite.path);
     if let Some(Command::MigrateSqlite { from }) = &args.command {
         if !matches!(location, db::Location::Postgres(_)) {
@@ -297,7 +301,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if !file.is_file() {
             return Err(format!("no SQLite database at {}", file.display()).into());
         }
-        let source = Db::open(&db::Location::Sqlite(file)).await?;
+        let source = Db::open(&db::Location::Sqlite(file))
+            .await
+            .map_err(|e| e.to_string())?;
         let report = migrate::copy(&source, &db).await?;
         println!("Copied {}.", migrate::describe(&report));
         return Ok(());
@@ -399,7 +405,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         login_limiter: RateLimiter::logins(),
         signup_limiter: RateLimiter::signups(),
         mailer,
-        membership: Arc::new(tokio::sync::Mutex::new(())),
         accounts: Arc::new(tokio::sync::Mutex::new(())),
         started: std::time::Instant::now(),
     };
@@ -410,12 +415,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let listener = tokio::net::TcpListener::bind(settings.server.bind).await?;
     tracing::info!("listening on {}", settings.server.bind);
-    axum::serve(
-        listener,
-        router.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .with_graceful_shutdown(shutdown_signal())
-    .await?;
+    serve(listener, router, shutdown_signal()).await?;
     tokio::task::spawn_blocking(move || workspaces.save_all()).await?;
     Ok(())
 }

@@ -1,6 +1,6 @@
-//! The access rules, end to end through the router and the real Borealis backend.
+//! The server end to end, through the router and the real Borealis backend.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 use crate::auth::RateLimiter;
-use crate::db::{Db, Location};
+use crate::db::{Db, Location, OpenError};
 use crate::mail::{Mailer, Recorder};
 use crate::workspaces::Workspaces;
 use crate::{api_routes, AppState, Config};
@@ -67,7 +67,6 @@ fn router_with(data: PathBuf, db: Db, setup: Setup) -> Router {
         login_limiter: RateLimiter::logins(),
         signup_limiter: RateLimiter::new(setup.signups_allowed, Duration::from_secs(3600)),
         mailer,
-        membership: Arc::new(tokio::sync::Mutex::new(())),
         accounts: Arc::new(tokio::sync::Mutex::new(())),
         started: std::time::Instant::now(),
     };
@@ -162,31 +161,8 @@ impl Client {
     async fn delete(&self, path: &str) -> (StatusCode, Value) {
         send(&self.router, Some(&self.token), "DELETE", path, Value::Null).await
     }
-    async fn rpc(&self, scope: &str, command: &str, args: Value) -> (StatusCode, Value) {
-        self.post(&format!("/api/rpc/{scope}/{command}"), args)
-            .await
-    }
-    async fn new_group(&self, name: &str) -> String {
-        let (status, group) = self.post("/api/groups", json!({ "name": name })).await;
-        assert_eq!(status, StatusCode::OK, "{group}");
-        group["id"].as_str().unwrap().to_string()
-    }
-    /// Invite `username` to `group` and have `player` accept.
-    async fn bring_in(&self, group: &str, player: &Self, username: &str) {
-        let (status, invite) = self
-            .post(
-                &format!("/api/groups/{group}/invites"),
-                json!({ "username": username }),
-            )
-            .await;
-        assert_eq!(status, StatusCode::OK, "{invite}");
-        let (status, out) = player
-            .post(
-                &format!("/api/invites/{}/accept", invite["id"].as_str().unwrap()),
-                json!({}),
-            )
-            .await;
-        assert_eq!(status, StatusCode::OK, "{out}");
+    async fn rpc(&self, command: &str, args: Value) -> (StatusCode, Value) {
+        self.post(&format!("/api/rpc/{command}"), args).await
     }
 }
 
@@ -208,112 +184,152 @@ fn spell_pack() -> Value {
     }})
 }
 
-/// Other workspaces reload in the background.
-async fn eventually(client: &Client, scope: &str, id: &str, want: StatusCode) {
-    let mut last = (StatusCode::IM_A_TEAPOT, Value::Null);
-    for _ in 0..100 {
-        last = client
-            .rpc(scope, "get_element", json!({ "elementId": id }))
-            .await;
-        if last.0 == want {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    panic!("{id} in {scope}: wanted {want}, last {last:?}");
+fn patch(fields: Value) -> Value {
+    json!({ "patch": fields })
+}
+
+fn character_file(data: &Path, account: &str, character: &str) -> PathBuf {
+    data.join("users")
+        .join(account)
+        .join("characters")
+        .join(format!("{character}.json"))
+}
+
+fn names(list: &Value) -> Vec<&str> {
+    list.as_array()
+        .unwrap_or_else(|| panic!("{list}"))
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn accounts_groups_and_characters_follow_the_rules() {
+async fn stopping_does_not_wait_for_an_open_event_stream() {
+    use axum::response::sse::{Event, Sse};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let endless = || async {
+        Sse::new(tokio_stream::pending::<
+            Result<Event, std::convert::Infallible>,
+        >())
+    };
+    let router = Router::new().route("/api/events", axum::routing::get(endless));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(crate::serve(listener, router, async move {
+        let _ = stopped.await;
+    }));
+    let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+    client
+        .write_all(
+            b"GET /api/events HTTP/1.1
+Host: localhost
+
+",
+        )
+        .await
+        .unwrap();
+    let mut head = [0u8; 12];
+    client.read_exact(&mut head).await.unwrap();
+    assert_eq!(&head, b"HTTP/1.1 200");
+    stop.send(()).unwrap();
+    tokio::time::timeout(crate::STOP_GRACE + Duration::from_secs(5), server)
+        .await
+        .expect("the server stops although the stream is open")
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_an_account_waits_for_its_workspace_to_open() {
     let dir = tempfile::tempdir().unwrap();
-    full_flow(router(dir.path().to_path_buf()).await).await;
+    let content = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../content");
+    let workspaces = Arc::new(Workspaces::new(dir.path().to_path_buf(), content));
+    let opening = tokio::spawn({
+        let workspaces = Arc::clone(&workspaces);
+        async move { workspaces.get("someone").await.map(|_| ()) }
+    });
+    // Opening loads the content, which takes far longer than this.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    workspaces.remove("someone").await.unwrap();
+    opening.await.unwrap().unwrap();
+    assert!(!workspaces.dir("someone").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_account_has_its_own_characters_and_content() {
+    let dir = tempfile::tempdir().unwrap();
+    full_flow(router(dir.path().to_path_buf()).await, dir.path()).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn admins_approve_and_manage_accounts() {
     let dir = tempfile::tempdir().unwrap();
     let router = router(dir.path().to_path_buf()).await;
-    // The first account on a new server is its admin, active at once.
+    // The first account on a new server is its admin, active at once; the next one is not.
     let admin = sign_up(&router, "the-admin").await;
     let (_, me) = admin.get("/api/me").await;
     assert_eq!(me["admin"], true, "{me}");
+    let second = sign_up(&router, "the-second").await;
+    let (_, me) = second.get("/api/me").await;
+    assert_eq!(me["admin"], false, "{me}");
     admin_flow(&router, &admin, dir.path()).await;
 }
 
+/// Three accounts, a setting saved on the admin page, and a character and a setting in the first account's folder.
 async fn some_accounts(router: &Router) {
-    let dm = sign_up(router, "moving-dm").await;
-    let player = sign_up(router, "moving-player").await;
-    let group = dm.new_group("Moving day").await;
-    dm.bring_in(&group, &player, "moving-player").await;
-    let (status, out) = dm
-        .rpc(
-            "library",
-            "save_settings",
-            json!({ "patch": { "accentColor": "green" } }),
-        )
+    let admin = sign_up(router, "moving-admin").await;
+    sign_up(router, "moving-player").await;
+    sign_up(router, "moving-other").await;
+    let (status, out) = admin
+        .patch("/api/admin/settings", json!({ "requireApproval": true }))
         .await;
     assert_eq!(status, StatusCode::OK, "{out}");
-    let other = sign_up(router, "invited-only").await;
-    dm.post(
-        &format!("/api/groups/{group}/invites"),
-        json!({ "username": "invited-only" }),
-    )
-    .await;
-    drop(other);
+    let (status, out) = admin
+        .rpc("save_settings", patch(json!({ "accentColor": "green" })))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, moved) = admin.rpc("create_character", new_character("Moved")).await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    let (status, out) = admin
+        .rpc("save_character", json!({ "characterId": moved["id"] }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
 }
 
-/// After a copy the new database answers exactly like the old one.
+/// After a copy the new database answers exactly like the old one, over the same data folder.
 async fn check_moved(router: &Router) {
-    let (status, out) = login(router, "MOVING-DM", PASSWORD).await;
+    let (status, out) = login(router, "MOVING-ADMIN", PASSWORD).await;
     assert_eq!(status, StatusCode::OK, "{out}");
     assert_eq!(out["user"]["admin"], true, "the first account is the admin");
-    assert_eq!(out["user"]["email"], "moving-dm@example.com");
-    let token = out["token"].as_str().unwrap();
-    let (_, groups) = send(router, Some(token), "GET", "/api/groups", Value::Null).await;
-    assert_eq!(groups[0]["name"], "Moving day", "{groups}");
-    assert_eq!(groups[0]["memberCount"], 1);
-    let (_, detail) = send(
-        router,
-        Some(token),
-        "GET",
-        &format!("/api/groups/{}", groups[0]["id"].as_str().unwrap()),
-        Value::Null,
-    )
-    .await;
-    assert_eq!(detail["invites"][0]["username"], "invited-only", "{detail}");
-    let (_, settings) = send(
-        router,
-        Some(token),
-        "POST",
-        "/api/rpc/library/get_settings",
-        json!({}),
-    )
-    .await;
-    assert_eq!(
-        settings["accentColor"], "green",
-        "account settings came too"
-    );
-    let (_, log) = send(
-        router,
-        Some(token),
-        "GET",
-        "/api/admin/activity",
-        Value::Null,
-    )
-    .await;
+    assert_eq!(out["user"]["email"], "moving-admin@example.com");
+    let admin = Client {
+        router: router.clone(),
+        token: out["token"].as_str().unwrap().into(),
+        id: out["user"]["id"].as_str().unwrap().into(),
+    };
+    let (_, me) = sign_in(router, "moving-player").await.get("/api/me").await;
+    assert_eq!(me["admin"], false, "{me}");
+    let (_, settings) = admin.get("/api/admin/settings").await;
+    assert_eq!(settings["requireApproval"], true, "{settings}");
+    let (_, log) = admin.get("/api/admin/activity").await;
     assert!(
         log["items"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|e| e["kind"] == "group_created"),
+            .any(|e| e["kind"] == "setting_changed"),
         "the activity log moves too: {log}"
     );
+    // The files never moved: the account id is the same, so its folder is found again.
+    let (_, list) = admin.rpc("list_characters", json!({})).await;
+    assert_eq!(names(&list), ["Moved"], "{list}");
+    let (_, settings) = admin.rpc("get_settings", json!({})).await;
+    assert_eq!(settings["accentColor"], "green");
 }
 
 /// The rows `some_accounts` makes, as the copy reports them.
-const MOVED: &str =
-    "users 3, sessions 3, party_groups 1, invites 1, members 1, user_settings 1, server_settings 0, activity 4";
+const MOVED: &str = "users 3, sessions 3, server_settings 1, activity 4";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_sqlite_instance_moves_with_its_accounts() {
@@ -347,79 +363,40 @@ async fn a_sqlite_instance_moves_with_its_accounts() {
     );
 }
 
-/// A database from before accounts had a status: everyone stays able to sign in, and the oldest account is the
-/// admin. `pool` must be empty.
-async fn upgrade_from_first_schema(pool: &sqlx::AnyPool, location: &Location, data: PathBuf) {
-    sqlx::query("CREATE TABLE IF NOT EXISTS schema_version (version BIGINT NOT NULL)")
-        .execute(pool)
+/// A database with the table only the versions with groups had.
+async fn make_old(url: &str) {
+    sqlx::any::install_default_drivers();
+    let pool = sqlx::AnyPool::connect(url).await.unwrap();
+    sqlx::query("CREATE TABLE party_groups (id TEXT PRIMARY KEY, name TEXT NOT NULL)")
+        .execute(&pool)
         .await
         .unwrap();
-    for step in crate::db::SCHEMA_1 {
-        sqlx::query(step).execute(pool).await.unwrap();
+    pool.close().await;
+}
+
+fn refused(opened: Result<Db, OpenError>) {
+    match opened {
+        Err(error @ OpenError::OldLayout) => {
+            assert!(error.to_string().contains("fresh config folder"), "{error}")
+        }
+        Err(other) => panic!("{other}"),
+        Ok(_) => panic!("an old database was opened"),
     }
-    sqlx::query("INSERT INTO schema_version (version) VALUES (1)")
-        .execute(pool)
-        .await
-        .unwrap();
-    let hash = crate::auth::hash_password(PASSWORD).await.unwrap();
-    for (id, name, role, created) in [
-        ("u-new", "newer-player", "player", 200),
-        ("u-old", "oldest-dm", "dm", 100),
-        ("u-mid", "middle-dm", "dm", 150),
-    ] {
-        sqlx::query(
-            "INSERT INTO users (id, username, password_hash, role, created_at) VALUES ($1, $2, $3, $4, $5)",
-        )
-        .bind(id)
-        .bind(name)
-        .bind(&hash)
-        .bind(role)
-        .bind(created)
-        .execute(pool)
-        .await
-        .unwrap();
-    }
-    sqlx::query("INSERT INTO party_groups (id, name, dm_id, created_at) VALUES ('g', 'Old table', 'u-mid', 1)")
-        .execute(pool)
-        .await
-        .unwrap();
-    let db = Db::open(location).await.unwrap();
-    let router = router_on(data, db);
-    for (name, admin) in [
-        ("oldest-dm", true),
-        ("middle-dm", false),
-        ("newer-player", false),
-    ] {
-        let (status, out) = login(&router, name, PASSWORD).await;
-        assert_eq!(status, StatusCode::OK, "{name}: {out}");
-        assert_eq!(out["user"]["admin"], admin, "{name}");
-    }
-    // The old DM and the old player can now both run groups and play.
-    let player = sign_in(&router, "newer-player").await;
-    let middle = sign_in(&router, "middle-dm").await;
-    let (_, groups) = middle.get("/api/groups").await;
-    assert_eq!(groups[0]["isDm"], true, "{groups}");
-    player.new_group("Player's own").await;
-    let (status, out) = middle
-        .rpc(
-            "personal",
-            "create_character",
-            new_character("Now a player too"),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn existing_accounts_survive_the_upgrade() {
+async fn an_old_database_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("old.db");
-    let location = Location::Sqlite(file.clone());
-    sqlx::any::install_default_drivers();
-    let pool = sqlx::AnyPool::connect(&format!("sqlite://{}?mode=rwc", file.display()))
-        .await
-        .unwrap();
-    upgrade_from_first_schema(&pool, &location, dir.path().join("data")).await;
+    make_old(&format!("sqlite://{}?mode=rwc", file.display())).await;
+    refused(Db::open(&Location::Sqlite(file.clone())).await);
+    // Nor is it copied into a new PostgreSQL database.
+    let new = Db::open(&Location::Memory).await.unwrap();
+    assert!(matches!(
+        crate::migrate::adopt_sqlite(&new, &file).await,
+        Err(crate::migrate::MigrateError::Source(OpenError::OldLayout))
+    ));
+    assert_eq!(new.user_count().await.unwrap(), 0);
 }
 
 async fn drop_all(url: &str) {
@@ -428,9 +405,6 @@ async fn drop_all(url: &str) {
     for table in [
         "activity",
         "server_settings",
-        "user_settings",
-        "members",
-        "invites",
         "party_groups",
         "sessions",
         "users",
@@ -443,25 +417,18 @@ async fn drop_all(url: &str) {
     }
 }
 
-/// The same rules on PostgreSQL. Runs when `BOREALIS_TEST_POSTGRES_URL` names a database it may wipe.
+/// The same on PostgreSQL. Runs when `BOREALIS_TEST_POSTGRES_URL` names a database it may wipe.
 #[tokio::test(flavor = "multi_thread")]
-async fn accounts_groups_and_characters_follow_the_rules_on_postgres() {
+async fn each_account_has_its_own_characters_and_content_on_postgres() {
     let Ok(url) = std::env::var("BOREALIS_TEST_POSTGRES_URL") else {
         eprintln!("skipped: set BOREALIS_TEST_POSTGRES_URL to run against PostgreSQL");
         return;
     };
     let dir = tempfile::tempdir().unwrap();
-    // An instance from before accounts had a status upgrades in place.
+    let data = dir.path().join("data");
     drop_all(&url).await;
-    {
-        let pool = sqlx::AnyPool::connect(&url).await.unwrap();
-        upgrade_from_first_schema(
-            &pool,
-            &Location::Postgres(url.clone()),
-            dir.path().join("upgrade"),
-        )
-        .await;
-    }
+    make_old(&url).await;
+    refused(Db::open(&Location::Postgres(url.clone())).await);
     drop_all(&url).await;
     let db = Db::open(&Location::Postgres(url.clone())).await.unwrap();
     // Opening again finds the schema already there.
@@ -469,361 +436,235 @@ async fn accounts_groups_and_characters_follow_the_rules_on_postgres() {
     // First a move from SQLite, as when an instance switches databases.
     let file = dir.path().join("party.db");
     let old = Db::open(&Location::Sqlite(file.clone())).await.unwrap();
-    some_accounts(&router_on(dir.path().join("old"), old)).await;
+    some_accounts(&router_on(data.clone(), old)).await;
     let report = crate::migrate::adopt_sqlite(&db, &file)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(crate::migrate::describe(&report), MOVED);
-    let router = router_on(dir.path().join("old"), db.clone());
+    let router = router_on(data.clone(), db.clone());
     check_moved(&router).await;
     assert!(crate::migrate::adopt_sqlite(&db, &file)
         .await
         .unwrap()
         .is_none());
-    full_flow(router_on(dir.path().join("old"), db)).await;
-    // The moved first account is the admin here.
-    let admin = sign_in(&router, "moving-dm").await;
-    admin_flow(&router, &admin, &dir.path().join("old")).await;
+    // The moved first account is the admin here. This ends with sign-up open and no approval needed.
+    let admin = sign_in(&router, "moving-admin").await;
+    admin_flow(&router, &admin, &data).await;
+    full_flow(router, &data).await;
 }
 
-async fn full_flow(router: Router) {
-    let dm = sign_up(&router, "dungeon-master").await;
-    let other_dm = sign_up(&router, "other-dm").await;
+async fn full_flow(router: Router, data: &Path) {
     let alice = sign_up(&router, "alice").await;
     let bob = sign_up(&router, "bob").await;
 
-    // Anyone can run a group; the group decides who is its DM.
-    let group_id = dm.new_group("Tuesday").await;
-    let scope = format!("group-{group_id}");
-    let invites = format!("/api/groups/{group_id}/invites");
-
-    // Invitations.
-    let (status, _) = dm
-        .post(&invites, json!({ "username": "dungeon-master" }))
-        .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "not into one's own group");
-    let (status, _) = dm.post(&invites, json!({ "username": "nobody" })).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, _) = other_dm
-        .post(&invites, json!({ "username": "alice" }))
-        .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "not their group");
-    let (status, invite) = dm.post(&invites, json!({ "username": "alice" })).await;
-    assert_eq!(status, StatusCode::OK);
-    let (status, _) = dm.post(&invites, json!({ "username": "ALICE" })).await;
-    assert_eq!(status, StatusCode::CONFLICT, "already invited");
-    let accept = format!("/api/invites/{}/accept", invite["id"].as_str().unwrap());
-    let (_, pending) = alice.get("/api/invites").await;
-    assert_eq!(pending.as_array().unwrap().len(), 1);
-    let (status, _) = bob.post(&accept, json!({})).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "someone else's invitation");
-    let (status, _) = alice.post(&accept, json!({})).await;
-    assert_eq!(status, StatusCode::OK);
-
-    // A player of the group can't manage it.
-    let (status, _) = alice.post(&invites, json!({ "username": "bob" })).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = alice.get(&format!("/api/groups/{group_id}/party")).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = alice.delete(&format!("/api/groups/{group_id}")).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, detail) = alice.get(&format!("/api/groups/{group_id}")).await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(detail["isDm"], false);
-    assert!(detail["invites"].as_array().unwrap().is_empty());
-
-    // A player owns many characters, one per group.
-    let (status, solo) = alice
-        .rpc("personal", "create_character", new_character("Solo"))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{solo}");
+    // An account creates, changes, saves and lists characters, in its own folder.
+    let (status, hero) = alice.rpc("create_character", new_character("Hero")).await;
+    assert_eq!(status, StatusCode::OK, "{hero}");
     assert!(
-        solo.get("displayPath").is_none(),
+        hero.get("displayPath").is_none(),
         "server paths stay private"
     );
-    alice
-        .rpc(
-            "personal",
-            "save_character",
-            json!({ "characterId": solo["id"] }),
-        )
+    let id = hero["id"].as_str().unwrap().to_string();
+    let character = json!({ "characterId": id });
+    let (status, out) = alice
+        .rpc("set_xp", json!({ "characterId": id, "xp": 900 }))
         .await;
-    let (status, hero) = alice
-        .rpc(&scope, "create_character", new_character("Hero"))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{hero}");
-    alice
-        .rpc(
-            &scope,
-            "save_character",
-            json!({ "characterId": hero["id"] }),
-        )
-        .await;
-    let (status, _) = alice
-        .rpc(&scope, "create_character", new_character("Second"))
-        .await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    let character = format!("/api/groups/{group_id}/character");
-    let (status, _) = alice
-        .post(&character, json!({ "characterId": solo["id"] }))
-        .await;
-    assert_eq!(status, StatusCode::CONFLICT, "the group's slot is taken");
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, out) = alice.rpc("save_character", character.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert!(character_file(data, &alice.id, &id).is_file());
+    let (status, list) = alice.rpc("list_characters", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(names(&list), ["Hero"], "{list}");
 
-    // The DM has characters of their own, but none in their own group.
-    let (status, own) = dm
-        .rpc("personal", "create_character", new_character("DM's own"))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{own}");
-    dm.rpc(
-        "personal",
+    // Another account sees none of them and cannot reach them by id.
+    let (status, list) = bob.rpc("list_characters", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(names(&list).is_empty(), "{list}");
+    for command in [
+        "load_character",
+        "get_snapshot",
         "save_character",
-        json!({ "characterId": own["id"] }),
-    )
-    .await;
-    let (status, _) = dm
-        .post(&character, json!({ "characterId": own["id"] }))
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = dm
-        .rpc("library", "create_character", new_character("Lost"))
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "no characters in a Library");
-
-    // The DM sees the party and cannot change it.
-    let (status, party) = dm.get(&format!("/api/groups/{group_id}/party")).await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(party[0]["name"], "Hero");
-    assert!(party[0]["stats"]["maxHp"].is_number(), "{party}");
-    let view = format!("/api/groups/{group_id}/members/{}/view", alice.id);
-    let (status, sheet) = dm.post(&format!("{view}/get_snapshot"), json!({})).await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(sheet["name"], "Hero");
-    let (status, _) = dm
-        .post(&format!("{view}/set_xp"), json!({ "xp": 900 }))
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = dm
-        .rpc(
-            &scope,
-            "set_xp",
-            json!({ "characterId": hero["id"], "xp": 900 }),
-        )
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = dm
-        .rpc(
-            &scope,
-            "delete_character",
-            json!({ "characterId": hero["id"] }),
-        )
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = dm
-        .rpc(&scope, "create_character", new_character("Theirs"))
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-
-    // Strangers see nothing.
-    for (who, what) in [(&bob, "bob"), (&other_dm, "other-dm")] {
-        let (status, _) = who.rpc(&scope, "list_characters", json!({})).await;
-        assert_eq!(status, StatusCode::NOT_FOUND, "{what}");
-        let (status, _) = who.get(&format!("/api/groups/{group_id}")).await;
-        assert_eq!(status, StatusCode::NOT_FOUND, "{what}");
+        "export_character",
+        "delete_character",
+    ] {
+        let (status, out) = bob.rpc(command, character.clone()).await;
+        assert!(!status.is_success(), "{command}: {out}");
     }
-    let (status, _) = other_dm.get(&format!("/api/groups/{group_id}/party")).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, _) = other_dm
-        .post(&format!("{view}/get_snapshot"), json!({}))
+    let (status, out) = bob
+        .rpc("set_xp", json!({ "characterId": id, "xp": 1 }))
         .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(!status.is_success(), "{out}");
+    assert!(!character_file(data, &bob.id, &id).exists());
+    assert!(character_file(data, &alice.id, &id).is_file());
+    let (status, sheet) = alice.rpc("load_character", character.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{sheet}");
+    assert_eq!(sheet["name"], "Hero");
+    assert_eq!(sheet["level"]["xp"], 900, "untouched by anyone else");
 
-    // Commands that touch the server's own machine do not exist here.
+    // Content an account imports is its own.
+    let (status, imported) = alice.rpc("import_pack", spell_pack()).await;
+    assert_eq!(status, StatusCode::OK, "{imported}");
+    let spark = json!({ "elementId": "ID_PARTY_SPARK" });
+    let (status, out) = alice.rpc("get_element", spark.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, _) = bob.rpc("get_element", spark).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let own_packs = |packs: &Value| {
+        packs
+            .as_array()
+            .unwrap_or_else(|| panic!("{packs}"))
+            .iter()
+            .filter(|p| p["id"] != "core" && !p["id"].as_str().unwrap().starts_with("srd-"))
+            .count()
+    };
+    let (_, packs) = alice.rpc("list_packs", json!({})).await;
+    assert_eq!(own_packs(&packs), 1, "{packs}");
+    let (_, packs) = bob.rpc("list_packs", json!({})).await;
+    assert_eq!(own_packs(&packs), 0, "{packs}");
+    // Every account may run the content commands, in its own folder.
+    let (status, out) = bob.rpc("import_pack", spell_pack()).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, out) = bob.rpc("stage_5etools_files", json!({ "files": [] })).await;
+    assert_ne!(status, StatusCode::NOT_FOUND, "the server offers it: {out}");
+
+    // Commands that touch the server's own machine are not offered, nor is anything from before.
     for command in [
         "pick_path",
         "open_app_folder",
         "vault_read",
         "set_documents_dir",
         "get_data_dirs",
+        "take_group_notes",
     ] {
-        let (status, _) = dm.rpc("library", command, json!({})).await;
+        let (status, out) = alice.rpc(command, json!({})).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{command}");
+        assert_eq!(out["message"], "The server does not offer that.", "{out}");
     }
+    for path in [
+        "/api/rpc/personal/list_characters",
+        "/api/groups",
+        "/api/invites",
+        "/api/characters",
+    ] {
+        let (status, _) = alice.post(path, json!({})).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+        let (status, out) = alice.get(path).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+        assert_eq!(out["code"], "not_found", "{path}: {out}");
+    }
+    let (status, _) = send(&router, None, "GET", "/api/events", Value::Null).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    // Content is added in a Library; in a group only its DM chooses it.
-    let (status, _) = alice.rpc(&scope, "import_pack", spell_pack()).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = alice
-        .rpc(&scope, "stage_5etools_files", json!({ "files": [] }))
-        .await;
-    assert_eq!(
-        status,
-        StatusCode::FORBIDDEN,
-        "5etools homebrew files are content too"
-    );
-    let (status, _) = alice.rpc("personal", "import_pack", spell_pack()).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "not into My characters");
-    let (status, out) = dm
-        .rpc("library", "stage_5etools_files", json!({ "files": [] }))
-        .await;
-    assert_ne!(status, StatusCode::NOT_FOUND, "the server offers it: {out}");
-    let (status, packs) = alice.rpc("library", "list_packs", json!({})).await;
-    assert_eq!(status, StatusCode::OK, "everyone has a Library: {packs}");
-    let (status, _) = dm.rpc(&scope, "import_pack", spell_pack()).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    eventually(&alice, &scope, "ID_PARTY_SPARK", StatusCode::NOT_FOUND).await;
-    let (status, imported) = dm.rpc("library", "import_pack", spell_pack()).await;
-    assert_eq!(status, StatusCode::OK, "{imported}");
-
-    // It reaches the group, and only the group: a character outside it sees bundled content.
-    eventually(&alice, &scope, "ID_PARTY_SPARK", StatusCode::OK).await;
-    let (status, _) = alice
-        .rpc(
-            "personal",
-            "get_element",
-            json!({ "elementId": "ID_PARTY_SPARK" }),
-        )
-        .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, _) = alice
-        .rpc(
-            "library",
-            "get_element",
-            json!({ "elementId": "ID_PARTY_SPARK" }),
-        )
-        .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "alice's Library is her own");
-
-    // The DM chooses the group's packs.
-    let (_, packs) = dm.rpc(&scope, "list_packs", json!({})).await;
-    let pack = packs
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|p| p["id"] != "core" && !p["id"].as_str().unwrap().starts_with("srd-"))
-        .unwrap_or_else(|| panic!("{packs}"));
-    let (status, out) = dm
-        .rpc(
-            &scope,
-            "set_pack_enabled",
-            json!({ "packId": pack["id"], "enabled": false }),
-        )
-        .await;
+    // Deleting a character removes its file.
+    let (status, out) = alice.rpc("delete_character", character).await;
     assert_eq!(status, StatusCode::OK, "{out}");
-    eventually(&alice, &scope, "ID_PARTY_SPARK", StatusCode::NOT_FOUND).await;
-    let (status, _) = dm
-        .rpc(
-            "library",
-            "get_element",
-            json!({ "elementId": "ID_PARTY_SPARK" }),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "the Library keeps it");
+    assert!(!character_file(data, &alice.id, &id).exists());
+    let (_, list) = alice.rpc("list_characters", json!({})).await;
+    assert!(names(&list).is_empty(), "{list}");
+}
 
-    // Alice runs a group of her own while she plays in Tuesday, and Bob plays in hers.
-    let table = alice.new_group("Alice's table").await;
-    let table_scope = format!("group-{table}");
-    let (status, _) = alice
-        .post(
-            &format!("/api/groups/{table}/invites"),
-            json!({ "username": "alice" }),
-        )
-        .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "not into her own group");
-    alice.bring_in(&table, &bob, "bob").await;
-    let (status, bobs) = bob
-        .rpc(&table_scope, "create_character", new_character("Bob's"))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{bobs}");
-    bob.rpc(
-        &table_scope,
-        "save_character",
-        json!({ "characterId": bobs["id"] }),
-    )
-    .await;
-    let (_, groups) = alice.get("/api/groups").await;
-    let kinds: Vec<(String, bool)> = groups
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|g| (g["name"].as_str().unwrap().to_string(), g["isDm"] == true))
-        .collect();
-    assert!(
-        kinds.contains(&("Alice's table".into(), true))
-            && kinds.contains(&("Tuesday".into(), false)),
-        "{groups}"
-    );
-    let (status, party) = alice.get(&format!("/api/groups/{table}/party")).await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(party[0]["name"], "Bob's", "{party}");
-    let (status, _) = alice
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_are_each_accounts_own_and_the_servers_stay_fixed() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = router(dir.path().to_path_buf()).await;
+    let alice = sign_up(&router, "settings-alice").await;
+    let bob = sign_up(&router, "settings-bob").await;
+    let defaults = serde_json::to_value(borealis_lib::settings::AppSettings::default()).unwrap();
+    let ai = serde_json::to_value(borealis_lib::settings::AiSettings::default()).unwrap();
+    let fixed = |settings: &Value| {
+        for folder in [
+            "documentsDir",
+            "secondaryContentDir",
+            "portraitLibraryDir",
+            "vaultDir",
+        ] {
+            assert_eq!(settings[folder], Value::Null, "{folder}: {settings}");
+        }
+        assert_eq!(settings["mobile"], true, "{settings}");
+        assert_eq!(settings["storeBuild"], true, "{settings}");
+        assert_eq!(settings["aiAvailable"], false, "{settings}");
+        assert_eq!(settings["checkAppUpdates"], false, "{settings}");
+        assert_eq!(settings["ai"], ai, "{settings}");
+    };
+    let (status, settings) = alice.rpc("get_settings", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    fixed(&settings);
+    assert_eq!(settings["accentColor"], defaults["accentColor"]);
+
+    // A patch that carries the server's settings saves the rest and ignores those.
+    let unusual_updates = defaults["checkAppUpdates"] != true;
+    let (status, saved) = alice
         .rpc(
-            &table_scope,
-            "set_xp",
-            json!({ "characterId": bobs["id"], "xp": 900 }),
+            "save_settings",
+            patch(json!({
+                "documentsDir": "/etc",
+                "secondaryContentDir": "/tmp",
+                "portraitLibraryDir": "/tmp",
+                "vaultDir": "/tmp",
+                "checkAppUpdates": unusual_updates,
+                "ai": { "enabled": true },
+                "mobile": false,
+                "storeBuild": false,
+                "aiAvailable": true,
+                "accentColor": "green",
+            })),
         )
         .await;
-    assert_eq!(
-        status,
-        StatusCode::FORBIDDEN,
-        "her DM role there is read-only"
-    );
-    let (status, _) = alice
-        .rpc(&table_scope, "create_character", new_character("Mine"))
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    fixed(&saved);
+    assert_eq!(saved["accentColor"], "green");
+    let (status, saved) = alice
+        .rpc("save_settings", patch(json!({ "documentsDir": "/etc" })))
         .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    // ... and her character in Tuesday is still hers to change.
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    fixed(&saved);
+    let file = dir
+        .path()
+        .join("users")
+        .join(&alice.id)
+        .join("settings.json");
+    let on_disk = || -> Value { serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap() };
+    let stored = on_disk();
+    assert_eq!(stored["accentColor"], "green", "{stored}");
+    for key in [
+        "documentsDir",
+        "secondaryContentDir",
+        "portraitLibraryDir",
+        "vaultDir",
+        "checkAppUpdates",
+        "ai",
+    ] {
+        let kept = stored.get(key).unwrap_or(&defaults[key]);
+        assert_eq!(*kept, defaults[key], "{key} never reaches disk: {stored}");
+    }
+    assert!(!std::fs::read_to_string(&file).unwrap().contains("/etc"));
+
+    // An ordinary setting round-trips, for that account only.
+    let (_, settings) = alice.rpc("get_settings", json!({})).await;
+    assert_eq!(settings["accentColor"], "green");
+    fixed(&settings);
+    let (_, settings) = bob.rpc("get_settings", json!({})).await;
+    assert_eq!(settings["accentColor"], defaults["accentColor"]);
     let (status, out) = alice
         .rpc(
-            &scope,
-            "set_xp",
-            json!({ "characterId": hero["id"], "xp": 300 }),
+            "save_settings",
+            patch(json!({ "accentColor": "no such colour" })),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-    // The DM of Tuesday can't see into Alice's group.
-    let (status, _) = dm.get(&format!("/api/groups/{table}")).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    // A character is in at most one group: Bob's, in Alice's group, can't also go into Tuesday.
-    dm.bring_in(&group_id, &bob, "bob").await;
-    let (status, _) = bob
-        .post(&character, json!({ "characterId": bobs["id"] }))
-        .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, _) = bob
-        .delete(&format!("/api/groups/{group_id}/members/{}", bob.id))
-        .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{out}");
 
-    // Leaving the group hands the character back.
-    let (status, _) = alice
-        .delete(&format!("/api/groups/{group_id}/members/{}", alice.id))
+    // Restore defaults is offered, and is the account's own too.
+    bob.rpc("save_settings", patch(json!({ "accentColor": "green" })))
         .await;
-    assert_eq!(status, StatusCode::OK);
-    let (_, mine) = alice.get("/api/characters").await;
-    let names: Vec<&str> = mine
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|c| c["name"].as_str().unwrap())
-        .collect();
-    assert!(names.contains(&"Hero") && names.contains(&"Solo"), "{mine}");
-
-    // An existing character can come back in, and deleting the group returns it.
-    dm.bring_in(&group_id, &alice, "alice").await;
-    let (status, out) = alice
-        .post(&character, json!({ "characterId": hero["id"] }))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-    let (status, _) = dm.delete(&format!("/api/groups/{group_id}")).await;
-    assert_eq!(status, StatusCode::OK);
-    let (_, mine) = alice.get("/api/characters").await;
-    assert_eq!(mine.as_array().unwrap().len(), 2, "{mine}");
-    assert!(mine
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|c| c["scope"] == "personal"));
+    let (status, restored) = alice.rpc("restore_default_settings", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    fixed(&restored);
+    assert_eq!(restored["accentColor"], defaults["accentColor"]);
+    assert_eq!(on_disk()["accentColor"], defaults["accentColor"]);
+    let (_, settings) = bob.rpc("get_settings", json!({})).await;
+    assert_eq!(settings["accentColor"], "green");
 }
 
 async fn status_of(admin: &Client, name: &str) -> Value {
@@ -1000,7 +841,7 @@ async fn admin_flow(router: &Router, admin: &Client, data: &std::path::Path) {
         token: out["token"].as_str().unwrap().into(),
         id: user.id.clone(),
     };
-    let (status, out) = user.get("/api/groups").await;
+    let (status, out) = user.rpc("list_characters", json!({})).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(out["code"], "password_change_required");
     let (status, _) = user
@@ -1018,7 +859,7 @@ async fn admin_flow(router: &Router, admin: &Client, data: &std::path::Path) {
         .await;
     assert_eq!(status, StatusCode::OK, "{out}");
     assert_eq!(out["mustChangePassword"], false);
-    let (status, _) = user.get("/api/groups").await;
+    let (status, _) = user.rpc("list_characters", json!({})).await;
     assert_eq!(status, StatusCode::OK);
     // Forcing a change without a new password keeps the old one.
     admin
@@ -1056,56 +897,29 @@ async fn admin_flow(router: &Router, admin: &Client, data: &std::path::Path) {
         assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
-    // Deleting an account takes its characters out of other groups first, and deletes the groups it runs.
+    // Deleting an account takes its sessions, its characters and its content with it.
     let user = sign_in(router, "waiting").await;
-    let host = admin.new_group("Admin's table").await;
-    admin.bring_in(&host, &user, "waiting").await;
     let (status, theirs) = user
-        .rpc(
-            &format!("group-{host}"),
-            "create_character",
-            new_character("Soon gone"),
-        )
+        .rpc("create_character", new_character("Soon gone"))
         .await;
     assert_eq!(status, StatusCode::OK, "{theirs}");
-    user.rpc(
-        &format!("group-{host}"),
-        "save_character",
-        json!({ "characterId": theirs["id"] }),
-    )
-    .await;
-    let own_group = user.new_group("Waiting's table").await;
-    let (status, invite) = user
-        .post(
-            &format!("/api/groups/{own_group}/invites"),
-            json!({ "username": admin_name(admin).await }),
-        )
+    user.rpc("save_character", json!({ "characterId": theirs["id"] }))
         .await;
-    assert_eq!(status, StatusCode::OK, "{invite}");
+    let (status, out) = user.rpc("import_pack", spell_pack()).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let folder = data.join("users").join(&user.id);
+    admin.rpc("list_characters", json!({})).await;
+    assert!(character_file(data, &user.id, theirs["id"].as_str().unwrap()).is_file());
     let (status, _) = admin
         .delete(&format!("/api/admin/accounts/{}", user.id))
         .await;
     assert_eq!(status, StatusCode::OK);
     let (status, _) = login(router, "waiting", PASSWORD).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    let (_, party) = admin.get(&format!("/api/groups/{host}/party")).await;
-    assert_eq!(party.as_array().unwrap().len(), 0, "{party}");
-    let (_, groups) = admin.get("/api/groups").await;
-    assert!(
-        groups
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|g| g["name"] != "Waiting's table"),
-        "{groups}"
-    );
-    assert!(!data.join("users").join(&user.id).exists());
-    let member_dir = data
-        .join("groups")
-        .join(&host)
-        .join("members")
-        .join(&user.id);
-    assert!(!member_dir.exists(), "{:?}", walk(&member_dir));
+    let (status, _) = user.rpc("list_characters", json!({})).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(!folder.exists(), "{:?}", walk(&folder));
+    assert!(data.join("users").join(&admin.id).is_dir(), "others stay");
 
     // Runtime settings: no approval, then no sign-up, without a restart.
     admin
@@ -1128,21 +942,17 @@ async fn admin_flow(router: &Router, admin: &Client, data: &std::path::Path) {
 
     // Statistics.
     let (_, counted) = admin
-        .rpc("personal", "create_character", new_character("Counted"))
+        .rpc("create_character", new_character("Counted"))
         .await;
     admin
-        .rpc(
-            "personal",
-            "save_character",
-            json!({ "characterId": counted["id"] }),
-        )
+        .rpc("save_character", json!({ "characterId": counted["id"] }))
         .await;
     let (status, stats) = admin.get("/api/admin/stats").await;
     assert_eq!(status, StatusCode::OK, "{stats}");
     assert_eq!(stats["accounts"]["rejected"], 1, "{stats}");
     assert!(stats["accounts"]["active"].as_i64().unwrap() >= 2);
     assert!(stats["activeSessions"].as_i64().unwrap() >= 1);
-    assert!(stats["groups"].as_i64().unwrap() >= 1);
+    assert!(stats.get("groups").is_none(), "{stats}");
     assert!(stats["diskBytes"].as_u64().unwrap() > 0);
     assert!(stats["characters"].as_u64().unwrap() >= 1, "{stats}");
     assert!(stats["version"].is_string());
@@ -1176,7 +986,6 @@ async fn admin_flow(router: &Router, admin: &Client, data: &std::path::Path) {
         "enable",
         "sign_in",
         "sign_in_failed",
-        "group_created",
         "admin_granted",
         "admin_removed",
         "password_reset",
@@ -1199,11 +1008,6 @@ fn walk(dir: &std::path::Path) -> Vec<PathBuf> {
         }
     }
     out
-}
-
-async fn admin_name(admin: &Client) -> String {
-    let (_, me) = admin.get("/api/me").await;
-    me["username"].as_str().unwrap().to_string()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1310,7 +1114,14 @@ async fn sessions_are_required_and_passwords_are_checked() {
     let router = router(dir.path().to_path_buf()).await;
     let (status, _) = send(&router, None, "GET", "/api/me", Value::Null).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    let (status, _) = send(&router, Some("nonsense"), "GET", "/api/groups", Value::Null).await;
+    let (status, _) = send(
+        &router,
+        Some("nonsense"),
+        "POST",
+        "/api/rpc/list_characters",
+        json!({}),
+    )
+    .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     let (status, _) = send(
         &router,
@@ -1328,589 +1139,4 @@ async fn sessions_are_required_and_passwords_are_checked() {
     }
     let (status, _) = login(&router, "carol", PASSWORD).await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
-}
-
-/// A setting as `client` sees it in `scope`, once the background reloads have caught up.
-async fn eventually_setting(client: &Client, scope: &str, field: &str, want: &Value) {
-    let mut last = Value::Null;
-    for _ in 0..100 {
-        let (status, settings) = client.rpc(scope, "get_settings", json!({})).await;
-        assert_eq!(status, StatusCode::OK, "{settings}");
-        last = settings[field].clone();
-        if last == *want {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    panic!("{field} in {scope}: wanted {want}, last {last}");
-}
-
-fn patch(fields: Value) -> Value {
-    json!({ "patch": fields })
-}
-
-#[test]
-fn every_setting_has_one_owner() {
-    use crate::settings::{DM_FIELDS, PLATFORM_FIELDS, RULE_FIELDS, SERVER_FIELDS, USER_FIELDS};
-    let all = serde_json::to_value(borealis_lib::settings::AppSettings::default()).unwrap();
-    for field in all.as_object().unwrap().keys() {
-        let owners = [
-            &USER_FIELDS[..],
-            &DM_FIELDS,
-            &RULE_FIELDS,
-            &SERVER_FIELDS,
-            &PLATFORM_FIELDS,
-        ]
-        .iter()
-        .filter(|list| list.contains(&field.as_str()))
-        .count();
-        assert_eq!(owners, 1, "{field}: say in settings.rs who owns it");
-    }
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[allow(clippy::too_many_lines)]
-async fn settings_are_scoped_by_account_group_and_server() {
-    let dir = tempfile::tempdir().unwrap();
-    let router = router(dir.path().to_path_buf()).await;
-    let dm = sign_up(&router, "settings-dm").await;
-    let alice = sign_up(&router, "settings-alice").await;
-    let bob = sign_up(&router, "settings-bob").await;
-    let (_, group) = dm.post("/api/groups", json!({ "name": "Rules" })).await;
-    let group_id = group["id"].as_str().unwrap().to_string();
-    let scope = format!("group-{group_id}");
-    for (who, name) in [(&alice, "settings-alice"), (&bob, "settings-bob")] {
-        let (_, invite) = dm
-            .post(
-                &format!("/api/groups/{group_id}/invites"),
-                json!({ "username": name }),
-            )
-            .await;
-        let (status, _) = who
-            .post(
-                &format!("/api/invites/{}/accept", invite["id"].as_str().unwrap()),
-                json!({}),
-            )
-            .await;
-        assert_eq!(status, StatusCode::OK);
-    }
-
-    // Server-wide settings are nobody's to see or change.
-    let (status, settings) = alice.rpc(&scope, "get_settings", json!({})).await;
-    assert_eq!(status, StatusCode::OK, "{settings}");
-    assert_eq!(settings["documentsDir"], Value::Null);
-    assert_eq!(settings["ai"]["enabled"], false);
-    assert_eq!(settings["checkAppUpdates"], false);
-    assert_eq!(settings["mobile"], true);
-    for (who, place) in [
-        (&dm, "library"),
-        (&dm, scope.as_str()),
-        (&alice, "personal"),
-    ] {
-        for change in [
-            json!({ "checkAppUpdates": true }),
-            json!({ "documentsDir": "/etc" }),
-            json!({ "vaultDir": "/home" }),
-            json!({ "ai": { "enabled": true } }),
-        ] {
-            let (status, out) = who.rpc(place, "save_settings", patch(change.clone())).await;
-            assert_eq!(status, StatusCode::FORBIDDEN, "{change} in {place}: {out}");
-            assert_eq!(
-                out["message"],
-                "That setting is managed by the server's administrator."
-            );
-        }
-    }
-
-    // An account's own settings follow it into every workspace, and stay its own.
-    let (status, out) = alice
-        .rpc(
-            "personal",
-            "save_settings",
-            patch(json!({ "theme": "dark", "sheet": { "formFillable": true } })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-    assert_eq!(out["theme"], "dark");
-    let (_, there) = alice.rpc(&scope, "get_settings", json!({})).await;
-    assert_eq!(there["theme"], "dark");
-    assert_eq!(there["sheet"]["formFillable"], true);
-    let (_, theirs) = bob.rpc(&scope, "get_settings", json!({})).await;
-    assert_eq!(theirs["theme"], "system", "bob's own");
-    let (_, dms) = dm.rpc(&scope, "get_settings", json!({})).await;
-    assert_eq!(dms["theme"], "system", "the DM's own");
-    let (status, out) = dm
-        .rpc(
-            "library",
-            "save_settings",
-            patch(json!({ "accentColor": "green" })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-    let (_, dms) = dm.rpc(&scope, "get_settings", json!({})).await;
-    assert_eq!(dms["accentColor"], "green");
-    let (_, theirs) = alice.rpc(&scope, "get_settings", json!({})).await;
-    assert_eq!(
-        theirs["accentColor"], "default",
-        "the member's file is the DM's, the look is not"
-    );
-    let (status, _) = alice
-        .rpc(
-            "personal",
-            "save_settings",
-            patch(json!({ "theme": "purple" })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "values are still checked");
-
-    // A group's house rules are its DM's: members read them and cannot change them.
-    let (status, out) = dm
-        .rpc(
-            &scope,
-            "save_settings",
-            patch(json!({ "pointBuyBudget": 32, "abilityMethod": "point_buy" })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-    eventually_setting(&alice, &scope, "pointBuyBudget", &json!(32)).await;
-    eventually_setting(&bob, &scope, "abilityMethod", &json!("point_buy")).await;
-    let (status, out) = alice
-        .rpc(
-            &scope,
-            "save_settings",
-            patch(json!({ "pointBuyBudget": 40 })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{out}");
-    assert_eq!(
-        out["message"],
-        "Your Dungeon Master sets this group's house rules."
-    );
-    let (status, out) = dm
-        .rpc(
-            "library",
-            "save_settings",
-            patch(json!({ "pointBuyBudget": 40 })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{out}");
-
-    // The settings window sends everything back: what the caller was shown is no change.
-    let (_, mut everything) = alice.rpc(&scope, "get_settings", json!({})).await;
-    everything["tileSize"] = json!(200);
-    let (status, out) = alice.rpc(&scope, "save_settings", patch(everything)).await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-    assert_eq!(out["tileSize"], 200);
-    assert_eq!(out["pointBuyBudget"], 32);
-
-    // Outside groups a player keeps their own rules.
-    let (_, personal) = alice.rpc("personal", "get_settings", json!({})).await;
-    assert_eq!(personal["pointBuyBudget"], 27);
-    let (status, out) = alice
-        .rpc(
-            "personal",
-            "save_settings",
-            patch(json!({ "pointBuyBudget": 30 })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-    let (_, there) = alice.rpc(&scope, "get_settings", json!({})).await;
-    assert_eq!(
-        there["pointBuyBudget"], 32,
-        "the group's rules are untouched"
-    );
-
-    // The DM and the member's character derive the same numbers; the DM's view can't change settings.
-    let (status, hero) = alice
-        .rpc(&scope, "create_character", new_character("Ruled"))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{hero}");
-    let view = format!("/api/groups/{group_id}/members/{}/view", alice.id);
-    let (status, seen) = dm.post(&format!("{view}/get_snapshot"), json!({})).await;
-    assert_eq!(status, StatusCode::OK, "{seen}");
-    assert_eq!(hero["abilities"]["pointBuy"]["budget"], 32, "{hero}");
-    assert_eq!(seen["abilities"], hero["abilities"]);
-    let (status, _) = dm
-        .post(
-            &format!("{view}/save_settings"),
-            patch(json!({ "theme": "dark" })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-
-    // The content library's settings are the DM's account's; players neither see nor change them.
-    let (status, out) = dm
-        .rpc(
-            "library",
-            "save_settings",
-            patch(json!({ "showImportNotice": false })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-    let (_, dms) = dm.rpc(&scope, "get_settings", json!({})).await;
-    assert_eq!(dms["showImportNotice"], false);
-    // The DM is a player in My characters; saving there keeps the Library's settings.
-    let (status, out) = dm
-        .rpc(
-            "personal",
-            "save_settings",
-            patch(json!({ "density": "compact" })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-    let (_, library) = dm.rpc("library", "get_settings", json!({})).await;
-    assert_eq!(library["showImportNotice"], false, "{library}");
-    assert_eq!(library["density"], "compact");
-    let (_, players) = alice.rpc("personal", "get_settings", json!({})).await;
-    assert_eq!(players["autoContentUpdate"], false, "hidden from players");
-    let (status, out) = alice
-        .rpc(
-            "personal",
-            "save_settings",
-            patch(json!({ "autoContentUpdate": true })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{out}");
-    assert_eq!(
-        out["message"],
-        "Content library settings are changed in your Library."
-    );
-    for place in ["personal", scope.as_str()] {
-        let (status, _) = alice.rpc(place, "clear_caches", json!({})).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{place}");
-    }
-    for place in ["library", scope.as_str()] {
-        let (status, out) = dm.rpc(place, "clear_caches", json!({})).await;
-        assert_eq!(status, StatusCode::OK, "{place}: {out}");
-    }
-
-    // Restore defaults resets only what the caller owns.
-    let (status, out) = alice
-        .rpc(&scope, "restore_default_settings", json!({}))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-    assert_eq!(out["theme"], "system");
-    assert_eq!(out["tileSize"], 160);
-    assert_eq!(out["pointBuyBudget"], 32, "still the DM's");
-    let (_, dms) = dm.rpc(&scope, "get_settings", json!({})).await;
-    assert_eq!(dms["pointBuyBudget"], 32);
-    assert_eq!(dms["accentColor"], "green");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[allow(clippy::too_many_lines)]
-async fn a_character_joining_a_group_takes_the_groups_rules() {
-    let dir = tempfile::tempdir().unwrap();
-    let router = router(dir.path().to_path_buf()).await;
-    let dm = sign_up(&router, "rules-dm").await;
-    let alice = sign_up(&router, "rules-alice").await;
-    let (_, group) = dm.post("/api/groups", json!({ "name": "Strict" })).await;
-    let group_id = group["id"].as_str().unwrap().to_string();
-    let scope = format!("group-{group_id}");
-    let (_, invite) = dm
-        .post(
-            &format!("/api/groups/{group_id}/invites"),
-            json!({ "username": "rules-alice" }),
-        )
-        .await;
-    alice
-        .post(
-            &format!("/api/invites/{}/accept", invite["id"].as_str().unwrap()),
-            json!({}),
-        )
-        .await;
-    let (status, out) = dm
-        .rpc(
-            &scope,
-            "save_settings",
-            patch(json!({ "abilityMethod": "point_buy", "pointBuyBudget": 20 })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-
-    // Outside any group a player's character has its own house rules and spends the usual 27 points.
-    let (_, solo) = alice
-        .rpc("personal", "create_character", new_character("Solo"))
-        .await;
-    let id = solo["id"].clone();
-    let (status, out) = alice
-        .rpc(
-            "personal",
-            "set_character_options",
-            json!({ "characterId": id, "options": {
-                "pointBuyUnrestricted": true, "ignoreFeatPrerequisites": true, "attunementLimit": 5,
-            }}),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-    for ability in ["str", "dex", "con"] {
-        let (status, out) = alice
-            .rpc(
-                "personal",
-                "set_base_score",
-                json!({ "characterId": id, "ability": ability, "value": 15 }),
-            )
-            .await;
-        assert_eq!(status, StatusCode::OK, "{out}");
-    }
-    alice
-        .rpc("personal", "save_character", json!({ "characterId": id }))
-        .await;
-
-    // In the group the DM's rules apply: what they don't allow is taken out, and the player is told once.
-    let (status, out) = alice
-        .post(
-            &format!("/api/groups/{group_id}/character"),
-            json!({ "characterId": id }),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-    let (status, joined) = alice
-        .rpc(&scope, "load_character", json!({ "characterId": id }))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{joined}");
-    assert_eq!(joined["options"]["pointBuyUnrestricted"], false, "{joined}");
-    assert_eq!(joined["options"]["ignoreFeatPrerequisites"], false);
-    assert_ne!(joined["options"]["attunementLimit"], 5);
-    assert_eq!(joined["abilities"]["pointBuy"]["budget"], 20);
-    assert_eq!(joined["abilities"]["pointBuy"]["spent"], 0, "scores reset");
-    assert_eq!(joined["dirty"], false, "and saved");
-    let (status, notes) = alice
-        .rpc(&scope, "take_group_notes", json!({ "characterId": id }))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{notes}");
-    let notes = notes.as_array().unwrap().clone();
-    assert_eq!(notes.len(), 2, "{notes:?}");
-    assert!(notes
-        .iter()
-        .any(|n| n.as_str().unwrap().contains("house rules")));
-    assert!(notes
-        .iter()
-        .any(|n| n.as_str().unwrap().contains("point buy with 20 points")));
-    let (_, again) = alice
-        .rpc(&scope, "take_group_notes", json!({ "characterId": id }))
-        .await;
-    assert_eq!(again, json!([]), "told once");
-    let (status, _) = dm
-        .rpc(&scope, "take_group_notes", json!({ "characterId": id }))
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "the player's notes");
-
-    // Nor can the player switch them back on in the group.
-    for (command, args) in [
-        (
-            "set_character_options",
-            json!({ "characterId": id, "options": { "ignoreFeatPrerequisites": true } }),
-        ),
-        (
-            "set_character_options",
-            json!({ "characterId": id, "options": { "pointBuyUnrestricted": true } }),
-        ),
-        (
-            "set_ability_method",
-            json!({ "characterId": id, "method": "roll_4d6" }),
-        ),
-    ] {
-        let (status, out) = alice.rpc(&scope, command, args.clone()).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{args}: {out}");
-        assert_eq!(
-            out["message"],
-            "Your Dungeon Master sets this group's house rules."
-        );
-    }
-    let (status, out) = alice
-        .rpc(
-            &scope,
-            "set_character_options",
-            json!({ "characterId": id, "options": { "averageHp": false } }),
-        )
-        .await;
-    assert_eq!(
-        status,
-        StatusCode::OK,
-        "other options are the player's: {out}"
-    );
-    for ability in ["str", "dex"] {
-        let (status, out) = alice
-            .rpc(
-                &scope,
-                "set_base_score",
-                json!({ "characterId": id, "ability": ability, "value": 15 }),
-            )
-            .await;
-        assert_eq!(status, StatusCode::OK, "{out}");
-    }
-    let (status, _) = alice
-        .rpc(
-            &scope,
-            "set_base_score",
-            json!({ "characterId": id, "ability": "con", "value": 15 }),
-        )
-        .await;
-    assert_ne!(status, StatusCode::OK, "27 points is over the group's 20");
-}
-
-fn slot<'a>(snapshot: &'a Value, title: &str) -> &'a Value {
-    snapshot["slots"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|s| s["title"] == title)
-        .unwrap_or_else(|| panic!("no slot {title}: {snapshot}"))
-}
-
-fn has_class(snapshot: &Value, name: &str) -> bool {
-    snapshot["level"]["classes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|c| c["name"] == name)
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_pick_made_by_ignoring_prerequisites_is_taken_out_in_a_group() {
-    let dir = tempfile::tempdir().unwrap();
-    let router = router(dir.path().to_path_buf()).await;
-    let dm = sign_up(&router, "prereq-dm").await;
-    let alice = sign_up(&router, "prereq-alice").await;
-    let (_, group) = dm
-        .post("/api/groups", json!({ "name": "By the book" }))
-        .await;
-    let group_id = group["id"].as_str().unwrap().to_string();
-    let scope = format!("group-{group_id}");
-    let (_, invite) = dm
-        .post(
-            &format!("/api/groups/{group_id}/invites"),
-            json!({ "username": "prereq-alice" }),
-        )
-        .await;
-    alice
-        .post(
-            &format!("/api/invites/{}/accept", invite["id"].as_str().unwrap()),
-            json!({}),
-        )
-        .await;
-    // Scores by hand, so only the multiclass is at odds with the group.
-    let (status, out) = dm
-        .rpc(
-            &scope,
-            "save_settings",
-            patch(json!({ "abilityMethod": "manual" })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-
-    // Outside any group: a CHA 8 wizard multiclasses into Bard by ignoring its CHA 13 prerequisite.
-    let (status, wizard) = alice
-        .rpc(
-            "personal",
-            "create_character",
-            json!({ "request": {
-                "name": "Seraphine", "ruleset": "dnd2014", "abilityMethod": "manual",
-                "options": { "multiclassing": true },
-            }}),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{wizard}");
-    let id = wizard["id"].clone();
-    let mut snapshot = wizard;
-    for (title, element) in [
-        ("Race", "ID_RACE_ELF"),
-        ("Class", "ID_WOTC_PHB_CLASS_WIZARD"),
-        ("Background", "ID_BACKGROUND_ACOLYTE"),
-    ] {
-        let (status, out) = alice
-            .rpc(
-                "personal",
-                "apply_selection",
-                json!({ "characterId": id, "slotId": slot(&snapshot, title)["id"], "elementId": element }),
-            )
-            .await;
-        assert_eq!(status, StatusCode::OK, "{title}: {out}");
-        snapshot = out;
-    }
-    for (ability, value) in [("str", 13), ("cha", 8), ("int", 13)] {
-        let (status, out) = alice
-            .rpc(
-                "personal",
-                "set_base_score",
-                json!({ "characterId": id, "ability": ability, "value": value }),
-            )
-            .await;
-        assert_eq!(status, StatusCode::OK, "{out}");
-    }
-    let (status, out) = alice
-        .rpc(
-            "personal",
-            "set_character_options",
-            json!({ "characterId": id, "options": { "ignoreMulticlassPrerequisites": true } }),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-    let (status, out) = alice
-        .rpc("personal", "add_multiclass", json!({ "characterId": id }))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-    let multiclass = slot(&out, "Multiclass (Level 2)")["id"].clone();
-    let (status, bard) = alice
-        .rpc(
-            "personal",
-            "apply_selection",
-            json!({ "characterId": id, "slotId": multiclass, "elementId": "ID_WOTC_PHB_MULTICLASS_BARD" }),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{bard}");
-    assert!(has_class(&bard, "Bard"), "{bard}");
-    assert_eq!(
-        slot(&bard, "Multiclass (Level 2)")["prerequisitesUnmet"],
-        true
-    );
-    alice
-        .rpc("personal", "save_character", json!({ "characterId": id }))
-        .await;
-
-    // In the group the DM's rules hold: the Bard levels go, and the player is told to choose again.
-    let (status, out) = alice
-        .post(
-            &format!("/api/groups/{group_id}/character"),
-            json!({ "characterId": id }),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{out}");
-    let (status, joined) = alice
-        .rpc(&scope, "load_character", json!({ "characterId": id }))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{joined}");
-    assert!(!has_class(&joined, "Bard"), "{joined}");
-    assert!(has_class(&joined, "Wizard"), "the main class stays");
-    assert_eq!(joined["options"]["ignoreMulticlassPrerequisites"], false);
-    assert!(joined["slots"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|s| s["prerequisitesUnmet"] == false || s["chosen"].is_null()));
-    assert_eq!(joined["dirty"], false, "and saved");
-    let (_, notes) = alice
-        .rpc(&scope, "take_group_notes", json!({ "characterId": id }))
-        .await;
-    let notes: Vec<&str> = notes
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|n| n.as_str().unwrap())
-        .collect();
-    assert!(
-        notes
-            .iter()
-            .any(|n| n.contains("Bard") && n.contains("Choose again")),
-        "{notes:?}"
-    );
-    assert!(notes.iter().any(|n| n.contains("house rules")), "{notes:?}");
-    assert_eq!(notes.len(), 2, "the scores were fine: {notes:?}");
-
-    // It stays out after a reopen.
-    let (_, again) = alice
-        .rpc(&scope, "load_character", json!({ "characterId": id }))
-        .await;
-    assert!(!has_class(&again, "Bard"));
 }

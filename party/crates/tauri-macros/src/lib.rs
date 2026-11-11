@@ -106,9 +106,6 @@ pub fn command(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #vis fn #wrapper(__invocation: &::tauri::Invocation)
             -> ::std::result::Result<::tauri::serde_json::Value, ::tauri::serde_json::Value>
         {
-            if __invocation.probe {
-                return ::std::result::Result::Ok(::tauri::serde_json::Value::Null);
-            }
             #(#reads)*
             #finish
         }

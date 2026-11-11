@@ -265,8 +265,6 @@ pub struct Invocation {
     pub app: AppHandle,
     /// The JSON arguments, by the UI's camelCase names.
     pub args: Map<String, Value>,
-    /// Only asks whether the command exists: the wrapper returns before reading anything.
-    pub probe: bool,
 }
 
 /// Something a command can take as a parameter.

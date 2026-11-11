@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { checkServer, signIn, signUp, type ServerInfo } from "../api/party";
-import { homeScope, rememberServer, rememberedServer, saveSession, type ServerUser } from "../api/session";
+import { rememberServer, rememberedServer, saveSession, type ServerUser } from "../api/session";
 import { isTauri } from "../../src/lib/tauri";
 import "./party.css";
 
@@ -45,8 +45,8 @@ export function ConnectPage() {
   };
 
   const enter = (baseUrl: string, token: string, user: ServerUser) => {
-    saveSession({ baseUrl, token, user, ...homeScope() });
-    window.location.hash = "/party";
+    saveSession({ baseUrl, token, user });
+    window.location.hash = "/";
     window.location.reload();
   };
 
@@ -90,7 +90,7 @@ export function ConnectPage() {
         <h1>Borealis Party</h1>
         {!server && needsAddress && (
           <>
-            <p className="muted">Enter the address of your group's server.</p>
+            <p className="muted">Enter the address of your server.</p>
             <label>
               Server address
               <input className="aur-text" autoFocus inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="192.168.1.20:8787" value={address} onChange={(e) => setAddress(e.target.value)} required />

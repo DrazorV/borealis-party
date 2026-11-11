@@ -1,8 +1,8 @@
 //! Accounts and sessions. Clients send `Authorization: Bearer <token>`: the phone app and the browser work the same
 //! way, and a request from another site carries no credentials by itself.
 //!
-//! Every account can run groups and play in them; what someone may do in a group comes from the group. New accounts
-//! wait for an admin (unless the admin page says otherwise), and with email set up they confirm their address first.
+//! Every account is the same, apart from admins, and the first account on a server is its admin. New accounts wait
+//! for an admin (unless the admin page says otherwise), and with email set up they confirm their address first.
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;

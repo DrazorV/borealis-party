@@ -1,5 +1,5 @@
-//! Who is who and who belongs where, in SQLite or PostgreSQL. Character and content files stay in the Borealis
-//! workspaces on disk.
+//! Accounts, sessions, the admin page's settings and its activity log, in SQLite or PostgreSQL. Characters and
+//! content are files in each account's Borealis data folder.
 //!
 //! Every query is written once in SQL that both databases accept: `$n` placeholders in ascending order of first use,
 //! `lower(...)` instead of collations, `ON CONFLICT DO NOTHING`, and no booleans read back from SQL.
@@ -14,33 +14,35 @@ use crate::error::{ApiError, ApiResult};
 
 /// Applied in order; each runs once. Never edit a step that has shipped, add a new one.
 const MIGRATIONS: &[&[&str]] = &[
-    SCHEMA_1,
-    // 2: account settings.
+    // 1: accounts, sessions, the admin page's settings and the activity log.
     &[
-        // Each account's own Application Settings (settings.rs), as a JSON object.
-        "CREATE TABLE IF NOT EXISTS user_settings (
-        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-        settings TEXT NOT NULL
-    )",
-    ],
-    // 3: every account can be DM and player (users.role stays, unused); email, approval, admins, runtime settings
-    // and the activity log. Accounts that exist already are active, and the oldest is the admin.
-    &[
-        "ALTER TABLE users ADD COLUMN email TEXT",
-        "ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
-        "ALTER TABLE users ADD COLUMN is_admin BIGINT NOT NULL DEFAULT 0",
-        "ALTER TABLE users ADD COLUMN must_change_password BIGINT NOT NULL DEFAULT 0",
-        "ALTER TABLE users ADD COLUMN email_verified_at BIGINT",
-        "ALTER TABLE users ADD COLUMN verify_token_hash TEXT",
-        "ALTER TABLE users ADD COLUMN verify_expires_at BIGINT",
+        "CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            username TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at BIGINT NOT NULL,
+            email TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            is_admin BIGINT NOT NULL DEFAULT 0,
+            must_change_password BIGINT NOT NULL DEFAULT 0,
+            email_verified_at BIGINT,
+            verify_token_hash TEXT,
+            verify_expires_at BIGINT
+        )",
+        "CREATE UNIQUE INDEX IF NOT EXISTS users_username ON users (lower(username))",
         "CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users (lower(email))",
         "CREATE INDEX IF NOT EXISTS users_verify ON users (verify_token_hash)",
-        "UPDATE users SET is_admin = 1 WHERE id = (SELECT id FROM users ORDER BY created_at, id LIMIT 1)",
+        "CREATE TABLE IF NOT EXISTS sessions (
+            token_hash TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            expires_at BIGINT NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id)",
         "CREATE TABLE IF NOT EXISTS server_settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         )",
-        // No foreign keys: the log outlives the accounts and groups it names.
+        // No foreign keys: the log outlives the accounts it names.
         "CREATE TABLE IF NOT EXISTS activity (
             id TEXT PRIMARY KEY,
             at BIGINT NOT NULL,
@@ -55,50 +57,42 @@ const MIGRATIONS: &[&[&str]] = &[
     ],
 ];
 
+/// A table only the versions with groups had. Their databases and data folders are laid out differently and are not
+/// read by this version.
+const OLD_TABLE: &str = "party_groups";
+
 /// Rows the activity log keeps; older ones are pruned as new ones arrive.
 pub const ACTIVITY_KEPT: i64 = 10_000;
 
-/// The schema as first shipped.
-pub(crate) const SCHEMA_1: &[&str] = &[
-    "CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        username TEXT NOT NULL,
-        password_hash TEXT NOT NULL,
-        role TEXT NOT NULL CHECK (role IN ('dm', 'player')),
-        created_at BIGINT NOT NULL
-    )",
-    "CREATE UNIQUE INDEX IF NOT EXISTS users_username ON users (lower(username))",
-    "CREATE TABLE IF NOT EXISTS sessions (
-        token_hash TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        expires_at BIGINT NOT NULL
-    )",
-    "CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id)",
-    "CREATE TABLE IF NOT EXISTS party_groups (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        dm_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        created_at BIGINT NOT NULL
-    )",
-    "CREATE INDEX IF NOT EXISTS party_groups_dm ON party_groups (dm_id)",
-    "CREATE TABLE IF NOT EXISTS invites (
-        id TEXT PRIMARY KEY,
-        group_id TEXT NOT NULL REFERENCES party_groups(id) ON DELETE CASCADE,
-        player_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        created_at BIGINT NOT NULL,
-        UNIQUE (group_id, player_id)
-    )",
-    "CREATE INDEX IF NOT EXISTS invites_player ON invites (player_id)",
-    // One row per player in a group, so one character per group; a character is in at most one group.
-    "CREATE TABLE IF NOT EXISTS members (
-        group_id TEXT NOT NULL REFERENCES party_groups(id) ON DELETE CASCADE,
-        player_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        character_id TEXT UNIQUE,
-        joined_at BIGINT NOT NULL,
-        PRIMARY KEY (group_id, player_id)
-    )",
-    "CREATE INDEX IF NOT EXISTS members_player ON members (player_id)",
-];
+/// Why the database could not be opened.
+#[derive(Debug)]
+pub enum OpenError {
+    /// It was made by a version with groups.
+    OldLayout,
+    /// It can't be reached, or its tables can't be created.
+    Database(sqlx::Error),
+}
+
+impl std::fmt::Display for OpenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OldLayout => f.write_str(
+                "this database was made by an older Borealis Party (the one with groups), which this version does \
+                 not read. This version starts from a fresh config folder: move the old folder away, keep it as a \
+                 backup, and start the server on an empty one",
+            ),
+            Self::Database(e) => write!(f, "database: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for OpenError {}
+
+impl From<sqlx::Error> for OpenError {
+    fn from(e: sqlx::Error) -> Self {
+        Self::Database(e)
+    }
+}
 
 /// The account columns [`user_from`] reads, from `users u`.
 const USER_COLUMNS: &str = "u.id, u.username, u.email, u.is_admin, u.must_change_password";
@@ -128,49 +122,6 @@ pub enum Location {
     Memory,
     /// A PostgreSQL connection URL.
     Postgres(String),
-}
-
-/// A group in a list.
-#[derive(Debug, Clone)]
-pub struct GroupRow {
-    /// Id.
-    pub id: String,
-    /// Name.
-    pub name: String,
-    /// The DM's username.
-    pub dm_name: String,
-    /// The DM's account id.
-    pub dm_id: String,
-    /// How many players.
-    pub member_count: i64,
-    /// The caller's character in it.
-    pub character_id: Option<String>,
-}
-
-/// A player in a group.
-#[derive(Debug, Clone)]
-pub struct MemberRow {
-    /// Account id.
-    pub player: String,
-    /// Username.
-    pub username: String,
-    /// Their character in the group.
-    pub character: Option<String>,
-}
-
-/// What an invitation attempt found.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InviteOutcome {
-    /// Invited.
-    Sent,
-    /// No such username, or not an active account.
-    NoAccount,
-    /// The account runs the group.
-    OwnGroup,
-    /// Already in the group.
-    AlreadyMember,
-    /// Already invited.
-    AlreadyInvited,
 }
 
 /// An account to add.
@@ -261,12 +212,6 @@ pub struct Counts {
     pub accounts: Vec<(String, i64)>,
     /// Admins.
     pub admins: i64,
-    /// Groups.
-    pub groups: i64,
-    /// Characters in groups.
-    pub group_characters: i64,
-    /// Pending invitations.
-    pub invites: i64,
     /// Unexpired sessions.
     pub sessions: i64,
 }
@@ -330,8 +275,8 @@ impl Db {
     /// Connect, and create or update the tables.
     ///
     /// # Errors
-    /// When the database can't be reached or its tables can't be created.
-    pub async fn open(location: &Location) -> sqlx::Result<Self> {
+    /// When the database can't be reached, its tables can't be created, or it was made by a version with groups.
+    pub async fn open(location: &Location) -> Result<Self, OpenError> {
         sqlx::any::install_default_drivers();
         let (url, sqlite, max) = match location {
             Location::Sqlite(path) => (format!("sqlite://{}?mode=rwc", path.display()), true, 4),
@@ -356,7 +301,19 @@ impl Db {
             })
             .connect(&url)
             .await?;
-        if sqlite && !matches!(location, Location::Postgres(_)) {
+        let old = sqlx::query(if sqlite {
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $1"
+        } else {
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = $1"
+        })
+        .bind(OLD_TABLE)
+        .fetch_optional(&pool)
+        .await?;
+        if old.is_some() {
+            pool.close().await;
+            return Err(OpenError::OldLayout);
+        }
+        if sqlite {
             // Persistent per file; memory databases ignore it.
             sqlx::query("PRAGMA journal_mode = WAL")
                 .execute(&pool)
@@ -417,11 +374,10 @@ impl Db {
                 return Ok(InsertOutcome::EmailTaken);
             }
         }
-        // `role` is from when accounts were either a DM or a player; it is no longer read.
         let done = sqlx::query(
-            "INSERT INTO users (id, username, password_hash, role, created_at, email, status, is_admin,
+            "INSERT INTO users (id, username, password_hash, created_at, email, status, is_admin,
                 must_change_password, verify_token_hash, verify_expires_at)
-             VALUES ($1, $2, $3, 'player', $4, $5, $6, $7, 0, $8, $9)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9)
              ON CONFLICT DO NOTHING",
         )
         .bind(account.id)
@@ -704,8 +660,8 @@ impl Db {
         Ok(true)
     }
 
-    /// Delete an account with its sessions, invitations, memberships and the groups it runs; `false` when it is the
-    /// last active admin or doesn't exist. Characters and groups' files are the caller's to move first.
+    /// Delete an account with its sessions; `false` when it is the last active admin or doesn't exist. Its data
+    /// folder is the caller's to remove.
     pub async fn delete_user(&self, user: &str) -> ApiResult<bool> {
         let done = sqlx::query(&format!(
             "DELETE FROM users WHERE id = $1 AND {}",
@@ -739,44 +695,10 @@ impl Db {
             .collect::<ApiResult<_>>()
     }
 
-    /// The groups a user runs: `(id, name)`.
-    pub async fn groups_run_by(&self, user: &str) -> ApiResult<Vec<(String, String)>> {
-        let rows = sqlx::query("SELECT id, name FROM party_groups WHERE dm_id = $1")
-            .bind(user)
-            .fetch_all(&self.pool)
-            .await?;
-        rows.iter()
-            .map(|r| Ok((r.try_get(0)?, r.try_get(1)?)))
-            .collect()
-    }
-
-    /// The groups a user plays in: `(group id, DM id, character)`.
-    pub async fn memberships_of(
-        &self,
-        user: &str,
-    ) -> ApiResult<Vec<(String, String, Option<String>)>> {
-        let rows = sqlx::query(
-            "SELECT g.id, g.dm_id, m.character_id FROM members m JOIN party_groups g ON g.id = m.group_id
-             WHERE m.player_id = $1",
-        )
-        .bind(user)
-        .fetch_all(&self.pool)
-        .await?;
-        rows.iter()
-            .map(|r| Ok((r.try_get(0)?, r.try_get(1)?, r.try_get(2)?)))
-            .collect()
-    }
-
     // Admin page.
 
     /// Counts for the statistics.
     pub async fn counts(&self) -> ApiResult<Counts> {
-        let one = |sql: &'static str| async move {
-            sqlx::query(sql)
-                .fetch_one(&self.pool)
-                .await?
-                .try_get::<i64, _>(0)
-        };
         let accounts = sqlx::query("SELECT status, COUNT(*) FROM users GROUP BY status")
             .fetch_all(&self.pool)
             .await?
@@ -785,11 +707,10 @@ impl Db {
             .collect::<sqlx::Result<_>>()?;
         Ok(Counts {
             accounts,
-            admins: one("SELECT COUNT(*) FROM users WHERE is_admin = 1").await?,
-            groups: one("SELECT COUNT(*) FROM party_groups").await?,
-            group_characters: one("SELECT COUNT(*) FROM members WHERE character_id IS NOT NULL")
-                .await?,
-            invites: one("SELECT COUNT(*) FROM invites").await?,
+            admins: sqlx::query("SELECT COUNT(*) FROM users WHERE is_admin = 1")
+                .fetch_one(&self.pool)
+                .await?
+                .try_get(0)?,
             sessions: sqlx::query("SELECT COUNT(*) FROM sessions WHERE expires_at > $1")
                 .bind(now())
                 .fetch_one(&self.pool)
@@ -881,316 +802,5 @@ impl Db {
             })
             .collect::<sqlx::Result<_>>()?;
         Ok((rows, total))
-    }
-
-    // Groups.
-
-    /// The groups a user runs or plays in.
-    pub async fn groups_of(&self, user: &str) -> ApiResult<Vec<GroupRow>> {
-        let rows = sqlx::query(
-            "SELECT g.id, g.name, d.username,
-                (SELECT COUNT(*) FROM members m WHERE m.group_id = g.id),
-                (SELECT m.character_id FROM members m WHERE m.group_id = g.id AND m.player_id = $1),
-                g.dm_id
-             FROM party_groups g JOIN users d ON d.id = g.dm_id
-             WHERE g.dm_id = $1 OR EXISTS (SELECT 1 FROM members m WHERE m.group_id = g.id AND m.player_id = $1)
-             ORDER BY lower(g.name)",
-        )
-        .bind(user)
-        .fetch_all(&self.pool)
-        .await?;
-        rows.iter()
-            .map(|r| {
-                Ok(GroupRow {
-                    id: r.try_get(0)?,
-                    name: r.try_get(1)?,
-                    dm_name: r.try_get(2)?,
-                    member_count: r.try_get(3)?,
-                    character_id: r.try_get(4)?,
-                    dm_id: r.try_get(5)?,
-                })
-            })
-            .collect()
-    }
-
-    /// Add a group.
-    pub async fn insert_group(&self, id: &str, name: &str, dm: &str) -> ApiResult<()> {
-        sqlx::query(
-            "INSERT INTO party_groups (id, name, dm_id, created_at) VALUES ($1, $2, $3, $4)",
-        )
-        .bind(id)
-        .bind(name)
-        .bind(dm)
-        .bind(now())
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    /// A group's name and its DM's username.
-    pub async fn group_header(&self, group: &str) -> ApiResult<Option<(String, String)>> {
-        let row = sqlx::query(
-            "SELECT g.name, d.username FROM party_groups g JOIN users d ON d.id = g.dm_id WHERE g.id = $1",
-        )
-        .bind(group)
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(row
-            .map(|r| Ok::<_, sqlx::Error>((r.try_get(0)?, r.try_get(1)?)))
-            .transpose()?)
-    }
-
-    /// A group's DM.
-    pub async fn group_dm(&self, group: &str) -> ApiResult<Option<String>> {
-        let row = sqlx::query("SELECT dm_id FROM party_groups WHERE id = $1")
-            .bind(group)
-            .fetch_optional(&self.pool)
-            .await?;
-        Ok(row.map(|r| r.try_get(0)).transpose()?)
-    }
-
-    /// `None`: not a member. `Some(None)`: a member without a character.
-    pub async fn membership(&self, group: &str, player: &str) -> ApiResult<Option<Option<String>>> {
-        let row =
-            sqlx::query("SELECT character_id FROM members WHERE group_id = $1 AND player_id = $2")
-                .bind(group)
-                .bind(player)
-                .fetch_optional(&self.pool)
-                .await?;
-        Ok(row.map(|r| r.try_get(0)).transpose()?)
-    }
-
-    /// Rename a group.
-    pub async fn rename_group(&self, group: &str, name: &str) -> ApiResult<()> {
-        sqlx::query("UPDATE party_groups SET name = $1 WHERE id = $2")
-            .bind(name)
-            .bind(group)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    /// Delete a group with its invitations and memberships.
-    pub async fn delete_group(&self, group: &str) -> ApiResult<()> {
-        sqlx::query("DELETE FROM party_groups WHERE id = $1")
-            .bind(group)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    /// A group's players, by username.
-    pub async fn members(&self, group: &str) -> ApiResult<Vec<MemberRow>> {
-        let rows = sqlx::query(
-            "SELECT u.id, u.username, m.character_id FROM members m JOIN users u ON u.id = m.player_id
-             WHERE m.group_id = $1 ORDER BY lower(u.username)",
-        )
-        .bind(group)
-        .fetch_all(&self.pool)
-        .await?;
-        rows.iter()
-            .map(|r| {
-                Ok(MemberRow {
-                    player: r.try_get(0)?,
-                    username: r.try_get(1)?,
-                    character: r.try_get(2)?,
-                })
-            })
-            .collect()
-    }
-
-    /// A group's pending invitations: `(invite id, username)`.
-    pub async fn group_invites(&self, group: &str) -> ApiResult<Vec<(String, String)>> {
-        let rows = sqlx::query(
-            "SELECT i.id, u.username FROM invites i JOIN users u ON u.id = i.player_id
-             WHERE i.group_id = $1 ORDER BY lower(u.username)",
-        )
-        .bind(group)
-        .fetch_all(&self.pool)
-        .await?;
-        rows.iter()
-            .map(|r| Ok((r.try_get(0)?, r.try_get(1)?)))
-            .collect()
-    }
-
-    /// Invite a player by username.
-    pub async fn invite(&self, id: &str, group: &str, username: &str) -> ApiResult<InviteOutcome> {
-        let mut tx = self.pool.begin().await?;
-        let player = sqlx::query(
-            "SELECT id FROM users WHERE lower(username) = lower($1) AND status = 'active'",
-        )
-        .bind(username)
-        .fetch_optional(&mut *tx)
-        .await?;
-        let Some(player) = player else {
-            return Ok(InviteOutcome::NoAccount);
-        };
-        let player: String = player.try_get(0)?;
-        let runs = sqlx::query("SELECT 1 FROM party_groups WHERE id = $1 AND dm_id = $2")
-            .bind(group)
-            .bind(&player)
-            .fetch_optional(&mut *tx)
-            .await?;
-        if runs.is_some() {
-            return Ok(InviteOutcome::OwnGroup);
-        }
-        let member = sqlx::query("SELECT 1 FROM members WHERE group_id = $1 AND player_id = $2")
-            .bind(group)
-            .bind(&player)
-            .fetch_optional(&mut *tx)
-            .await?;
-        if member.is_some() {
-            return Ok(InviteOutcome::AlreadyMember);
-        }
-        let added = sqlx::query(
-            "INSERT INTO invites (id, group_id, player_id, created_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
-        )
-        .bind(id)
-        .bind(group)
-        .bind(&player)
-        .bind(now())
-        .execute(&mut *tx)
-        .await?;
-        if added.rows_affected() == 0 {
-            return Ok(InviteOutcome::AlreadyInvited);
-        }
-        tx.commit().await?;
-        Ok(InviteOutcome::Sent)
-    }
-
-    /// Withdraw an invitation.
-    pub async fn cancel_invite(&self, invite: &str, group: &str) -> ApiResult<()> {
-        sqlx::query("DELETE FROM invites WHERE id = $1 AND group_id = $2")
-            .bind(invite)
-            .bind(group)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    /// A player's invitations: `(invite id, group name, DM's username)`.
-    pub async fn invites_for(&self, player: &str) -> ApiResult<Vec<(String, String, String)>> {
-        let rows = sqlx::query(
-            "SELECT i.id, g.name, d.username FROM invites i
-             JOIN party_groups g ON g.id = i.group_id JOIN users d ON d.id = g.dm_id
-             WHERE i.player_id = $1 ORDER BY i.created_at",
-        )
-        .bind(player)
-        .fetch_all(&self.pool)
-        .await?;
-        rows.iter()
-            .map(|r| Ok((r.try_get(0)?, r.try_get(1)?, r.try_get(2)?)))
-            .collect()
-    }
-
-    /// Accept an invitation; the group joined, or `None` when there is no such invitation.
-    pub async fn accept_invite(&self, invite: &str, player: &str) -> ApiResult<Option<String>> {
-        let mut tx = self.pool.begin().await?;
-        let group = sqlx::query("SELECT group_id FROM invites WHERE id = $1 AND player_id = $2")
-            .bind(invite)
-            .bind(player)
-            .fetch_optional(&mut *tx)
-            .await?;
-        let Some(group) = group else {
-            return Ok(None);
-        };
-        let group: String = group.try_get(0)?;
-        sqlx::query("DELETE FROM invites WHERE id = $1")
-            .bind(invite)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query(
-            "INSERT INTO members (group_id, player_id, character_id, joined_at) VALUES ($1, $2, NULL, $3)
-             ON CONFLICT DO NOTHING",
-        )
-        .bind(&group)
-        .bind(player)
-        .bind(now())
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        Ok(Some(group))
-    }
-
-    /// Refuse an invitation.
-    pub async fn decline_invite(&self, invite: &str, player: &str) -> ApiResult<()> {
-        sqlx::query("DELETE FROM invites WHERE id = $1 AND player_id = $2")
-            .bind(invite)
-            .bind(player)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    /// Take a player out of a group.
-    pub async fn delete_member(&self, group: &str, player: &str) -> ApiResult<()> {
-        sqlx::query("DELETE FROM members WHERE group_id = $1 AND player_id = $2")
-            .bind(group)
-            .bind(player)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    /// Set or clear a member's character.
-    pub async fn set_member_character(
-        &self,
-        character: Option<&str>,
-        group: &str,
-        player: &str,
-    ) -> ApiResult<()> {
-        sqlx::query("UPDATE members SET character_id = $1 WHERE group_id = $2 AND player_id = $3")
-            .bind(character.map(str::to_string))
-            .bind(group)
-            .bind(player)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    /// The groups where a player has a character: `(group id, name, DM id)`.
-    pub async fn character_groups(&self, player: &str) -> ApiResult<Vec<(String, String, String)>> {
-        let rows = sqlx::query(
-            "SELECT g.id, g.name, g.dm_id FROM members m JOIN party_groups g ON g.id = m.group_id
-             WHERE m.player_id = $1 AND m.character_id IS NOT NULL",
-        )
-        .bind(player)
-        .fetch_all(&self.pool)
-        .await?;
-        rows.iter()
-            .map(|r| Ok((r.try_get(0)?, r.try_get(1)?, r.try_get(2)?)))
-            .collect()
-    }
-
-    // Account settings.
-
-    /// An account's own settings (a JSON object), if it has saved any.
-    pub async fn user_settings(&self, user: &str) -> ApiResult<Option<String>> {
-        let row = sqlx::query("SELECT settings FROM user_settings WHERE user_id = $1")
-            .bind(user)
-            .fetch_optional(&self.pool)
-            .await?;
-        Ok(row.map(|r| r.try_get(0)).transpose()?)
-    }
-
-    /// Store an account's own settings; with `replace` false, a row already there is kept.
-    pub async fn set_user_settings(
-        &self,
-        user: &str,
-        settings: &str,
-        replace: bool,
-    ) -> ApiResult<()> {
-        let sql = if replace {
-            "INSERT INTO user_settings (user_id, settings) VALUES ($1, $2)
-             ON CONFLICT (user_id) DO UPDATE SET settings = excluded.settings"
-        } else {
-            "INSERT INTO user_settings (user_id, settings) VALUES ($1, $2) ON CONFLICT DO NOTHING"
-        };
-        sqlx::query(sql)
-            .bind(user)
-            .bind(settings)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
     }
 }

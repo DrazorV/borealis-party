@@ -31,13 +31,6 @@ pub enum ApiError {
 /// Result of a request handler.
 pub type ApiResult<T> = Result<T, ApiError>;
 
-impl ApiError {
-    /// A 404 with the usual wording.
-    pub fn group_not_found() -> Self {
-        Self::NotFound("That group does not exist.".into())
-    }
-}
-
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, body) = match self {

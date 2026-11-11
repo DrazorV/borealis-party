@@ -26,8 +26,8 @@ pub const DEFAULT_FILE: &str = r#"# Borealis Party settings.
 bind = "0.0.0.0:8787"
 # The address people open the server at, for links in emails, for example "https://party.example.com".
 # public_url = ""
-# true: anyone who can reach the server can ask for an account (every account can run groups, and a group's DM
-# can make the server download content from https addresses). false: accounts come from
+# true: anyone who can reach the server can ask for an account (and an account can make the server download
+# content from https addresses). false: accounts come from
 # `borealis-server add-user`, or the [initial_admin] section below.
 open_registration = true
 # true: a new account waits until an admin approves it on the admin page.
@@ -37,8 +37,8 @@ max_upload_mb = 512
 
 [database]
 # "sqlite" (a file in this folder) or "postgres" (your own server, see [postgres]).
-# Switching to postgres: on its first start with an empty PostgreSQL database, the server copies the accounts and
-# groups from the SQLite file below, and leaves the file as it was.
+# Switching to postgres: on its first start with an empty PostgreSQL database, the server copies the accounts
+# from the SQLite file below, and leaves the file as it was.
 type = "sqlite"
 
 [sqlite]
@@ -76,7 +76,7 @@ tls = "starttls"
 [initial_admin]
 # Creates this admin account on a server with no accounts yet. Useful with open_registration = false.
 # Set BOREALIS__INITIAL_ADMIN__USERNAME and BOREALIS__INITIAL_ADMIN__PASSWORD, and optionally
-# BOREALIS__INITIAL_ADMIN__EMAIL. The old BOREALIS__INITIAL_DM__* names still work.
+# BOREALIS__INITIAL_ADMIN__EMAIL.
 
 [log]
 # error, warn, info, debug or trace. RUST_LOG, when set, wins.
@@ -300,7 +300,7 @@ impl std::fmt::Debug for SmtpSettings {
     }
 }
 
-/// `[initial_admin]` (formerly `[initial_dm]`).
+/// `[initial_admin]`.
 #[derive(Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct InitialAdmin {
@@ -319,25 +319,6 @@ impl std::fmt::Debug for InitialAdmin {
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
             .field("email", &self.email)
             .finish()
-    }
-}
-
-/// What `[initial_admin]` was called before accounts stopped being either a DM or a player.
-const OLD_INITIAL_ADMIN: &str = "initial_dm";
-
-/// Fold `[initial_dm]` (in a file an older version wrote, or from `BOREALIS__INITIAL_DM__*`) into
-/// `[initial_admin]`, whose own keys win.
-fn fold_old_names(table: &mut toml::Table) {
-    let Some(toml::Value::Table(old)) = table.remove(OLD_INITIAL_ADMIN) else {
-        return;
-    };
-    let entry = table
-        .entry("initial_admin")
-        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
-    if let toml::Value::Table(new) = entry {
-        for (key, value) in old {
-            new.entry(key).or_insert(value);
-        }
     }
 }
 
@@ -401,13 +382,8 @@ fn overlay(
                 "{name}: use {ENV_PREFIX}<SECTION>__<KEY>, for example BOREALIS__POSTGRES__HOST"
             )));
         };
-        let looked_up = if section == OLD_INITIAL_ADMIN {
-            "initial_admin"
-        } else {
-            section
-        };
         let like = defaults
-            .get(looked_up)
+            .get(section)
             .and_then(toml::Value::as_table)
             .and_then(|t| t.get(key));
         let entry = table
@@ -451,7 +427,6 @@ impl Settings {
         let defaults = toml::Table::try_from(Self::default())
             .map_err(|e| ConfigError(format!("defaults: {e}")))?;
         overlay(&mut table, &defaults, vars)?;
-        fold_old_names(&mut table);
         let settings: Self = table
             .try_into()
             .map_err(|e: toml::de::Error| ConfigError(e.message().to_string()))?;
@@ -606,31 +581,6 @@ mod tests {
             panic!("postgres");
         };
         assert!(url.contains("p%40ss%2Fw%3Ard@"), "{url}");
-    }
-
-    #[test]
-    fn the_old_initial_dm_names_still_work() {
-        // A file an older version wrote has an empty [initial_dm] section.
-        let old_file = "[initial_dm]\n";
-        let s = Settings::parse(
-            old_file,
-            vars(&[
-                ("BOREALIS__INITIAL_DM__USERNAME", "boss"),
-                ("BOREALIS__INITIAL_DM__PASSWORD", "secret words here"),
-            ]),
-        )
-        .unwrap();
-        assert_eq!(s.initial_admin.username.as_deref(), Some("boss"));
-        let s = Settings::parse(
-            old_file,
-            vars(&[
-                ("BOREALIS__INITIAL_ADMIN__USERNAME", "admin"),
-                ("BOREALIS__INITIAL_ADMIN__PASSWORD", "secret words here"),
-                ("BOREALIS__INITIAL_DM__USERNAME", "old"),
-            ]),
-        )
-        .unwrap();
-        assert_eq!(s.initial_admin.username.as_deref(), Some("admin"));
     }
 
     #[test]

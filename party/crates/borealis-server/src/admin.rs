@@ -36,7 +36,7 @@ impl Activity {
         self
     }
 
-    /// Done to the account or group `id`, called `name`.
+    /// Done to the account `id`, called `name`.
     #[must_use]
     pub fn on(mut self, id: &str, name: &str) -> Self {
         self.target_id = Some(id.to_string());
@@ -339,8 +339,12 @@ pub async fn sign_out_everywhere(
     Ok(Json(json!({ "ended": ended })))
 }
 
-/// `DELETE /api/admin/accounts/{id}`: the groups it runs are deleted (their characters go back to their players),
-/// its characters in other groups are taken out first, then the account and all its characters are deleted.
+/// `DELETE /api/admin/accounts/{id}`: the account goes, with its sessions, its characters and its content.
+///
+/// The database row goes first and the folder second. If the second step fails, a folder is left that no account can
+/// reach (ids are never reused) and that the server's log names, which wastes disk and nothing else. The other order
+/// could leave an account that still signs in after its characters were deleted, or delete the files of an account
+/// the last-admin guard then refuses to remove.
 pub async fn delete_account(
     State(state): State<AppState>,
     Admin(admin): Admin,
@@ -353,20 +357,9 @@ pub async fn delete_account(
     if only_admin {
         return Err(last_admin());
     }
-    let _guard = state.membership.lock().await;
-    for (group, _) in state.db.groups_run_by(&id).await? {
-        crate::groups::delete_group_now(&state, &group, &id).await?;
-    }
-    for (group, dm, character) in state.db.memberships_of(&id).await? {
-        if let Some(character) = character {
-            crate::groups::release_character(&state, &group, &dm, &id, &character).await?;
-        }
-        state.db.delete_member(&group, &id).await?;
-    }
     if !state.db.delete_user(&id).await? {
         return Err(last_admin());
     }
-    state.workspaces.remove_user(&id).await?;
     record(
         &state,
         Activity::new("account_deleted")
@@ -374,7 +367,7 @@ pub async fn delete_account(
             .on(&id, &before.user.username),
     )
     .await;
-    Ok(())
+    state.workspaces.remove(&id).await
 }
 
 /// `GET /api/admin/stats`.
@@ -391,11 +384,8 @@ pub async fn stats(State(state): State<AppState>, _: Admin) -> ApiResult<Json<Va
     Ok(Json(json!({
         "accounts": accounts,
         "admins": counts.admins,
-        "groups": counts.groups,
         "characters": disk.characters,
-        "groupCharacters": counts.group_characters,
         "contentPacks": disk.packs,
-        "invites": counts.invites,
         "activeSessions": counts.sessions,
         "diskBytes": disk.bytes,
         "version": env!("CARGO_PKG_VERSION"),

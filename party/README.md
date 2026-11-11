@@ -1,8 +1,12 @@
 # Borealis Party server
 
-Borealis Party is Borealis with a multi-user server: accounts that run groups as Dungeon Master and play in
-others, a party view for the DM, and an admin page. The server runs the Borealis rules engine and stores everything. Browsers, the Android app and the desktop app are
-clients.
+Borealis Party is Borealis with a multi-user server: every account has its own characters and its own content, and
+an admin page manages the accounts. The server runs the Borealis rules engine and stores everything. Browsers, the
+Android app and the desktop app are clients.
+
+This version starts from a fresh config folder. It does not read the database or the data folder of the earlier
+versions that had groups, and refuses to start on one: move the old config folder away (keep it as a backup) and start
+on an empty one.
 
 ## Run with Docker
 
@@ -67,7 +71,7 @@ Put passwords in variables rather than in the file.
 | `BOREALIS__SMTP__TLS` | `starttls` | `starttls` (port 587), `tls` (port 465) or `none` (trusted relay only) |
 | `BOREALIS__INITIAL_ADMIN__USERNAME` | | With the password, creates an admin on a server with no accounts |
 | `BOREALIS__INITIAL_ADMIN__PASSWORD` | | |
-| `BOREALIS__INITIAL_ADMIN__EMAIL` | | Optional. The old `BOREALIS__INITIAL_DM__*` names still work |
+| `BOREALIS__INITIAL_ADMIN__EMAIL` | | Optional |
 | `BOREALIS__LOG__LEVEL` | `info` | `error` to `trace` |
 
 `OPEN_REGISTRATION` and `REQUIRE_APPROVAL` can also be changed on the admin page while the server runs. What is saved
@@ -77,12 +81,13 @@ The config folder itself is `/config` in the container. For a direct install it 
 underscore), which the service file sets to `/var/lib/borealis-party`.
 
 Characters and content packs always stay as files in the data folder, whichever database you choose. The database holds
-accounts, sessions, groups, the admin page's settings and its activity log.
+accounts, sessions, the admin page's settings and its activity log.
 
 ## Accounts
 
-Every account can run groups and play in them. Whoever creates a group is its Dungeon Master; the people they invite
-are its players. Each account has its own *My characters* and its own content *Library*.
+Every account is the same: it has its own characters and its own content, as one ordinary Borealis data folder,
+`data/users/<account id>/` (`characters/`, `library/`, `settings.json` and so on). Nothing is shared between accounts.
+The one difference between accounts is that some are admins.
 
 Sign-up asks for a username, an email address (unique, whatever its case) and a password. Then:
 
@@ -91,15 +96,13 @@ Sign-up asks for a username, an email address (unique, whatever its case) and a 
 2. With approval required (the default), the account waits on the admin page, and admins with an email address get
    an email about it. Signing in meanwhile says what the account is waiting for.
 
-The first account on a new server is its admin, active at once. When a server from before this existed upgrades, every
-account stays active and the oldest one becomes the admin, so nobody is locked out.
+The first account on a new server is its admin, active at once.
 
 The admin page (`/admin`, shown to admins only) approves, rejects, disables and re-enables accounts; resets a password,
 either to a temporary one or by asking for a new one at the next sign-in; signs an account out everywhere; makes and
-removes admins (there is always at least one); and deletes an account. Deleting takes the account's characters out of
-other groups first and deletes the groups it runs, whose characters go back to their players. The page also shows
-statistics, the sign-up settings and an activity log of sign-ups, sign-ins, failed sign-ins, groups and admin actions;
-the newest 10,000 entries are kept.
+removes admins (there is always at least one); and deletes an account, with its characters and content. The page also
+shows statistics, the sign-up settings and an activity log of sign-ups, sign-ins, failed sign-ins and admin actions; the
+newest 10,000 entries are kept.
 
 Sign-ups are limited to 10 an hour per client address, and failed sign-ins to 10 per five minutes per address and name.
 Behind a reverse proxy every client has the proxy's address, so these limits are then shared.
@@ -109,9 +112,9 @@ Behind a reverse proxy every client has the proxy's address, so these limits are
 1. Create an empty PostgreSQL database and a user that owns it.
 2. Set `BOREALIS__DATABASE__TYPE=postgres` and the `BOREALIS__POSTGRES__*` variables, then restart.
 
-On that first start the server finds PostgreSQL empty and the old SQLite file still in the config folder, and copies
-accounts, sign-ins, groups, invitations and memberships across in one transaction. Everyone stays signed in. The log
-says what was copied, for example `moved to PostgreSQL: users 3, sessions 4, party_groups 1, invites 0, members 2`.
+On that first start the server finds PostgreSQL empty and the SQLite file still in the config folder, and copies
+accounts, sign-ins, the admin page's settings and the activity log across in one transaction. Everyone stays signed in.
+The log says what was copied, for example `moved to PostgreSQL: users 3, sessions 4, server_settings 1, activity 12`.
 
 The SQLite file is left as it was, so you can go back by setting the type to `sqlite` again. Once PostgreSQL has
 accounts the file is never copied again. Delete it when you are happy. To run the copy by hand instead, for example
@@ -121,7 +124,7 @@ from another file:
 docker exec borealis-party /app/borealis-server migrate-sqlite --from /config/party.db
 ```
 
-It refuses if PostgreSQL already has accounts or groups, and saves nothing if anything fails.
+It refuses if PostgreSQL already has accounts, and saves nothing if anything fails.
 
 ## Install on Linux without Docker
 
@@ -169,20 +172,18 @@ The password is read from standard input. For a direct install, run
 
 | Rule | Where it is enforced |
 |---|---|
-| A group's DM is its creator; its players are the people they invited | `rpc.rs`, `group_role` |
-| Characters are changed by their owners only, in My characters or a group they play in | `rpc.rs`, `check_access` |
-| One character per player per group, a character in at most one group | `members` table in `db.rs` |
-| A DM sees a member's character and cannot change it | `groups.rs`, `view` |
-| Content is added in a Library; only a group's DM chooses its packs | `rpc.rs`, `check_access` |
-| Only the group's DM manages it and its invitations; nobody joins their own group | `groups.rs` |
+| A signed-in account runs commands in its own data folder and in no other | `rpc.rs`, `workspaces.rs` |
+| Only commands listed in `backend.rs` are reachable; the rest answer "The server does not offer that." | `backend.rs` |
 | Only active accounts sign in; only admins reach `/api/admin` | `auth.rs`, `admin.rs` |
-| Only commands listed in `backend.rs` are reachable | `backend.rs` |
-| Each Application Setting has one owner: the account, the group's DM (house rules), the DM's library, or the server | `party/crates/borealis-server/src/settings.rs` |
-| In a group, characters follow the DM's house rules: their own are off, and what the rules don't allow is taken out (with a note to the player) when the character opens | `workspaces.rs` `Workspace::call`, `backend.rs` `apply_group_rules` |
+| The machine's settings (folders, updates, AI) are never saved from a client and are reported as fixed values | `settings.rs` |
 
-Content follows the character's folder. A character outside a group sees the bundled SRD. A character in a group sees the
-bundled SRD plus the DM's library, minus the packs the DM turned off for that group. See the layout comment at the top of
-`party/crates/borealis-server/src/workspaces.rs`.
+The HTTP API is small: `/api/auth/*` and `/api/me` for accounts, `/api/admin/*` for the admin page,
+`POST /api/rpc/{command}` to run a Borealis command with its arguments as a JSON object, and `GET /api/events` for
+the events Borealis sends its window, as server-sent events.
+
+Each account's workspace is opened the way the desktop app opens its data folder, the first time the account does
+something, and closed after half an hour without use. Every open workspace holds its own copy of the content in
+memory.
 
 ## Keeping up with Borealis
 
@@ -195,8 +196,8 @@ git merge upstream/main
 sh party/check-upstream.sh
 ```
 
-Our code lives only in `party/` and `ui/party/`, folders upstream never touches, so merges don't conflict. The one exception
-is a 3-line hook in `src-tauri/src/state.rs`. `check-upstream.sh` fails if anything else in upstream's files changes.
+Our code lives only in `party/` and `ui/party/`, folders upstream never touches, so merges don't conflict.
+`check-upstream.sh` fails if any of upstream's files changes.
 
 A fix we send upstream can be carried here before it is merged: apply exactly the pull request's commits and list each
 file with the PR's link in `party/upstream-pending.txt`. The check accepts those files, and once upstream merges the PR and
@@ -212,7 +213,15 @@ How that works:
 - **Android.** `party/android/party.init.gradle` sets the app id, name and HTTP permission from outside upstream's Gradle files.
 - **Tauri.** `party/tauri.party.json` overrides the front end and network policy.
 
-After a merge, build and run the tests. A new upstream command stays off the network until it is added to a list in
+After a merge, build and run the tests (on Linux, from `party/`):
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test -p borealis-server
+```
+
+Set `BOREALIS_TEST_POSTGRES_URL` to a database the tests may wipe to run them on PostgreSQL too. A new upstream command stays off the network until it is added to a list in
 `party/crates/borealis-server/src/backend.rs`, and an upstream change to `tauri` API usage may need a matching stub in
 `party/crates/tauri`.
 
@@ -225,3 +234,6 @@ party/android/build-apk.ps1
 ```
 
 Keep the signing key: Android only installs an update signed with the same key.
+
+Known limit: in the Android app the character sheet cannot be saved or shared as a PDF yet (its web view has no
+download or share sheet). Open the server in the phone's browser for that.

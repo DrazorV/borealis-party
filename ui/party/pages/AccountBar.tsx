@@ -3,13 +3,13 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import { Button } from "../../src/components/Button";
 import { signOut } from "../api/party";
-import { clearSession, homeScope, loadSession, moveTo } from "../api/session";
+import { clearSession, loadSession } from "../api/session";
 
 /** A host element placed in upstream's window, above the content, for as long as that window exists. */
 function useHost(): HTMLElement | null {
   const [host] = useState(() => {
     const element = document.createElement("div");
-    element.className = "party-scope-host";
+    element.className = "party-bar-host";
     return element;
   });
   const [placed, setPlaced] = useState(false);
@@ -30,13 +30,12 @@ function useHost(): HTMLElement | null {
   return placed ? host : null;
 }
 
-/** Which place on the server this screen belongs to, and the way back to the party. */
-export function ScopeBar() {
+/** Who is signed in, with the ways to the account page, the admin page and out. */
+export function AccountBar() {
   const nav = useNavigate();
   const host = useHost();
   const session = loadSession();
   if (!session || !host) return null;
-  const leaveView = () => moveTo(homeScope(), "/party");
   const exit = async () => {
     try { await signOut(); } catch { /* the token goes either way */ }
     clearSession();
@@ -44,16 +43,11 @@ export function ScopeBar() {
     window.location.reload();
   };
   return createPortal(
-    <div className={`party-scope ${session.view ? "viewing" : ""}`} data-party-scope>
-      {session.view
-        ? <span><strong>{session.view.characterName}</strong> · read only</span>
-        : <span>{session.scopeLabel}</span>}
+    <div className="party-bar">
+      <span className="muted">{session.user.username}</span>
       <span className="spacer" />
-      <span className="muted party-scope-user">{session.user.username}</span>
-      {session.view
-        ? <Button small onClick={leaveView}>Back to party</Button>
-        : <Button small onClick={() => nav("/party")}>Party</Button>}
-      {session.user.admin && !session.view && <Button small onClick={() => nav("/admin")}>Admin</Button>}
+      <Button small onClick={() => nav("/account")}>Account</Button>
+      {session.user.admin && <Button small onClick={() => nav("/admin")}>Admin</Button>}
       <Button small onClick={() => void exit()}>Sign out</Button>
     </div>,
     host,

@@ -1,4 +1,6 @@
 import { COMMANDS, EVENTS, type Api, type ApiError, type ApiMethods, type CommandName, type DataDirs, type EventName } from "../../src/api/contract";
+import type { ExportResult, SheetShare } from "../../src/api/contract";
+import { phoneOs } from "../../src/lib/phone";
 import { clearSession, loadSession, saveSession, type ServerSession } from "./session";
 
 function fail(code: string, message: string): ApiError {
@@ -58,14 +60,6 @@ const LOCAL: Partial<Record<CommandName, Local>> = {
   listPortraitLibrary: () => { throw unavailable(); },
 };
 
-/** A place the current view has no business reaching. */
-const VIEW_LOCAL: Partial<Record<CommandName, Local>> = {
-  listCharacters: () => [],
-  closeCharacter: () => undefined,
-};
-
-const SETTINGS: ReadonlySet<CommandName> = new Set<CommandName>(["getSettings", "saveSettings"]);
-
 const unavailable = (): ApiError => fail("not_available", "That isn't available when connected to a server.");
 
 interface ServerEvent {
@@ -74,12 +68,12 @@ interface ServerEvent {
 }
 
 /** Server-sent events over `fetch`, since EventSource can't send the Authorization header. Reconnects until closed. */
-function eventStream(session: ServerSession, scope: string, onEvent: (e: ServerEvent) => void): () => void {
+function eventStream(session: ServerSession, onEvent: (e: ServerEvent) => void): () => void {
   const abort = new AbortController();
   void (async () => {
     while (!abort.signal.aborted) {
       try {
-        const response = await fetch(`${session.baseUrl}/api/events/${scope}`, { headers: { authorization: `Bearer ${session.token}` }, signal: abort.signal });
+        const response = await fetch(`${session.baseUrl}/api/events`, { headers: { authorization: `Bearer ${session.token}` }, signal: abort.signal });
         if (!response.ok || !response.body) throw new Error("events refused");
         const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
         let buffer = "";
@@ -104,20 +98,13 @@ function eventStream(session: ServerSession, scope: string, onEvent: (e: ServerE
 
 /** The Borealis API over HTTP. Pages use this exactly as they use the on-device backend. */
 export function createHttpApi(session: ServerSession): Api {
-  const view = session.view;
-  const eventScope = view ? `group-${view.groupId}` : session.scope;
-  const route = (name: CommandName): string => {
-    const command = COMMANDS[name];
-    if (view && !SETTINGS.has(name)) return `/api/groups/${view.groupId}/members/${view.playerId}/view/${command}`;
-    return `/api/rpc/${eventScope}/${command}`;
-  };
   const methods = {} as Record<string, unknown>;
   for (const name of Object.keys(COMMANDS) as CommandName[]) {
     methods[name] = async (args?: Record<string, unknown>) => {
-      const local = LOCAL[name] ?? (view ? VIEW_LOCAL[name] : undefined);
+      const local = LOCAL[name];
       if (local) return local(args ?? {});
       try {
-        return await serverFetch(session, "POST", route(name), args ?? {});
+        return await serverFetch(session, "POST", `/api/rpc/${COMMANDS[name]}`, args ?? {});
       } catch (e) {
         // "The server does not offer that" reads better as a statement about the feature.
         if ((e as ApiError).code === "not_found" && (e as ApiError).message === "The server does not offer that.") throw unavailable();
@@ -125,6 +112,14 @@ export function createHttpApi(session: ServerSession): Api {
       }
     };
   }
+
+  // Phones share the sheet PDF from the web view's own share sheet, with the bytes the server made. Android's web view
+  // has no share sheet and upstream shares from the device's backend there, which has no character to share.
+  methods.shareSheet = async (args?: Record<string, unknown>): Promise<SheetShare> => {
+    if (phoneOs() === "android") throw unavailable();
+    const file = await serverFetch(session, "POST", `/api/rpc/${COMMANDS.exportSheet}`, args ?? {}) as ExportResult;
+    return { fileName: file.fileName, mime: file.mime, shared: false, dataBase64: file.dataBase64 ?? "" };
+  };
 
   const listeners = new Map<string, Set<(payload: never) => void>>();
   let close: (() => void) | null = null;
@@ -139,7 +134,7 @@ export function createHttpApi(session: ServerSession): Api {
       const set = listeners.get(name) ?? new Set();
       listeners.set(name, set);
       set.add(handler as (payload: never) => void);
-      close ??= eventStream(session, eventScope, dispatch);
+      close ??= eventStream(session, dispatch);
       return () => {
         set.delete(handler as (payload: never) => void);
         if ([...listeners.values()].every((s) => s.size === 0)) {
@@ -150,5 +145,3 @@ export function createHttpApi(session: ServerSession): Api {
     },
   } as Api;
 }
-
-export const currentSession = loadSession;

@@ -149,7 +149,7 @@ function AccountRow({ account: a, act, onReset }: { account: Account; act: (work
   const remove = async () => {
     const answer = await confirm({
       title: "Delete account",
-      body: <>Delete <strong>{a.username}</strong> and all their characters? Groups they run are deleted too, and those groups' characters go back to their players. This can't be undone.</>,
+      body: <>Delete <strong>{a.username}</strong>? Their characters and content are deleted for good. This can't be undone.</>,
       confirmLabel: "Delete account",
       danger: true,
     });
@@ -240,11 +240,8 @@ function Statistics() {
     ["Disabled", stats.accounts.disabled],
     ["Rejected", stats.accounts.rejected],
     ["Admins", stats.admins],
-    ["Groups", stats.groups],
     ["Characters", stats.characters],
-    ["Characters in groups", stats.groupCharacters],
     ["Content packs", stats.contentPacks],
-    ["Open invitations", stats.invites],
     ["Active sessions", stats.activeSessions],
     ["Data folder", bytes(stats.diskBytes)],
   ];
@@ -325,8 +322,6 @@ const KIND_LABEL: Record<string, string> = {
   password_changed: "Changed password",
   signed_out_everywhere: "Signed out everywhere",
   account_deleted: "Deleted account",
-  group_created: "Created group",
-  group_deleted: "Deleted group",
   setting_changed: "Changed setting",
 };
 

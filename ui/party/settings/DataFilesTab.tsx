@@ -6,14 +6,14 @@ import { DescCheck, SectionDesc, SectionTitle } from "../../src/pages/settings/r
 export { heldPath, type HeldFolder, type HeldPicks } from "../../src/pages/settings/DataFilesTab";
 
 /**
- * DATA FILES on a server: the Dungeon Master's content library (players don't get the tab). The documents and secondary
- * content folders and the logs are the server's; a DM's own files come in by upload on the Content page.
+ * DATA FILES on a server: upstream's tab without the documents and secondary content folders and the logs, which are
+ * the server's. An account's own files come in by upload on the Content page.
  */
 export function DataFilesTab({ form, set, clearCache, cacheCleared, error }: Parameters<typeof UpstreamDataFiles>[0]) {
   return (
     <>
       <h3 className="aur-set-title13 first flush"><PhoneCase>DATA FILES</PhoneCase></h3>
-      <SectionDesc>Settings of your content library.</SectionDesc>
+      <SectionDesc>Your additional content settings.</SectionDesc>
       <SectionTitle>ADDITIONAL CONTENT</SectionTitle>
       <SectionDesc>Manage additional content added through index files.</SectionDesc>
       <DescCheck spaced title="Automatic Updates" description="Check for updates to additional content at startup." checked={form.autoContentUpdate} onChange={(v) => set({ autoContentUpdate: v })} />

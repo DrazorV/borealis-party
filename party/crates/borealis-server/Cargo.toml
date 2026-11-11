@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Multi-user Borealis server: accounts, groups run by a Dungeon Master, shared content"
+description = "Multi-user Borealis server: accounts, each with its own characters and content"
 
 [[bin]]
 name = "borealis-server"
@@ -15,7 +15,7 @@ path = "src/main.rs"
 borealis = { path = "../../../src-tauri", default-features = false, features = ["mas"] }
 tauri = { path = "../tauri" }
 axum = "0.8"
-tower-http = { version = "0.6", features = ["cors", "fs", "set-header", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "fs", "set-header"] }
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "any", "sqlite", "postgres", "tls-rustls-ring-webpki"] }

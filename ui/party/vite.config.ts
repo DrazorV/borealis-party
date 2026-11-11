@@ -6,8 +6,8 @@ const local = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
 /**
  * The party build is upstream's app with some of its imports pointed at ours, so upstream's own files stay as they are:
- * the entry points in `src/main.tsx`, and the settings window's tabs and a character's house rules, which a server splits by who may
- * change what (`settings/`). The build fails if upstream renames one of them, rather than silently shipping the plain app.
+ * the entry points in `src/main.tsx`, and the settings window's tabs, less what a server has nothing behind (`settings/`).
+ * The build fails if upstream renames one of them, rather than silently shipping the plain app.
  */
 const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "src/main.tsx": {
@@ -17,12 +17,8 @@ const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   },
   "src/pages/settings/ApplicationSettings.tsx": {
     "./settingsTabs": local("./settings/settingsTabs.ts"),
-    "./GeneralBuildTabs": local("./settings/GeneralBuildTabs.tsx"),
     "./BorealisTabs": local("./settings/BorealisTabs.tsx"),
     "./DataFilesTab": local("./settings/DataFilesTab.tsx"),
-  },
-  "src/pages/manage/EditionFlyout.tsx": {
-    "./OptionsTab": local("./settings/OptionsTab.tsx"),
   },
 };
 

@@ -16,9 +16,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-#[path = "../../party/backend/state_ext.rs"]
-pub mod party; // party fork: see that file
-
 /// Bundled content packs, in load order (later packs may extend earlier ones).
 pub const BUNDLED_PACKS: [&str; 5] = [
     "core",

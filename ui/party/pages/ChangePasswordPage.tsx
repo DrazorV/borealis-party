@@ -24,7 +24,7 @@ export function ChangePasswordPage() {
     setError("");
     try {
       updateUser(await changePassword(current, password));
-      window.location.hash = "/party";
+      window.location.hash = "/";
       window.location.reload();
     } catch (err) {
       setError(message(err));
