@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../../src/components/Button";
 import { errorMessage } from "../../src/state/useAsync";
-import { checkForUpdate, installUpdate, updatesPossible, type AvailableUpdate } from "../api/desktopUpdate";
+import { checkForUpdate, installUpdate, onUpdateOffered, updatesPossible, type AvailableUpdate } from "../api/desktopUpdate";
 
 /** First look a little after start, so launching is never slowed; then again while the app stays open. */
 export const FIRST_CHECK_MS = 15_000;
@@ -28,12 +28,29 @@ export function DesktopUpdate({ floating = false }: { floating?: boolean }) {
     return () => { stopped = true; clearTimeout(first); clearInterval(again); };
   }, []);
 
-  if (!update || later) return null;
-  const install = () => {
+  // Help → Check for updates… (../api/overrides/updates.ts): show what it found, even after Later, and install it if asked.
+  // A download under way is left alone.
+  const installing = useRef(false);
+  useEffect(() => onUpdateOffered(({ update: found, install: now }) => {
+    if (installing.current) return;
+    setUpdate(found);
+    setLater(false);
+    if (now) start(found);
+    else setPhase({ kind: "offer" });
+  }), []);
+
+  function start(target: AvailableUpdate) {
+    installing.current = true;
     setPhase({ kind: "installing", fraction: null });
-    installUpdate(update, (fraction) => setPhase({ kind: "installing", fraction }))
-      .catch((e: unknown) => setPhase({ kind: "failed", message: errorMessage(e) }));
-  };
+    installUpdate(target, (fraction) => setPhase({ kind: "installing", fraction }))
+      .catch((e: unknown) => {
+        installing.current = false;
+        setPhase({ kind: "failed", message: errorMessage(e) });
+      });
+  }
+
+  if (!update || later) return null;
+  const install = () => start(update);
   return (
     <div className={floating ? "party-offline party-update floating" : "party-offline party-update"} role="status">
       {phase.kind === "installing" ? (

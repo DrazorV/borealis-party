@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { offerUpdate } from "../api/desktopUpdate";
 import { DesktopUpdate, FIRST_CHECK_MS, RECHECK_MS } from "./DesktopUpdate";
 
 const tauri = vi.hoisted(() => ({
@@ -101,4 +102,33 @@ it("a failed install says why and can be tried again", async () => {
   await pass(0);
   expect(screen.getByRole("status").textContent).toContain("The update could not be installed: the signature does not match");
   expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+});
+
+it("Help → Check for updates…: shows what it found even after Later, and installs it when asked", async () => {
+  tauri.answer["plugin:updater|download_and_install"] = () => new Promise<void>(() => {});
+  render(<DesktopUpdate />);
+  await pass(FIRST_CHECK_MS);
+  fireEvent.click(screen.getByRole("button", { name: "Later" }));
+  expect(screen.queryByRole("status")).toBeNull();
+  const newer = { rid: 9, currentVersion: "0.1.1", version: "0.1.3" };
+  act(() => { expect(offerUpdate({ update: newer, install: false })).toBe(true); });
+  expect(screen.getByRole("status").textContent).toContain("Borealis Party 0.1.3 is available");
+  act(() => { offerUpdate({ update: newer, install: true }); });
+  expect(tauri.calls.at(-1)).toMatchObject({ cmd: "plugin:updater|download_and_install", args: { rid: 9 } });
+  expect(screen.getByRole("status").textContent).toContain("Downloading Borealis Party 0.1.3");
+});
+
+it("with no update bar shown, an offer reaches nobody", () => {
+  expect(offerUpdate({ update: offer, install: true })).toBe(false);
+});
+
+it("an offer while a download is under way leaves it alone", async () => {
+  tauri.answer["plugin:updater|download_and_install"] = () => new Promise<void>(() => {});
+  render(<DesktopUpdate />);
+  await pass(FIRST_CHECK_MS);
+  fireEvent.click(screen.getByRole("button", { name: "Install and restart" }));
+  act(() => { offerUpdate({ update: { ...offer, rid: 8 }, install: false }); });
+  act(() => { offerUpdate({ update: { ...offer, rid: 8 }, install: true }); });
+  expect(tauri.calls.filter((c) => c.cmd === "plugin:updater|download_and_install")).toHaveLength(1);
+  expect(screen.getByRole("status").textContent).toContain("Downloading Borealis Party 0.1.2");
 });
