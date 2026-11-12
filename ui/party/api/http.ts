@@ -1,8 +1,11 @@
 import { COMMANDS, EVENTS, type Api, type ApiError, type ApiMethods, type CommandName, type DataDirs, type EventName } from "../../src/api/contract";
-import type { ExportResult, SheetShare } from "../../src/api/contract";
-import { phoneOs } from "../../src/lib/phone";
-import { exportBundle, importWatch, shareBundle, looksLikeBundle, openBundleFromImport, pickBundleFile } from "./bundles";
+import { OVERRIDES, type Methods } from "./overrides/registry";
 import { clearSession, loadSession, saveSession, type ServerSession } from "./session";
+
+// Each feature's changes to the commands, one module each (./overrides/registry.ts), applied in this order.
+import "./overrides/sheet";
+import "./overrides/bundles";
+import "./overrides/android"; // after sheet and bundles, which it wraps
 
 function fail(code: string, message: string): ApiError {
   return { code, message } as ApiError;
@@ -106,7 +109,7 @@ export function eventStream(session: ServerSession, onEvent: (e: ServerEvent) =>
 
 /** The Borealis API over HTTP. Pages use this exactly as they use the on-device backend. */
 export function createHttpApi(session: ServerSession): Api {
-  const methods = {} as Record<string, unknown>;
+  const methods = {} as Methods;
   for (const name of Object.keys(COMMANDS) as CommandName[]) {
     methods[name] = async (args?: Record<string, unknown>) => {
       const local = LOCAL[name];
@@ -121,50 +124,7 @@ export function createHttpApi(session: ServerSession): Api {
     };
   }
 
-  // Phones share the sheet PDF from the web view's own share sheet, with the bytes the server made. Android's web view
-  // has no share sheet and upstream shares from the device's backend there, which has no character to share.
-  methods.shareSheet = async (args?: Record<string, unknown>): Promise<SheetShare> => {
-    if (phoneOs() === "android") throw unavailable();
-    const file = await serverFetch(session, "POST", `/api/rpc/${COMMANDS.exportSheet}`, args ?? {}) as ExportResult;
-    return { fileName: file.fileName, mime: file.mime, shared: false, dataBase64: file.dataBase64 ?? "" };
-  };
-
-  // File > Open bundle...: the browser's file chooser and an upload stand in for the native open panel (./bundles.ts).
-  // Every other pick still goes to the server, which does not offer it.
-  const serverPick = methods.pickPath as (args?: Record<string, unknown>) => Promise<unknown>;
-  methods.pickPath = (args?: Record<string, unknown>) => (args?.purpose === "bundle-file" ? pickBundleFile(session) : serverPick(args));
-
-  // File > Export to bundle...: the server builds the file and the browser's download stands in for the save dialog.
-  methods.bundleExport = (args?: Record<string, unknown>) => exportBundle(session, args ?? {});
-  // The dialog takes upstream's phone path ("Share as a file") here, as the server reports every client as mobile.
-  // Android's web view has neither a download nor a share sheet, as for the sheet PDF above.
-  methods.bundleShare = async (args?: Record<string, unknown>) => {
-    if (phoneOs() === "android") throw unavailable();
-    return shareBundle(session, args ?? {}, phoneOs() !== null);
-  };
-
-  // Start page > Import characters with a .borealis file (or a zip under another name): the Open bundle window instead.
-  const serverImport = methods.importCharacter as (args?: Record<string, unknown>) => Promise<unknown>;
-  methods.importCharacter = (args?: Record<string, unknown>) => {
-    const fileName = String(args?.fileName ?? "");
-    const content = String(args?.contentBase64 ?? "");
-    return looksLikeBundle(fileName, content) ? openBundleFromImport(session, fileName, content) : serverImport(args);
-  };
-
-  // The Open bundle window for such an import: the preview the import already made, and how the window closed.
-  const serverOpen = methods.bundleOpen as (args?: Record<string, unknown>) => Promise<unknown>;
-  const serverAccept = methods.bundleAccept as (args?: Record<string, unknown>) => Promise<unknown>;
-  const serverDiscard = methods.bundleDiscard as (args?: Record<string, unknown>) => Promise<unknown>;
-  methods.bundleOpen = async (args?: Record<string, unknown>) => importWatch.open(String(args?.token ?? "")) ?? await serverOpen(args);
-  methods.bundleAccept = async (args?: Record<string, unknown>) => {
-    const out = await serverAccept(args);
-    importWatch.settle(String(args?.bundleId ?? ""), "accepted");
-    return out;
-  };
-  methods.bundleDiscard = async (args?: Record<string, unknown>) => {
-    importWatch.settle(String(args?.bundleId ?? ""), "cancelled");
-    return await serverDiscard(args);
-  };
+  for (const { apply } of OVERRIDES) apply(methods, session);
 
   const listeners = new Map<string, Set<(payload: never) => void>>();
   let close: (() => void) | null = null;

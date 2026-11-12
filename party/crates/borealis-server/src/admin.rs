@@ -470,3 +470,21 @@ pub async fn activity(
         .collect();
     Ok(Json(json!({ "items": items, "total": total })))
 }
+
+/// The admin page's routes. Each handler checks for an admin itself.
+pub fn routes() -> axum::Router<AppState> {
+    use axum::routing::{delete, get, post};
+    axum::Router::new()
+        .route("/api/admin/stats", get(stats))
+        .route("/api/admin/settings", get(settings).patch(save_settings))
+        .route("/api/admin/activity", get(activity))
+        .route("/api/admin/accounts", get(accounts))
+        .route("/api/admin/accounts/{id}", delete(delete_account))
+        .route("/api/admin/accounts/{id}/status", post(set_status))
+        .route("/api/admin/accounts/{id}/admin", post(set_admin))
+        .route("/api/admin/accounts/{id}/password", post(reset_password))
+        .route(
+            "/api/admin/accounts/{id}/sign-out",
+            post(sign_out_everywhere),
+        )
+}
