@@ -3,7 +3,7 @@
 <!--
   Merged by `tauri ios build` into upstream's Info.plist (party/tauri.party.ios.json > bundle > iOS > infoPlist), so
   upstream's Xcode project stays as it is. The iOS side of party/android/party.init.gradle: the app's name, and plain
-  HTTP for servers on a home network.
+  HTTP for servers on a home network, and the files it opens (no .borealis, see below).
 -->
 <plist version="1.0">
 <dict>
@@ -24,5 +24,132 @@
 	<!-- Asked before the first connection to an address on this network (iOS 14 and later). Replaces upstream's text. -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Borealis Party connects to your party server on this network.</string>
+	<!--
+	  Open with / Share (plan I4, decision D11). These two keys replace upstream's whole lists (the merge works key by
+	  key). The party app is built without device-link, and without it the backend drops an opened .borealis without a
+	  word (src-tauri/src/content_preview.rs push_opened_file), so the party app does not offer to open bundles; they go
+	  in through File > Open bundle... instead. Added: .json, for 5etools-format homebrew. Every file opened here is
+	  imported into the signed-in account after an app dialog asks (ui/party/api/overrides/opened.ts).
+	-->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>dnd5e</string>
+			</array>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>app.borealis.dnd5e</string>
+			</array>
+			<key>CFBundleTypeName</key>
+			<string>Character file</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>index</string>
+			</array>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>app.borealis.index</string>
+			</array>
+			<key>CFBundleTypeName</key>
+			<string>Content index</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>xml</string>
+			</array>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.xml</string>
+			</array>
+			<key>CFBundleTypeName</key>
+			<string>Content file</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>zip</string>
+			</array>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.zip-archive</string>
+			</array>
+			<key>CFBundleTypeName</key>
+			<string>Content archive</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>json</string>
+			</array>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.json</string>
+			</array>
+			<key>CFBundleTypeName</key>
+			<string>5etools-format homebrew</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+		</dict>
+	</array>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>app.borealis.dnd5e</string>
+			<key>UTTypeDescription</key>
+			<string>5e character</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>dnd5e</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>app.borealis.index</string>
+			<key>UTTypeDescription</key>
+			<string>Content index</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.xml</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>index</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
 </dict>
 </plist>
