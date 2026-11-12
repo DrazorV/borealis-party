@@ -165,4 +165,5 @@ html.phone .party-parties .btn, html.phone .party-parties .input, html.phone .pa
 html.phone .party-pick-row, html.phone .party-parties .aur-switch { min-height: var(--ph-hit); }
 html.phone .party-parties .input, html.phone .party-form .input { font-size: 16px; }
 html.phone .party-parties .party-inline > .btn, html.phone .party-actions > .btn { flex: 1 1 auto; justify-content: center; }
-html.phone .party-parties .party-note a, html.phone .party .party-note a { display: inline-flex; align-items: center; min-height: var(--ph-hit); }
+.party-dm-offer .btn { text-decoration: none; }
+html.phone .party .party-note a, html.phone .party-dm-offer .btn { display: inline-flex; align-items: center; justify-content: center; min-height: var(--ph-hit); min-width: var(--ph-hit); }

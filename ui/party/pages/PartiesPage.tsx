@@ -274,9 +274,10 @@ export function PartiesPage() {
       {playing.map((p) => <PartyCard key={p.id} party={p} act={act} open={setDialog} />)}
 
       {data && !data.dm && (
-        <p className="muted party-note">
-          Want to run a game? Turn on Dungeon Master tools on your <Link to="/account">Account</Link> page.
-        </p>
+        <div className="party-line party-dm-offer">
+          <span className="grow muted">Want to run a game? Turn on Dungeon Master tools on your Account page.</span>
+          <Link className="btn btn-sm" to="/account">Account</Link>
+        </div>
       )}
       {data && <p className="muted party-note">Server admins can read party data on the server.</p>}
 

@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { APIRequestContext, Page, TestInfo } from "@playwright/test";
 import { ACCOUNTS, type AccountName } from "./accounts";
-import { expect, measureOverflow, minTap, open, scrollIntoReach, signedInShell, smallTargets, test } from "./fixtures";
+import { expect, measureOverflow, minTap, open, scrollIntoReach, settled, signedInShell, smallTargets, test } from "./fixtures";
 
 /**
  * Parties (plan 4.1, release 0.2.0), with two accounts on the throwaway server: `admin` turns on Dungeon Master tools
@@ -13,12 +13,30 @@ import { expect, measureOverflow, minTap, open, scrollIntoReach, signedInShell, 
  */
 
 const FIXTURES = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../e2e/fixtures");
-const CHARACTER = readFileSync(join(FIXTURES, "import/fine.dnd5e")).toString("base64");
+const CHARACTER = readFileSync(join(FIXTURES, "d5-hero.dnd5e")).toString("base64");
 
-async function token(request: APIRequestContext, who: AccountName): Promise<string> {
-  const r = await request.post("/api/auth/login", { data: { username: who, password: ACCOUNTS[who].password } });
-  expect(r.ok(), `sign in as ${who}`).toBeTruthy();
-  return ((await r.json()) as { token: string }).token;
+/** Party names are unique per call: the phones share one server and one DM account. */
+function uniqueName(testInfo: TestInfo): string {
+  return `Party ${testInfo.project.name} ${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * One API session per account per worker: every sign-in hashes a password, which a debug server does slowly, and the
+ * other specs sign in through the same server at the same time.
+ */
+const tokens = new Map<AccountName, Promise<string>>();
+function token(request: APIRequestContext, who: AccountName): Promise<string> {
+  let t = tokens.get(who);
+  if (!t) {
+    t = (async () => {
+      const r = await request.post("/api/auth/login", { data: { username: who, password: ACCOUNTS[who].password } });
+      expect(r.ok(), `sign in as ${who}`).toBeTruthy();
+      return ((await r.json()) as { token: string }).token;
+    })();
+    t.catch(() => tokens.delete(who));
+    tokens.set(who, t);
+  }
+  return t;
 }
 
 async function api<T>(request: APIRequestContext, auth: string, method: string, path: string, data?: unknown): Promise<T> {
@@ -30,7 +48,7 @@ async function api<T>(request: APIRequestContext, auth: string, method: string, 
 
 /** A fresh character for `who`; answers its id. */
 async function newCharacter(request: APIRequestContext, auth: string): Promise<string> {
-  const report = await api<{ summary: { id: string } }>(request, auth, "POST", "/api/rpc/import_character", { fileName: "fine.dnd5e", contentBase64: CHARACTER });
+  const report = await api<{ summary: { id: string } }>(request, auth, "POST", "/api/rpc/import_character", { fileName: "d5-hero.dnd5e", contentBase64: CHARACTER });
   return report.summary.id;
 }
 
@@ -38,7 +56,7 @@ async function newCharacter(request: APIRequestContext, auth: string): Promise<s
 async function newParty(request: APIRequestContext, testInfo: TestInfo): Promise<{ id: string; name: string; dm: string }> {
   const dm = await token(request, "admin");
   await api(request, dm, "POST", "/api/me/roles/dm", {});
-  const name = `Party ${testInfo.project.name.slice(0, 8)} ${testInfo.testId.slice(0, 6)}${testInfo.retry}`;
+  const name = uniqueName(testInfo);
   const p = await api<{ id: string }>(request, dm, "POST", "/api/parties", { name });
   return { id: p.id, name, dm };
 }
@@ -57,6 +75,15 @@ async function bigEnough(page: Page, testInfo: TestInfo, within: string) {
 
 const partyCard = (page: Page, name: string) => page.getByRole("region", { name });
 
+/** With PARTY_SHOTS=<folder>, a screenshot for looking at by eye. */
+async function shot(page: Page, testInfo: TestInfo, name: string) {
+  const dir = process.env.PARTY_SHOTS;
+  if (!dir) return;
+  const sheet = page.getByRole("dialog");
+  if (await sheet.count()) await settled(sheet);
+  await page.screenshot({ path: join(dir, `${testInfo.project.name}-${name}.png`), fullPage: false });
+}
+
 test.describe("Parties on a phone (plan 4.1)", () => {
   test("More has a Parties row; the page fits the screen", async ({ page, signIn }, testInfo) => {
     await signIn("player");
@@ -69,6 +96,7 @@ test.describe("Parties on a phone (plan 4.1)", () => {
     await expect(page.getByRole("heading", { name: "My parties" })).toBeVisible();
     await noSidewaysScroll(page);
     await bigEnough(page, testInfo, ".party-parties");
+    await shot(page, testInfo, "parties-empty");
   });
 
   test("the Account page's Dungeon Master tools switch", async ({ page, signIn }, testInfo) => {
@@ -90,7 +118,7 @@ test.describe("Parties on a phone (plan 4.1)", () => {
     const dm = await token(request, "admin");
     await api(request, dm, "POST", "/api/me/roles/dm", {});
     await open(page, "/parties");
-    const name = `Party ${testInfo.project.name.slice(0, 8)} ${testInfo.testId.slice(0, 6)}${testInfo.retry}`;
+    const name = uniqueName(testInfo);
     await page.getByRole("button", { name: /New party/ }).tap();
     const create = page.getByRole("dialog", { name: "New party" });
     await create.getByLabel("Party name").fill(name);
@@ -106,6 +134,7 @@ test.describe("Parties on a phone (plan 4.1)", () => {
     expect(code).toMatch(/^[0-9A-Z]{4}(-[0-9A-Z]{4}){3}$/);
     await noSidewaysScroll(page);
     await bigEnough(page, testInfo, "[role=dialog]");
+    await shot(page, testInfo, "dm-join-code");
     await invite.getByRole("button", { name: "Done" }).tap();
     await expect(card.getByText(/1 use left/)).toBeVisible();
 
@@ -118,6 +147,8 @@ test.describe("Parties on a phone (plan 4.1)", () => {
     const member = partyCard(page, name).getByRole("listitem").filter({ hasText: "player" });
     await expect(member).toBeVisible();
     await expect(member.getByRole("button", { name: "Remove" })).toBeVisible();
+    await member.scrollIntoViewIfNeeded();
+    await shot(page, testInfo, "dm-party");
     await noSidewaysScroll(page);
     await bigEnough(page, testInfo, ".party-parties");
 
@@ -145,6 +176,7 @@ test.describe("Parties on a phone (plan 4.1)", () => {
     await pick.locator(`input[value="${character}"]`).check();
     await noSidewaysScroll(page);
     await bigEnough(page, testInfo, "[role=dialog]");
+    await shot(page, testInfo, "player-pick");
     const joinButton = pick.getByRole("button", { name: "Join with this character" });
     expect(await scrollIntoReach(page, joinButton, page.viewportSize()!.height)).toBe(true);
     await joinButton.tap();
@@ -155,6 +187,7 @@ test.describe("Parties on a phone (plan 4.1)", () => {
     await expect(card.getByText(/DM: admin/)).toBeVisible();
     const mine = card.getByRole("listitem").filter({ hasText: "your character" });
     await expect(mine).toHaveCount(1);
+    await shot(page, testInfo, "player-party");
     await noSidewaysScroll(page);
     await bigEnough(page, testInfo, ".party-parties");
 
@@ -197,6 +230,7 @@ test.describe("Parties at a desktop size", () => {
     const own = card.getByRole("listitem").filter({ hasText: "your character" });
     await expect(own.getByRole("button", { name: "Leave" })).toBeVisible();
     await expect(own.getByRole("button", { name: "Remove" })).toHaveCount(0);
+    await shot(page, testInfo, "desktop-parties");
     await noSidewaysScroll(page);
 
     await page.locator(".party-bar").getByRole("button", { name: "Account" }).click();
