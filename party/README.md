@@ -56,6 +56,7 @@ Put passwords in variables rather than in the file.
 | `BOREALIS__SERVER__MAX_UPLOAD_MB` | `512` | Largest upload, in MB |
 | `BOREALIS__SERVER__PUBLIC_UPLOAD_MB` | `95` | Largest upload through the public address, in MB (see [Upload size](#upload-size)) |
 | `BOREALIS__SERVER__APP_DOWNLOAD` | the latest GitHub release | Folder URL the website offers the apps from; `off` offers none |
+| `BOREALIS__SERVER__TRUSTED_PROXIES` | | Reverse proxies allowed to name the client, such as `172.20.20.100`; commas between entries (see [Security and proxies](#security-and-proxies)) |
 | `BOREALIS__DATABASE__TYPE` | `sqlite` | `sqlite` or `postgres` |
 | `BOREALIS__SQLITE__PATH` | `party.db` | SQLite file, relative to the config folder |
 | `BOREALIS__POSTGRES__HOST` | `localhost` | PostgreSQL server |
@@ -207,6 +208,137 @@ docker exec -i borealis-party /app/borealis-server add-user <name> [--email <add
 
 The password is read from standard input. For a direct install, run
 `sudo -u borealis-party env BOREALIS_CONFIG_DIR=/var/lib/borealis-party /opt/borealis-party/borealis-server add-user ...`.
+
+## Security and proxies
+
+### Addresses the server downloads from
+
+Any account can give the server an address to download from: an index (Indexes tab, or the index a shared bundle's
+packs came from) or a 5etools folder. So the server checks each address before it saves or fetches it, and refuses:
+
+- addresses on this machine or a private network: `127.x`, `10.x`, `172.16-31.x`, `192.168.x`, `100.64-127.x`
+  (carrier and Tailscale), `169.254.x` (link-local, cloud metadata), IPv6 `::1`, `fc00::/7`, `fe80::/10`, reserved
+  ranges, and IPv4 written as IPv6;
+- local names: `localhost`, one-word names, `.local`, `.lan`, `.home`, `.internal`, `.home.arpa` and similar;
+- names that resolve to any such address;
+- the server's own `public_url` host;
+- addresses with a user name or password (`https://user:pw@...`) or an access key in the query (`?token=`, `?key=`,
+  `?signature=`, ...): the address is saved, shown, and travels inside bundles.
+
+The account is told why ("The server does not download from 192.168.1.1: it is on a home or office network").
+Every file an index or a 5etools folder lists is checked the same way when it is fetched, so are indexes saved before
+this check existed, so an index can't point the server at the network either. The Indexes tab shows Borealis's own
+sentence for a refused index file; the server log has the reason.
+
+This check alone is not enough: Borealis's HTTPS client looks the name up again when it connects and follows
+redirects, so a name that answers differently the second time, or a redirect, still gets through. The firewall rule
+below closes that, and it is the real protection.
+
+### Runbook: keep the server's container off the home network
+
+Done on the Docker host (for a direct install, the same rules with `-m owner --uid-owner borealis-party` in the
+`OUTPUT` chain instead). The example addresses are the reference setup: home network `172.20.20.0/24`, PostgreSQL on
+`172.20.20.247`, DNS (Pi-hole) on `172.20.20.2`. Use yours.
+
+1. Give the server a network of its own, so the rule touches no other container. In the stack:
+
+   ```yaml
+   services:
+     borealis-party:
+       networks: [borealis]
+       # remove network_mode: "bridge"
+   networks:
+     borealis:
+       ipam:
+         config:
+           - subnet: 172.30.248.0/24
+   ```
+
+2. Allow what the server needs on the home network, then refuse the rest of it. Docker leaves the `DOCKER-USER`
+   chain to you; rules there run before Docker's own:
+
+   ```sh
+   NET=172.30.248.0/24
+   iptables -N BOREALIS-EGRESS 2>/dev/null || iptables -F BOREALIS-EGRESS
+   iptables -C DOCKER-USER -s $NET -j BOREALIS-EGRESS 2>/dev/null ||
+     iptables -I DOCKER-USER -s $NET -j BOREALIS-EGRESS
+   iptables -A BOREALIS-EGRESS -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+   iptables -A BOREALIS-EGRESS -d 172.20.20.247 -p tcp --dport 5432 -j RETURN      # PostgreSQL
+   iptables -A BOREALIS-EGRESS -d 172.20.20.2 -p udp --dport 53 -j RETURN          # DNS
+   iptables -A BOREALIS-EGRESS -d 172.20.20.2 -p tcp --dport 53 -j RETURN
+   # A mail relay on the home network needs its own line here (tcp 587 or 465).
+   for range in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16 127.0.0.0/8 0.0.0.0/8 224.0.0.0/4 240.0.0.0/4; do
+     iptables -A BOREALIS-EGRESS -d $range -j REJECT --reject-with icmp-admin-prohibited
+   done
+   # The Docker host itself, reached through the network's gateway, is INPUT, not DOCKER-USER:
+   iptables -C INPUT -s $NET -m conntrack --ctstate NEW -j REJECT --reject-with icmp-admin-prohibited 2>/dev/null ||
+     iptables -I INPUT -s $NET -m conntrack --ctstate NEW -j REJECT --reject-with icmp-admin-prohibited
+   ```
+
+   With IPv6 on in Docker, add the same with `ip6tables` for `fc00::/7`, `fe80::/10` and `::1`.
+
+3. Make it survive a restart: put step 2 in a script and run it from a systemd unit ordered
+   `After=docker.service` with `Requires=docker.service` (Docker recreates `DOCKER-USER` empty when it starts), or
+   use `netfilter-persistent` if it loads after Docker.
+
+4. Check from the server's network. The image has no download tool, so use a throwaway container on the same
+   network (`docker network ls` shows its full name, usually `<stack>_borealis`). The first two must fail at once, the
+   last must print a page:
+
+   ```sh
+   docker run --rm --network <stack>_borealis curlimages/curl:8.11.1 -sS -m 5 http://172.20.20.1/
+   docker run --rm --network <stack>_borealis curlimages/curl:8.11.1 -sS -m 5 http://172.20.20.100:81/
+   docker run --rm --network <stack>_borealis curlimages/curl:8.11.1 -sS -m 5 https://example.com/
+   ```
+
+   Then, in the app, Indexes > Update: indexes on the internet still update.
+
+### Real client addresses behind a proxy
+
+Sign-up attempts are limited per client address, and failed sign-ins per client and user name. Behind a reverse
+proxy every request comes from the proxy, so without the setting below there is one sign-up limit for everyone, and
+ten wrong passwords from anyone lock that user name for everyone for five minutes.
+
+`server.trusted_proxies` (`BOREALIS__SERVER__TRUSTED_PROXIES`, commas between entries) lists the proxies, as
+addresses or ranges. Only a request whose connecting address is in the list may name the client: the server reads
+`CF-Connecting-IP` (set by Cloudflare), otherwise the right-most `X-Forwarded-For` entry that is not itself a listed
+proxy (entries left of it are whatever the client sent, and are ignored). From any other address both headers are
+ignored, and the server logs once that it saw them and which setting to change. Empty, the default, means no proxy is
+believed, which is safe but gives the shared limits above. IPv6 clients are counted per /64.
+
+A client that reaches the proxy without going through Cloudflare (on the home network) can write its own
+`CF-Connecting-IP`. That only lets it choose its own rate-limit bucket on the home network.
+
+### Runbook: production behind Cloudflare and Nginx Proxy Manager
+
+1. Find the address the server sees for the proxy: the admin page's activity log shows the client of each sign-in.
+   Today every entry shows the proxy's address (in the reference setup `172.20.20.100`, Nginx Proxy Manager; if NPM
+   runs on the same Docker host, a `172.x` bridge address instead).
+2. Add to the stack's environment, and update the stack:
+
+   ```
+   BOREALIS__SERVER__TRUSTED_PROXIES=172.20.20.100
+   ```
+
+   List only proxies you run. Cloudflare's tunnel connects to NPM, not to the server, so it needs no entry.
+3. Sign in once from a phone on mobile data and once from the home network: the activity log now shows the phone's
+   public address and the computer's home address, not the proxy's.
+4. Lock the server's port so only the proxy can reach it, on the Docker host. A published port is DNAT'ed, so match
+   the original port:
+
+   ```sh
+   RULE="-p tcp -m conntrack --ctorigdstport 8787 --ctdir ORIGINAL ! -s 172.20.20.100 -j REJECT"
+   iptables -C DOCKER-USER $RULE 2>/dev/null || iptables -I DOCKER-USER $RULE
+   ```
+
+   Keep it with the egress rules (step 3 above). The container's own health check runs inside it and is not affected.
+   After this, home-network devices use the server's name (a local DNS record that points it at the proxy, as with
+   Pi-hole) instead of `http://<docker host>:8787`. The app counts a domain name as the public address, so for a
+   file bigger than `PUBLIC_UPLOAD_MB` allows, add an NPM proxy host for a home-only name (for example `party.lan`) or
+   leave a LAN address allowed in that rule: `! -s 172.20.20.0/24` instead keeps the port open to the home network
+   only, where the trusted proxy setting still stops anyone else from naming a client.
+5. Check from another home device: `curl -m 5 http://<docker host>:8787/api/server` is refused, and the site still
+   opens through its name.
 
 ## Bundles
 

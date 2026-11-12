@@ -2122,3 +2122,547 @@ async fn receive_flow(router: Router, data: &Path) {
     assert!(trashed(data, &bob.id).is_empty());
     assert!(staged_files(data, &bob.id).is_empty());
 }
+
+// ---- Imports over HTTP, the download check and upload limits (plan I8, I10). ----
+
+fn b64(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// A zip with `files` stored uncompressed: enough for the importers, without a zip crate in the tests.
+fn stored_zip(files: &[(&str, &[u8])]) -> Vec<u8> {
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut crc = 0xffff_ffffu32;
+        for byte in bytes {
+            crc ^= u32::from(*byte);
+            for _ in 0..8 {
+                crc = if crc & 1 == 1 {
+                    (crc >> 1) ^ 0xedb8_8320
+                } else {
+                    crc >> 1
+                };
+            }
+        }
+        !crc
+    }
+    let mut out = Vec::new();
+    let mut central = Vec::new();
+    for (name, data) in files {
+        let offset = u32::try_from(out.len()).unwrap();
+        let (crc, size, len) = (
+            crc32(data),
+            u32::try_from(data.len()).unwrap(),
+            u16::try_from(name.len()).unwrap(),
+        );
+        // Local header: version 2.0, no flags, stored, no time.
+        out.extend_from_slice(&0x0403_4b50u32.to_le_bytes());
+        out.extend_from_slice(&[20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        for n in [crc, size, size] {
+            out.extend_from_slice(&n.to_le_bytes());
+        }
+        out.extend_from_slice(&len.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(data);
+        central.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
+        central.extend_from_slice(&[20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        for n in [crc, size, size] {
+            central.extend_from_slice(&n.to_le_bytes());
+        }
+        central.extend_from_slice(&len.to_le_bytes());
+        central.extend_from_slice(&[0; 12]);
+        central.extend_from_slice(&offset.to_le_bytes());
+        central.extend_from_slice(name.as_bytes());
+    }
+    let start = u32::try_from(out.len()).unwrap();
+    let count = u16::try_from(files.len()).unwrap();
+    out.extend_from_slice(&central);
+    out.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
+    out.extend_from_slice(&[0, 0, 0, 0]);
+    out.extend_from_slice(&count.to_le_bytes());
+    out.extend_from_slice(&count.to_le_bytes());
+    out.extend_from_slice(&u32::try_from(central.len()).unwrap().to_le_bytes());
+    out.extend_from_slice(&start.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out
+}
+
+/// A 5etools `data/` folder with two System Reference Document spells, described in our own words.
+fn srd_5etools_zip() -> Vec<u8> {
+    let spells = json!({ "spell": [
+        {
+            "name": "Acid Splash", "source": "XPHB", "page": 239, "srd52": true, "level": 0, "school": "V",
+            "time": [{ "number": 1, "unit": "action" }],
+            "range": { "type": "point", "distance": { "type": "feet", "amount": 60 } },
+            "components": { "v": true, "s": true },
+            "duration": [{ "type": "instant" }],
+            "entries": ["A test spell: a splash of acid hits creatures near a point you choose."]
+        },
+        {
+            "name": "Light", "source": "XPHB", "page": 292, "srd52": true, "level": 0, "school": "V",
+            "time": [{ "number": 1, "unit": "action" }],
+            "range": { "type": "point", "distance": { "type": "touch" } },
+            "components": { "v": true, "m": "a firefly or phosphorescent moss" },
+            "duration": [{ "type": "timed", "duration": { "type": "hour", "amount": 1 } }],
+            "entries": ["A test spell: an object you touch sheds light."]
+        }
+    ]});
+    stored_zip(&[(
+        "data/spells/spells-xphb.json",
+        spells.to_string().as_bytes(),
+    )])
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn content_and_characters_import_over_http() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = router(dir.path().to_path_buf()).await;
+    let alice = sign_up(&router, "importer").await;
+
+    // Aurora files: preview, then install what the preview staged.
+    let spell = spell_pack();
+    let (status, preview) = alice
+        .rpc(
+            "preview_import_pack",
+            json!({ "request": { "files": [{
+                "fileName": "party.xml",
+                "contentBase64": spell["request"]["contentBase64"],
+            }]}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert!(preview["converted"].as_u64().unwrap() >= 1, "{preview}");
+    let spark = json!({ "elementId": "ID_PARTY_SPARK" });
+    let (status, _) = alice.rpc("get_element", spark.clone()).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "nothing installed before Install"
+    );
+    let (status, installed) = alice
+        .rpc(
+            "install_import_preview",
+            json!({ "previewId": preview["previewId"] }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{installed}");
+    let (status, out) = alice.rpc("get_element", spark).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, again) = alice
+        .rpc(
+            "install_import_preview",
+            json!({ "previewId": preview["previewId"] }),
+        )
+        .await;
+    assert!(!status.is_success(), "a preview installs once: {again}");
+
+    // A zip of a 5etools data folder: stage, scan, import.
+    let (status, staged) = alice
+        .rpc(
+            "stage_5etools_zip",
+            json!({ "file": { "fileName": "data.zip", "contentBase64": b64(&srd_5etools_zip()) } }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{staged}");
+    let (status, scan) = alice
+        .rpc("scan_5etools_folder", json!({ "folder": staged["token"] }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{scan}");
+    let sources: Vec<Value> = scan["sources"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{scan}"))
+        .iter()
+        .map(|s| s["abbr"].clone())
+        .collect();
+    assert!(!sources.is_empty(), "{scan}");
+    let (status, report) = alice
+        .rpc(
+            "import_5etools",
+            json!({ "request": { "folder": staged["token"], "sources": sources, "includeFluff": false } }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    assert!(report["converted"].as_u64().unwrap() >= 2, "{report}");
+    let (_, packs) = alice.rpc("list_packs", json!({})).await;
+    assert!(
+        packs
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["id"].as_str().unwrap().starts_with("5etools-")),
+        "{packs}"
+    );
+
+    // An Aurora character file.
+    let file = std::fs::read(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../crates/borealis-character/tests/data/example.dnd5e"),
+    )
+    .unwrap();
+    let (status, imported) = alice
+        .rpc(
+            "import_character",
+            json!({ "fileName": "example.dnd5e", "contentBase64": b64(&file) }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{imported}");
+    let (_, list) = alice.rpc("list_characters", json!({})).await;
+    assert_eq!(names(&list), ["Test Hero"], "{list}");
+    let (status, bad) = alice
+        .rpc(
+            "import_character",
+            json!({ "fileName": "broken.dnd5e", "contentBase64": b64(b"<character") }),
+        )
+        .await;
+    assert!(!status.is_success(), "{bad}");
+    let (_, list) = alice.rpc("list_characters", json!({})).await;
+    assert_eq!(names(&list).len(), 1, "a broken file adds nothing: {list}");
+}
+
+fn index_urls(list: &Value) -> Vec<String> {
+    list.as_array()
+        .unwrap_or_else(|| panic!("{list}"))
+        .iter()
+        .map(|i| i["url"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_server_never_downloads_from_its_own_network() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path();
+    let router = router(data.to_path_buf()).await;
+    let alice = sign_up(&router, "ssrf-alice").await;
+    for url in [
+        "https://172.20.20.100:8006/index.xml",
+        "https://192.168.1.1/x.index",
+        "https://127.0.0.1:8787/api/server",
+        "https://[::1]/x.index",
+        "https://169.254.169.254/latest/meta-data/",
+        "https://localhost/x.index",
+        "https://pve.local/x.index",
+        "https://lan.example.invalid/x.index",
+        "https://me:secret@content.example/x.index",
+        "https://raw.githubusercontent.com/o/r/main/x.index?token=GHSAT0AAAA",
+    ] {
+        let (status, out) = alice.rpc("add_index", json!({ "url": url })).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{url}: {out}");
+        let message = out["message"].as_str().unwrap_or_default();
+        assert!(
+            message.contains("does not download from") || message.contains("are not accepted"),
+            "{url}: {out}"
+        );
+        let (status, out) = alice.rpc("stage_5etools_url", json!({ "url": url })).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{url}: {out}");
+    }
+    let (_, list) = alice.rpc("list_indexes", json!({})).await;
+    assert!(index_urls(&list).is_empty(), "{list}");
+    let (status, list) = alice
+        .rpc(
+            "add_index",
+            json!({ "url": "https://content.example/packs/x.index" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(index_urls(&list), ["https://content.example/packs/x.index"]);
+
+    // An index named in someone else's bundle is checked the same way: the pack comes in, the address doesn't.
+    let (status, imported) = alice.rpc("import_pack", spell_pack()).await;
+    assert_eq!(status, StatusCode::OK, "{imported}");
+    let pack = imported["pack"]["id"].as_str().unwrap().to_string();
+    let meta = data
+        .join("users")
+        .join(&alice.id)
+        .join("library")
+        .join(&pack)
+        .join("pack-meta.json");
+    let mut written: Value =
+        serde_json::from_str(&std::fs::read_to_string(&meta).unwrap()).unwrap();
+    written["indexUrl"] = json!("https://172.20.20.100/proxmox.index");
+    written["sha256"] = json!("00");
+    std::fs::write(&meta, written.to_string()).unwrap();
+    let bytes = alice.export_bundle(&[], "all").await;
+    let bob = sign_up(&router, "ssrf-bob").await;
+    let preview = bob.open_bundle("content.borealis", &bytes).await;
+    assert_eq!(actions(&preview), one("pack", "new"), "{preview}");
+    bob.accept_bundle(&preview).await;
+    let (status, out) = bob
+        .rpc("get_element", json!({ "elementId": "ID_PARTY_SPARK" }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (_, list) = bob.rpc("list_indexes", json!({})).await;
+    assert!(index_urls(&list).is_empty(), "{list}");
+}
+
+/// Serves invented files and records every address it is asked for.
+struct MockFetcher {
+    files: std::collections::HashMap<String, Vec<u8>>,
+    asked: std::sync::Mutex<Vec<String>>,
+}
+
+impl borealis_lib::content_index::Fetcher for MockFetcher {
+    fn get(&self, url: &str, _max: usize) -> Result<Vec<u8>, String> {
+        self.asked.lock().unwrap().push(url.to_string());
+        self.files
+            .get(url)
+            .cloned()
+            .ok_or_else(|| "the server answered 404 Not Found".to_string())
+    }
+}
+
+fn aurora_index(name: &str, files: &[&str]) -> Vec<u8> {
+    let rows: String = files
+        .iter()
+        .map(|url| {
+            let file = url.rsplit('/').next().unwrap();
+            format!("    <file name=\"{file}\" url=\"{url}\" />\n")
+        })
+        .collect();
+    format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<index>\n  <info><name>{name}</name></info>\n  <files>\n{rows}  \
+         </files>\n</index>"
+    )
+    .into_bytes()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn index_updates_fetch_only_internet_addresses() {
+    use tauri::Manager as _;
+    const GOOD: &str = "https://content.example/good.index";
+    const GOOD_FILE: &str = "https://content.example/party.xml";
+    const SNEAKY: &str = "https://content.example/sneaky.index";
+    const LAN_FILE: &str = "https://172.20.20.100/packs/lan.xml";
+    const OLD_LAN: &str = "https://10.0.0.5/saved-before.index";
+    let account = Desktop::new().await;
+    for url in [GOOD, SNEAKY] {
+        account.run("add_index", json!({ "url": url })).await;
+    }
+    let app = account.app.clone();
+    let refused = tokio::task::spawn_blocking(move || {
+        let Value::Object(args) = json!({ "url": OLD_LAN }) else {
+            unreachable!()
+        };
+        crate::backend::invoke(&app, "add_index", args)
+            .unwrap()
+            .unwrap_err()
+    })
+    .await
+    .unwrap();
+    assert!(
+        refused.to_string().contains("does not download from"),
+        "{refused}"
+    );
+    // Saved before the check existed: upstream's own add_index looks at the scheme only.
+    account
+        .app
+        .state::<borealis_lib::state::AppState>()
+        .add_index(OLD_LAN)
+        .unwrap();
+
+    let spell = spell_pack();
+    let xml = {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD
+            .decode(spell["request"]["contentBase64"].as_str().unwrap())
+            .unwrap()
+    };
+    let mock = MockFetcher {
+        files: std::collections::HashMap::from([
+            (GOOD.to_string(), aurora_index("Good", &[GOOD_FILE])),
+            (GOOD_FILE.to_string(), xml),
+            (SNEAKY.to_string(), aurora_index("Sneaky", &[LAN_FILE])),
+            (LAN_FILE.to_string(), b"<elements/>".to_vec()),
+            (OLD_LAN.to_string(), aurora_index("Old", &[])),
+        ]),
+        asked: std::sync::Mutex::default(),
+    };
+    let app = account.app.clone();
+    let (result, asked) = tokio::task::spawn_blocking(move || {
+        let state = app.state::<borealis_lib::state::AppState>();
+        let guarded = crate::net_guard::Guarded::new(mock);
+        let result = state
+            .update_indexes(&guarded, &borealis_lib::content_packs::NullSink)
+            .unwrap();
+        let asked = guarded.inner().asked.lock().unwrap().clone();
+        (result, asked)
+    })
+    .await
+    .unwrap();
+    let was_asked = |url: &str| asked.iter().any(|a| a == url);
+    assert!(was_asked(GOOD) && was_asked(GOOD_FILE), "{asked:?}");
+    assert!(was_asked(SNEAKY), "{asked:?}");
+    assert!(!was_asked(LAN_FILE), "never asked for: {asked:?}");
+    assert!(!was_asked(OLD_LAN), "never asked for: {asked:?}");
+    for refused in [LAN_FILE, OLD_LAN] {
+        assert!(result.failed.iter().any(|f| f == refused), "{result:?}");
+    }
+    let indexes = account.run("list_indexes", json!({})).await;
+    let problem = indexes
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["url"] == OLD_LAN)
+        .map(|i| i["problem"].to_string())
+        .unwrap_or_default();
+    // Upstream words every refused index download the same way; the log has the reason.
+    assert!(problem.contains("not allowed"), "{indexes}");
+    let sneaky = indexes
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["url"] == SNEAKY)
+        .map(|i| i["problem"].to_string())
+        .unwrap_or_default();
+    assert!(sneaky.contains("does not download from"), "{indexes}");
+    let found = account
+        .run("get_element", json!({ "elementId": "ID_PARTY_SPARK" }))
+        .await;
+    assert_eq!(found["id"], "ID_PARTY_SPARK", "{found}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_upload_command_refuses_a_body_over_the_limit() {
+    const LIMIT: usize = 4096;
+    let dir = tempfile::tempdir().unwrap();
+    let router = router_with(
+        dir.path().to_path_buf(),
+        Db::open(&Location::Memory).await.unwrap(),
+        Setup {
+            max_upload: LIMIT,
+            ..Setup::default()
+        },
+    );
+    let alice = sign_up(&router, "uploader").await;
+    let big = b64(&[7u8; LIMIT]);
+    let file = json!({ "fileName": "big.xml", "contentBase64": big });
+    for (command, args) in [
+        ("import_character", file.clone()),
+        ("import_pack", json!({ "request": file })),
+        (
+            "preview_import_pack",
+            json!({ "request": { "files": [file] } }),
+        ),
+        ("stage_5etools_zip", json!({ "file": file })),
+        ("stage_5etools_files", json!({ "files": [file] })),
+        (
+            "stage_bundle",
+            json!({ "fileName": "big.borealis", "contentBase64": big }),
+        ),
+        (
+            "set_portrait",
+            json!({ "characterId": "x", "dataUrl": format!("data:image/png;base64,{big}") }),
+        ),
+        (
+            "party_sync_push",
+            json!({ "id": "x", "baseSha": "", "editedAtMs": 0, "contentBase64": big }),
+        ),
+    ] {
+        let (status, out) = alice.rpc(command, args).await;
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{command}: {out}");
+        // The same command with a small body gets past the limit, and is offered.
+        let (status, out) = alice.rpc(command, json!({})).await;
+        assert!(
+            status != StatusCode::PAYLOAD_TOO_LARGE && status != StatusCode::NOT_FOUND,
+            "{command}: {status} {out}"
+        );
+    }
+}
+
+#[test]
+fn only_trusted_proxies_name_the_client() {
+    use crate::auth::client_ip;
+    use crate::net_guard::Cidr;
+    use axum::http::HeaderMap;
+    let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+    let headers = |pairs: &[(&'static str, &str)]| {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.append(*k, v.parse().unwrap());
+        }
+        h
+    };
+    let npm = ip("172.20.20.100");
+    let trusted = [
+        Cidr::parse("172.20.20.100").unwrap(),
+        Cidr::parse("172.18.0.0/16").unwrap(),
+    ];
+    let forged = headers(&[
+        ("x-forwarded-for", "1.1.1.1"),
+        ("cf-connecting-ip", "2.2.2.2"),
+    ]);
+    // Nothing configured: the headers are never believed.
+    assert_eq!(client_ip(npm, &forged, &[]), npm);
+    // A peer that isn't a proxy can't name anyone.
+    assert_eq!(
+        client_ip(ip("203.0.113.9"), &forged, &trusted),
+        ip("203.0.113.9")
+    );
+    // Through Cloudflare: its header wins.
+    assert_eq!(client_ip(npm, &forged, &trusted), ip("2.2.2.2"));
+    // X-Forwarded-For: the right-most address that isn't a proxy; whatever the client wrote left of it is ignored.
+    let chain = headers(&[("x-forwarded-for", "6.6.6.6, 198.51.100.7, 172.18.0.3")]);
+    assert_eq!(client_ip(npm, &chain, &trusted), ip("198.51.100.7"));
+    let split = headers(&[
+        ("x-forwarded-for", "6.6.6.6"),
+        ("x-forwarded-for", "198.51.100.7:5123"),
+    ]);
+    assert_eq!(client_ip(npm, &split, &trusted), ip("198.51.100.7"));
+    let v6 = headers(&[("x-forwarded-for", "[2001:db8::7]:443")]);
+    assert_eq!(client_ip(npm, &v6, &trusted), ip("2001:db8::7"));
+    let mapped = headers(&[("x-forwarded-for", "::ffff:198.51.100.7")]);
+    assert_eq!(
+        client_ip(ip("::ffff:172.20.20.100"), &mapped, &trusted),
+        ip("198.51.100.7")
+    );
+    // Garbled, or proxies only: the nearest believable address.
+    let garbled = headers(&[("x-forwarded-for", "198.51.100.7, nonsense, 172.18.0.3")]);
+    assert_eq!(client_ip(npm, &garbled, &trusted), ip("172.18.0.3"));
+    let proxies = headers(&[("x-forwarded-for", "172.18.0.3")]);
+    assert_eq!(client_ip(npm, &proxies, &trusted), ip("172.18.0.3"));
+    assert_eq!(client_ip(npm, &HeaderMap::new(), &trusted), npm);
+    // IPv6 clients count per /64.
+    assert_eq!(
+        crate::auth::ClientIp(ip("2001:db8:1:2:aaaa::1")).limit_key(),
+        crate::auth::ClientIp(ip("2001:db8:1:2:bbbb::9")).limit_key()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn forwarded_headers_from_an_untrusted_peer_change_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = router_with(
+        dir.path().to_path_buf(),
+        Db::open(&Location::Memory).await.unwrap(),
+        Setup {
+            signups_allowed: 2,
+            ..Setup::default()
+        },
+    );
+    let forged = |n: u8| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/auth/register")
+            .header("content-type", "application/json")
+            .header("x-forwarded-for", format!("198.51.100.{n}"))
+            .header("cf-connecting-ip", format!("203.0.113.{n}"))
+            .body(Body::from(
+                json!({ "username": format!("fwd{n}"), "email": "x", "password": PASSWORD })
+                    .to_string(),
+            ))
+            .unwrap()
+    };
+    let mut statuses = Vec::new();
+    for n in 0..3 {
+        statuses.push(router.clone().oneshot(forged(n)).await.unwrap().status());
+    }
+    assert_eq!(
+        statuses,
+        [
+            StatusCode::BAD_REQUEST,
+            StatusCode::BAD_REQUEST,
+            StatusCode::TOO_MANY_REQUESTS
+        ],
+        "one client, whatever the headers say"
+    );
+}

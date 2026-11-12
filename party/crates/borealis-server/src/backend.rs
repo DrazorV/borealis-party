@@ -14,6 +14,10 @@
 //!
 //! A bundle from another player is received safely ([`bundle_open`], [`bundle_accept`]): a pack or character this
 //! account already has with different content is refused, never replaced or renamed, and the rest comes in.
+//!
+//! Every address the server downloads from passes [`crate::net_guard`] first: [`add_index`] and the indexes
+//! [`bundle_accept`] follows are checked before they are saved, and [`update_indexes`], [`stage_5etools_url`] and
+//! [`update_5etools_url`] check each file they fetch, so no account can make the server reach its own network.
 
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
@@ -31,6 +35,9 @@ use tauri::{AppHandle, Invocation, Manager};
 
 use borealis_lib::commands_content::{SearchEvents, TauriSink};
 use borealis_lib::commands_sync::TauriSyncEvents;
+use borealis_lib::content_dto::{ContentIndex, UpdateIndexesResult};
+use borealis_lib::content_fivetools_url::FiveToolsUrlUpdate;
+use borealis_lib::content_index::HttpsFetcher;
 use borealis_lib::device_sync::inbox::is_bundle_name;
 use borealis_lib::device_sync::{incoming_dir, DeviceSync, SyncConfig};
 use borealis_lib::dto::ExportResult;
@@ -38,6 +45,7 @@ use borealis_lib::dto_ext::SheetOptionsDto;
 use borealis_lib::error::{ApiError, ApiResult};
 use borealis_lib::picked_files::BUNDLE_EXTENSION;
 use borealis_lib::picked_paths::PickPurpose;
+use borealis_lib::picked_paths::PickedPathDto;
 use borealis_lib::state::{AppPaths, AppState};
 use borealis_lib::{
     commands, commands_added, commands_content, commands_gear, commands_hp, commands_play,
@@ -150,11 +158,69 @@ fn bundle_accept(
         .map(|(_, (url, _))| url)
         .collect();
     for url in urls {
-        if let Err(e) = state.add_index(&url) {
+        // The address comes from someone else's file: it is checked as if this account had typed it.
+        if let Err(e) = guarded_add_index(&state, &url) {
             tracing::warn!("bundle: index {url} not added: {}", e.message);
         }
     }
     Ok(summary)
+}
+
+/// Upstream's `add_index` once [`crate::net_guard::check_url`] allows the address.
+fn guarded_add_index(state: &AppState, url: &str) -> ApiResult<Vec<ContentIndex>> {
+    crate::net_guard::check_url(&borealis_lib::content_index::raw_file_url(url))
+        .map_err(ApiError::invalid)?;
+    state.add_index(url)
+}
+
+/// Remember an index address: upstream's, for addresses on the internet only.
+#[tauri::command(async)]
+fn add_index(state: tauri::State<'_, AppState>, url: String) -> ApiResult<Vec<ContentIndex>> {
+    guarded_add_index(&state, &url)
+}
+
+/// Run `f` on a blocking thread, as upstream's private `commands_content::blocking` does.
+async fn blocking<T, F>(app: AppHandle, f: F) -> ApiResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce(&AppState, &TauriSink) -> ApiResult<T> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(move || {
+        let sink = TauriSink(app.clone());
+        let state = app.state::<AppState>();
+        f(&state, &sink)
+    })
+    .await
+    .map_err(ApiError::internal)?
+}
+
+/// Upstream's, with every index and file address checked before it is fetched, the ones saved before this check
+/// existed and the files an index lists included. A refused one is reported like any failed download.
+#[tauri::command]
+async fn update_indexes(app: AppHandle) -> ApiResult<UpdateIndexesResult> {
+    blocking(app, |state, sink| {
+        state.update_indexes(&crate::net_guard::Guarded::new(HttpsFetcher), sink)
+    })
+    .await
+}
+
+/// Upstream's, with the address and every file under it checked before it is fetched.
+#[tauri::command]
+async fn stage_5etools_url(app: AppHandle, url: String) -> ApiResult<PickedPathDto> {
+    crate::net_guard::check_url(&url).map_err(ApiError::invalid)?;
+    blocking(app, move |state, sink| {
+        state.stage_5etools_url(&crate::net_guard::Guarded::new(HttpsFetcher), &url, sink)
+    })
+    .await
+}
+
+/// Upstream's, with every file checked before it is fetched.
+#[tauri::command]
+async fn update_5etools_url(app: AppHandle, url: String) -> ApiResult<FiveToolsUrlUpdate> {
+    blocking(app, move |state, sink| {
+        state.update_5etools_url(&crate::net_guard::Guarded::new(HttpsFetcher), &url, sink)
+    })
+    .await
 }
 
 /// The start of the source device in every bundle a server account exports. The account's folder name (its id)
@@ -623,17 +689,17 @@ fn offered(name: &str, invocation: &Invocation) -> Option<Result<Value, Value>> 
         commands_content::set_pack_enabled,
         commands_content::remove_pack,
         commands_content::set_source_edition,
-        commands_content::add_index,
+        add_index,
         commands_content::remove_index,
-        commands_content::update_indexes,
+        update_indexes,
         commands_content::clear_downloaded_content,
         commands_settings::clear_caches,
         commands_content::scan_5etools_folder,
         commands_content::stage_5etools_zip,
         commands_content::stage_5etools_files,
-        commands_content::stage_5etools_url,
+        stage_5etools_url,
         commands_content::remove_5etools_url,
-        commands_content::update_5etools_url,
+        update_5etools_url,
         commands_content::import_5etools,
         // Bundle files, made from and previewed and applied in the account's own folder.
         bundle_export,

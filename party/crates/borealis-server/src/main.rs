@@ -25,6 +25,7 @@ mod db;
 mod error;
 mod mail;
 mod migrate;
+mod net_guard;
 #[cfg(test)]
 mod route_tests;
 mod rpc;

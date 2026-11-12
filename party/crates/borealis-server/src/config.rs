@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::db::Location;
+use crate::net_guard::Cidr;
 
 /// Prefix of the variables that override `config.toml`.
 pub const ENV_PREFIX: &str = "BOREALIS__";
@@ -46,6 +47,12 @@ public_upload_mb = 95
 # Where visitors of the website are offered the app for their system: a folder URL that holds the release files
 # (borealis-party-arm64.apk, borealis-party-windows-x64-setup.exe, ...). By default the latest release on GitHub; "off" offers no download.
 # app_download = "https://github.com/DrazorV/borealis-party/releases/latest/download"
+# The reverse proxies in front of the server, as addresses or ranges ("172.20.20.100", "172.18.0.0/16"). Only a
+# request from one of these may say who the client is (CF-Connecting-IP, else the right-most X-Forwarded-For entry
+# that is not one of these). Sign-up and sign-in limits count per client, so behind a proxy list it here, or every
+# client looks like the proxy: one sign-up limit for everyone, and failed sign-ins lock a name for everyone.
+# Empty: the headers are ignored and the connecting address is the client. As a variable, separate with commas.
+trusted_proxies = []
 
 [database]
 # "sqlite" (a file in this folder) or "postgres" (your own server, see [postgres]).
@@ -135,6 +142,8 @@ pub struct ServerSettings {
     pub public_upload_mb: usize,
     /// Where the apps are downloaded from: unset for [`DEFAULT_APP_DOWNLOAD`], `off` for nowhere.
     pub app_download: Option<String>,
+    /// Reverse proxies whose client headers are believed ([`crate::auth::ClientIp`]).
+    pub trusted_proxies: Vec<String>,
 }
 
 impl Default for ServerSettings {
@@ -147,6 +156,7 @@ impl Default for ServerSettings {
             max_upload_mb: 512,
             public_upload_mb: 95,
             app_download: None,
+            trusted_proxies: Vec::new(),
         }
     }
 }
@@ -171,6 +181,27 @@ pub struct UploadLimits {
     pub max_upload_mb: usize,
     /// `server.public_upload_mb`, at most `max_upload_mb`: through the public address.
     pub public_upload_mb: usize,
+}
+
+/// What the network code needs from the settings: who may name the client, and the server's own names.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Network {
+    /// `server.trusted_proxies`, parsed.
+    pub trusted_proxies: Vec<Cidr>,
+    /// The host of `server.public_url`, lower case: the server never downloads from itself.
+    pub own_hosts: Vec<String>,
+}
+
+static NETWORK: std::sync::OnceLock<Network> = std::sync::OnceLock::new();
+
+/// The network settings [`Settings::load`] read at start, or none (tests that build the routes by hand): no proxy is
+/// trusted, and the server has no public name.
+#[must_use]
+pub fn network() -> &'static Network {
+    static NONE: std::sync::OnceLock<Network> = std::sync::OnceLock::new();
+    NETWORK
+        .get()
+        .unwrap_or_else(|| NONE.get_or_init(Network::default))
 }
 
 static UPLOAD_LIMITS: std::sync::OnceLock<UploadLimits> = std::sync::OnceLock::new();
@@ -418,6 +449,14 @@ fn typed(value: &str, like: Option<&toml::Value>) -> toml::Value {
         Some(toml::Value::Integer(_)) => value
             .parse::<i64>()
             .map_or_else(|_| toml::Value::String(value.into()), toml::Value::Integer),
+        Some(toml::Value::Array(_)) => toml::Value::Array(
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(|v| toml::Value::String(v.into()))
+                .collect(),
+        ),
         _ => toml::Value::String(value.into()),
     }
 }
@@ -467,8 +506,33 @@ impl Settings {
         }
         let text = std::fs::read_to_string(&file)
             .map_err(|e| ConfigError(format!("cannot read {}: {e}", file.display())))?;
-        Self::parse(&text, std::env::vars())
-            .map_err(|e| ConfigError(format!("{}: {e}", file.display())))
+        let settings = Self::parse(&text, std::env::vars())
+            .map_err(|e| ConfigError(format!("{}: {e}", file.display())))?;
+        // Read by the sign-in routes and the download check, which have no settings of their own. Once per process.
+        let _ = NETWORK.set(settings.network());
+        Ok(settings)
+    }
+
+    /// What [`network`] answers after [`Settings::load`].
+    #[must_use]
+    pub fn network(&self) -> Network {
+        Network {
+            trusted_proxies: self
+                .server
+                .trusted_proxies
+                .iter()
+                .filter_map(|p| Cidr::parse(p).ok())
+                .collect(),
+            own_hosts: self
+                .public_url()
+                .and_then(|u| url::Url::parse(&u).ok())
+                .and_then(|u| {
+                    u.host_str()
+                        .map(|h| h.trim_end_matches('.').to_ascii_lowercase())
+                })
+                .into_iter()
+                .collect(),
+        }
     }
 
     /// Settings from file text and variables.
@@ -491,6 +555,9 @@ impl Settings {
     }
 
     fn check(&self) -> Result<(), ConfigError> {
+        for proxy in &self.server.trusted_proxies {
+            Cidr::parse(proxy).map_err(|e| ConfigError(format!("server.trusted_proxies: {e}")))?;
+        }
         if !["disable", "prefer", "require"].contains(&self.postgres.sslmode.as_str()) {
             return Err(ConfigError(
                 "postgres.sslmode must be disable, prefer or require".into(),
@@ -683,6 +750,49 @@ mod tests {
         assert!(
             !format!("{s:?}").contains("1234"),
             "passwords stay out of logs"
+        );
+    }
+
+    #[test]
+    fn trusted_proxies_are_ranges_from_the_file_or_a_variable() {
+        assert!(Settings::default().network().trusted_proxies.is_empty());
+        let s = Settings::parse(
+            DEFAULT_FILE,
+            vars(&[
+                (
+                    "BOREALIS__SERVER__TRUSTED_PROXIES",
+                    "172.20.20.100, 172.18.0.0/16",
+                ),
+                ("BOREALIS__SERVER__PUBLIC_URL", "https://Party.Example.com/"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(s.server.trusted_proxies, ["172.20.20.100", "172.18.0.0/16"]);
+        let net = s.network();
+        assert_eq!(net.trusted_proxies.len(), 2);
+        assert!(net.trusted_proxies[1].contains("172.18.4.2".parse().unwrap()));
+        assert_eq!(net.own_hosts, ["party.example.com"]);
+        let file = Settings::parse(
+            "[server]
+trusted_proxies = [\"::1\"]",
+            [],
+        )
+        .unwrap();
+        assert_eq!(file.network().trusted_proxies.len(), 1);
+        assert!(Settings::parse(
+            "[server]
+trusted_proxies = [\"npm\"]",
+            []
+        )
+        .is_err());
+        assert!(Settings::parse(
+            "",
+            vars(&[("BOREALIS__SERVER__TRUSTED_PROXIES", "10.0.0.0/40")])
+        )
+        .is_err());
+        assert!(
+            network().trusted_proxies.is_empty(),
+            "nothing loaded in tests"
         );
     }
 
