@@ -49,3 +49,35 @@ html.party-browser .aur-winbtns { display: none; }
 /* Offline, upstream's delete closes the open character before it asks the backend, and shows no refusal: hidden. */
 html.party-offline-mode .v4-tile-btn[title="Delete"] { display: none; }
 .aur-menu-sep:not(:has(~ .aur-menu-item:not(.party-hidden))) { display: none; }
+
+/*
+ * Phones: one type step smaller and tighter spacing than upstream's phone scale, so a phone shows more per screen.
+ * Only the tokens change (styles/phone/tokens.css); `:root` makes these win whatever order the sheets load in.
+ */
+html.phone:root {
+  --ph-t-caption: calc(11 * var(--ph-rem));
+  --ph-t-tab: calc(10 * var(--ph-rem));
+  --ph-t-foot: calc(12 * var(--ph-rem));
+  --ph-t-sub: calc(14 * var(--ph-rem));
+  --ph-t-body: calc(16 * var(--ph-rem));
+  --ph-t-title3: calc(18 * var(--ph-rem));
+  --ph-t-title2: calc(20 * var(--ph-rem));
+  --ph-t-name: calc(18 * var(--ph-rem));
+  --ph-gutter: 12px;
+  --ph-hit: 40px;
+  --ph-row: 44px;
+  --ph-bar: 40px;
+  --ph-tabbar: 46px;
+}
+html.phone.android:root {
+  --ph-t-body: calc(15 * var(--ph-rem));
+  --ph-t-tab: calc(11 * var(--ph-rem));
+  --ph-hit: 44px;
+  --ph-row: 48px;
+  --ph-bar: 50px;
+  --ph-tabbar: 58px;
+}
+/* The account bar on a phone: the buttons keep their whole label (never "Sync…" for "Synced"); the name gives way first. */
+html.phone .party-bar { gap: var(--sp-1); padding: var(--sp-1) var(--sp-2) var(--sp-1) var(--ph-gutter); }
+html.phone .party-bar > .btn { flex-shrink: 0; min-height: 36px; padding: 0 10px; }
+html.phone .party-bar .party-bar-name { flex-shrink: 1; max-width: none; }
