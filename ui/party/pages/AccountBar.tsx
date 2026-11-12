@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { Button } from "../../src/components/Button";
 import { loadSession } from "../api/session";
 import { requestSync, useSyncStatus, type SyncStatus } from "../sync/runner";
+import { AppOffer } from "./AppOffer";
 import { OfflineBanner } from "./OfflineBanner";
 import { useSignOut } from "./SignOut";
 
@@ -63,6 +64,7 @@ function SyncChip() {
 /** Who is signed in, with the ways to the account page, the admin page and out. */
 export function AccountBar() {
   const nav = useNavigate();
+  const { pathname } = useLocation();
   const host = useHost();
   const session = loadSession();
   const exit = useSignOut();
@@ -78,6 +80,8 @@ export function AccountBar() {
         <Button small onClick={exit.start} disabled={exit.busy}>{exit.busy ? "Signing out…" : "Sign out"}</Button>
       </div>
       <OfflineBanner />
+      {/* The Start page (the character list) of a phone browser: the app for this device. */}
+      {pathname === "/characters" && <AppOffer />}
       {exit.dialog}
     </>,
     host,

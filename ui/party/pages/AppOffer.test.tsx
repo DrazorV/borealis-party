@@ -1,0 +1,74 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { memoryStorage } from "../test/memoryStorage";
+
+const env = vi.hoisted(() => ({ tauri: false, folder: "https://github.com/DrazorV/borealis-party/releases/latest/download" as string | null, asked: 0 }));
+vi.mock("../../src/lib/tauri", () => ({ isTauri: () => env.tauri }));
+vi.mock("../api/party", () => ({
+  checkServer: async () => { env.asked += 1; return { app: "borealis-party", appDownload: env.folder }; },
+}));
+
+const { AppOffer, forgetDownloadFolderForTests } = await import("./AppOffer");
+
+const PIXEL = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36";
+const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1";
+const WINDOWS = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
+
+const device = (userAgent: string) => vi.spyOn(navigator, "userAgent", "get").mockReturnValue(userAgent);
+
+beforeEach(() => {
+  vi.stubGlobal("localStorage", memoryStorage());
+  env.tauri = false;
+  env.folder = "https://github.com/DrazorV/borealis-party/releases/latest/download";
+  env.asked = 0;
+  forgetDownloadFolderForTests();
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+it("offers the APK on an Android browser, with the address to enter", async () => {
+  device(PIXEL);
+  render(<AppOffer />);
+  const link = await screen.findByRole("link", { name: /download the app/i });
+  expect(link.getAttribute("href")).toBe("https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-android.apk");
+  expect(screen.getByText(window.location.origin.replace(/^https?:\/\//, ""), { exact: false })).toBeTruthy();
+});
+
+it("tells an iPhone honestly that there is no app to install", async () => {
+  device(IPHONE);
+  render(<AppOffer />);
+  expect(await screen.findByText(/no iPhone or iPad app to install/)).toBeTruthy();
+  expect(screen.queryByRole("link")).toBeNull();
+});
+
+it("shows nothing in the app, on a computer, or when the server offers no download", async () => {
+  device(PIXEL);
+  env.tauri = true;
+  const { container, unmount } = render(<AppOffer />);
+  expect(container.innerHTML).toBe("");
+  unmount();
+  env.tauri = false;
+  device(WINDOWS);
+  expect(render(<AppOffer />).container.innerHTML).toBe("");
+  device(PIXEL);
+  expect(render(<AppOffer folder={null} />).container.innerHTML).toBe("");
+  expect(env.asked).toBe(0);
+});
+
+it("uses the sign-in page's answer instead of asking again", () => {
+  device(PIXEL);
+  render(<AppOffer folder="https://files.example.com/apps" />);
+  expect(screen.getByRole("link", { name: /download the app/i }).getAttribute("href")).toBe("https://files.example.com/apps/borealis-party-android.apk");
+  expect(env.asked).toBe(0);
+});
+
+it("stays closed in this browser once dismissed", async () => {
+  device(PIXEL);
+  const first = render(<AppOffer />);
+  fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+  expect(first.container.innerHTML).toBe("");
+  first.unmount();
+  expect(render(<AppOffer folder="https://files.example.com/apps" />).container.innerHTML).toBe("");
+});

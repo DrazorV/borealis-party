@@ -68,6 +68,7 @@ fn router_with(data: PathBuf, db: Db, setup: Setup) -> Router {
             public_url: mailer
                 .as_ref()
                 .map(|_| "https://party.example.com".to_string()),
+            app_download: Some(crate::config::DEFAULT_APP_DOWNLOAD.to_string()),
         }),
         login_limiter: RateLimiter::logins(),
         signup_limiter: RateLimiter::new(setup.signups_allowed, Duration::from_secs(3600)),
@@ -959,6 +960,7 @@ async fn admin_flow(router: &Router, admin: &Client, data: &std::path::Path) {
     assert_eq!(status, StatusCode::FORBIDDEN);
     let (_, info) = send(router, None, "GET", "/api/server", Value::Null).await;
     assert_eq!(info["openRegistration"], false);
+    assert_eq!(info["appDownload"], crate::config::DEFAULT_APP_DOWNLOAD);
     admin
         .patch("/api/admin/settings", json!({ "openRegistration": true }))
         .await;

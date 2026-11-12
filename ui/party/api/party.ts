@@ -8,6 +8,8 @@ export interface ServerInfo {
   requireApproval: boolean;
   /** The server sends a confirmation email at sign-up. */
   email: boolean;
+  /** The folder the apps are downloaded from (`server.app_download`); null when the server offers none. */
+  appDownload?: string | null;
 }
 
 interface SignedIn {

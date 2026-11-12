@@ -85,6 +85,8 @@ pub struct Config {
     require_approval: bool,
     /// `server.public_url`, without a trailing slash.
     public_url: Option<String>,
+    /// `server.app_download`: the folder the apps are downloaded from, if any.
+    app_download: Option<String>,
 }
 
 /// Shared by every route.
@@ -113,6 +115,7 @@ async fn server_info(
         "openRegistration": settings.open_registration,
         "requireApproval": settings.require_approval,
         "email": state.mailer.is_some(),
+        "appDownload": state.config.app_download,
     })))
 }
 
@@ -402,6 +405,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             open_registration: settings.server.open_registration,
             require_approval: settings.server.require_approval,
             public_url: settings.public_url(),
+            app_download: settings.app_download(),
         }),
         login_limiter: RateLimiter::logins(),
         signup_limiter: RateLimiter::signups(),

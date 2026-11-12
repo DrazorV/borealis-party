@@ -54,6 +54,7 @@ Put passwords in variables rather than in the file.
 | `BOREALIS__SERVER__OPEN_REGISTRATION` | `true` | Anyone who can reach the server may ask for an account |
 | `BOREALIS__SERVER__REQUIRE_APPROVAL` | `true` | New accounts wait until an admin approves them |
 | `BOREALIS__SERVER__MAX_UPLOAD_MB` | `512` | Largest upload |
+| `BOREALIS__SERVER__APP_DOWNLOAD` | the latest GitHub release | Folder URL the website offers the apps from to phone visitors; `off` offers none |
 | `BOREALIS__DATABASE__TYPE` | `sqlite` | `sqlite` or `postgres` |
 | `BOREALIS__SQLITE__PATH` | `party.db` | SQLite file, relative to the config folder |
 | `BOREALIS__POSTGRES__HOST` | `localhost` | PostgreSQL server |
@@ -154,6 +155,13 @@ back up everything. Running `install.sh` from a newer release upgrades in place 
   one-word name such as `raspberrypi:8787` means `http://`. Type the scheme to choose it yourself.
 
 Then sign in or create an account.
+
+A phone or tablet that opens the website in its browser sees a small, dismissible note on the sign-in page and the
+Start page. On Android it links to the app (`borealis-party-android.apk` in the `server.app_download` folder, by default
+`https://github.com/DrazorV/borealis-party/releases/latest/download`) and shows the address to enter in it. On an
+iPhone or iPad it says that there is no app to install from a website, since iOS installs apps only from the App Store
+or TestFlight. To offer your own build, point `BOREALIS__SERVER__APP_DOWNLOAD` at a folder holding the same file
+names; `off` hides the note. The file names are in `ui/party/api/appOffer.ts`.
 
 If the server later moves to a new address (for example from an IP address to a domain name), change it in the app
 under Account > Server address. The app checks that the server there knows the signed-in account, so it stays signed in.
