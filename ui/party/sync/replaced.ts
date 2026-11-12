@@ -1,5 +1,6 @@
 import { announceBundleApplied } from "../../src/pages/transfer/openBundle";
-import { eventStream, type ServerEvent } from "../api/http";
+import type { ServerEvent } from "../api/http";
+import { liveEvents } from "../api/liveEvents";
 import { loadSession } from "../api/session";
 
 /**
@@ -20,5 +21,5 @@ export function rereadIfReplaced(e: ServerEvent): void {
 export function followReplaced(): () => void {
   const session = loadSession();
   if (!session) return () => {};
-  return eventStream(session, rereadIfReplaced);
+  return liveEvents(session, rereadIfReplaced);
 }
