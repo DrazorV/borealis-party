@@ -22,22 +22,30 @@ test("Admin: trusted proxies fit the screen", async ({ page, signIn }, testInfo)
   const o = await measureOverflow(page);
   expect(o.page, "the page scrolls sideways").toBeLessThanOrEqual(0);
   expect(o.scrollers, "containers that scroll sideways").toEqual([]);
-  const small = (await smallTargets(page, minTap(testInfo), ".party-admin")).filter((t) => /Trust|Save list|config\.toml/.test(t.label));
+  const small = (await smallTargets(page, minTap(testInfo), ".party-admin")).filter((t) => /Trust|^Add$|Remove|config\.toml/.test(t.label));
   expect(small, `proxy buttons under ${minTap(testInfo)} px`).toEqual([]);
   if (process.env.PARTY_SHOTS) await card.screenshot({ path: `${process.env.PARTY_SHOTS}/trusted-proxies-${testInfo.project.name}.png` });
 });
 
-test("Admin: trust this proxy, refuse everyone, back to config.toml", async ({ page, signIn }, testInfo) => {
+test("Admin: type, remove and trust proxies, refuse everyone, back to config.toml", async ({ page, signIn }, testInfo) => {
   // It changes a server-wide setting: one project only, so parallel workers don't race on it.
   test.skip(testInfo.project.name !== "android-portrait", "changes a server-wide setting");
   await signIn("admin");
   const card = await proxiesCard(page);
 
-  const field = card.getByLabel("Trusted proxies");
+  const field = card.getByLabel("Add a trusted proxy");
+  const add = card.getByRole("button", { name: "Add", exact: true });
   await field.fill("0.0.0.0/0");
   await expect(card.getByText(/would trust every address/)).toBeVisible();
-  await expect(card.getByRole("button", { name: "Save list" })).toBeDisabled();
-  await field.fill("");
+  await expect(add).toBeDisabled();
+  // More than one, an address and a range; then one removed.
+  await field.fill("10.9.9.9, 172.20.20.0/24");
+  await add.tap();
+  const list = card.getByRole("list", { name: "Trusted proxies in force" });
+  await expect(list.getByRole("listitem")).toHaveCount(2);
+  await card.getByRole("button", { name: "Remove 172.20.20.0/24" }).tap();
+  await expect(list.getByRole("listitem")).toHaveCount(1);
+  await expect(list.getByText("10.9.9.9")).toBeVisible();
 
   const trust = card.getByRole("button", { name: /^Trust this proxy \(/ });
   await trust.tap();
