@@ -7,7 +7,8 @@
 //!
 //! `.borealis` bundles are files, not device transfer: [`stage_bundle`] writes an uploaded bundle into the account's
 //! own `sync/incoming` folder and hands back a pick token, and upstream's `bundle_open`, `bundle_accept` and
-//! `bundle_discard` preview and apply it there. [`bundle_export`] builds one with upstream's builder and sends its
+//! `bundle_discard` preview and apply it there ([`bundle_accept`] also follows the indexes the bundle's packs came
+//! from). [`bundle_export`] builds one with upstream's builder and sends its
 //! bytes back. Sharing bundles from the server's machine (`bundle_share`), the device link (`link_*`, paired devices)
 //! and the OS inbox (`take_opened_*`, one queue for the whole process) stay out.
 
@@ -82,6 +83,52 @@ fn bundle_export(
         bytes: info.bytes,
         data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
     })
+}
+
+/// Each pack in the library with the index it was downloaded from: its id, that index's address and its whole
+/// `pack-meta.json`, which changes whenever the pack is installed again.
+fn index_packs(state: &AppState) -> std::collections::BTreeMap<String, (String, String)> {
+    use borealis_lib::content_packs::PACK_META_FILE;
+    std::fs::read_dir(state.paths.library())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let text = std::fs::read_to_string(entry.path().join(PACK_META_FILE)).ok()?;
+            let meta: Value = serde_json::from_str(&text).ok()?;
+            let url = meta["indexUrl"].as_str()?.to_string();
+            Some((
+                entry.file_name().to_string_lossy().into_owned(),
+                (url, text),
+            ))
+        })
+        .collect()
+}
+
+/// Accept, as upstream does, then keep the packs that came from indexes up to date: a pack this bundle added or
+/// replaced records the index it was downloaded from (`indexUrl` in its `pack-meta.json`, which travels in the
+/// bundle), and this account now follows that index too, as the one who exported it does. Packs the bundle left as
+/// they were (identical, or newer here) add nothing, so an index this account removed stays removed unless the
+/// bundle brings its content back. An index that can't be added (not HTTPS) leaves the pack as a snapshot.
+#[tauri::command(async)]
+fn bundle_accept(
+    state: tauri::State<'_, AppState>,
+    sync: tauri::State<'_, Arc<DeviceSync>>,
+    bundle_id: String,
+) -> ApiResult<borealis_lib::sync_dto::LinkSummary> {
+    let before = index_packs(&state);
+    let summary = sync.accept_bundle(&bundle_id)?;
+    let urls: std::collections::BTreeSet<String> = index_packs(&state)
+        .into_iter()
+        .filter(|(id, now)| before.get(id) != Some(now))
+        .map(|(_, (url, _))| url)
+        .collect();
+    for url in urls {
+        if let Err(e) = state.add_index(&url) {
+            tracing::warn!("bundle: index {url} not added: {}", e.message);
+        }
+    }
+    Ok(summary)
 }
 
 /// Upstream's prefix of the per-open folders under `sync/incoming`; it is crate-private there.
@@ -332,7 +379,7 @@ fn offered(name: &str, invocation: &Invocation) -> Option<Result<Value, Value>> 
         bundle_export,
         stage_bundle,
         commands_sync::bundle_open,
-        commands_sync::bundle_accept,
+        bundle_accept,
         commands_sync::bundle_discard,
     ])(name, invocation)
 }
