@@ -17,6 +17,9 @@ const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     "./App": local("./entry/App.tsx"),
     "./AppProviders": local("./entry/AppProviders.tsx"),
   },
+  // A NavLink the shell marks "not current" stays so (entry/shellRouter.tsx): one selected START sub-tab.
+  "src/components/shell/Chrome.tsx": { "react-router": local("./entry/shellRouter.tsx") },
+  "src/components/shell/MobileChrome.tsx": { "react-router": local("./entry/shellRouter.tsx") },
   "src/pages/settings/ApplicationSettings.tsx": {
     "./settingsTabs": local("./settings/settingsTabs.ts"),
     "./BorealisTabs": local("./settings/BorealisTabs.tsx"),
