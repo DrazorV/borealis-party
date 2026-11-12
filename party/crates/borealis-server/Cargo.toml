@@ -19,6 +19,8 @@ tauri = { path = "../tauri" }
 # Sync for the apps: the same digests, edit stamps and trash as upstream's bundles, and its content file format.
 borealis-bundle = { path = "../../../crates/borealis-bundle" }
 borealis-content = { path = "../../../crates/borealis-content" }
+# A pushed character replaces an open session's character in place (sync.rs).
+borealis-character = { path = "../../../crates/borealis-character" }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "fs", "set-header"] }
 tokio = { version = "1", features = ["full"] }

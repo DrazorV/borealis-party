@@ -1,5 +1,5 @@
 import type { Api, ApiError, ContentPack, ContentSource } from "../../src/api/contract";
-import { emptyMirror, loadMirror, saveMirror, type Mirror } from "./mirror";
+import { addNotices, emptyMirror, heldByOthers, loadMirror, saveMirror, type Mirror } from "./mirror";
 
 /**
  * One sync of the app's copy of the account, while online: the server is read, the app's own backend is written.
@@ -8,7 +8,8 @@ import { emptyMirror, loadMirror, saveMirror, type Mirror } from "./mirror";
  * as one content file for upstream `import_pack`; the server's settings replace the app's.
  * The characters are copied before the index downloads, which can take minutes: upstream re-checks saved characters
  * when packs are installed.
- * Edits made here offline (api/offline.ts) are "waiting": nothing replaces or removes such a copy until it is sent.
+ * Edits made here offline (api/offline.ts) are sent first (`party_sync_push`, with the server file they were made
+ * from and the edit time on the server's clock); until the server has taken one, nothing replaces or removes its copy.
  */
 
 /** The app's own backend, as far as a sync uses it. */
@@ -41,6 +42,16 @@ export interface SyncReport {
   problems: Record<string, string>;
   /** What copied another way than planned. */
   notes: string[];
+  /** Characters edited here that the server took. */
+  pushed: number;
+  /** Edits made here that the server did not take (a newer edit or a delete won), for the Account page. */
+  notices: string[];
+}
+
+/** The server's answer to `party_sync_push`: the digest of its file afterwards (none when deleted). */
+interface PushAnswer {
+  result: "applied" | "identical" | "kept-server" | "deleted";
+  sha256: string | null;
 }
 
 interface ServerState {
@@ -67,8 +78,8 @@ async function sha256(base64: string): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** A copy as upstream exports it: its digest and the server id it carries. */
-async function exported(local: LocalApi, id: string): Promise<{ sha: string; metaId: string }> {
+/** A copy as upstream exports it: its digest, the server id it carries, and the file itself (base64). */
+async function exported(local: LocalApi, id: string): Promise<{ sha: string; metaId: string; data: string }> {
   await local.loadCharacter({ characterId: id });
   try {
     const file = await local.exportCharacter({ characterId: id });
@@ -78,7 +89,7 @@ async function exported(local: LocalApi, id: string): Promise<{ sha: string; met
       const text = new TextDecoder().decode(Uint8Array.from(atob(data), (c) => c.charCodeAt(0)));
       metaId = String((JSON.parse(text) as { meta?: { id?: unknown } }).meta?.id ?? "");
     } catch { /* not ours */ }
-    return { sha: await sha256(data), metaId };
+    return { sha: await sha256(data), metaId, data };
   } finally {
     await local.closeCharacter({ characterId: id, discard: true });
   }
@@ -223,7 +234,7 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
   const now = deps.now ?? Date.now;
   const known = loadMirror(userId);
   const mirror = known ?? emptyMirror(userId);
-  const report: SyncReport = { first: !known, pulled: 0, removed: 0, packs: 0, waiting: [], problems: {}, notes: [] };
+  const report: SyncReport = { first: !known, pulled: 0, removed: 0, packs: 0, waiting: [], problems: {}, notes: [], pushed: 0, notices: [] };
 
   const t0 = now();
   const st = await server("party_sync_state") as ServerState;
@@ -238,7 +249,8 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
   if (!known || mirror.pending.length > 0) {
     // A lost or new mirror: copies already here are found by the server id they carry, and fetched again.
     // A stopped sync: a copy of a server id it was copying that is in no entry is a spare, and goes.
-    const mapped = new Set(Object.values(mirror.characters).map((m) => m.local));
+    // Another account's copies on this device are never taken over or removed (P6 decides when they go).
+    const mapped = new Set([...Object.values(mirror.characters).map((m) => m.local), ...heldByOthers(userId)]);
     for (const c of localList) {
       if (mapped.has(c.id)) continue;
       try {
@@ -257,18 +269,64 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
 
   // Edited here (offline): a changed date alone is not an edit, a changed export is.
   const waiting = new Set<string>();
+  const edits = new Map<string, { sha: string; data: string }>();
   const listed = new Map(localList.map((c) => [c.id, c.updatedAt]));
   for (const [s, m] of Object.entries(mirror.characters)) {
     const updatedAt = listed.get(m.local);
     if (updatedAt === undefined || updatedAt === m.localMtime) continue;
     try {
-      if ((await exported(local, m.local)).sha === m.localSha) m.localMtime = updatedAt;
-      else waiting.add(s);
+      const copy = await exported(local, m.local);
+      if (copy.sha === m.localSha) m.localMtime = updatedAt;
+      else { waiting.add(s); edits.set(s, copy); }
     } catch {
       waiting.add(s); // unreadable now: kept, and looked at again next time
     }
   }
+
+  // The edits go to the server before anything comes from it. Unreachable: the sync stops, and every push can be
+  // sent again. Refused: a problem, and the copy stays as it is (nothing is fetched over it).
+  const names = new Map(localList.map((c) => [c.id, c.name]));
+  for (const [s, copy] of edits) {
+    const m = mirror.characters[s]!;
+    const name = names.get(m.local) || "A character";
+    const updatedAt = listed.get(m.local) ?? "";
+    const editedAtMs = Math.max(0, Math.round((Date.parse(updatedAt) || now()) + mirror.offsetMs));
+    let answer: PushAnswer;
+    try {
+      answer = await server("party_sync_push", {
+        id: s, baseSha: m.baseUnknown ? null : m.serverSha, editedAtMs, contentBase64: copy.data,
+      }) as PushAnswer;
+    } catch (e) {
+      if (String((e as Partial<ApiError>)?.code) === "network") throw e;
+      report.problems[s] = `Your changes to ${name} could not be sent: ${message(e)}`;
+      continue;
+    }
+    waiting.delete(s);
+    // What the server holds now: the steps below compare with that, not with the state read before.
+    if (answer.sha256) {
+      const listedThere = st.characters.find((c) => c.id === s);
+      if (listedThere) listedThere.sha256 = answer.sha256;
+      else st.characters.push({ id: s, sha256: answer.sha256 });
+      onServer.add(s);
+    }
+    const kept = "This device's copy is in the account's trash on the server for 30 days.";
+    if (answer.result === "applied" || answer.result === "identical") {
+      mirror.characters[s] = { local: m.local, serverSha: answer.sha256, localSha: copy.sha, localMtime: updatedAt };
+      if (answer.result === "applied") report.pushed += 1;
+    } else if (answer.result === "kept-server") {
+      // Replaced by the server's copy below.
+      mirror.characters[s] = { local: m.local, serverSha: "", localSha: m.localSha, localMtime: m.localMtime };
+      report.notices.push(`${name}: a newer edit on the server was kept over the changes made on this device. ${kept}`);
+    } else {
+      // Removed here below, in this sync, even when the state read before still listed it.
+      onServer.delete(s);
+      st.characters = st.characters.filter((c) => c.id !== s);
+      report.notices.push(`${name} was deleted on the server after it was changed on this device. ${kept}`);
+    }
+    saveMirror(mirror);
+  }
   report.waiting = [...waiting];
+  addNotices(userId, report.notices);
 
   // Merged packs are quick and come first; the index downloads wait until the characters are here.
   let packsChanged = await copyMerged(deps, await stalePacks(local, st, mirror, false), mirror, report);
@@ -291,8 +349,9 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
       const before = mirror.characters[c.id];
       if (before && before.serverSha === null && before.localSha !== sha) {
         // Found again after a lost mirror, and not the same as the server's copy: maybe an edit made here. It stays
-        // and waits, with the server's copy as its base (an empty date makes every sync compare it again).
-        mirror.characters[c.id] = { local: before.local, serverSha: file.sha256, localSha: sha, localMtime: "" };
+        // and waits, with the server's copy as its base (an empty date makes every sync compare it again). It is not
+        // known to be what this copy was made from, so a push of it is a conflict: the newest edit wins.
+        mirror.characters[c.id] = { local: before.local, serverSha: file.sha256, localSha: sha, localMtime: "", baseUnknown: true };
         saveMirror(mirror);
         await drop(local, id);
         spare = null;
@@ -359,6 +418,7 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
   }
 
   mirror.lastSyncMs = now();
+  mirror.problems = report.problems;
   saveMirror(mirror);
   return report;
 }

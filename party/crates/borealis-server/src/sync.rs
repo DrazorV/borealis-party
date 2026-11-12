@@ -10,9 +10,19 @@
 //!   A pack downloaded from an index the account still has reports that index's address in the state instead, so
 //!   the device can download the same pack itself.
 //!
+//! * `party_sync_push {id, baseSha, editedAtMs, contentBase64}` is a character edited on a device, sent back. When
+//!   the server's file is still the one the device's copy was made from (`baseSha`), the device's copy replaces it
+//!   whatever the clocks say. When both changed, the newest edit wins (upstream's `decide`, on the server's clock:
+//!   the device sends its edit time corrected by the measured offset, and a time in the future counts as now). A
+//!   character deleted here after the device's edit stays deleted; one edited after its delete comes back. Unsaved
+//!   edits of an open session are saved first and compared by their save time (upstream keeps no time of the edit
+//!   itself); with autosave on, that is within seconds of the edit.
+//!
 //! A deleted character leaves a copy in the account's trash (`sync/trash/<ms>-<id>.json`, upstream's own folder and
-//! naming, swept after 30 days); a trash entry with no live character file is a delete record. All of it runs under
-//! the workspace's sync lock. Nothing here writes a character.
+//! naming, swept after 30 days); a trash entry with no live character file is a delete record. A copy replaced by a
+//! push goes there too, under the same name, as a bundle's would; a device's copy that lost goes there as
+//! `<ms>-<id>.device.json`, which is no delete record. All of it runs under the workspace's sync lock, as do the
+//! upstream commands that write character files.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
@@ -20,11 +30,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
 use borealis_bundle::{
-    is_plain_key, item_digest, list_packs, mtime_ms, read_pack_dir, scan_characters, sha256_hex,
-    sweep_trash, trash_dir, FileEntry, Limits,
+    decide, is_plain_key, item_digest, list_packs, mtime_ms, read_pack_dir, scan_characters,
+    sha256_hex, sweep_trash, trash_dir, Action, FileEntry, ItemKind, ItemValidator, Limits,
+    LocalItem,
 };
 use borealis_content::{ContentFile, PackFileKind, PackManifest, PackOrigin, Ruleset};
 use borealis_lib::content_import::{import_pack_id, MAX_PACK_BYTES};
+use borealis_lib::device_sync::validate::AppValidator;
 use borealis_lib::state::AppState as Backend;
 use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Manager};
@@ -33,7 +45,12 @@ use crate::error::{ApiError, ApiResult};
 use crate::workspaces::Workspace;
 
 /// The sync commands, under `POST /api/rpc/<name>`.
-pub const COMMANDS: [&str; 3] = ["party_sync_state", "party_sync_get", "party_sync_pack"];
+pub const COMMANDS: [&str; 4] = [
+    "party_sync_state",
+    "party_sync_get",
+    "party_sync_pack",
+    "party_sync_push",
+];
 
 /// Sent after a command wrote or deleted character files: `{ ids }`, the ids it knows of (empty: any of them).
 pub const CHARACTERS_CHANGED: &str = "party://characters-changed";
@@ -51,9 +68,6 @@ const WRITES_CHARACTERS: [&str; 10] = [
     "apply_convert_to_2024",
     "bundle_accept",
 ];
-
-/// Upstream commands that delete or replace character files, run under the sync lock.
-const LOCKED: [&str; 2] = ["delete_character", "bundle_accept"];
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -103,12 +117,215 @@ pub async fn call(
             let id = key_arg(args)?;
             workspace.blocking(move |app| pack(app, &id)).await
         }
+        "party_sync_push" => {
+            let sent = Pushed::from_args(args)?;
+            let id = sent.id.clone();
+            let out = workspace.blocking(move |app| push(app, &sent)).await?;
+            if out["result"] == "applied" {
+                // `replaced`: an open page of it re-reads it (a save of its own does not need to).
+                workspace.emit(CHARACTERS_CHANGED, json!({ "ids": [id], "replaced": true }));
+            }
+            Ok(out)
+        }
         _ => Err(ApiError::NotFound("The server does not offer that.".into())),
     }
 }
 
-/// Run an upstream command that writes characters: under the sync lock when it deletes or replaces files, with a
-/// delete record first for `delete_character`, and [`CHARACTERS_CHANGED`] after it worked.
+/// A character sent back by a device.
+struct Pushed {
+    id: String,
+    /// The digest of the server file the device's copy was made from; none when the device does not know it.
+    base_sha: Option<String>,
+    /// When it was last edited on the device, on the server's clock.
+    edited_at_ms: u64,
+    bytes: Vec<u8>,
+}
+
+impl Pushed {
+    fn from_args(args: &Map<String, Value>) -> ApiResult<Self> {
+        let id = key_arg(args)?;
+        let base_sha = args
+            .get("baseSha")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let edited_at_ms = args
+            .get("editedAtMs")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| ApiError::Invalid("Give the time of the edit.".into()))?;
+        let bytes = args
+            .get("contentBase64")
+            .and_then(Value::as_str)
+            .and_then(|text| {
+                base64::engine::general_purpose::STANDARD
+                    .decode(text.trim())
+                    .ok()
+            })
+            .ok_or_else(|| {
+                ApiError::Invalid("The character's content is not valid base64.".into())
+            })?;
+        Ok(Self {
+            id,
+            base_sha,
+            edited_at_ms,
+            bytes,
+        })
+    }
+}
+
+/// What a push does with the device's copy.
+enum Outcome {
+    /// The server's file already holds it.
+    Identical,
+    /// It becomes the server's file, stamped with this time.
+    Write(u64),
+    /// The server's copy is newer, or the character was deleted after the edit: it goes to the trash.
+    Lost(&'static str),
+}
+
+/// `party_sync_push`. Answers `{ result, sha256, editedAtMs }`: `applied`, `identical`, `kept-server` or `deleted`,
+/// with the server file's digest and stamp afterwards (none when deleted).
+fn push(app: &AppHandle, sent: &Pushed) -> ApiResult<Value> {
+    let backend = app.state::<Backend>();
+    let id = sent.id.as_str();
+    let file = characters_dir(&backend)?.join(format!("{id}.json"));
+    // The same checks as a bundle's character: upstream's parser, and an id that is empty or this one.
+    let bytes = AppValidator
+        .character(id, &sent.bytes)
+        .map_err(|why| ApiError::Invalid(format!("The character can't be taken: {why}.")))?;
+    let incoming_sha = sha256_hex(&bytes);
+    let now = now_ms();
+    let edited = sent.edited_at_ms.min(now);
+    let trash = trash_dir(&backend.paths.data);
+    let _ = sweep_trash(&trash, now);
+    let hub = backend.hub().map_err(|e| internal(e.message))?;
+    let written = {
+        let mut sessions = backend.sessions().map_err(internal)?;
+        // Edits not saved yet are the server's newest copy: on file first, so they are compared and never dropped.
+        if let Some(session) = sessions.get_mut(id).filter(|s| s.dirty) {
+            session.character.save(&session.path).map_err(internal)?;
+            session.dirty = false;
+        }
+        let outcome = match std::fs::read(&file) {
+            Ok(current) => {
+                let local = LocalItem {
+                    kind: ItemKind::Character,
+                    key: id.to_string(),
+                    sha256: sha256_hex(&current),
+                    edited_at_ms: mtime_ms(&file),
+                };
+                if local.sha256 == incoming_sha {
+                    Outcome::Identical
+                } else if sent.base_sha.as_deref() == Some(local.sha256.as_str()) {
+                    // Only the device changed it: its copy goes on, after the server's whatever the clocks say.
+                    Outcome::Write(edited.max(local.edited_at_ms + 1))
+                } else {
+                    match decide(&incoming_sha, edited, Some(&local)) {
+                        Action::ReplaceWithIncoming => Outcome::Write(edited),
+                        _ => Outcome::Lost("kept-server"),
+                    }
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                match deleted(&trash, &BTreeSet::new()).get(id) {
+                    Some(&at) if edited <= at => Outcome::Lost("deleted"),
+                    _ => Outcome::Write(edited),
+                }
+            }
+            Err(e) => return Err(internal(e)),
+        };
+        match outcome {
+            Outcome::Identical => false,
+            Outcome::Write(stamp) => {
+                // An open session takes the new copy in place, as upstream's `reload_if_open` would, but under this
+                // same lock: no edit can land on the old copy between the write and the reload and be dropped.
+                // Nothing unsaved is lost, it went on file above.
+                let reloaded = match sessions.get(id) {
+                    Some(_) => {
+                        let text = std::str::from_utf8(&bytes).map_err(internal)?;
+                        let mut character =
+                            borealis_character::Character::from_json_str(text).map_err(internal)?;
+                        let _ =
+                            borealis_lib::renamed_ids::migrate(&mut character.build, &hub.store);
+                        Some(character)
+                    }
+                    None => None,
+                };
+                write_character(&file, &trash, id, &bytes, stamp)?;
+                if let (Some(character), Some(session)) = (reloaded, sessions.get_mut(id)) {
+                    session.character = character;
+                    session.dirty = false;
+                    session.rolls.clear();
+                }
+                true
+            }
+            Outcome::Lost(result) => {
+                std::fs::create_dir_all(&trash).map_err(internal)?;
+                std::fs::write(trash_file(&trash, id, ".device.json"), &bytes).map_err(internal)?;
+                let (sha256, edited_at_ms) = file_stamp(&file);
+                return Ok(
+                    json!({ "result": result, "sha256": sha256, "editedAtMs": edited_at_ms }),
+                );
+            }
+        }
+    };
+    let (sha256, edited_at_ms) = file_stamp(&file);
+    let result = if written { "applied" } else { "identical" };
+    Ok(json!({
+        "result": result,
+        "sha256": sha256,
+        "editedAtMs": edited_at_ms,
+    }))
+}
+
+/// A free trash name `<ms>-<id><ext>`: now, or the first later millisecond not taken, so two copies of one character
+/// in the same millisecond do not overwrite each other.
+fn trash_file(trash: &Path, id: &str, ext: &str) -> PathBuf {
+    let mut ms = now_ms();
+    loop {
+        let path = trash.join(format!("{ms}-{id}{ext}"));
+        if !path.exists() {
+            return path;
+        }
+        ms += 1;
+    }
+}
+
+/// A character file's digest and stamp, or nulls when there is none.
+fn file_stamp(file: &Path) -> (Value, Value) {
+    match std::fs::read(file) {
+        Ok(bytes) => (json!(sha256_hex(&bytes)), json!(mtime_ms(file))),
+        Err(_) => (Value::Null, Value::Null),
+    }
+}
+
+/// Write a pushed character in place, as upstream's bundle apply does: the old file copied to the trash, the new
+/// one written beside it, stamped, and renamed over it (the file is never missing or half written).
+fn write_character(file: &Path, trash: &Path, id: &str, bytes: &[u8], stamp: u64) -> ApiResult<()> {
+    if file.is_file() {
+        std::fs::create_dir_all(trash).map_err(internal)?;
+        std::fs::copy(file, trash_file(trash, id, ".json")).map_err(internal)?;
+    }
+    let dir = file.parent().unwrap_or(file);
+    std::fs::create_dir_all(dir).map_err(internal)?;
+    let temp = dir.join(format!(".party-push-{}.tmp", uuid::Uuid::new_v4().simple()));
+    let written = std::fs::write(&temp, bytes)
+        .and_then(|()| {
+            std::fs::File::options()
+                .write(true)
+                .open(&temp)?
+                .set_modified(UNIX_EPOCH + std::time::Duration::from_millis(stamp))
+        })
+        .and_then(|()| std::fs::rename(&temp, file));
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&temp);
+        return Err(internal(e));
+    }
+    Ok(())
+}
+
+/// Run an upstream command that writes characters: under the sync lock (a push never sees one half done, and a save
+/// never writes an old copy over a pushed one), with a delete record first for `delete_character`, and
+/// [`CHARACTERS_CHANGED`] after it worked.
 pub async fn call_upstream(
     workspace: &Workspace,
     command: &str,
@@ -125,11 +342,7 @@ pub async fn call_upstream(
     if command == "close_character" && !named.as_deref().is_some_and(|id| workspace.is_dirty(id)) {
         return workspace.call(command, args).await;
     }
-    let _sync = if LOCKED.contains(&command) {
-        Some(workspace.sync_lock.lock().await)
-    } else {
-        None
-    };
+    let _sync = workspace.sync_lock.lock().await;
     let record = match named
         .clone()
         .filter(|id| command == "delete_character" && is_plain_key(id))
@@ -175,7 +388,7 @@ fn keep_deleted(app: &AppHandle, id: &str) -> ApiResult<Option<PathBuf>> {
     }
     let trash = trash_dir(&backend.paths.data);
     std::fs::create_dir_all(&trash).map_err(internal)?;
-    let record = trash.join(format!("{}-{id}.json", now_ms()));
+    let record = trash_file(&trash, id, ".json");
     // An open session with unsaved edits: the copy holds them, as the delete drops the session.
     let sessions = backend.sessions().map_err(internal)?;
     match sessions.values().find(|s| s.dirty && s.path == file) {

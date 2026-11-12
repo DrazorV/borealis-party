@@ -874,6 +874,7 @@ dependencies = [
  "base64 0.22.1",
  "borealis",
  "borealis-bundle",
+ "borealis-character",
  "borealis-content",
  "clap",
  "http-body-util",

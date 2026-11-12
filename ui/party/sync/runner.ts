@@ -5,6 +5,7 @@ import { isTauri } from "../../src/lib/tauri";
 import { eventStream, serverFetch } from "../api/http";
 import { loadSession } from "../api/session";
 import { hasCopy } from "./mirror";
+import { rereadIfReplaced } from "./replaced";
 import { syncOnce, type LocalApi, type ServerCall, type SyncReport } from "./sync";
 
 /** What the account bar shows. */
@@ -98,7 +99,10 @@ export function startSync(deps?: Partial<Runner>): () => void {
     userId: deps?.userId ?? session.user.id,
   };
   void requestSync();
-  const stopEvents = deps ? () => {} : eventStream(session, (e) => { if (CHANGED.includes(e.event)) later(DEBOUNCE_MS); });
+  const stopEvents = deps ? () => {} : eventStream(session, (e) => {
+    rereadIfReplaced(e);
+    if (CHANGED.includes(e.event)) later(DEBOUNCE_MS);
+  });
   const every = setInterval(() => void requestSync(), EVERY_MS);
   const front = () => { if (document.visibilityState === "visible") void requestSync(); };
   document.addEventListener("visibilitychange", front);

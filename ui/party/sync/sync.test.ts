@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ContentPack, ContentSource } from "../../src/api/contract";
 import { saveSession } from "../api/session";
 import { memoryStorage } from "../test/memoryStorage";
-import { loadMirror } from "./mirror";
+import { clearNotices, loadMirror, loadNotices } from "./mirror";
 import { startSync } from "./runner";
 import { syncOnce, type LocalApi, type ServerCall } from "./sync";
 
@@ -31,7 +31,11 @@ function fakeLocal() {
   };
   const stamp = () => new Date((clock += 1000)).toISOString();
   const api: LocalApi = {
-    listCharacters: async () => [...files].map(([id, f]) => ({ id, updatedAt: f.updatedAt }) as never),
+    listCharacters: async () => [...files].map(([id, f]) => {
+      let name = "";
+      try { name = String((JSON.parse(f.text) as { meta?: { name?: string } }).meta?.name ?? ""); } catch { /* not JSON */ }
+      return { id, name, updatedAt: f.updatedAt } as never;
+    }),
     loadCharacter: async ({ characterId }) => {
       if (!files.has(characterId)) throw { code: "not_found", message: "gone" };
       open.add(characterId);
@@ -107,11 +111,51 @@ function fakeServer() {
     sources: [] as ContentSource[],
     settings: { theme: "light", documentsDir: null, mobile: true, checkAppUpdates: false } as Record<string, unknown>,
     calls: [] as string[],
+    /** Edit stamps of the server's files (0 when not set). */
+    edited: new Map<string, number>(),
+    /** Delete records: id to the time of the delete. */
+    deleted: new Map<string, number>(),
+    /** What a push left in the account's trash. */
+    trash: [] as string[],
+    pushes: [] as { id: string; baseSha: string | null; editedAtMs: number }[],
+    /** A push answered with this error. */
+    refuse: null as null | { code: string; message: string },
+    /** Runs as a push arrives, after the state was read (a change made on the server in between). */
+    beforePush: null as null | ((id: string) => void),
   };
   const sha = (text: string) => `sha(${text})`;
+  /** party_sync_push as the server decides it (sync.rs). */
+  const push = (args: Record<string, unknown>) => {
+    const id = String(args.id);
+    const text = unb64(String(args.contentBase64));
+    const baseSha = (args.baseSha ?? null) as string | null;
+    const editedAtMs = Number(args.editedAtMs);
+    state.pushes.push({ id, baseSha, editedAtMs });
+    if (state.refuse) throw state.refuse;
+    state.beforePush?.(id);
+    const current = state.characters.get(id);
+    const take = () => {
+      state.characters.set(id, text);
+      state.edited.set(id, editedAtMs);
+      return { result: "applied", sha256: sha(text) };
+    };
+    if (current !== undefined) {
+      if (current === text) return { result: "identical", sha256: sha(text) };
+      if (baseSha === sha(current) || editedAtMs > (state.edited.get(id) ?? 0)) return take();
+      state.trash.push(text);
+      return { result: "kept-server", sha256: sha(current) };
+    }
+    const at = state.deleted.get(id);
+    if (at !== undefined && editedAtMs <= at) {
+      state.trash.push(text);
+      return { result: "deleted", sha256: null };
+    }
+    return take();
+  };
   const call: ServerCall = async (command, args) => {
     state.calls.push(args?.id ? `${command} ${String(args.id)}` : command);
     switch (command) {
+      case "party_sync_push": return push(args ?? {});
       case "party_sync_state":
         return {
           nowMs: 5000,
@@ -233,10 +277,15 @@ it("a lost mirror after an offline edit keeps the edited copy, waiting, and late
   expect(localTexts()).toEqual([character("c_a", "Ana", 3), character("c_b", "Bo")]);
   expect(loadMirror("u1")!.characters.c_a!.local).toBe(m.local);
 
+  // Not known to be made from the server's file: sent without a base, so the server weighs the edit times.
   server.state.characters.set("c_a", character("c_a", "Ana", 20));
+  server.state.edited.set("c_a", 999_999_999);
   const again = await sync();
-  expect(again).toMatchObject({ waiting: ["c_a"], pulled: 0 });
-  expect(local.state.files.get(m.local)?.text).toBe(character("c_a", "Ana", 3));
+  expect(server.state.pushes).toEqual([{ id: "c_a", baseSha: null, editedAtMs: expect.any(Number) }]);
+  expect(again).toMatchObject({ waiting: [], pulled: 1 });
+  // The server's edit was newer: its copy is here now, and this device's is in the trash there.
+  expect(server.state.trash).toEqual([character("c_a", "Ana", 3)]);
+  expect(localTexts()).toEqual([character("c_a", "Ana", 20), character("c_b", "Bo")]);
 });
 
 it("a character deleted between the state and the fetch is no problem", async () => {
@@ -322,15 +371,18 @@ it("a pack change that rewrites a copy is not taken for an edit", async () => {
   expect(after.localSha).not.toBe(m.localSha);
 });
 
-it("a copy edited here waits: a server change does not replace it, a server delete does not remove it", async () => {
+it("a copy whose edit the server refused waits: a server change does not replace it, a server delete does not remove it", async () => {
   await sync();
   const m = loadMirror("u1")!.characters.c_a!;
   // Played offline: the file on the device changed.
   local.state.files.set(m.local, { text: character("c_a", "Ana", 3), updatedAt: "offline edit" });
   server.state.characters.set("c_a", character("c_a", "Ana", 20));
   server.state.calls = [];
+  server.state.refuse = { code: "invalid_argument", message: "The character can't be taken: not a Borealis character." };
   const report = await sync();
   expect(report.waiting).toEqual(["c_a"]);
+  expect(report.problems.c_a).toBe("Your changes to Ana could not be sent: The character can't be taken: not a Borealis character.");
+  expect(loadMirror("u1")!.problems).toEqual(report.problems);
   expect(report.pulled).toBe(0);
   expect(server.state.calls).not.toContain("party_sync_get c_a");
   expect(local.state.files.get(m.local)?.text).toBe(character("c_a", "Ana", 3));
@@ -464,6 +516,147 @@ it("a sync stopped right after an import leaves no spare copy after the next syn
   await sync();
   expect(localTexts()).toEqual([character("c_a", "Ana"), character("c_b", "Bo", 7)]);
   expect(loadMirror("u1")!.pending).toEqual([]);
+});
+
+/** Edit the device's copy of `s` as an offline page does, at device time `atMs`. */
+function editHere(s: string, text: string, atMs = 3500) {
+  const m = loadMirror("u1")!.characters[s]!;
+  local.state.files.set(m.local, { text, updatedAt: new Date(atMs).toISOString() });
+  return m.local;
+}
+
+it("only edited copies are sent, before anything is fetched, and the server's answer is the new base", async () => {
+  await sync();
+  server.state.calls = [];
+  const edited = character("c_a", "Ana", 3);
+  const here = editHere("c_a", edited);
+  // Changed on the server too: c_b is fetched after the push.
+  server.state.characters.set("c_b", character("c_b", "Bo", 8));
+  const report = await sync();
+  expect(report).toMatchObject({ pushed: 1, waiting: [], pulled: 1, problems: {}, notices: [] });
+  expect(server.state.calls).toEqual(["party_sync_state", "party_sync_push c_a", "party_sync_get c_b", "get_settings"]);
+  expect(server.state.pushes).toEqual([{ id: "c_a", baseSha: `sha(${character("c_a", "Ana")})`, editedAtMs: 3500 + 1000 }]);
+  expect(server.state.characters.get("c_a")).toBe(edited);
+  const m = loadMirror("u1")!.characters.c_a!;
+  expect(m).toMatchObject({ local: here, serverSha: `sha(${edited})` });
+  expect(local.state.files.get(here)?.text).toBe(edited);
+  // Nothing left to do.
+  server.state.calls = [];
+  expect(await sync()).toMatchObject({ pushed: 0, pulled: 0 });
+  expect(server.state.calls).toEqual(["party_sync_state", "get_settings"]);
+});
+
+it("the edit time sent is on the server's clock: a device clock 2 hours fast is corrected", async () => {
+  await sync();
+  const fast = 2 * 60 * 60 * 1000;
+  editHere("c_a", character("c_a", "Ana", 3), 10_000_000);
+  // Server clock 5000 at device 5000 + 2 h.
+  await syncOnce({ local: local.api, server: server.call, userId: "u1", now: () => 5000 + fast });
+  expect(loadMirror("u1")!.offsetMs).toBe(-fast);
+  expect(server.state.pushes[0]?.editedAtMs).toBe(10_000_000 - fast);
+});
+
+it("a server that can't be reached during the pushes stops the sync and changes nothing here", async () => {
+  await sync();
+  const a = editHere("c_a", character("c_a", "Ana", 3));
+  const b = editHere("c_b", character("c_b", "Bo", 4));
+  const files = new Map(local.state.files);
+  const before = loadMirror("u1")!.characters;
+  const call = server.call;
+  server.call = async (command, args) => {
+    if (command === "party_sync_push") throw { code: "network", message: "The server can't be reached. Check your connection." };
+    return call(command, args);
+  };
+  await expect(syncOnce({ local: local.api, server: server.call, userId: "u1", now: () => 4000 })).rejects.toMatchObject({ code: "network" });
+  expect(local.state.files).toEqual(files);
+  expect(loadMirror("u1")!.characters).toEqual(before);
+  // Once it answers, both go.
+  server.call = call;
+  expect(await sync()).toMatchObject({ pushed: 2, waiting: [] });
+  expect(server.state.characters.get("c_a")).toBe(local.state.files.get(a)?.text);
+  expect(server.state.characters.get("c_b")).toBe(local.state.files.get(b)?.text);
+});
+
+it("a newer edit on the server wins: its copy replaces this one, and a notice says so", async () => {
+  await sync();
+  const old = editHere("c_a", character("c_a", "Ana", 3), 2500);
+  server.state.characters.set("c_a", character("c_a", "Ana", 20));
+  server.state.edited.set("c_a", 9000);
+  const report = await sync();
+  expect(report).toMatchObject({ pushed: 0, waiting: [], pulled: 1 });
+  expect(server.state.trash).toEqual([character("c_a", "Ana", 3)]);
+  expect(local.state.files.has(old)).toBe(false);
+  expect(localTexts()).toEqual([character("c_a", "Ana", 20), character("c_b", "Bo")]);
+  expect(report.notices).toEqual(["Ana: a newer edit on the server was kept over the changes made on this device. This device's copy is in the account's trash on the server for 30 days."]);
+  expect(loadNotices("u1")).toEqual(report.notices);
+  clearNotices("u1");
+  expect(loadNotices("u1")).toEqual([]);
+});
+
+it("an edit here newer than the server's wins over it", async () => {
+  await sync();
+  const mine = character("c_a", "Ana", 3);
+  editHere("c_a", mine, 9500);
+  server.state.characters.set("c_a", character("c_a", "Ana", 20));
+  server.state.edited.set("c_a", 2000);
+  const report = await sync();
+  expect(report).toMatchObject({ pushed: 1, pulled: 0, notices: [] });
+  expect(server.state.characters.get("c_a")).toBe(mine);
+  expect(localTexts()).toEqual([mine, character("c_b", "Bo")]);
+});
+
+it("deleted on the server: an unchanged copy goes, one edited before the delete goes with a notice, one edited after comes back", async () => {
+  await sync();
+  // Edited before the delete.
+  const before = editHere("c_a", character("c_a", "Ana", 3), 2500);
+  server.state.characters.delete("c_a");
+  server.state.deleted.set("c_a", 6000);
+  // Edited after the delete.
+  const after = character("c_b", "Bo", 4);
+  const kept = editHere("c_b", after, 9500);
+  server.state.characters.delete("c_b");
+  server.state.deleted.set("c_b", 6000);
+  const report = await sync();
+  expect(report.notices).toEqual(["Ana was deleted on the server after it was changed on this device. This device's copy is in the account's trash on the server for 30 days."]);
+  expect(local.state.files.has(before)).toBe(false);
+  expect(loadMirror("u1")!.characters.c_a).toBeUndefined();
+  expect(report).toMatchObject({ pushed: 1, removed: 1, waiting: [] });
+  expect(server.state.characters.get("c_b")).toBe(after);
+  expect(local.state.files.get(kept)?.text).toBe(after);
+  expect(loadMirror("u1")!.characters.c_b).toMatchObject({ local: kept, serverSha: `sha(${after})` });
+});
+
+it("deleted on the server between the state and the push: the copy goes in the same sync, sent once", async () => {
+  await sync();
+  const here = editHere("c_a", character("c_a", "Ana", 3), 2500);
+  server.state.beforePush = (id) => {
+    server.state.characters.delete(id);
+    server.state.deleted.set(id, 6000);
+  };
+  const report = await sync();
+  expect(report).toMatchObject({ removed: 1, pushed: 0, waiting: [], problems: {} });
+  expect(report.notices).toHaveLength(1);
+  expect(local.state.files.has(here)).toBe(false);
+  expect(loadMirror("u1")!.characters.c_a).toBeUndefined();
+  server.state.pushes = [];
+  expect((await sync()).notices).toEqual([]);
+  expect(server.state.pushes).toEqual([]);
+});
+
+it("another account's copy on this device is never taken over, sent or removed by this account's sync", async () => {
+  await sync();
+  const theirs = loadMirror("u1")!.characters.c_a!.local;
+  const edited = character("c_a", "Ana", 3);
+  editHere("c_a", edited);
+  // A second account whose server has a character of the same id (both opened the same bundle).
+  const other = fakeServer();
+  other.state.characters.set("c_a", character("c_a", "Ana", 20));
+  await syncOnce({ local: local.api, server: other.call, userId: "u2", now: () => 4000 });
+  await syncOnce({ local: local.api, server: other.call, userId: "u2", now: () => 4000 });
+  expect(other.state.pushes).toEqual([]);
+  expect(loadMirror("u2")!.characters.c_a!.local).not.toBe(theirs);
+  expect(local.state.files.get(theirs)?.text).toBe(edited);
+  expect(other.state.characters.get("c_a")).toBe(character("c_a", "Ana", 20));
 });
 
 it("a browser keeps no copy: nothing starts outside the app", async () => {

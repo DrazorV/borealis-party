@@ -188,6 +188,20 @@ characters and content packs to that account only, exactly as desktop Borealis w
 - Dropping a `.borealis` file on the window or choosing it with "+" is not supported: those say the file cannot be
   imported. Use "Import characters" or File > Open bundle... instead.
 
+## Offline in the apps
+
+The Android and desktop apps keep a copy of the account's characters and content packs. Without the server they open,
+play and edit the characters they have; everything else says "Needs the server. Connect and try again." Back online,
+the app sends its edits first, then fetches what changed on the server.
+
+- A character changed only on the device replaces the server's copy.
+- Changed on both sides, the newest edit wins (the device's time is corrected to the server's clock). The other copy
+  is kept in the account's `sync/trash` folder for 30 days (a device's copy as `<time>-<id>.device.json`), and the
+  app's Account page says so. There is no restore button yet: an admin restores a copy by moving it back into the
+  account's `characters/` folder as `<id>.json`.
+- Deleted on the server: the device drops its copy, unless it edited the character after the delete; then it comes
+  back.
+
 ## How it works
 
 | Rule | Where it is enforced |

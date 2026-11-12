@@ -5,7 +5,33 @@ import { useToast } from "../../src/components/Toast";
 import { isTauri } from "../../src/lib/tauri";
 import { changeEmail, changePassword, checkServer, sameAccountAt } from "../api/party";
 import { isLocalAddress, loadSession, normaliseAddress, setServerAddress, updateUser } from "../api/session";
+import { clearNotices, loadMirror, loadNotices } from "../sync/mirror";
+import { useSyncStatus } from "../sync/runner";
 import "./party.css";
+
+/**
+ * The app's copy of the account: what the last sync could not do, and edits made here that the server did not take
+ * (their copies are in the account's trash on the server). Nothing when all is well.
+ */
+export function SyncNotes({ userId }: { userId: string }) {
+  // Read again after each sync, and after Dismiss.
+  useSyncStatus();
+  const [, setDismissed] = useState(0);
+  const notices = loadNotices(userId);
+  const problems = Object.values(loadMirror(userId)?.problems ?? {});
+  if (problems.length === 0 && notices.length === 0) return null;
+  return (
+    <Card title="Sync">
+      {problems.map((p) => <Alert key={p} tone="warning">{p}</Alert>)}
+      {notices.map((n, i) => <Alert key={`${i}:${n}`} tone="info">{n}</Alert>)}
+      {notices.length > 0 && (
+        <div className="party-inline">
+          <Button onClick={() => { clearNotices(userId); setDismissed((n) => n + 1); }}>Dismiss</Button>
+        </div>
+      )}
+    </Card>
+  );
+}
 
 const message = (e: unknown): string => (e as { message?: string }).message ?? "Something went wrong.";
 
@@ -85,6 +111,7 @@ export function AccountPage() {
           <Button type="submit">Change password</Button>
         </form>
       </Card>
+      {isTauri() && user && <SyncNotes userId={user.id} />}
       {/* A browser got the page from the server itself, so only the apps have an address to change. */}
       {isTauri() && (
         <Card title="Server address">

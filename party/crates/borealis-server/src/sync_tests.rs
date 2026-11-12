@@ -216,13 +216,8 @@ pub(super) async fn sync_flow(router: Router, data: &Path) {
             assert_eq!(status, StatusCode::BAD_REQUEST, "{command} {bad}: {out}");
         }
     }
-    // Uploads are a later phase, and bundles still only come in.
-    for command in [
-        "party_sync_push",
-        "bundle_export",
-        "bundle_share",
-        "link_status",
-    ] {
+    // Bundles still only come in.
+    for command in ["bundle_export", "bundle_share", "link_status"] {
         let (status, out) = alice.rpc(command, json!({})).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{command}: {out}");
     }
@@ -288,6 +283,323 @@ pub(super) async fn sync_flow(router: Router, data: &Path) {
     let (_, state) = alice.rpc("party_sync_state", json!({})).await;
     assert_eq!(state["deleted"], json!([]), "{state}");
     assert_eq!(ids(&state["characters"]), [back.as_str()]);
+}
+
+fn now_ms() -> u64 {
+    u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis(),
+    )
+    .unwrap()
+}
+
+/// The digest and stamp of a character's file on the server.
+fn on_file(data: &Path, account: &str, id: &str) -> (String, u64) {
+    let file = character_file(data, account, id);
+    (
+        sha256_hex(&std::fs::read(&file).unwrap()),
+        borealis_bundle::mtime_ms(&file),
+    )
+}
+
+/// A device's copy of the server's file of `id`, edited: its player is `who`.
+fn device_copy(data: &Path, account: &str, id: &str, who: &str) -> Vec<u8> {
+    let mut value: Value =
+        serde_json::from_slice(&std::fs::read(character_file(data, account, id)).unwrap()).unwrap();
+    value["meta"]["id"] = json!(id);
+    value["meta"]["player"] = json!(who);
+    serde_json::to_vec_pretty(&value).unwrap()
+}
+
+/// The trash entries of an account whose text names `who`, by file name.
+fn trashed(data: &Path, account: &str, who: &str) -> Vec<String> {
+    let mut found: Vec<String> = std::fs::read_dir(trash(data, account))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| {
+            std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains(&format!("\"{who}\"")))
+        })
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    found.sort();
+    found
+}
+
+fn player(data: &Path, account: &str, id: &str) -> String {
+    let value: Value =
+        serde_json::from_slice(&std::fs::read(character_file(data, account, id)).unwrap()).unwrap();
+    value["meta"]["player"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+async fn push(
+    client: &Client,
+    id: &str,
+    base: Option<&str>,
+    edited_at_ms: u64,
+    content: &[u8],
+) -> (StatusCode, Value) {
+    client
+        .rpc(
+            "party_sync_push",
+            json!({ "id": id, "baseSha": base, "editedAtMs": edited_at_ms, "contentBase64": b64(content) }),
+        )
+        .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_apps_send_their_edits_back() {
+    let dir = tempfile::tempdir().unwrap();
+    push_flow(router(dir.path().to_path_buf()).await, dir.path()).await;
+}
+
+/// Sending edits back: fast-forward, conflicts, ties, clamped times, repeats, deletes, races, unsaved server edits,
+/// refusals and isolation. Also run on PostgreSQL, from the test there.
+pub(super) async fn push_flow(router: Router, data: &Path) {
+    let alice = sign_up(&router, "push-alice").await;
+    let bob = sign_up(&router, "push-bob").await;
+    let mut stream = event_stream(&alice).await;
+    let mut buffer = String::new();
+    let (_, made) = alice.rpc("create_character", new_character("Pusher")).await;
+    let id = made["id"].as_str().unwrap().to_string();
+    let (status, out) = alice
+        .rpc("save_character", json!({ "characterId": id }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let _ = next_event(&mut stream, &mut buffer, crate::sync::CHARACTERS_CHANGED).await;
+    let _ = next_event(&mut stream, &mut buffer, crate::sync::CHARACTERS_CHANGED).await;
+
+    // Fast-forward: the server still holds the device's base, so the device's copy goes on even with a clock far
+    // behind; it is stamped after the old file, which goes to the trash.
+    let (base, base_ms) = on_file(data, &alice.id, &id);
+    let first = device_copy(data, &alice.id, &id, "first");
+    let (status, out) = push(&alice, &id, Some(&base), 1000, &first).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["result"], "applied", "{out}");
+    let (sha, ms) = on_file(data, &alice.id, &id);
+    assert_eq!(sha, sha256_hex(&first));
+    assert_eq!(ms, base_ms + 1);
+    assert_eq!(out["sha256"], sha.as_str());
+    assert_eq!(out["editedAtMs"], ms);
+    let changed = next_event(&mut stream, &mut buffer, crate::sync::CHARACTERS_CHANGED).await;
+    assert_eq!(changed["ids"], json!([id]), "{changed}");
+    assert_eq!(changed["replaced"], true, "{changed}");
+    let kept: Vec<String> = std::fs::read_dir(trash(data, &alice.id))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert!(kept[0].ends_with(&format!("-{id}.json")), "{kept:?}");
+    // The live file and a trash copy of it are no delete record.
+    let (_, state) = alice.rpc("party_sync_state", json!({})).await;
+    assert_eq!(state["deleted"], json!([]), "{state}");
+
+    // The same push again (its answer was lost): identical, nothing written.
+    let (_, out) = push(&alice, &id, Some(&base), 1000, &first).await;
+    assert_eq!(out["result"], "identical", "{out}");
+    assert_eq!(on_file(data, &alice.id, &id), (sha.clone(), ms));
+
+    // Both changed: an older device edit loses and is kept in the trash, as the device's copy.
+    let stale = device_copy(data, &alice.id, &id, "stale");
+    let (_, out) = push(&alice, &id, Some(&base), ms - 10, &stale).await;
+    assert_eq!(out["result"], "kept-server", "{out}");
+    assert_eq!(out["sha256"], sha.as_str());
+    assert_eq!(player(data, &alice.id, &id), "first");
+    let lost = trashed(data, &alice.id, "stale");
+    assert_eq!(lost.len(), 1);
+    assert!(lost[0].ends_with(&format!("-{id}.device.json")), "{lost:?}");
+    // A tie keeps the server's copy too.
+    let (_, out) = push(
+        &alice,
+        &id,
+        Some(&base),
+        ms,
+        &device_copy(data, &alice.id, &id, "tie"),
+    )
+    .await;
+    assert_eq!(out["result"], "kept-server", "{out}");
+    assert_eq!(trashed(data, &alice.id, "tie").len(), 1);
+    // A newer device edit wins, and the server's copy goes to the trash.
+    let newer = device_copy(data, &alice.id, &id, "newer");
+    let (_, out) = push(&alice, &id, None, ms + 10, &newer).await;
+    assert_eq!(out["result"], "applied", "{out}");
+    assert_eq!(on_file(data, &alice.id, &id), (sha256_hex(&newer), ms + 10));
+    assert_eq!(trashed(data, &alice.id, "first").len(), 1);
+
+    // A time in the future counts as now.
+    let (sha, _) = on_file(data, &alice.id, &id);
+    let before = now_ms();
+    let (_, out) = push(
+        &alice,
+        &id,
+        Some("not the base"),
+        before + 3_600_000,
+        &device_copy(data, &alice.id, &id, "future"),
+    )
+    .await;
+    assert_eq!(out["result"], "applied", "{out}");
+    let (_, ms) = on_file(data, &alice.id, &id);
+    assert!(ms >= before && ms <= now_ms(), "{ms} {before}");
+    assert_ne!(on_file(data, &alice.id, &id).0, sha);
+
+    // Edits the server has not saved yet are saved first and take part: an older device edit loses to them.
+    let (base, _) = on_file(data, &alice.id, &id);
+    let (_, out) = alice
+        .rpc("load_character", json!({ "characterId": id }))
+        .await;
+    assert!(out.is_object(), "{out}");
+    let (status, out) = alice
+        .rpc("set_xp", json!({ "characterId": id, "xp": 6543 }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (_, out) = push(
+        &alice,
+        &id,
+        Some(&base),
+        now_ms() - 60_000,
+        &device_copy(data, &alice.id, &id, "behind"),
+    )
+    .await;
+    assert_eq!(out["result"], "kept-server", "{out}");
+    let text = std::fs::read_to_string(character_file(data, &alice.id, &id)).unwrap();
+    assert!(text.contains("6543"), "the unsaved edit reached the file");
+    // Saved, the session is no edit of its own: a device copy made from that file goes on, the old file (with the
+    // edit) goes to the trash, and the open session shows the device's copy.
+    let (base, _) = on_file(data, &alice.id, &id);
+    let device = device_copy(data, &alice.id, &id, "ahead");
+    let (_, out) = push(&alice, &id, Some(&base), now_ms(), &device).await;
+    assert_eq!(out["result"], "applied", "{out}");
+    let kept = std::fs::read_dir(trash(data, &alice.id))
+        .unwrap()
+        .filter_map(|e| std::fs::read_to_string(e.unwrap().path()).ok())
+        .filter(|t| t.contains("6543") && !t.contains("\"ahead\""))
+        .count();
+    assert!(kept >= 1, "the server's copy with the edit is in the trash");
+    let (_, sheet) = alice
+        .rpc("get_snapshot", json!({ "characterId": id }))
+        .await;
+    assert!(sheet.to_string().contains("\"ahead\""), "{sheet}");
+    assert_eq!(sheet["dirty"], false, "{sheet}");
+    let (_, state) = alice.rpc("party_sync_state", json!({})).await;
+    assert_eq!(state["characters"][0]["sha256"], sha256_hex(&device));
+    // The next edit of the open page lands on the device's copy.
+    let (status, out) = alice
+        .rpc("set_xp", json!({ "characterId": id, "xp": 7654 }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (_, sheet) = alice
+        .rpc("get_snapshot", json!({ "characterId": id }))
+        .await;
+    assert!(sheet.to_string().contains("\"ahead\""), "{sheet}");
+    assert!(sheet.to_string().contains("7654"), "{sheet}");
+    alice
+        .rpc(
+            "close_character",
+            json!({ "characterId": id, "discard": false }),
+        )
+        .await;
+
+    // Deleted after the device's edit: stays deleted, and the device's copy goes to the trash.
+    let (status, _) = alice
+        .rpc("delete_character", json!({ "characterId": id }))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, state) = alice.rpc("party_sync_state", json!({})).await;
+    let deleted_at = state["deleted"][0]["deletedAtMs"].as_u64().unwrap();
+    let (_, out) = push(
+        &alice,
+        &id,
+        Some(&sha256_hex(&device)),
+        deleted_at - 1,
+        &device,
+    )
+    .await;
+    assert_eq!(out["result"], "deleted", "{out}");
+    assert_eq!(out["sha256"], Value::Null);
+    assert!(!character_file(data, &alice.id, &id).exists());
+    let (_, state) = alice.rpc("party_sync_state", json!({})).await;
+    assert_eq!(
+        state["deleted"],
+        json!([{ "id": id, "deletedAtMs": deleted_at }]),
+        "a lost copy is no newer delete record"
+    );
+    // Edited after the delete: it comes back.
+    let back = device_copy_from(&device, "back");
+    let (_, out) = push(&alice, &id, Some("gone"), deleted_at + 1, &back).await;
+    assert_eq!(out["result"], "applied", "{out}");
+    assert_eq!(player(data, &alice.id, &id), "back");
+    let (_, state) = alice.rpc("party_sync_state", json!({})).await;
+    assert_eq!(ids(&state["characters"]), [id.as_str()]);
+    assert_eq!(state["deleted"], json!([]));
+
+    // Two devices at once, from the same base: one after the other, and neither copy is lost.
+    let (base, _) = on_file(data, &alice.id, &id);
+    let one = device_copy(data, &alice.id, &id, "device one");
+    let two = device_copy(data, &alice.id, &id, "device two");
+    let at = now_ms();
+    let (a, b) = tokio::join!(
+        push(&alice, &id, Some(&base), at, &one),
+        push(&alice, &id, Some(&base), at + 5, &two),
+    );
+    let results = [a.1["result"].clone(), b.1["result"].clone()];
+    assert!(results.contains(&json!("applied")), "{results:?}");
+    let live = player(data, &alice.id, &id);
+    let other = if live == "device one" {
+        "device two"
+    } else {
+        "device one"
+    };
+    assert!(live == "device one" || live == "device two", "{live}");
+    assert_eq!(trashed(data, &alice.id, other).len(), 1, "{results:?}");
+
+    // What is not a character of this account is refused, and changes nothing.
+    let (sha, ms) = on_file(data, &alice.id, &id);
+    let mut wrong_id: Value = serde_json::from_slice(&one).unwrap();
+    wrong_id["meta"]["id"] = json!("c_someone_else");
+    for (bad, why) in [
+        (
+            json!({ "id": "../x", "editedAtMs": 1, "contentBase64": b64(&one) }),
+            "path",
+        ),
+        (json!({ "id": id, "contentBase64": b64(&one) }), "no time"),
+        (
+            json!({ "id": id, "editedAtMs": 1, "contentBase64": "%%%" }),
+            "not base64",
+        ),
+        (
+            json!({ "id": id, "editedAtMs": 1, "contentBase64": b64(b"not json") }),
+            "not JSON",
+        ),
+        (
+            json!({ "id": id, "editedAtMs": 1, "contentBase64": b64(b"[1,2]") }),
+            "not a character",
+        ),
+        (
+            json!({ "id": id, "editedAtMs": now_ms(), "contentBase64": b64(&serde_json::to_vec(&wrong_id).unwrap()) }),
+            "another id",
+        ),
+    ] {
+        let (status, out) = alice.rpc("party_sync_push", bad).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{why}: {out}");
+    }
+    assert_eq!(on_file(data, &alice.id, &id), (sha.clone(), ms));
+
+    // Another account's push lands in its own folder only.
+    let (_, out) = push(&bob, &id, None, now_ms(), &one).await;
+    assert_eq!(out["result"], "applied", "{out}");
+    assert_eq!(on_file(data, &alice.id, &id), (sha, ms));
+    assert_eq!(player(data, &bob.id, &id), "device one");
+}
+
+fn device_copy_from(copy: &[u8], who: &str) -> Vec<u8> {
+    let mut value: Value = serde_json::from_slice(copy).unwrap();
+    value["meta"]["player"] = json!(who);
+    serde_json::to_vec_pretty(&value).unwrap()
 }
 
 /// A desktop data folder holding `files` (paths under the data folder) before it opens.

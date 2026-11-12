@@ -458,6 +458,7 @@ async fn each_account_has_its_own_characters_and_content_on_postgres() {
     admin_flow(&router, &admin, &data).await;
     bundle_flow(router.clone(), &data).await;
     sync_tests::sync_flow(router.clone(), &data).await;
+    sync_tests::push_flow(router.clone(), &data).await;
     full_flow(router, &data).await;
 }
 

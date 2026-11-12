@@ -10,6 +10,7 @@ import { AccountBar } from "../pages/AccountBar";
 import { AccountPage } from "../pages/AccountPage";
 import { AdminPage } from "../pages/AdminPage";
 import { OfflinePage } from "../pages/OfflineBanner";
+import { followReplaced } from "../sync/replaced";
 import { startSync } from "../sync/runner";
 import { hideUnofferedRows } from "./hideTransfer";
 import "../pages/party.css";
@@ -34,6 +35,8 @@ export function App() {
   }, [offline]);
   // The apps keep a copy of the account (sync/); a browser doesn't. Offline it is the page's backend and stays still.
   useEffect(() => (offline ? undefined : startSync()), [offline]);
+  // A browser's open character follows a device's edit the server took (the apps hear it in their sync's events).
+  useEffect(() => (isTauri() ? undefined : followReplaced()), []);
   return (
     <>
       <AccountBar />
