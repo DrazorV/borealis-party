@@ -2,7 +2,7 @@
 
 Borealis Party is Borealis with a multi-user server: every account has its own characters and its own content, and
 an admin page manages the accounts. The server runs the Borealis rules engine and stores everything. Browsers, the
-Android app and the desktop app are clients.
+Android and iOS apps and the desktop app are clients.
 
 This version starts from a fresh config folder. It does not read the database or the data folder of the earlier
 versions that had groups, and refuses to start on one: move the old config folder away (keep it as a backup) and start
@@ -149,7 +149,7 @@ back up everything. Running `install.sh` from a newer release upgrades in place 
 ## Connect
 
 - **Browser:** open `http://<server>:8787`.
-- **Android app and desktop app:** on first launch, enter the server's address. A domain name such as
+- **Android, iOS and desktop apps:** on first launch, enter the server's address. A domain name such as
   `party.example.com` means `https://`; an IP address such as `192.168.1.20:8787`, `localhost`, a `.local` name or a
   one-word name such as `raspberrypi:8787` means `http://`. Type the scheme to choose it yourself.
 
@@ -190,7 +190,7 @@ characters and content packs to that account only, exactly as desktop Borealis w
 
 ## Offline in the apps
 
-The Android and desktop apps keep a copy of the account's characters and content packs. Without the server they open,
+The Android, iOS and desktop apps keep a copy of the account's characters and content packs. Without the server they open,
 play and edit the characters they have; everything else says "Needs the server. Connect and try again." Back online,
 the app sends its edits first, then fetches what changed on the server.
 
@@ -258,6 +258,9 @@ How that works:
   and the settings window with its tabs pointed at `ui/party/settings`, which leave out what an account can't change on
   a server. The build fails if upstream renames one of them. `party.css` hides controls that don't apply to an account.
 - **Android.** `party/android/party.init.gradle` sets the app id, name and HTTP permission from outside upstream's Gradle files.
+- **iOS.** `party/tauri.party.ios.json` sets the app id and merges `party/ios/Info.plist` (name, plain HTTP, local
+  network text) into upstream's Info.plist while Tauri builds; `party/ios/build-ios.sh` puts upstream's Xcode project
+  back afterwards.
 - **Tauri.** `party/tauri.party.json` overrides the front end and network policy, and `party/tauri.party.desktop.json`
   the desktop app's name, identifier, update feed and file associations.
 
@@ -327,6 +330,27 @@ Keep the signing key: Android only installs an update signed with the same key.
 
 Known limit: in the Android app the character sheet cannot be saved or shared as a PDF yet (its web view has no
 download or share sheet). Open the server in the phone's browser for that.
+
+## Build the iOS app
+
+Only on a Mac, with Xcode, the `ui` dependencies (`npm --prefix ui ci`) and the Rust target `aarch64-apple-ios`
+(`aarch64-apple-ios-sim` for the Simulator), from the repository root:
+
+```sh
+party/ios/build-ios.sh                # signed IPA, target/party-ios/Borealis Party.ipa
+party/ios/build-ios.sh --sim          # debug app for the iOS Simulator, target/party-ios/Borealis Party.app
+party/ios/build-ios.sh --export-method app-store-connect --build-number 1004000
+```
+
+A device build is signed: set `APPLE_DEVELOPMENT_TEAM`, or `IOS_CERTIFICATE`, `IOS_CERTIFICATE_PASSWORD` and
+`IOS_MOBILE_PROVISION` (a profile for `app.borealis.party`). Like the Android app it is built without device transfer
+or on-device semantic search, and the script fails if the built app lacks the party id, name or HTTP setting.
+
+- Plain HTTP (`192.168.1.20:8787`, `.local` names, a typed `http://`) is allowed with `NSAllowsArbitraryLoads`, as on
+  Android. The first connection to the home network asks for the Local Network permission; allow it.
+- In the iOS app, Share on the character sheet hands the server's PDF to the share sheet, so "Save to Files" works
+  from there. Opening a `.dnd5e` or `.borealis` file with the app from Files does nothing, as on Android: use
+  "Import characters" instead.
 
 ## Build the desktop app
 
