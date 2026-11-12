@@ -13,7 +13,7 @@ use crate::auth::{Status, User};
 use crate::error::{ApiError, ApiResult};
 
 /// Applied in order; each runs once. Never edit a step that has shipped, add a new one.
-const MIGRATIONS: &[&[&str]] = &[
+pub(crate) const MIGRATIONS: &[&[&str]] = &[
     // 1: accounts, sessions, the admin page's settings and the activity log.
     &[
         "CREATE TABLE IF NOT EXISTS users (
@@ -57,9 +57,27 @@ const MIGRATIONS: &[&[&str]] = &[
     ],
 ];
 
+/// One table per step of [`MIGRATIONS`], in the same order, that the step creates. When `schema_version` says a step
+/// ran but its table is missing, the database came from somewhere else (the versions with groups numbered their own
+/// steps 1 to 3), and the server refuses to start instead of skipping the step.
+pub(crate) const MARKERS: &[&str] = &["users"];
+
 /// A table only the versions with groups had. A database that still has it opens like any other: the table is left
 /// alone and a warning is logged, so an instance that ran those versions (or rolls back to one) still boots.
 const OLD_TABLE: &str = "party_groups";
+
+/// Whether the database has the table `name`.
+async fn has_table(pool: &AnyPool, sqlite: bool, name: &str) -> sqlx::Result<bool> {
+    let row = sqlx::query(if sqlite {
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $1"
+    } else {
+        "SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = $1"
+    })
+    .bind(name)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.is_some())
+}
 
 /// Rows the activity log keeps; older ones are pruned as new ones arrive.
 pub const ACTIVITY_KEPT: i64 = 10_000;
@@ -69,12 +87,18 @@ pub const ACTIVITY_KEPT: i64 = 10_000;
 pub enum OpenError {
     /// It can't be reached, or its tables can't be created.
     Database(sqlx::Error),
+    /// `schema_version` says step `version` ran, but `table`, which that step creates, is missing.
+    Stale { version: i64, table: &'static str },
 }
 
 impl std::fmt::Display for OpenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Database(e) => write!(f, "database: {e}"),
+            Self::Stale { version, table } => write!(
+                f,
+                "database: schema_version {version} but table {table} missing: this database predates the current                  migrations. Do not reset it; ask for an upgrade step."
+            ),
         }
     }
 }
@@ -294,15 +318,7 @@ impl Db {
             })
             .connect(&url)
             .await?;
-        let old = sqlx::query(if sqlite {
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $1"
-        } else {
-            "SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = $1"
-        })
-        .bind(OLD_TABLE)
-        .fetch_optional(&pool)
-        .await?;
-        if old.is_some() {
+        if has_table(&pool, sqlite, OLD_TABLE).await? {
             // No refusal, and no "schema too new" refusal either: rolling back depends on older binaries booting.
             tracing::warn!(
                 "the database still has the {OLD_TABLE} table from a version with groups; it is not used and is left alone"
@@ -318,11 +334,11 @@ impl Db {
             pool,
             kind: if sqlite { "sqlite" } else { "postgres" },
         };
-        db.migrate().await?;
+        db.migrate(sqlite).await?;
         Ok(db)
     }
 
-    async fn migrate(&self) -> sqlx::Result<()> {
+    async fn migrate(&self, sqlite: bool) -> Result<(), OpenError> {
         sqlx::query("CREATE TABLE IF NOT EXISTS schema_version (version BIGINT NOT NULL)")
             .execute(&self.pool)
             .await?;
@@ -330,6 +346,13 @@ impl Db {
             .fetch_one(&self.pool)
             .await?
             .try_get(0)?;
+        // Steps beyond the ones this version knows are left alone: rolling back depends on older binaries booting.
+        for (index, table) in MARKERS.iter().enumerate() {
+            let version = i64::try_from(index).unwrap_or(i64::MAX) + 1;
+            if version <= current && !has_table(&self.pool, sqlite, table).await? {
+                return Err(OpenError::Stale { version, table });
+            }
+        }
         for (index, steps) in MIGRATIONS.iter().enumerate() {
             let version = i64::try_from(index).unwrap_or(i64::MAX) + 1;
             if version <= current {
