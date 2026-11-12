@@ -200,8 +200,10 @@ characters and content packs to that account only, exactly as desktop Borealis w
   and saves it as a download. To hand someone all of an account's content, untick every character and choose "All my
   content packs": that is every pack in the account's library, imported homebrew and packs from indexes alike, in
   `Borealis content.borealis`. They open it in desktop Borealis or in their own account with File > Open bundle....
-  The index addresses themselves do not travel, only the packs they installed. The phone apps do not offer it (their
-  web view has no download).
+  Packs from an index keep updating: each records its index, and accepting the bundle in a party account also adds
+  those indexes to that account, so its content updates follow them. Packs the account already had unchanged add
+  nothing, so an index it removed stays removed. Desktop Borealis takes the packs only, as a snapshot. The phone
+  apps do not offer it (their web view has no download).
 - Device-to-device transfer is not offered either: every device of an account reads the same account on the server.
 - A bundle is uploaded as base64, so the largest one is about three quarters of `MAX_UPLOAD_MB`.
 - Uploaded bundles wait in the account's `sync/incoming` folder until they are accepted or closed. At most eight wait

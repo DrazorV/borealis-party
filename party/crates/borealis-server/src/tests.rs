@@ -1744,3 +1744,92 @@ async fn an_account_exports_its_content_as_a_bundle() {
         .await;
     assert_eq!(status, StatusCode::OK, "{out}");
 }
+
+/// A bundle's packs from an index bring that index along: the account that accepts them follows it, so they keep
+/// updating instead of staying a snapshot. Packs the bundle leaves as they were add nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bundle_brings_the_indexes_its_packs_came_from() {
+    use base64::Engine as _;
+    const INDEX: &str = "https://example.invalid/homebrew.index";
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path();
+    let router = router(data.to_path_buf()).await;
+    let alice = sign_up(&router, "index-alice").await;
+    let bob = sign_up(&router, "index-bob").await;
+    let (status, imported) = alice.rpc("import_pack", spell_pack()).await;
+    assert_eq!(status, StatusCode::OK, "{imported}");
+    let pack = imported["pack"]["id"].as_str().unwrap().to_string();
+    // As an index download writes it (content_index.rs): the pack records the index it came from.
+    let meta = data
+        .join("users")
+        .join(&alice.id)
+        .join("library")
+        .join(&pack)
+        .join("pack-meta.json");
+    let mut written: Value =
+        serde_json::from_str(&std::fs::read_to_string(&meta).unwrap()).unwrap();
+    written["indexUrl"] = json!(INDEX);
+    written["sha256"] = json!("00");
+    std::fs::write(&meta, written.to_string()).unwrap();
+
+    let (status, file) = alice
+        .rpc(
+            "bundle_export",
+            json!({ "selection": { "characterIds": [], "packs": "all" } }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{file}");
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(file["dataBase64"].as_str().unwrap())
+        .unwrap();
+    let indexes = |list: &Value| -> Vec<String> {
+        list.as_array()
+            .unwrap_or_else(|| panic!("{list}"))
+            .iter()
+            .map(|i| i["url"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let (_, list) = bob.rpc("list_indexes", json!({})).await;
+    assert!(indexes(&list).is_empty(), "{list}");
+
+    // Accepted: the pack, and the index it came from.
+    let preview = bob.open_bundle("content.borealis", &bytes).await;
+    assert_eq!(actions(&preview), one("pack", "new"), "{preview}");
+    bob.accept_bundle(&preview).await;
+    let (status, list) = bob.rpc("list_indexes", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(indexes(&list), [INDEX], "{list}");
+    let (status, out) = bob
+        .rpc("get_element", json!({ "elementId": "ID_PARTY_SPARK" }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+
+    // Removed on purpose, it stays removed when the same bundle comes again (its pack is identical).
+    let (status, list) = bob.rpc("remove_index", json!({ "url": INDEX })).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(indexes(&list).is_empty(), "{list}");
+    let preview = bob.open_bundle("again.borealis", &bytes).await;
+    assert_eq!(actions(&preview), one("pack", "identical"), "{preview}");
+    bob.accept_bundle(&preview).await;
+    let (_, list) = bob.rpc("list_indexes", json!({})).await;
+    assert!(indexes(&list).is_empty(), "{list}");
+
+    // A homebrew pack (no index) brings none.
+    let carol = sign_up(&router, "index-carol").await;
+    let (status, plain) = carol.rpc("import_pack", spell_pack()).await;
+    assert_eq!(status, StatusCode::OK, "{plain}");
+    let (_, file) = carol
+        .rpc(
+            "bundle_export",
+            json!({ "selection": { "characterIds": [], "packs": "all" } }),
+        )
+        .await;
+    let plain_bytes = base64::engine::general_purpose::STANDARD
+        .decode(file["dataBase64"].as_str().unwrap())
+        .unwrap();
+    let dave = sign_up(&router, "index-dave").await;
+    let preview = dave.open_bundle("plain.borealis", &plain_bytes).await;
+    dave.accept_bundle(&preview).await;
+    let (_, list) = dave.rpc("list_indexes", json!({})).await;
+    assert!(indexes(&list).is_empty(), "{list}");
+}
