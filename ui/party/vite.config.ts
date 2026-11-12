@@ -45,25 +45,34 @@ function partyEntry(): Plugin {
   };
 }
 
+const TITLE = /<title>Borealis<\/title>/;
+
 /**
- * The Borealis mark as the tab icon. Upstream's `index.html` has none, so the links are added here; the files are in
- * `public/` (`favicon.svg` is `.github/readme/favicon.svg`; the PNG and ICO fallbacks are rendered from it).
+ * Upstream's `index.html` with the party's tab title and the Borealis mark as the tab icon (upstream's page has none).
+ * The icon files are in `public/` (`favicon.svg` is `.github/readme/favicon.svg`; the PNG and ICO fallbacks are
+ * rendered from it). The build fails if upstream changes its title, rather than silently shipping the plain one.
  */
-function partyIcons(): Plugin {
+function partyPage(): Plugin {
   const link = (attrs: Record<string, string>) => ({ tag: "link", attrs, injectTo: "head" as const });
   return {
-    name: "party-icons",
-    transformIndexHtml: () => [
-      link({ rel: "icon", href: "/favicon.ico", sizes: "48x48" }),
-      link({ rel: "icon", href: "/favicon.svg", type: "image/svg+xml" }),
-      link({ rel: "icon", href: "/favicon-32.png", type: "image/png", sizes: "32x32" }),
-      link({ rel: "apple-touch-icon", href: "/apple-touch-icon.png" }),
-    ],
+    name: "party-page",
+    transformIndexHtml(html) {
+      if (!TITLE.test(html)) throw new Error("party-page: upstream index.html no longer has <title>Borealis</title>");
+      return {
+        html: html.replace(TITLE, "<title>Borealis Party</title>"),
+        tags: [
+          link({ rel: "icon", href: "/favicon.ico", sizes: "48x48" }),
+          link({ rel: "icon", href: "/favicon.svg", type: "image/svg+xml" }),
+          link({ rel: "icon", href: "/favicon-32.png", type: "image/png", sizes: "32x32" }),
+          link({ rel: "apple-touch-icon", href: "/apple-touch-icon.png" }),
+        ],
+      };
+    },
   };
 }
 
 export default mergeConfig(upstream, defineConfig({
-  plugins: [partyEntry(), partyIcons()],
+  plugins: [partyEntry(), partyPage()],
   publicDir: "party/public",
   build: { outDir: "party/dist", emptyOutDir: true },
 }));
