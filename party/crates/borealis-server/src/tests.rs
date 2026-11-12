@@ -1230,6 +1230,8 @@ async fn sessions_slide(router: &Router, db: &Db) {
 
     // Last used more than a day ago: 90 days from now again, for any signed-in request.
     set(now() + SESSION_SECONDS - RENEW_SECONDS - 60).await;
+    // Taken before the request, so however long it takes, the renewed end is at least this far off.
+    let start = now();
     let (status, _) = send(
         router,
         Some(&user.token),
@@ -1239,12 +1241,13 @@ async fn sessions_slide(router: &Router, db: &Db) {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(ends().await >= now() + SESSION_SECONDS - 5);
+    assert!(ends().await >= start + SESSION_SECONDS);
 
     // Nearly over and then used: renewed.
     set(now() + 10).await;
+    let start = now();
     assert_eq!(me().await, StatusCode::OK);
-    assert!(ends().await >= now() + SESSION_SECONDS - 5);
+    assert!(ends().await >= start + SESSION_SECONDS);
 
     // Over: refused, and not brought back.
     set(now() - 1).await;
