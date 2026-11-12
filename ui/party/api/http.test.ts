@@ -31,9 +31,5 @@ describe("shareSheet on the phones", () => {
     expect(out).toEqual({ fileName: "Hero.pdf", mime: "application/pdf", shared: false, dataBase64: "JVBERi0=" });
   });
 
-  it("Android: not offered, since its web view has no share sheet", async () => {
-    setPhoneOsForTests("android");
-    await expect(createHttpApi(session).shareSheet({ characterId: "hero-1" } as never)).rejects.toMatchObject({ code: "not_available" });
-    expect(paths).toEqual([]);
-  });
+  // Android makes the PDF on the device: overrides/android.test.ts and export/androidSheet.test.ts.
 });

@@ -202,8 +202,13 @@ characters and content packs to that account only, exactly as desktop Borealis w
   `Borealis content.borealis`. They open it in desktop Borealis or in their own account with File > Open bundle....
   Packs from an index keep updating: each records its index, and accepting the bundle in a party account also adds
   those indexes to that account, so its content updates follow them. Packs the account already had unchanged add
-  nothing, so an index it removed stays removed. Desktop Borealis takes the packs only, as a snapshot. The phone
-  apps do not offer it (their web view has no download).
+  nothing, so an index it removed stays removed. Desktop Borealis takes the packs only, as a snapshot. The iOS app
+  offers it as More > Share as a file, through the share sheet, up to 48 MiB per bundle. The Android app does not
+  offer it: its web view can't download or share the file and its own backend has no bundle commands, so Android
+  will send bundles through the server instead (share codes, planned). The export dialog marks packs whose
+  pack info says they are not redistributable; it does not leave them out.
+- The character sheet PDF on Android (Save and Share) is made by the app from its own copy of the character, after a
+  sync, and goes to the system save picker or share sheet.
 - Device-to-device transfer is not offered either: every device of an account reads the same account on the server.
 - A bundle is uploaded as base64, so the largest one is about three quarters of `MAX_UPLOAD_MB`.
 - Uploaded bundles wait in the account's `sync/incoming` folder until they are accepted or closed. At most eight wait
