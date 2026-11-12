@@ -314,7 +314,8 @@ async function main() {
   await screenshot("07-json-routed");
 
   // 5. A .borealis made by the server from the imported character: Android hands it over with the other files
-  //    (`take_opened_files`, no bundle queue without device-link), so it opens upstream's Open bundle window.
+  //    (`take_opened_files`, no bundle queue without device-link), so it opens upstream's Open bundle window, through
+  //    the Import screen (and its content notice).
   const list = await api(token, "list_characters");
   const bundle = await api(token, "bundle_export", { selection: { characterIds: [list[0].id], packs: "none" } });
   const bundleFile = join(out, "Smoke-Party.borealis");
@@ -325,7 +326,16 @@ async function main() {
   check("a .borealis reaches the page (the files queue) and asks first", !!asked);
   if (asked) {
     await answerAsk("Smoke-Party.borealis", "Import");
-    const shown = await until("the Open bundle window", async () => (await smoke("dialogs()")).find((d) => d.text.startsWith("Open bundle") && d.text.includes("Smoke-Party.borealis")), 30000).catch(() => null);
+    // Since the unified imports the file goes through the Import screen, which shows upstream's content notice first
+    // unless the account turned it off; continue past it.
+    const shown = await until("the Open bundle window", async () => {
+      const open = await smoke("dialogs()");
+      if (open.some((d) => d.text.startsWith("Import only content you own"))) {
+        await smoke("clickIn('Import only content you own', 'I understand, continue')");
+        return null;
+      }
+      return open.find((d) => d.text.startsWith("Open bundle") && d.text.includes("Smoke-Party.borealis"));
+    }, 30000).catch(() => null);
     check("the .borealis opens the Open bundle window (staged on the server)", !!shown, shown ? shown.text.split(/\n+/).slice(1, 3).join(" / ") : "");
     await screenshot("08-bundle-window");
     await smoke("clickIn('Open bundle', 'Cancel')");
