@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api } from "../../src/api/contract";
+import { openImport, resetDoor, sendFiles, sendLink } from "../import/door";
 import { AURORA_CHARACTER, AURORA_PACK, BUNDLE_ZIP, fileOf, FIVETOOLS_HOMEBREW, FIVETOOLS_ZIP } from "../import/testFiles";
 
 /** The commands the screen sends, by name, with their arguments. */
@@ -91,6 +92,7 @@ const names = () => calls.map((c) => c.name);
 const row = (title: string | RegExp) => screen.getByText(title, { selector: ".party-import-name" }).closest("li")!;
 
 beforeEach(() => {
+  resetDoor();
   calls.length = 0;
   Object.assign(state, { packs: [], urls: [], indexes: [], refuse: null, confirm: "confirm" });
   api = fakeApi();
@@ -213,5 +215,54 @@ describe("Get the latest 5etools data", () => {
     expect(names()).toContain("update5etoolsUrl");
     expect(names()).not.toContain("stage5etoolsUrl");
     expect(within(row("Latest 5etools data")).getByRole("status").textContent).toBe("Everything is up to date.");
+  });
+});
+
+describe("from the other doors (../import/door.ts)", () => {
+  it("imports files handed over before the screen opened", async () => {
+    sendFiles([fileOf("Ana.dnd5e", AURORA_CHARACTER)]);
+    render(<ImportHub />);
+    await settle();
+    expect(within(row("Ana.dnd5e")).getByRole("status").textContent).toBe("Imported Ana.");
+  });
+
+  it("imports files handed over while it shows, and a pick that came while busy after the one before", async () => {
+    render(<ImportHub />);
+    let release: () => void = () => undefined;
+    const real = api.importCharacter;
+    api.importCharacter = (async (args: { fileName: string }) => { await new Promise<void>((r) => { release = r; }); return real(args as never); }) as never;
+    act(() => sendFiles([fileOf("Ana.dnd5e", AURORA_CHARACTER)]));
+    await settle();
+    act(() => sendFiles([fileOf("Bo.dnd5e", AURORA_CHARACTER)]));
+    await settle();
+    expect(screen.queryByText("Bo.dnd5e")).toBeNull();
+    api.importCharacter = real;
+    release();
+    await settle();
+    await settle();
+    expect(within(row("Ana.dnd5e")).getByRole("status").textContent).toBe("Imported Ana.");
+    expect(within(row("Bo.dnd5e")).getByRole("status").textContent).toBe("Imported Bo.");
+  });
+
+  it("runs a link as what its form was for: an index", async () => {
+    sendLink({ url: "example.com/list", kind: "index" });
+    render(<ImportHub />);
+    await settle();
+    expect(calls.find((c) => c.name === "addIndex")?.args).toEqual({ url: "https://example.com/list" });
+  });
+
+  it("runs a link as what its form was for: 5etools-format data", async () => {
+    sendLink({ url: "https://example.com/list.index", kind: "fivetools" });
+    render(<ImportHub />);
+    await settle();
+    expect(calls.find((c) => c.name === "stage5etoolsUrl")?.args).toEqual({ url: "https://example.com/list.index" });
+    expect(names()).not.toContain("addIndex");
+  });
+
+  it("puts the cursor in the link field when asked", async () => {
+    render(<ImportHub />);
+    act(() => openImport("link"));
+    await settle();
+    expect(document.activeElement).toBe(screen.getByLabelText("Link to import"));
   });
 });
