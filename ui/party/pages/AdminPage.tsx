@@ -220,7 +220,7 @@ function ResetPassword({ account, onClose, onDone }: { account: Account; onClose
       <form className="party-form" onSubmit={(e) => void submit(e)}>
         <Check label="Set a temporary password" description="You tell them this password. Without one, they keep their current password but must change it at their next sign-in." checked={temporary} onChange={(e) => setTemporary(e.target.checked)} />
         {temporary && (
-          <input className="aur-text" type="text" aria-label="Temporary password" placeholder="Temporary password (8 or more characters)" autoComplete="off" spellCheck={false} value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required />
+          <input className="input" type="text" aria-label="Temporary password" placeholder="Temporary password (8 or more characters)" autoComplete="off" spellCheck={false} value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required />
         )}
         <p className="muted">Either way, they are signed out on every device now.</p>
       </form>

@@ -1,4 +1,5 @@
 import { type FormEvent, useState } from "react";
+import { usePhone } from "../../src/lib/phone";
 import { changePassword } from "../api/party";
 import { loadSession, updateUser } from "../api/session";
 import { useSignOut } from "./SignOut";
@@ -13,6 +14,8 @@ const message = (e: unknown): string => (e as { message?: string }).message ?? "
 export function ChangePasswordPage() {
   const session = loadSession();
   const leave = useSignOut();
+  // On a phone a focused field opens the keyboard at once (ConnectPage).
+  const focusFirst = !usePhone();
   const [current, setCurrent] = useState("");
   const [password, setPassword] = useState("");
   const [again, setAgain] = useState("");
@@ -44,15 +47,15 @@ export function ChangePasswordPage() {
         <p className="muted">An admin asked {session?.user.username ?? "you"} to choose a new password before going on.</p>
         <label>
           Current or temporary password
-          <input className="aur-text" type="password" autoFocus autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} required />
+          <input className="input" type="password" autoFocus={focusFirst} autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} required />
         </label>
         <label>
           New password
-          <input className="aur-text" type="password" autoComplete="new-password" minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <input className="input" type="password" autoComplete="new-password" minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} required />
         </label>
         <label>
           New password again
-          <input className="aur-text" type="password" autoComplete="new-password" minLength={8} value={again} onChange={(e) => setAgain(e.target.value)} required />
+          <input className="input" type="password" autoComplete="new-password" minLength={8} value={again} onChange={(e) => setAgain(e.target.value)} required />
         </label>
         <button className="btn primary" disabled={busy}>Save password</button>
         <button type="button" className="btn" onClick={leave.start} disabled={leave.busy}>Sign out</button>

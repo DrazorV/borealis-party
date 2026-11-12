@@ -46,9 +46,13 @@ export async function open(page: Page, route: string): Promise<void> {
   await expect(page.locator("main, .party-connect").first()).toBeVisible({ timeout: 30_000 });
 }
 
-/** Wait for upstream's window with the account bar, which a signed-in page always has. */
+/**
+ * Wait for upstream's window with the account bar, which a signed-in page always has. On a phone the bar shows only
+ * the Sync chip (plan D10), which a browser has none of, so it is in the page but not on screen.
+ */
 export async function signedInShell(page: Page): Promise<void> {
-  await expect(page.locator(".party-bar")).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".party-bar")).toBeAttached({ timeout: 30_000 });
+  await expect(page.locator(".aur-window").first()).toBeVisible({ timeout: 30_000 });
 }
 
 /** Record a glitch without failing the test (party/ui-tests/findings.md lists them after the run). */

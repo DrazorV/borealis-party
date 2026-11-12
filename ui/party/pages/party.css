@@ -16,11 +16,20 @@
 .party-bar .party-bar-name, .party-bar .party-sync-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .party-bar .party-bar-name { flex-shrink: 0; max-width: 35%; }
 .party-bar .spacer, .party-member-head .spacer, .party-line .spacer, .party-inline .spacer { flex: 1; }
-.party-connect { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; background: var(--bg); color: var(--text, inherit); }
-.party-connect-card { display: flex; flex-direction: column; gap: var(--sp-3); width: 100%; max-width: 360px; padding: var(--sp-5); }
+/*
+ * The sign-in and new-password screens scroll themselves (base.css never lets the window scroll), so the card can be
+ * reached in landscape and above the keyboard: the apps keep the page's size and report the keyboard as `--kb`, which
+ * pads the bottom. `margin: auto` centres the card while it fits and lets its top scroll into view when it doesn't.
+ */
+.party-connect {
+  height: 100vh; height: 100dvh; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  display: flex; box-sizing: border-box; background: var(--bg); color: var(--text, inherit);
+  padding: max(16px, var(--safe-t, 0px)) max(16px, var(--safe-r, 0px)) max(16px, var(--safe-b, 0px), calc(var(--kb, 0px) + 16px)) max(16px, var(--safe-l, 0px));
+}
+.party-connect-card { display: flex; flex-direction: column; gap: var(--sp-3); width: 100%; max-width: 360px; padding: var(--sp-5); margin: auto; box-sizing: border-box; }
 .party-connect-card h1 { margin: 0; font-size: var(--fs-xl); }
 .party-connect-card label { display: flex; flex-direction: column; gap: var(--sp-1); }
-.party-connect-card input.aur-text { min-height: 36px; padding: 0 var(--sp-2); font-size: 16px; box-sizing: border-box; }
+.party-connect-card .input { font-size: 16px; }
 .party-connect-note { margin: 0; font-size: var(--fs-sm); }
 .party-app-offer { align-items: flex-start; font-size: var(--fs-sm); }
 .party-bar-host > .party-app-offer { margin: var(--sp-2) var(--sp-3); }
@@ -65,20 +74,32 @@ html.phone:root {
   --ph-t-title2: calc(20 * var(--ph-rem));
   --ph-t-name: calc(18 * var(--ph-rem));
   --ph-gutter: 12px;
-  --ph-hit: 40px;
+  /* Plan D9: smaller type, but full-size tap targets: 44 px (Apple's 44 pt) here, 48 px (Android's 48 dp) below. */
+  --ph-hit: 44px;
   --ph-row: 44px;
-  --ph-bar: 40px;
+  --ph-bar: 44px;
   --ph-tabbar: 46px;
 }
 html.phone.android:root {
   --ph-t-body: calc(15 * var(--ph-rem));
   --ph-t-tab: calc(11 * var(--ph-rem));
-  --ph-hit: 44px;
+  --ph-hit: 48px;
   --ph-row: 48px;
   --ph-bar: 50px;
   --ph-tabbar: 58px;
 }
-/* The account bar on a phone: the buttons keep their whole label (never "Sync…" for "Synced"); the name gives way first. */
-html.phone .party-bar { gap: var(--sp-1); padding: var(--sp-1) var(--sp-2) var(--sp-1) var(--ph-gutter); }
-html.phone .party-bar > .btn { flex-shrink: 0; min-height: 36px; padding: 0 10px; }
-html.phone .party-bar .party-bar-name { flex-shrink: 1; max-width: none; }
+/*
+ * The account bar on a phone (plan D10): only the Sync chip, which keeps its whole label (never "Sync…" for
+ * "Synced"); Account, Admin and Sign out are rows on the More page. With no chip (a browser keeps no copy) there is
+ * no bar, and none while the keyboard is open.
+ */
+html.phone .party-bar { gap: var(--sp-1); padding: 2px var(--sp-2) 2px var(--ph-gutter); }
+html.phone .party-bar > .btn { flex-shrink: 0; min-height: var(--ph-hit); padding: 0 12px; }
+html.phone .party-bar .party-bar-name { display: none; }
+html.phone .party-bar:not(:has(> .btn)), html.phone.kb-open .party-bar { display: none; }
+html.phone .party-more { margin-bottom: 10px; }
+html.phone .party-more .v5-row:disabled { opacity: 0.6; }
+/* Party pages' own controls at the phone's tap size (D9): the admin page's tabs, and the app note's text link. */
+html.phone .party-admin [role="tab"] { min-height: var(--ph-hit); display: inline-flex; align-items: center; }
+html.phone .party .segmented button { min-width: var(--ph-hit); }
+html.phone .party-app-others { display: inline-flex; align-items: center; min-height: var(--ph-hit); }
