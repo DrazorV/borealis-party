@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenedFile } from "../../../src/api/contract";
 import { createHttpApi } from "../http";
 import type { ServerSession } from "../session";
-import { ASK_TITLE, describeFiles, noticeOffline, OFFLINE_TITLE, openedDeps, resetOpened, takeOpened, type OpenedDeps } from "./opened";
+import { resetDoor, setImportNavigate, takeInbox } from "../../import/door";
+import { ASK_TITLE, describeFiles, drainOpened, noticeOffline, OFFLINE_TITLE, openedDeps, resetOpened, takeOpened, watchOpened, type OpenedDeps } from "./opened";
 
 const session: ServerSession = {
   baseUrl: "http://192.168.1.20:8787", token: "t",
@@ -12,20 +13,21 @@ const session: ServerSession = {
 
 const file = (fileName: string): OpenedFile => ({ fileName, contentBase64: "QQ==" });
 
-function deps(files: OpenedFile[], answer = "import"): OpenedDeps & { asked: string[]; bundles: string[] } {
+function deps(files: OpenedFile[], answer = "import"): OpenedDeps & { asked: string[]; handed: string[][] } {
   const asked: string[] = [];
-  const bundles: string[] = [];
+  const handed: string[][] = [];
   return {
-    asked, bundles,
+    asked, handed,
     inApp: () => true,
     take: async () => files.splice(0),
     ask: async (title, message) => { asked.push(`${title}: ${String(message)}`); return answer; },
-    openBundle: async (_s, f) => { bundles.push(f.fileName); },
+    toImport: (list) => { handed.push(list.map((f) => f.fileName)); },
   };
 }
 
 afterEach(() => {
   resetOpened();
+  resetDoor();
   document.documentElement.classList.remove("party-offline-mode");
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   document.body.innerHTML = "";
@@ -53,19 +55,19 @@ describe("files opened with the app", () => {
     expect(browser.asked).toEqual([]);
   });
 
-  it("a .borealis opens the Open bundle window instead of going to the importers", async () => {
+  it("a .borealis goes to the Import screen with the other files (it opens the Open bundle window there)", async () => {
     const d = deps([file("Party.borealis"), file("Hero.dnd5e")]);
-    expect(await takeOpened(session, d)).toEqual([file("Hero.dnd5e")]);
-    expect(d.bundles).toEqual(["Party.borealis"]);
+    await drainOpened(session, d);
+    expect(d.handed).toEqual([["Party.borealis", "Hero.dnd5e"]]);
   });
 
-  it("a bundle that can't be opened says so in an app dialog", async () => {
-    const d = { ...deps([file("Big.borealis")]), openBundle: async () => { throw { code: "too_large", message: "Too big." }; } };
-    expect(await takeOpened(session, d)).toEqual([]);
-    expect(d.asked[1]).toBe("Big.borealis was not opened: Too big.");
+  it("Cancel hands nothing to the Import screen", async () => {
+    const d = deps([file("Hero.dnd5e")], "cancel");
+    await drainOpened(session, d);
+    expect(d.handed).toEqual([]);
   });
 
-  it("files no importer reads pass through unasked, so upstream says it can't import them", async () => {
+  it("files no importer reads pass through unasked, so the Import screen says it can't import them", async () => {
     const d = deps([file("notes.pdf")]);
     expect(await takeOpened(session, d)).toEqual([file("notes.pdf")]);
     expect(d.asked).toEqual([]);
@@ -97,15 +99,29 @@ describe("through the page's API", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("takes the device's queue (take_opened_files) and asks in an app dialog", async () => {
-    const api = createHttpApi(session);
-    const taken = api.takeOpenedFiles();
+  it("upstream's GlobalImport gets none: the party takes the queue itself", async () => {
+    expect(await createHttpApi(session).takeOpenedFiles()).toEqual([]);
+    expect(invoked).toEqual([]);
+  });
+
+  it("takes the device's queue (take_opened_files), asks in an app dialog, then opens the Import screen with it", async () => {
+    const went: string[] = [];
+    setImportNavigate((to) => went.push(to));
+    const stop = watchOpened(session);
     const dialog = await screen.findByRole("dialog");
     expect(dialog.textContent).toContain("Import Hero.dnd5e into alice?");
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
-    expect(await taken).toEqual([file("Hero.dnd5e")]);
-    expect(invoked).toEqual(["take_opened_files"]);
+    await waitFor(() => expect(went).toEqual(["/import-files"]));
+    expect(takeInbox().files.map((f) => f.name)).toEqual(["Hero.dnd5e"]);
+    expect(invoked.filter((c) => !c.startsWith("plugin:"))).toEqual(["take_opened_files"]);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // Nudged again (Android's activity): asked again for the new file.
+    queued.push(file("Second.dnd5e"));
+    window.dispatchEvent(new Event("borealis-open-file"));
+    expect((await screen.findByRole("dialog")).textContent).toContain("Second.dnd5e");
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    await waitFor(() => expect(takeInbox().files.map((f) => f.name)).toEqual(["Second.dnd5e"]));
+    stop();
   });
 
   it("never asks the device for bundles: take_opened_bundles is not in the apps", async () => {
@@ -121,16 +137,19 @@ describe("through the page's API", () => {
       asked.push(String(message));
       return new Promise((done) => { release = done; });
     };
-    const api = createHttpApi(session);
-    const first = api.takeOpenedFiles();
-    const second = api.takeOpenedFiles();
+    const handed: string[][] = [];
+    openedDeps.toImport = (list) => { handed.push(list.map((f) => f.fileName)); };
+    const first = drainOpened(session);
+    const second = drainOpened(session);
     await waitFor(() => expect(asked).toHaveLength(1));
     queued.push(file("b.dnd5e"));
     release("import");
-    expect(await first).toEqual([file("a.dnd5e")]);
+    await first;
+    expect(handed).toEqual([["a.dnd5e"]]);
     await waitFor(() => expect(asked).toHaveLength(2));
     release("cancel");
-    expect(await second).toEqual([]);
+    await second;
+    expect(handed).toEqual([["a.dnd5e"]]);
   });
 });
 

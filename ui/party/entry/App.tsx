@@ -1,9 +1,10 @@
 import { useEffect } from "react";
-import { Navigate, Route, Routes } from "react-router";
+import { Navigate, Route, Routes, useNavigate } from "react-router";
 import { App as UpstreamApp } from "../../src/App";
 import { AppShell } from "../../src/components/shell/AppShell";
 import { isTauri } from "../../src/lib/tauri";
 import { isOffline } from "../api/connectivity";
+import { watchOpened } from "../api/overrides/opened";
 import { fetchMe } from "../api/party";
 import { loadSession, updateUser } from "../api/session";
 import { AccountBar } from "../pages/AccountBar";
@@ -11,10 +12,14 @@ import { AccountPage } from "../pages/AccountPage";
 import { AdminPage } from "../pages/AdminPage";
 import { ImportHub } from "../pages/ImportHub";
 import { OfflinePage } from "../pages/OfflineBanner";
+import { setImportNavigate } from "../import/door";
+import { SharePage } from "../pages/SharePage";
+import { ShareReceivePage } from "../pages/ShareReceivePage";
 import { followReplaced } from "../sync/replaced";
 import { startSync } from "../sync/runner";
 import { hideUnofferedRows } from "./hideTransfer";
 import { startPhoneBrowser } from "./phoneBrowser";
+import { unifyImports } from "./unifyImports";
 import "../pages/party.css";
 
 // A browser tab has no window buttons to offer (party.css).
@@ -22,12 +27,24 @@ document.documentElement.classList.toggle("party-browser", !isTauri());
 hideUnofferedRows();
 // Phone browsers get the apps' phone layer and a Back that closes the top sheet (plan M4).
 startPhoneBrowser();
+// Every import button, menu item, drop and "Open with" leads to the one Import screen (0.1.5).
+unifyImports();
 
 /** Upstream's app with the account bar above it and the account and admin pages in front of it. */
 export function App() {
   const admin = Boolean(loadSession()?.user.admin);
   // Offline (the apps without a server) the page plays from the device's copy until it reloads online.
   const offline = isOffline();
+  const navigate = useNavigate();
+  useEffect(() => {
+    setImportNavigate((to) => void navigate(to));
+    return () => setImportNavigate(null);
+  }, [navigate]);
+  // Files opened with the app go to the Import screen (online; offline they wait in the device's queue).
+  useEffect(() => {
+    const session = loadSession();
+    return offline || !session ? undefined : watchOpened(session);
+  }, [offline]);
   useEffect(() => {
     if (offline) return;
     // An admin may have changed this account since it signed in on this device.
@@ -49,6 +66,9 @@ export function App() {
         <Route path="/admin" element={admin ? <AppShell>{offline ? <OfflinePage /> : <AdminPage />}</AppShell> : <Navigate to="/" replace />} />
         {/* One Import screen for every kind of file and link (plan I9). */}
         <Route path="/import-files" element={<AppShell>{offline ? <OfflinePage /> : <ImportHub />}</AppShell>} />
+        {/* Share codes (plan E4): send from any device with no file, and receive by code or link. */}
+        <Route path="/share" element={<AppShell>{offline ? <OfflinePage /> : <SharePage />}</AppShell>} />
+        <Route path="/share/receive/:code?" element={<AppShell>{offline ? <OfflinePage /> : <ShareReceivePage />}</AppShell>} />
         {/* Notes read a folder on the device, which a server doesn't offer. */}
         <Route path="/notes" element={<Navigate to="/" replace />} />
         <Route path="*" element={<UpstreamApp />} />

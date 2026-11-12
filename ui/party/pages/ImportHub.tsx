@@ -1,5 +1,5 @@
-import { type DragEvent, type FormEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { type Navigator, type To, UNSAFE_NavigationContext } from "react-router";
+import { type FormEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { type Navigator, type To, UNSAFE_NavigationContext, useNavigate } from "react-router";
 import type { Api, ContentProgress, FiveToolsImportReport, FiveToolsSource, ImportReport } from "../../src/api/contract";
 import { Button } from "../../src/components/Button";
 import { Card } from "../../src/components/Card";
@@ -19,8 +19,10 @@ import { startImportPreview, useImportPreviewState } from "../../src/state/impor
 import { errorMessage } from "../../src/state/useAsync";
 import { openBundleFromImport } from "../api/bundles";
 import { loadSession } from "../api/session";
+import { inboxEmpty, onInbox, sendFiles, takeFocus, takeInbox } from "../import/door";
 import { KIND_LABEL, needsNotice, planImport, sentence } from "../import/plan";
 import { classifyLink, LATEST_5ETOOLS_URL, type LinkKind } from "../import/sniff";
+import { receiveRoute } from "./ShareReceivePage";
 import "./party.css";
 
 /**
@@ -33,6 +35,9 @@ import "./party.css";
  * - 5etools-format data (.zip, .json) and 5etools GitHub links: `stage_5etools_*`, then the books to import.
  * Index links go to `add_index` and `update_indexes`. Each file and link gets a row in one list. Failures keep the
  * server's own words (a refused private address, a too-large file as ../api/overrides/errors.ts words it).
+ *
+ * Every other place that starts an import (upstream's buttons and menu items, drops on the window, "Open with") opens
+ * this screen through ../import/door.ts and hands over its files or link, which are taken here one pick at a time.
  */
 
 type Tone = "working" | "success" | "warning" | "error" | "info";
@@ -132,17 +137,26 @@ function StagedBooks({ api, staged, onDone }: { api: Api; staged: Staged; onDone
   );
 }
 
+/** The 5etools card, which a door can ask to show. */
+const FIVETOOLS_CARD = "party-import-5etools";
+
 export function ImportHub() {
   const api = useApi();
   const confirm = useConfirm();
   const notice = useImportNotice();
   const previewClosed = usePreviewOutcome();
   const fileRef = useRef<HTMLInputElement>(null);
+  const linkRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const nextId = useRef(1);
   const [rows, setRows] = useState<Row[]>([]);
   const [link, setLink] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [shareCode, setShareCode] = useState("");
+  const nav = useNavigate();
+  const [busy, setBusyState] = useState(false);
+  // Read by work that outlives a render (the inbox is emptied in a loop).
+  const busyRef = useRef(false);
+  const setBusy = (b: boolean) => { busyRef.current = b; setBusyState(b); };
   const [progress, setProgress] = useState<ContentProgress | null>(null);
   useEffect(() => api.subscribe("import5etools:progress", setProgress), [api]);
   useEffect(() => api.subscribe("content:progress", setProgress), [api]);
@@ -180,7 +194,7 @@ export function ImportHub() {
   };
 
   const importFiles = async (files: File[]) => {
-    if (files.length === 0 || busy) return;
+    if (files.length === 0 || busyRef.current) return;
     setBusy(true);
     const session = loadSession();
     try {
@@ -311,14 +325,42 @@ export function ImportHub() {
     await take("fivetools", id, LATEST_5ETOOLS_URL);
   };
 
-  const onDrop = (e: DragEvent) => {
-    if (!Array.from(e.dataTransfer?.types ?? []).includes("Files")) return;
-    e.preventDefault();
-    void importFiles(Array.from(e.dataTransfer.files));
+  /** What the other doors handed over (../import/door.ts), one pick at a time. */
+  const draining = useRef(false);
+  const drain = async () => {
+    if (draining.current || busyRef.current) return;
+    draining.current = true;
+    try {
+      while (!inboxEmpty()) {
+        const inbox = takeInbox();
+        await importFiles(inbox.files);
+        for (const l of inbox.links) {
+          const parsed = classifyLink(l.url);
+          if (!parsed) { add({ title: l.url, kind: "Link", tone: "error", message: "That is not a web address. Paste a link that starts with https://." }); continue; }
+          const id = add({ title: parsed.url, kind: l.kind === "index" ? "Index" : "5etools-format data", tone: "working", message: "Waiting…" });
+          await take(l.kind, id, parsed.url);
+        }
+      }
+    } finally { draining.current = false; }
   };
+  /** The part of the screen the door asked for. */
+  const showFocus = () => {
+    const focus = takeFocus();
+    if (focus === "link") { linkRef.current?.scrollIntoView?.({ block: "center" }); linkRef.current?.focus(); }
+    else if (focus === "fivetools") document.getElementById(FIVETOOLS_CARD)?.scrollIntoView?.({ block: "start" });
+  };
+  const arrived = useRef(() => undefined as void);
+  arrived.current = () => { showFocus(); void drain(); };
+  useEffect(() => {
+    arrived.current();
+    return onInbox(() => arrived.current());
+  }, []);
+  // A pick that waited for the one before it.
+  useEffect(() => { if (!busy) void drain(); }, [busy]);
 
   return (
-    <div className="party party-import" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+    // Drops anywhere on the page come in through the inbox (../entry/unifyImports.ts).
+    <div className="party party-import">
       <Card title="Import">
         <p className="muted">Characters (.dnd5e), Borealis bundles (.borealis), Aurora content (.xml, .index or .zip) and 5etools-format data (.zip or .json). Choose several at once: each file goes where it belongs.</p>
         <div className="party-import-actions">
@@ -326,17 +368,25 @@ export function ImportHub() {
         </div>
         {/* No accept filter: Android's web view fails on extensions it has no type for, and the files are sniffed anyway. */}
         <input ref={fileRef} type="file" multiple hidden aria-label="Choose files to import"
-          onChange={(e) => { const files = Array.from(e.target.files ?? []); e.target.value = ""; void importFiles(files); }} />
+          onChange={(e) => { const files = Array.from(e.target.files ?? []); e.target.value = ""; sendFiles(files); }} />
+      </Card>
+      <Card title="Share code">
+        <form className="party-import-link" onSubmit={(e) => { e.preventDefault(); if (shareCode.trim()) nav(receiveRoute(shareCode.trim())); }}>
+          <input className="input" autoCapitalize="characters" autoCorrect="off" autoComplete="off" spellCheck={false}
+            aria-label="Share code to enter" placeholder="ABCD-EFGH-JKMN-PQRS" value={shareCode} onChange={(e) => setShareCode(e.target.value)} />
+          <Button type="submit" icon="download" disabled={!shareCode.trim()}>Enter a share code</Button>
+        </form>
+        <p className="muted small">Another player's characters and content, from a code they made with Share with a code.</p>
       </Card>
       <Card title="Paste a link">
         <form className="party-import-link" onSubmit={(e) => void submitLink(e)}>
-          <input className="input" type="url" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+          <input ref={linkRef} className="input" type="url" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false}
             aria-label="Link to import" placeholder="https://" value={link} onChange={(e) => setLink(e.target.value)} />
           <Button type="submit" variant="primary" icon="download" disabled={busy || !link.trim()}>Import</Button>
         </form>
         <p className="muted small">An Aurora or Borealis .index file, or a GitHub repository (or https:// data/ folder) of 5etools-format data. The server downloads it.</p>
       </Card>
-      <Card title="5etools data">
+      <Card title="5etools data" id={FIVETOOLS_CARD}>
         <p className="muted">Download the newest 5etools-format data from its public GitHub repository, then choose the books. Next time it re-imports the same books when they changed. Only use content you are entitled to use.</p>
         <div className="party-import-actions">
           <Button icon="download" disabled={busy} onClick={() => void latest()}>Get the latest 5etools data</Button>

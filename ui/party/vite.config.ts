@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, mergeConfig, type Plugin } from "vite";
 import upstream from "../vite.config";
+import { cargoVersion } from "./version";
 
 const local = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
@@ -71,8 +73,12 @@ function partyPage(): Plugin {
   };
 }
 
+/** The party version (./version.ts), shown where upstream shows its own. The Docker build copies party/Cargo.toml for it. */
+export const PARTY_VERSION = cargoVersion(readFileSync(local("../../party/Cargo.toml"), "utf8"));
+
 export default mergeConfig(upstream, defineConfig({
   plugins: [partyEntry(), partyPage()],
+  define: { __APP_VERSION__: JSON.stringify(PARTY_VERSION) },
   publicDir: "party/public",
   build: { outDir: "party/dist", emptyOutDir: true },
 }));
