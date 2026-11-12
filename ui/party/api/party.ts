@@ -165,4 +165,23 @@ export const signOutEverywhere = (id: string) => call<{ ended: number }>("POST",
 export const deleteAccount = (id: string) => call<void>("DELETE", `/api/admin/accounts/${id}`);
 export const adminSettings = () => call<AdminSettings>("GET", "/api/admin/settings");
 export const saveAdminSettings = (changes: Partial<SignUpSettings>) => call<AdminSettings>("PATCH", "/api/admin/settings", changes);
+/** Admin › Settings › Trusted proxies, with how the server sees the admin's own request. */
+export interface ProxySettings {
+  /** In force. */
+  proxies: string[];
+  /** Saved on the admin page, from config.toml, or neither. */
+  source: "admin" | "config" | "none";
+  /** `server.trusted_proxies` in config.toml or the environment. */
+  configFile: string[];
+  /** The address that connected for this request. */
+  peer: string;
+  peerTrusted: boolean;
+  headers: { cfConnectingIp: string | null; xForwardedFor: string | null };
+  /** The client the server takes this request to come from. */
+  clientIp: string;
+}
+
+export const adminProxies = () => call<ProxySettings>("GET", "/api/admin/proxies");
+/** Saves the list, or with null goes back to config.toml. */
+export const saveAdminProxies = (proxies: string[] | null) => call<ProxySettings>("POST", "/api/admin/proxies", { proxies });
 export const adminActivity = (page: number, perPage: number) => call<Paged<ActivityEntry>>("GET", `/api/admin/activity${query({ page, perPage })}`);

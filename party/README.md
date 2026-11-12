@@ -77,8 +77,8 @@ Put passwords in variables rather than in the file.
 | `BOREALIS__INITIAL_ADMIN__EMAIL` | | Optional |
 | `BOREALIS__LOG__LEVEL` | `info` | `error` to `trace` |
 
-`OPEN_REGISTRATION` and `REQUIRE_APPROVAL` can also be changed on the admin page while the server runs. What is saved
-there is kept in the database and wins over the file and the variables.
+`OPEN_REGISTRATION`, `REQUIRE_APPROVAL` and `TRUSTED_PROXIES` can also be changed on the admin page while the server
+runs. What is saved there is kept in the database and wins over the file and the variables.
 
 The config folder itself is `/config` in the container. For a direct install it is set by `BOREALIS_CONFIG_DIR` (one
 underscore), which the service file sets to `/var/lib/borealis-party`.
@@ -108,7 +108,8 @@ shows statistics, the sign-up settings and an activity log of sign-ups, sign-ins
 newest 10,000 entries are kept.
 
 Sign-ups are limited to 10 an hour per client address, and failed sign-ins to 10 per five minutes per address and name.
-Behind a reverse proxy every client has the proxy's address, so these limits are then shared.
+Behind a reverse proxy every client has the proxy's address, so these limits are then shared until the proxy is
+trusted (Admin > Settings > Trusted proxies, see [Security and proxies](#security-and-proxies)).
 
 ### Moving from SQLite to PostgreSQL
 
@@ -299,31 +300,40 @@ Sign-up attempts are limited per client address, and failed sign-ins per client 
 proxy every request comes from the proxy, so without the setting below there is one sign-up limit for everyone, and
 ten wrong passwords from anyone lock that user name for everyone for five minutes.
 
-`server.trusted_proxies` (`BOREALIS__SERVER__TRUSTED_PROXIES`, commas between entries) lists the proxies, as
-addresses or ranges. Only a request whose connecting address is in the list may name the client: the server reads
-`CF-Connecting-IP` (set by Cloudflare), otherwise the right-most `X-Forwarded-For` entry that is not itself a listed
+The trusted proxies are set on the admin page (Admin > Settings > Trusted proxies), or in `server.trusted_proxies`
+(`BOREALIS__SERVER__TRUSTED_PROXIES`, commas between entries); a list saved on the admin page wins, and its "Use
+config.toml instead" goes back to the file's. Entries are addresses or ranges. Only a request whose connecting
+address is in the list may name the client: the server reads `CF-Connecting-IP` (set by Cloudflare), otherwise the right-most `X-Forwarded-For` entry that is not itself a listed
 proxy (entries left of it are whatever the client sent, and are ignored). From any other address both headers are
 ignored, and the server logs once that it saw them and which setting to change. Empty, the default, means no proxy is
 believed, which is safe but gives the shared limits above. IPv6 clients are counted per /64.
+
+The admin page shows the address your own request arrives from, the `CF-Connecting-IP` and `X-Forwarded-For` headers
+on it, and the address the server takes you to be; after a change it shows that address again, so you can see it
+worked. It refuses ranges that trust everyone (`0.0.0.0/0`, `::/0`) or nearly everyone (wider than `/8` for IPv4 or
+`/32` for IPv6): a trusted address can claim to be any client. Changes are in the activity log.
 
 A client that reaches the proxy without going through Cloudflare (on the home network) can write its own
 `CF-Connecting-IP`. That only lets it choose its own rate-limit bucket on the home network.
 
 ### Runbook: production behind Cloudflare and Nginx Proxy Manager
 
-1. Find the address the server sees for the proxy: the admin page's activity log shows the client of each sign-in.
-   Today every entry shows the proxy's address (in the reference setup `172.20.20.100`, Nginx Proxy Manager; if NPM
-   runs on the same Docker host, a `172.x` bridge address instead).
-2. Add to the stack's environment, and update the stack:
+1. Open the site through its public name, as an admin, and go to Admin > Settings > Trusted proxies. It says
+   "Requests arrive from 172.20.20.100" (in the reference setup, Nginx Proxy Manager; if NPM runs on the same Docker
+   host, a `172.x` bridge address instead) and that the headers came through a proxy the server doesn't trust. Tap
+   **Trust this proxy (172.20.20.100)**: it applies at once, and the page then shows your own public address as the
+   one the server sees.
+
+   List only proxies you run. Cloudflare's tunnel connects to NPM, not to the server, so it needs no entry. When no
+   admin can sign in yet, set it in the stack's environment instead and update the stack:
 
    ```
    BOREALIS__SERVER__TRUSTED_PROXIES=172.20.20.100
    ```
 
-   List only proxies you run. Cloudflare's tunnel connects to NPM, not to the server, so it needs no entry.
-3. Sign in once from a phone on mobile data and once from the home network: the activity log now shows the phone's
+2. Sign in once from a phone on mobile data and once from the home network: the activity log now shows the phone's
    public address and the computer's home address, not the proxy's.
-4. Lock the server's port so only the proxy can reach it, on the Docker host. A published port is DNAT'ed, so match
+3. Lock the server's port so only the proxy can reach it, on the Docker host. A published port is DNAT'ed, so match
    the original port:
 
    ```sh
@@ -337,7 +347,7 @@ A client that reaches the proxy without going through Cloudflare (on the home ne
    file bigger than `PUBLIC_UPLOAD_MB` allows, add an NPM proxy host for a home-only name (for example `party.lan`) or
    leave a LAN address allowed in that rule: `! -s 172.20.20.0/24` instead keeps the port open to the home network
    only, where the trusted proxy setting still stops anyone else from naming a client.
-5. Check from another home device: `curl -m 5 http://<docker host>:8787/api/server` is refused, and the site still
+4. Check from another home device: `curl -m 5 http://<docker host>:8787/api/server` is refused, and the site still
    opens through its name.
 
 ## Bundles
