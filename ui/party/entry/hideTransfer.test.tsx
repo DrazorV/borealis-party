@@ -10,10 +10,12 @@ vi.mock("../../src/state/platform", () => ({
   usePlatform: () => ({ mobile: true, aiAvailable: false, aiEnabled: false, storeBuild: true, ready: true }),
 }));
 
-const mode = vi.hoisted(() => ({ offline: false }));
+const mode = vi.hoisted(() => ({ offline: false, app: false }));
 vi.mock("../api/connectivity", () => ({ isOffline: () => mode.offline }));
+// The Android rows are hidden in the app only; a phone browser on Android keeps them (plan M4).
+vi.mock("../../src/lib/tauri", async (importOriginal) => ({ ...(await importOriginal<object>()), isTauri: () => mode.app }));
 
-afterEach(() => { document.body.innerHTML = ""; mode.offline = false; setPhoneOsForTests(null); });
+afterEach(() => { document.body.innerHTML = ""; mode.offline = false; mode.app = false; setPhoneOsForTests(null); });
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0)); // the observer runs after the change
 
@@ -51,6 +53,7 @@ describe("upstream's More page", () => {
   });
 
   it("Android: no bundle row either, and no empty list where they were (E1b)", async () => {
+    mode.app = true;
     const { rows, devices, shown, container } = await morePage("android");
     for (const label of ["Send to device", "Receive from device", "Share as a file", "Export to bundle"]) expect(rows).not.toContain(label);
     expect(rows.length).toBeGreaterThan(0);
@@ -80,7 +83,13 @@ describe("the desktop File menu", () => {
 
   it("Android: Export to bundle... is hidden, Open bundle... stays (E1b)", async () => {
     setPhoneOsForTests("android");
+    mode.app = true;
     expect(await fileMenu()).toEqual([true, true, false]);
+  });
+
+  it("an Android phone browser keeps Export to bundle... (it downloads the file)", async () => {
+    setPhoneOsForTests("android");
+    expect(await fileMenu()).toEqual([true, false, false]);
   });
 
   it("Android: every bundle export label upstream has today is in the hidden list (fails if one comes back)", () => {

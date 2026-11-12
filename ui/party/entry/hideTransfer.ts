@@ -1,4 +1,5 @@
 import { phoneOs } from "../../src/lib/phone";
+import { isTauri } from "../../src/lib/tauri";
 import { isOffline } from "../api/connectivity";
 import { tweakExportDialog } from "../export/exportDialog";
 
@@ -21,9 +22,10 @@ const LABELS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Android only: bundle files. The app is built without device-link, so its backend has no bundle command, and its web
- * view can't download or share the bytes (api/overrides/android.ts refuses them). Android will send bundles through
- * the server instead (share codes, 0.1.8).
+ * The Android app only: bundle files. The app is built without device-link, so its backend has no bundle command, and its
+ * web view can't download or share the bytes (api/overrides/android.ts refuses them). Android will send bundles through
+ * the server instead (share codes, 0.1.8). A phone browser on Android has the phone layer too (plan M4) and downloads
+ * bundles like any browser, so it keeps them.
  */
 export const ANDROID_LABELS: ReadonlySet<string> = new Set([
   "Export to bundle...",
@@ -39,7 +41,7 @@ const OFFLINE_LABELS: ReadonlySet<string> = new Set(["Duplicate"]);
 const OFFLINE_ROWS = ".dialog-foot .btn, .flyout-foot .btn";
 
 function hidden(label: string): boolean {
-  return LABELS.has(label) || (phoneOs() === "android" && ANDROID_LABELS.has(label));
+  return LABELS.has(label) || (phoneOs() === "android" && isTauri() && ANDROID_LABELS.has(label));
 }
 
 function hideRows(): void {

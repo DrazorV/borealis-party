@@ -13,11 +13,14 @@ import { OfflinePage } from "../pages/OfflineBanner";
 import { followReplaced } from "../sync/replaced";
 import { startSync } from "../sync/runner";
 import { hideUnofferedRows } from "./hideTransfer";
+import { startPhoneBrowser } from "./phoneBrowser";
 import "../pages/party.css";
 
 // A browser tab has no window buttons to offer (party.css).
 document.documentElement.classList.toggle("party-browser", !isTauri());
 hideUnofferedRows();
+// Phone browsers get the apps' phone layer and a Back that closes the top sheet (plan M4).
+startPhoneBrowser();
 
 /** Upstream's app with the account bar above it and the account and admin pages in front of it. */
 export function App() {
