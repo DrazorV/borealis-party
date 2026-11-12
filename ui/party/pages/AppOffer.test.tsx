@@ -12,6 +12,8 @@ const { AppOffer, forgetDownloadFolderForTests } = await import("./AppOffer");
 
 const PIXEL = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36";
 const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1";
+const LINUX = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
+const CHROMEBOOK = "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
 const WINDOWS = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
 
 const device = (userAgent: string) => vi.spyOn(navigator, "userAgent", "get").mockReturnValue(userAgent);
@@ -36,21 +38,41 @@ it("offers the APK on an Android browser, with the address to enter", async () =
   expect(screen.getByText(window.location.origin.replace(/^https?:\/\//, ""), { exact: false })).toBeTruthy();
 });
 
-it("tells an iPhone honestly that there is no app to install", async () => {
+it("tells an iPhone honestly that there is no app to install, with the other systems' builds", async () => {
   device(IPHONE);
   render(<AppOffer />);
   expect(await screen.findByText(/no iPhone or iPad app to install/)).toBeTruthy();
-  expect(screen.queryByRole("link")).toBeNull();
+  expect(screen.queryByRole("link", { name: /download/i })).toBeNull();
+  expect(screen.getByRole("link", { name: "Other systems" }).getAttribute("href")).toBe("https://github.com/DrazorV/borealis-party/releases/latest");
 });
 
-it("shows nothing in the app, on a computer, or when the server offers no download", async () => {
+it("offers Windows its installer", async () => {
+  device(WINDOWS);
+  render(<AppOffer />);
+  expect(await screen.findByText("Get the Windows app.")).toBeTruthy();
+  expect(screen.getByRole("link", { name: /download the installer/i }).getAttribute("href")).toBe("https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-windows-x64-setup.exe");
+});
+
+it("offers Linux the AppImage, then the .deb", async () => {
+  device(LINUX);
+  render(<AppOffer />);
+  await screen.findByText("Get the Linux app.");
+  const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
+  expect(hrefs).toEqual([
+    "https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-linux-x86_64.AppImage",
+    "https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-linux-amd64.deb",
+    "https://github.com/DrazorV/borealis-party/releases/latest",
+  ]);
+});
+
+it("shows nothing in the app, on other systems, or when the server offers no download", async () => {
   device(PIXEL);
   env.tauri = true;
   const { container, unmount } = render(<AppOffer />);
   expect(container.innerHTML).toBe("");
   unmount();
   env.tauri = false;
-  device(WINDOWS);
+  device(CHROMEBOOK);
   expect(render(<AppOffer />).container.innerHTML).toBe("");
   device(PIXEL);
   expect(render(<AppOffer folder={null} />).container.innerHTML).toBe("");

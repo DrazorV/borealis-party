@@ -54,7 +54,7 @@ Put passwords in variables rather than in the file.
 | `BOREALIS__SERVER__OPEN_REGISTRATION` | `true` | Anyone who can reach the server may ask for an account |
 | `BOREALIS__SERVER__REQUIRE_APPROVAL` | `true` | New accounts wait until an admin approves them |
 | `BOREALIS__SERVER__MAX_UPLOAD_MB` | `512` | Largest upload |
-| `BOREALIS__SERVER__APP_DOWNLOAD` | the latest GitHub release | Folder URL the website offers the apps from to phone visitors; `off` offers none |
+| `BOREALIS__SERVER__APP_DOWNLOAD` | the latest GitHub release | Folder URL the website offers the apps from; `off` offers none |
 | `BOREALIS__DATABASE__TYPE` | `sqlite` | `sqlite` or `postgres` |
 | `BOREALIS__SQLITE__PATH` | `party.db` | SQLite file, relative to the config folder |
 | `BOREALIS__POSTGRES__HOST` | `localhost` | PostgreSQL server |
@@ -156,12 +156,21 @@ back up everything. Running `install.sh` from a newer release upgrades in place 
 
 Then sign in or create an account.
 
-A phone or tablet that opens the website in its browser sees a small, dismissible note on the sign-in page and the
-Start page. On Android it links to the app (`borealis-party-arm64.apk` in the `server.app_download` folder, by default
-`https://github.com/DrazorV/borealis-party/releases/latest/download`) and shows the address to enter in it. On an
-iPhone or iPad it says that there is no app to install from there: the release's `borealis-party-ios.ipa` is an ad hoc
-build, which installs only on the devices listed in its provisioning profile. To offer your own build, point `BOREALIS__SERVER__APP_DOWNLOAD` at a folder holding the same file
-names; `off` hides the note. The file names are in `ui/party/api/appOffer.ts`.
+A browser on the website sees a small, dismissible note on the sign-in page and the Start page, recommending the app
+for its system from the `server.app_download` folder (by default
+`https://github.com/DrazorV/borealis-party/releases/latest/download`), with the address to enter in the app:
+
+- Android: `borealis-party-arm64.apk`.
+- Windows: `borealis-party-windows-x64-setup.exe`.
+- Linux: `borealis-party-linux-x86_64.AppImage`, and `borealis-party-linux-amd64.deb` as a second link; on ARM (when
+  the browser says so) `borealis-party-linux-aarch64.AppImage` and `borealis-party-linux-arm64.deb`.
+- iPhone and iPad: no download. A release's `borealis-party-ios.ipa`, when the iOS secrets are set, is an ad hoc build
+  that installs only on the devices listed in its provisioning profile, so the note says there is nothing to install.
+- macOS: no build yet; the note says so.
+
+Each note links to the release page for other systems; inside the apps, and on other systems, there is none. To offer
+your own builds, point `BOREALIS__SERVER__APP_DOWNLOAD` at a folder holding the same file names; `off` hides the note.
+The file names are in `ui/party/api/appOffer.ts`.
 
 If the server later moves to a new address (for example from an IP address to a domain name), change it in the app
 under Account > Server address. The app checks that the server there knows the signed-in account, so it stays signed in.

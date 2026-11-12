@@ -1,36 +1,79 @@
 import { describe, expect, it } from "vitest";
 import { memoryStorage } from "../test/memoryStorage";
-import { APP_ASSETS, addressToEnter, appDownloadUrl, browserMobileOs, dismissOffer, offerDismissed } from "./appOffer";
+import { APP_ASSETS, addressToEnter, dismissOffer, isArm, offerDismissed, offerFor, releasesPage, visitorOs } from "./appOffer";
 
 const PIXEL = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36";
 const TAB = "Mozilla/5.0 (Linux; Android 13; SM-X710) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
 const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1";
-const IPAD = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15";
+const MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15";
 const WINDOWS = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
+const LINUX = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
+const FIREFOX_LINUX = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0";
+const CHROMEBOOK = "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
 
-describe("browserMobileOs", () => {
-  it("knows Android phones and tablets, iPhones and iPads", () => {
-    expect(browserMobileOs(PIXEL, 5)).toBe("android");
-    expect(browserMobileOs(TAB, 5)).toBe("android");
-    expect(browserMobileOs(IPHONE, 5)).toBe("ios");
-    expect(browserMobileOs(IPAD, 5)).toBe("ios");
+const os = (userAgent: string, maxTouchPoints = 0, platform?: string) => visitorOs({ userAgent, maxTouchPoints, platform });
+const BASE = "https://github.com/DrazorV/borealis-party/releases/latest/download";
+
+describe("visitorOs", () => {
+  it("knows phones and tablets", () => {
+    expect(os(PIXEL, 5)).toBe("android");
+    expect(os(TAB, 5)).toBe("android");
+    expect(os(IPHONE, 5)).toBe("ios");
+    expect(os(MAC, 5)).toBe("ios");
   });
-  it("leaves computers alone, a Mac without touch included", () => {
-    expect(browserMobileOs(WINDOWS, 0)).toBeNull();
-    expect(browserMobileOs(IPAD, 0)).toBeNull();
+  it("knows computers", () => {
+    expect(os(WINDOWS)).toBe("windows");
+    expect(os(LINUX)).toBe("linux");
+    expect(os(FIREFOX_LINUX)).toBe("linux");
+    expect(os(MAC)).toBe("mac");
+  });
+  it("prefers userAgentData's platform where the browser offers it", () => {
+    expect(os("Mozilla/5.0", 0, "Windows")).toBe("windows");
+    expect(os("Mozilla/5.0", 0, "Linux")).toBe("linux");
+    expect(os("Mozilla/5.0", 0, "macOS")).toBe("mac");
+    expect(os("Mozilla/5.0", 5, "Android")).toBe("android");
+  });
+  it("leaves other systems alone", () => {
+    expect(os(CHROMEBOOK)).toBeNull();
+    expect(os("Mozilla/5.0", 0, "Chrome OS")).toBeNull();
+    expect(os("curl/8.0")).toBeNull();
   });
 });
 
-describe("appDownloadUrl", () => {
-  const base = "https://github.com/DrazorV/borealis-party/releases/latest/download";
-  it("puts the Android file in the server's folder", () => {
-    expect(appDownloadUrl(base, "android")).toBe(`${base}/${APP_ASSETS.android}`);
-    expect(appDownloadUrl("https://files.example.com/apps/", "android")).toBe(`https://files.example.com/apps/${APP_ASSETS.android}`);
+describe("offerFor", () => {
+  it("offers each system its app from the server's folder", () => {
+    expect(offerFor(BASE, "android")).toEqual({ kind: "app", name: "Android", links: [{ label: "Download the app", href: `${BASE}/${APP_ASSETS.android}` }] });
+    expect(offerFor("https://files.example.com/apps/", "windows")).toEqual({
+      kind: "app", name: "Windows", links: [{ label: "Download the installer", href: `https://files.example.com/apps/${APP_ASSETS.windows}` }],
+    });
   });
-  it("offers nothing for iOS, nor when the server turned downloads off", () => {
-    expect(appDownloadUrl(base, "ios")).toBeNull();
-    expect(appDownloadUrl(null, "android")).toBeNull();
-    expect(appDownloadUrl("", "android")).toBeNull();
+  it("offers Linux the AppImage first and the .deb second", () => {
+    const offer = offerFor(BASE, "linux");
+    expect(offer?.kind === "app" && offer.links.map((l) => l.href)).toEqual([`${BASE}/${APP_ASSETS.linuxAppImage}`, `${BASE}/${APP_ASSETS.linuxDeb}`]);
+  });
+  it("offers ARM Linux its own files only when the browser reports ARM", () => {
+    const offer = offerFor(BASE, "linux", true);
+    expect(offer?.kind === "app" && offer.links.map((l) => l.href)).toEqual([`${BASE}/${APP_ASSETS.linuxArmAppImage}`, `${BASE}/${APP_ASSETS.linuxArmDeb}`]);
+    expect(isArm("Mozilla/5.0 (X11; Linux aarch64; rv:132.0) Gecko/20100101 Firefox/132.0")).toBe(true);
+    expect(isArm(LINUX)).toBe(false);
+    expect(isArm(LINUX, "arm")).toBe(true);
+    expect(isArm("Mozilla/5.0 (X11; Linux aarch64)", "x86")).toBe(false);
+  });
+  it("has notes, not downloads, for iOS and macOS", () => {
+    expect(offerFor(BASE, "ios")).toMatchObject({ kind: "note", note: expect.stringMatching(/registered in advance/) });
+    expect(offerFor(BASE, "mac")).toMatchObject({ kind: "note", note: expect.stringMatching(/no macOS app/) });
+  });
+  it("offers nothing when the server turned downloads off", () => {
+    expect(offerFor(null, "android")).toBeNull();
+    expect(offerFor("", "linux")).toBeNull();
+  });
+});
+
+describe("releasesPage", () => {
+  it("is the GitHub release page, or the folder itself", () => {
+    expect(releasesPage(BASE)).toBe("https://github.com/DrazorV/borealis-party/releases/latest");
+    expect(releasesPage("https://github.com/o/r/releases/download/party-v0.2.0/")).toBe("https://github.com/o/r/releases/tag/party-v0.2.0");
+    expect(releasesPage("https://files.example.com/apps/")).toBe("https://files.example.com/apps");
   });
 });
 

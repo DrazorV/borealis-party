@@ -38,8 +38,8 @@ open_registration = true
 require_approval = true
 # Largest upload in megabytes (a zip of a 5etools data folder can be large).
 max_upload_mb = 512
-# Where phone and tablet visitors of the website are offered the app: a folder URL that holds the release files
-# (borealis-party-android.apk, ...). By default the latest release on GitHub; "off" offers no download.
+# Where visitors of the website are offered the app for their system: a folder URL that holds the release files
+# (borealis-party-arm64.apk, borealis-party-windows-x64-setup.exe, ...). By default the latest release on GitHub; "off" offers no download.
 # app_download = "https://github.com/DrazorV/borealis-party/releases/latest/download"
 
 [database]
