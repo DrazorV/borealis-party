@@ -49,7 +49,9 @@ test.describe("import and export entry points", () => {
   });
 
   test("Menu: Export to bundle... opens the export dialog, which closes again", async ({ page }) => {
-    // Only the Android app hides this row (entry/hideTransfer.ts, isTauri); Chrome on Android, as here, downloads it.
+    // Chrome on Android (these projects: Android emulation, no Tauri) shows the row like every browser. Only the
+    // Android app hides it (phoneOs() === "android" && isTauri()); that case is covered by vitest:
+    // api/overrides/android.test.ts and entry/hideTransfer.test.tsx.
     await open(page, "/characters");
     await signedInShell(page);
     await page.getByRole("button", { name: "Menu" }).tap();
