@@ -1,7 +1,8 @@
 name: Party CI
 
 # Checks the fork's own code on every push and pull request: no upstream file changed, every upstream command has a
-# decision, the party web app (types, tests, build) and the server (fmt, clippy, tests on SQLite and PostgreSQL).
+# decision, the party web app (types, tests, build), the server (fmt, clippy, tests on SQLite and PostgreSQL) and the
+# phone UI suite (party/ui-tests).
 # Upstream's own CI (ci.yml) is turned off on the fork: upstream runs it on the same upstream code, and
 # party/check-upstream.sh keeps that code unchanged here.
 # This file belongs to the fork (party/check-upstream.sh accepts .github/workflows/party-*.yml).
@@ -99,3 +100,56 @@ jobs:
         env:
           BOREALIS_TEST_POSTGRES_URL: postgres://postgres:party-ci@localhost:5432/postgres
         run: cargo test -p borealis-server --locked
+
+  phone:
+    # The phone UI suite (party/ui-tests): the built web app on a throwaway local server, in Chromium as an Android
+    # phone (portrait and landscape) and WebKit as an iPhone. findings.md lists what it reports without failing.
+    name: phone UI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      RUSTUP_TOOLCHAIN: stable
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: party
+          cache-on-failure: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            ui/package-lock.json
+            party/ui-tests/package-lock.json
+      - name: Server
+        working-directory: party
+        run: cargo build -p borealis-server --locked
+      - name: Web app
+        working-directory: ui
+        run: |
+          npm ci --no-audit --no-fund
+          node party/build.mjs
+      - name: Browsers
+        working-directory: party/ui-tests
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium webkit
+      - name: Phone UI tests
+        working-directory: party/ui-tests
+        run: npm test
+      - name: Findings
+        if: always()
+        working-directory: party/ui-tests
+        run: if [ -f findings.md ]; then cat findings.md >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phone-ui-report
+          path: |
+            party/ui-tests/findings.md
+            party/ui-tests/playwright-report
+            party/ui-tests/test-results
+          retention-days: 14

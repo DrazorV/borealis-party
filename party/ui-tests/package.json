@@ -1,0 +1,16 @@
+{
+  "name": "borealis-party-ui-tests",
+  "private": true,
+  "description": "Phone UI tests for Borealis Party: Playwright against a throwaway local party server.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:android": "playwright test --project=android-portrait --project=android-landscape",
+    "test:ios": "playwright test --project=iphone",
+    "install-browsers": "playwright install chromium webkit",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0"
+  }
+}

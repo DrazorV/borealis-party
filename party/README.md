@@ -461,3 +461,29 @@ keeps its data in `%APPDATA%\app.borealis.party`, and the app window never touch
 (never write) desktop Borealis's library and search index in `%APPDATA%\app.borealis`, so don't use them. It also leaves out upstream's update feed and file associations, which belong to desktop Borealis.
 Like the Android app it is built without device transfer or on-device semantic search. Set `CARGO_HOME` to a short
 path such as `C:\c` first, as for the Android app.
+
+## Phone UI tests
+
+`party/ui-tests` is a Playwright suite for the web app on phones: Chromium as an Android phone at 384x832 and 832x384
+(a Samsung S26 Ultra), and WebKit as an iPhone at 390x844, all through upstream's `?mock=mobile` phone layer. It starts
+its own throwaway server on a free port of 127.0.0.1, with a new temporary config folder and SQLite database, and seeds
+an admin and a player account; it never talks to another server. It checks that sign-in works with the on-screen
+keyboard open, that the main pages don't scroll sideways, that dialogs open and close, and that the import and export
+entry points can be reached. It passes before every release (from 0.1.5).
+
+Build the web app (`node party/build.mjs` in `ui/`) and the server (`cargo build -p borealis-server` in `party/`) first,
+then, from the repository root:
+
+```sh
+npm --prefix party/ui-tests ci
+npm --prefix party/ui-tests run install-browsers
+npm --prefix party/ui-tests test
+```
+
+The suite looks for the server in `party/target` (or `$CARGO_TARGET_DIR`); `BOREALIS_SERVER_BIN` names another binary.
+On Windows with the server built in WSL, set `BOREALIS_SERVER_WSL_BIN` to its Linux path instead (from Git Bash, also
+`MSYS_NO_PATHCONV=1`). `test:android` and `test:ios` run one phone only.
+
+Controls smaller than a comfortable tap target (44 px on iOS, 48 px on Android) and content cut off at the screen's
+edge are reported, not failed, in `party/ui-tests/findings.md`, with the tests marked `test.fail` for fixes that are
+planned. CI runs the suite as the "phone UI" job of `party-ci.yml` and adds `findings.md` to the run's summary.
