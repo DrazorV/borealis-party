@@ -372,18 +372,46 @@ characters and content packs to that account only, exactly as desktop Borealis w
 ## Open with, and web links, in the apps
 
 - **Open with / Share to Borealis Party** (Android and iOS): the app asks first, in its own dialog, "Import
-  Hero.dnd5e into alice?", and Import sends the file to that account on the server, as if it had been chosen there:
-  a `.dnd5e` (or character `.json`) to the character import, Aurora `.xml`, `.index` and `.zip` to the content import
-  preview, 5etools-format `.json` homebrew to Additional Content's 5etools import. Cancel drops it. The upload size
-  limits above apply, with the same messages.
-- A `.borealis` opened on Android goes up to the server and opens the Open bundle window, as File > Open bundle...
-  does. The party apps are built without device transfer, and without it iOS (and the desktop app) would drop an
+  Hero.dnd5e into alice?", and Import opens the Import screen with the file, as if it had been chosen there (see
+  "One Import screen" below). Cancel drops it. The upload size limits above apply, with the same messages.
+- A `.borealis` opened on Android goes to the Import screen too, which uploads it and opens the Open bundle window.
+  The party apps are built without device transfer, and without it iOS (and the desktop app) would drop an
   opened `.borealis` without a word, so the iOS app doesn't offer to open `.borealis` files: use File > Open bundle....
 - Offline, an opened file stays on the device and the app says it will import it when it is connected; the online
   app takes it when it starts. (On Android a file opened while the app was closed is taken on the next online start.)
 - Web links: the apps open Borealis's own pages as before, and any other web page (this server's pages, the app
   downloads, a link on a party page) in the system browser. If the device can't, a dialog shows the address with
   Copy link.
+
+## One Import screen
+
+Since 0.1.5 every way to start an import leads to the Import screen (`#/import-files`), which tells files apart by
+their content and lists one result per file or link. The main doors are More > Import on a phone and Import in the
+desktop account bar. Upstream's own buttons stay where they are and look the same; the party catches their tap
+(`ui/party/entry/unifyImports.ts`, matched by their text) and opens the Import screen instead:
+
+| Where | What it does now |
+|---|---|
+| Start > Import characters | Import screen, file chooser open |
+| File menu > Load Character, Open bundle... (desktop bar and phone Menu) | Import screen, file chooser open; the menu closes |
+| File menu > Import Characters, the floating "+" | the same; upstream shows them only with its AI import, so not in the party |
+| Additional Content > Import files | Import screen, file chooser open (the content notice comes there, once content is chosen) |
+| Additional Content > 5etools: the .zip and homebrew .json buttons | Import screen, file chooser open |
+| Additional Content > Index files: Fetch | Import screen, the typed address added as an index there |
+| Additional Content > 5etools: Import from an address | Import screen, the typed address imported as 5etools-format data there |
+| Files dropped on the window (browsers) | Import screen with the files, `.borealis` included |
+| Files dropped on the desktop app's window | Import screen with the files, read from the device |
+| Open with / Share (apps) | after "Import X into alice?", Import screen with the files, `.borealis` included |
+
+Additional Content still lists, updates, enables and removes packs, indexes and 5etools addresses. Not redirected:
+"Import my content folder" and "Scan folder..." (upstream shows them only on a desktop backend, never with the server,
+and the Import screen takes files, not folders). If upstream rewords a button, it falls back to upstream's own import,
+which still works.
+
+Known limit: a `.borealis` or a folder dropped on the **desktop app's** window can't be read into the page (upstream's
+backend opens those by path and keeps the bytes on the device), so the app says to choose it with Choose files instead.
+An upstream hook that would fix it: let `take_picked_files` read a dropped bundle's token (purpose `bundle-file`), as it
+reads `dropped-file` tokens; then the party uploads it like any other file.
 
 ## Offline in the apps
 
