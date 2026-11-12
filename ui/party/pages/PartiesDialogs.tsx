@@ -6,7 +6,7 @@ import { Modal } from "../../src/components/Modal";
 import { NumericUpDown } from "../../src/components/controls/Controls";
 import { errorMessage } from "../../src/state/useAsync";
 import {
-  CODE_DAYS, formatCode, inviteUsername, joinLink, makeJoinCode, MAX_CODE_USES, type JoinCode, type Party,
+  CODE_DAYS, formatCode, inviteUsername, joinLink, makeJoinCode, MAX_CODE_USES, MAX_NAME, type JoinCode, type Party,
 } from "../api/overrides/parties";
 
 /** A party's name: typed for a new party, or a new one for a party. */
@@ -39,7 +39,7 @@ export function NameDialog({ title, action, initial = "", onSave, onClose }: {
       <form className="party-form" onSubmit={(e) => void submit(e)}>
         <label className="party-field">
           Party name
-          <input className="input" aria-label="Party name" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} required />
+          <input className="input" aria-label="Party name" maxLength={MAX_NAME} value={name} onChange={(e) => setName(e.target.value)} required />
         </label>
         {error && <Alert tone="danger">{error}</Alert>}
       </form>
@@ -118,11 +118,11 @@ export function InviteDialog({ party, onClose }: { party: Party; onClose: () => 
             <p className="muted">Share this now: it isn't shown again.</p>
             <output className="party-code" aria-label="Join code">{formatCode(code.code)}</output>
             <p className="muted party-note">
-              {code.usesLeft === 1 ? "One use" : `${code.usesLeft ?? uses} uses`}, until {new Date(code.expiresAt).toLocaleDateString()}.
+              {code.invite.usesLeft === 1 ? "One use" : `${code.invite.usesLeft ?? uses} uses`}, until {new Date(code.invite.expiresAt).toLocaleDateString()}.
             </p>
             <div className="party-inline">
               <Button icon="copy" onClick={() => void copy(formatCode(code.code))}>Copy code</Button>
-              <Button icon="link" onClick={() => void copy(joinLink(code.code))}>Copy link</Button>
+              <Button icon="link" onClick={() => void copy(code.link ?? joinLink(code.code))}>Copy link</Button>
             </div>
             {copied && <Alert tone="success">Copied.</Alert>}
             <Button onClick={() => { setCode(null); setCopied(false); }}>Make another</Button>

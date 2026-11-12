@@ -4,7 +4,7 @@ import { saveSession, type ServerSession } from "../session";
 import { memoryStorage } from "../../test/memoryStorage";
 import {
   charactersInParties, formatCode, joinLink, keepJoinCode, keptJoinCode, normaliseCode, onPartiesChanged, partiesDeps,
-  removeMember, resetParties, takeJoinLink, type Party,
+  loadParties, removeMember, resetParties, takeJoinLink, type PartySummary,
 } from "./parties";
 
 const session: ServerSession = { baseUrl: "http://server", token: "t", user: { id: "u", username: "alice", email: null, admin: false, mustChangePassword: false } };
@@ -54,12 +54,11 @@ it("ids go into a path as one encoded segment each", async () => {
   expect(paths).toEqual(["/api/parties/p%2F1/members/..%2Fu/c_1%3Fx"]);
 });
 
-it("the account's characters in parties come from the members marked as its own", () => {
-  const party = (id: string, members: [string, boolean][]): Party => ({
-    id, name: id, ruleset: "dnd2024", role: "player", dmName: "dm", createdAt: 0,
-    members: members.map(([characterId, mine]) => ({ ownerId: "o", ownerName: "o", characterId, name: characterId, classLevel: "", joinedAt: 0, mine })),
+it("the account's characters in parties come from each party's own list", () => {
+  const party = (id: string, myCharacters: string[]): PartySummary => ({
+    id, name: id, ruleset: "dnd2024", role: "player", dmName: "dm", memberCount: 3, myCharacters, createdAt: 0, updatedAt: 0,
   });
-  const taken = charactersInParties([party("p1", [["c_a", true], ["c_b", false]]), party("p2", [["c_c", true]])]);
+  const taken = charactersInParties([party("p1", ["c_a"]), party("p2", ["c_c"])]);
   expect([...taken].map(([c, p]) => [c, p.id])).toEqual([["c_a", "p1"], ["c_c", "p2"]]);
 });
 
@@ -77,4 +76,32 @@ it("a refused delete tells nobody", async () => {
   onPartiesChanged(heard);
   await expect(createHttpApi(session).deleteCharacter({ id: "c_1" } as never)).rejects.toMatchObject({ code: "not_found" });
   expect(heard).not.toHaveBeenCalled();
+});
+
+describe("loading the parties", () => {
+  it("lists them, then each one's roster, with the server's seconds as milliseconds", async () => {
+    const paths: string[] = [];
+    partiesDeps.fetch = async (_s, _m, path) => {
+      paths.push(path);
+      if (path === "/api/parties") return { dm: true, parties: [{ id: "p1", createdAt: 10, updatedAt: 20, myCharacters: [] }, { id: "gone", createdAt: 1, updatedAt: 1, myCharacters: [] }] };
+      if (path === "/api/parties/gone") throw { code: "not_found", message: "Not found." };
+      return { id: "p1", createdAt: 10, updatedAt: 20, myCharacters: [], members: [{ characterId: "c", joinedAt: 30 }], invites: [{ id: "i", createdAt: 40, expiresAt: 50 }] };
+    };
+    const out = await loadParties();
+    expect(paths).toEqual(["/api/parties", "/api/parties/p1", "/api/parties/gone"]);
+    expect(out.dm).toBe(true);
+    // A party gone between the list and its roster is left out.
+    expect(out.parties.map((p) => p.id)).toEqual(["p1"]);
+    expect(out.parties[0]).toMatchObject({ createdAt: 10_000, updatedAt: 20_000, members: [{ joinedAt: 30_000 }], invites: [{ createdAt: 40_000, expiresAt: 50_000 }] });
+  });
+
+  it("404 for the list: parties are switched off on this server", async () => {
+    partiesDeps.fetch = async () => { throw { code: "not_found", message: "Not found." }; };
+    expect(await loadParties()).toEqual({ dm: false, parties: [], off: true });
+  });
+
+  it("other failures are the page's to show", async () => {
+    partiesDeps.fetch = async () => { throw { code: "network", message: "No answer." }; };
+    await expect(loadParties()).rejects.toMatchObject({ code: "network" });
+  });
 });

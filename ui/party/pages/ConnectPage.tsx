@@ -7,7 +7,7 @@ import {
 import { usePhone } from "../../src/lib/phone";
 import { isTauri } from "../../src/lib/tauri";
 import { othersUnsentEdits, removeOtherCopies } from "../sync/account";
-import { keepJoinCode, keptJoinCode, normaliseCode } from "../api/overrides/parties";
+import { keepJoinCode, keptJoinCode, normaliseCode, previewJoinCode, type CodePreview } from "../api/overrides/parties";
 import { AppOffer } from "./AppOffer";
 import { DiscardDialog } from "./SignOut";
 import "./party.css";
@@ -120,6 +120,17 @@ export function ConnectPage({ again }: { again?: ServerSession } = {}) {
         return;
       }
       const code = normaliseCode(joinCode);
+      // The server never fails a sign-up over its code, so a code that wouldn't work is caught first.
+      let join: CodePreview | null = null;
+      if (code) {
+        try { join = await previewJoinCode(server.baseUrl, code); } catch (err) {
+          setError((err as { code?: string }).code === "not_found"
+            ? "That join code isn't valid, or it has expired. Check it, or clear it to sign up without one."
+            : message(err));
+          setBusy(false);
+          return;
+        }
+      }
       const out = await signUp(server.baseUrl, username, email, password, code || undefined);
       // The server keeps the code now: as an invite on the new account, or until an admin approves it.
       if (code) keepJoinCode(null);
@@ -129,9 +140,8 @@ export function ConnectPage({ again }: { again?: ServerSession } = {}) {
       }
       // Waiting for the emailed link or for an admin: back to signing in, with what happens next.
       const waits = out.message ?? "Your account is waiting for approval.";
-      const join = out.pendingJoin;
       setNotice(join
-        ? `${waits} You'll join ${join.partyName} once an admin approves you; the invite is kept until ${new Date(join.expiresAt).toLocaleDateString()}.`
+        ? `${waits} Your join code for ${join.party.name} is kept: once ${out.awaitingEmail ? "your email address is confirmed" : "an admin approves you"}, sign in and pick the character that joins (until ${new Date(join.expiresAt).toLocaleDateString()}).`
         : waits);
       setMode("in");
       setPassword("");

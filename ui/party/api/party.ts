@@ -24,8 +24,6 @@ interface SignUpResult {
   user?: ServerUser;
   awaitingEmail?: boolean;
   message?: string;
-  /** A join code sent with the sign-up, kept until an admin approves the account (plan D39). */
-  pendingJoin?: { partyName: string; expiresAt: number } | null;
 }
 
 function call<T>(method: string, path: string, body?: unknown): Promise<T> {

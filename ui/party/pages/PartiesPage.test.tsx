@@ -3,9 +3,9 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api } from "../../src/api/contract";
 import { partiesDeps, resetParties } from "../api/overrides/parties";
-import { saveSession, loadSession } from "../api/session";
+import { saveSession } from "../api/session";
 import { memoryStorage } from "../test/memoryStorage";
-import { fakePartiesServer, type FakeServer } from "../test/partiesServer";
+import { charId, fakePartiesServer, type FakeServer } from "../test/partiesServer";
 
 const state = vi.hoisted(() => ({ confirm: "confirm" as string, toasts: [] as { text: string; tone?: string }[] }));
 let api: Api;
@@ -16,21 +16,22 @@ vi.mock("../../src/components/Toast", () => ({ useToast: () => ({ push: (text: s
 const { PartiesPage, JoinRoute } = await import("./PartiesPage");
 const { DungeonMasterCard } = await import("./PartiesDm");
 
+const CLERIC = charId(1);
+const ARIA = charId(2);
+const BRAM = charId(3);
 const ACCOUNTS = () => [
-  { id: "dm1", username: "dana", dm: true, characters: [{ id: "c_dm", name: "Dana's Cleric", classLevel: "Cleric 3" }] },
-  { id: "pl1", username: "alice", dm: false, characters: [
-    { id: "c_a1", name: "Aria", classLevel: "Fighter 3" },
-    { id: "c_a2", name: "Bram", classLevel: "Wizard 2" },
-  ] },
+  { id: "dm1", username: "dana", dm: true, characters: [{ id: CLERIC, name: "Dana's Cleric", level: 4 }] },
+  { id: "pl1", username: "alice", dm: false, characters: [{ id: ARIA, name: "Aria", level: 3 }, { id: BRAM, name: "Bram", level: 2 }] },
 ];
+const LATER = () => Math.floor(Date.now() / 1000) + 86_400;
 
 let server: FakeServer;
 
 function signIn(uid: string) {
   server.me = uid;
   const a = server.accounts.find((x) => x.id === uid)!;
-  saveSession({ baseUrl: "http://server", token: "t", user: { id: a.id, username: a.username, email: null, admin: false, mustChangePassword: false, dm: a.dm } as never });
-  api = { listCharacters: async () => a.characters.map((c) => ({ id: c.id, name: c.name, build: c.classLevel, level: 3 })) } as unknown as Api;
+  saveSession({ baseUrl: "http://server", token: "t", user: { id: a.id, username: a.username, email: null, admin: false, mustChangePassword: false } });
+  api = { listCharacters: async () => a.characters.map((c) => ({ id: c.id, name: c.name, build: `Fighter ${c.level}`, level: c.level })) } as unknown as Api;
 }
 
 function page(path = "/parties") {
@@ -48,8 +49,12 @@ function page(path = "/parties") {
 const loaded = () => screen.findByRole("heading", { name: "My parties" });
 const dialog = () => screen.getByRole("dialog");
 const toastTexts = () => state.toasts.map((t) => t.text);
+const party = (id: string, name: string, dmId = "dm1") => server.parties.push({ id, name, dmId, createdAt: 1 });
+const member = (partyId: string, ownerId: string, characterId: string) => server.members.push({ ownerId, characterId, partyId, joinedAt: 1 });
+const usernameInvite = (id: string, partyId: string, username: string) =>
+  server.invites.push({ id, partyId, username, usesLeft: 1, expiresAt: LATER() });
 
-/** The DM makes a party and a join code; answers the code. */
+/** The DM makes a party and a join code; answers the code as shown. */
 async function dmMakesCode(name = "Tuesday Party", uses = 1): Promise<string> {
   signIn("dm1");
   const view = page();
@@ -63,7 +68,7 @@ async function dmMakesCode(name = "Tuesday Party", uses = 1): Promise<string> {
   if (uses !== 1) fireEvent.change(within(dialog()).getByRole("spinbutton", { name: "Number of uses" }), { target: { value: String(uses) } });
   fireEvent.click(within(dialog()).getByRole("button", { name: "Make a join code" }));
   const out = await within(dialog()).findByLabelText("Join code");
-  const code = out.textContent!.replace(/-/g, "");
+  const code = out.textContent!;
   view.unmount();
   return code;
 }
@@ -92,29 +97,43 @@ describe("Dungeon Master tools", () => {
     expect(screen.getByLabelText("Join code")).toBeTruthy();
   });
 
-  it("on: the account switch asks the server, keeps the answer, and shows the way to the parties", async () => {
+  it("the account switch: on and off on the server, with the way to the parties while on", async () => {
     signIn("pl1");
     page("/account");
     const toggle = screen.getByRole("switch", { name: "Dungeon Master tools" });
+    await waitFor(() => expect((toggle as HTMLButtonElement).disabled).toBe(false));
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(toggle);
     await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
-    expect(server.calls).toContainEqual({ method: "PUT", path: "/api/me/roles/dm", body: { on: true } });
-    expect((loadSession()?.user as { dm?: boolean }).dm).toBe(true);
+    expect(server.calls).toContainEqual({ method: "POST", path: "/api/me/roles/dm", body: {} });
+    expect(server.accounts[1]!.dm).toBe(true);
     expect(screen.getByRole("link", { name: "Manage your parties" })).toBeTruthy();
     fireEvent.click(toggle);
     await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));
-    expect((loadSession()?.user as { dm?: boolean }).dm).toBe(false);
+    expect(server.calls.at(-1)).toEqual({ method: "DELETE", path: "/api/me/roles/dm" });
   });
 
-  it("a refused switch keeps its place and says why", async () => {
-    signIn("pl1");
-    partiesDeps.fetch = async () => { throw { code: "forbidden", message: "Confirm your email address first." }; };
+  it("off is refused while the account runs parties, in the server's words", async () => {
+    signIn("dm1");
+    party("p0", "Tuesday Party");
     page("/account");
     const toggle = screen.getByRole("switch", { name: "Dungeon Master tools" });
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
     fireEvent.click(toggle);
-    await waitFor(() => expect(toastTexts()).toContain("Confirm your email address first."));
-    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    await waitFor(() => expect(toastTexts()).toContain("Delete the parties you run first."));
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("a server with parties switched off shows no switch, and the page says so", async () => {
+    signIn("pl1");
+    server.off = true;
+    const view = page("/account");
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByRole("switch")).toBeNull();
+    view.unmount();
+    page();
+    expect(await screen.findByText("Parties are switched off on this server.")).toBeTruthy();
+    expect(screen.queryByLabelText("Join code")).toBeNull();
   });
 });
 
@@ -143,66 +162,81 @@ describe("as a DM", () => {
 
   it("keeps a party when the delete is cancelled", async () => {
     signIn("dm1");
-    server.parties.push({ id: "p0", name: "Keep", dmId: "dm1", createdAt: 1 });
+    party("p0", "Keep");
     state.confirm = "cancel";
     page();
     const card = await screen.findByRole("region", { name: "Keep" });
     fireEvent.click(within(card).getByRole("button", { name: /Delete/ }));
     await act(async () => { await Promise.resolve(); });
     expect(server.parties).toHaveLength(1);
+    expect(server.calls.some((c) => c.method === "DELETE")).toBe(false);
   });
 
   it("invites by username: always 'sent', and the invite is listed until withdrawn", async () => {
     signIn("dm1");
-    server.parties.push({ id: "p0", name: "Tuesday Party", dmId: "dm1", createdAt: 1 });
+    party("p0", "Tuesday Party");
     page();
     const card = await screen.findByRole("region", { name: "Tuesday Party" });
     fireEvent.click(within(card).getByRole("button", { name: /Invite/ }));
     fireEvent.change(within(dialog()).getByLabelText("Username"), { target: { value: " nobody-here " } });
     fireEvent.click(within(dialog()).getByRole("button", { name: "Send invite" }));
     expect(await within(dialog()).findByText(/Invite sent to nobody-here/)).toBeTruthy();
-    expect(server.calls).toContainEqual({ method: "POST", path: "/api/parties/p0/invites", body: { username: "nobody-here" } });
+    expect(server.calls).toContainEqual({ method: "POST", path: "/api/parties/p0/invites", body: { kind: "username", username: "nobody-here" } });
     fireEvent.click(within(dialog()).getByRole("button", { name: "Done" }));
     const listed = await within(card).findByText("nobody-here");
     fireEvent.click(within(listed.closest("li")!).getByRole("button", { name: "Withdraw" }));
     await waitFor(() => expect(within(card).queryByText("nobody-here")).toBeNull());
   });
 
-  it("makes a join code with a number of uses, shown once with a link to copy", async () => {
+  it("makes a join code with a number of uses and days, shown once; the party lists it with its uses", async () => {
     const code = await dmMakesCode("Tuesday Party", 3);
-    expect(code).toMatch(/^CODE/);
-    expect(server.calls).toContainEqual({ method: "POST", path: `/api/parties/${server.parties[0]!.id}/invites`, body: { uses: 3, expiresInDays: 7 } });
+    expect(code).toMatch(/^K7QM-3XTR-9BWD-\d{4}$/);
+    expect(server.calls).toContainEqual({ method: "POST", path: `/api/parties/${server.parties[0]!.id}/invites`, body: { kind: "code", uses: 3, days: 7 } });
+    page();
+    const card = await screen.findByRole("region", { name: "Tuesday Party" });
+    expect(within(card).getByText(/3 uses left/)).toBeTruthy();
   });
 
   it("sees members' read-only cards and removes a member", async () => {
     signIn("dm1");
-    server.parties.push({ id: "p0", name: "Tuesday Party", dmId: "dm1", createdAt: 1 });
-    server.members.push({ ownerId: "pl1", characterId: "c_a1", partyId: "p0", joinedAt: 1 });
+    party("p0", "Tuesday Party");
+    member("p0", "pl1", ARIA);
     page();
     const card = await screen.findByRole("region", { name: "Tuesday Party" });
-    const member = within(card).getByRole("listitem", { name: "Aria" });
-    expect(within(member).getByText(/Fighter 3 · alice/)).toBeTruthy();
-    expect(within(member).getByText("AC")).toBeTruthy();
-    expect(within(member).getByText("20/24")).toBeTruthy();
-    expect(within(member).getByText("Passive Perception")).toBeTruthy();
-    expect(within(member).queryByText("Spell DC")).toBeNull();
-    fireEvent.click(within(member).getByRole("button", { name: "Remove" }));
+    const row = within(card).getByRole("listitem", { name: "Aria" });
+    expect(within(row).getByText("Level 3 · 2024 rules · alice")).toBeTruthy();
+    // Read-only: nothing on the card edits the character.
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Remove"]);
+    fireEvent.click(within(row).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(within(card).queryByRole("listitem", { name: "Aria" })).toBeNull());
-    expect(server.calls).toContainEqual({ method: "DELETE", path: "/api/parties/p0/members/pl1/c_a1" });
+    expect(server.calls).toContainEqual({ method: "DELETE", path: `/api/parties/p0/members/pl1/${ARIA}` });
     expect(toastTexts()).toContain("Aria was removed.");
   });
 
-  it("adds their own character to a party they run (D4)", async () => {
+  it("a member whose file is gone shows as missing", async () => {
     signIn("dm1");
-    server.parties.push({ id: "p0", name: "Tuesday Party", dmId: "dm1", createdAt: 1 });
+    party("p0", "Tuesday Party");
+    member("p0", "pl1", charId(99));
+    page();
+    const card = await screen.findByRole("region", { name: "Tuesday Party" });
+    const row = within(card).getByRole("listitem", { name: "A deleted character" });
+    expect(within(row).getByText("Missing")).toBeTruthy();
+  });
+
+  it("adds their own character to a party they run (D4), and it shows as theirs", async () => {
+    signIn("dm1");
+    party("p0", "Tuesday Party");
     page();
     const card = await screen.findByRole("region", { name: "Tuesday Party" });
     fireEvent.click(within(card).getByRole("button", { name: /Add my character/ }));
     fireEvent.click(within(dialog()).getByRole("button", { name: "Join with this character" }));
-    const member = await within(card).findByRole("listitem", { name: "Dana's Cleric" });
-    expect(within(member).getByText(/your character/)).toBeTruthy();
-    expect(within(member).getByRole("button", { name: "Leave" })).toBeTruthy();
-    expect(within(member).queryByRole("button", { name: "Remove" })).toBeNull();
+    const row = await within(card).findByRole("listitem", { name: "Dana's Cleric" });
+    expect(server.calls).toContainEqual({ method: "POST", path: "/api/parties/p0/members", body: { characterId: CLERIC } });
+    expect(within(row).getByText(/your character/)).toBeTruthy();
+    expect(within(row).getByRole("button", { name: "Leave" })).toBeTruthy();
+    expect(within(row).queryByRole("button", { name: "Remove" })).toBeNull();
+    // Still the DM's view of it (plan 3.1).
+    expect(within(card).getByText("DM")).toBeTruthy();
   });
 });
 
@@ -213,52 +247,68 @@ describe("as a player", () => {
     page();
     await loaded();
     expect(screen.getByText("None of your characters is in a party yet.")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Join code"), { target: { value: code.toLowerCase().replace(/(.{4})/, "$1-") } });
+    fireEvent.change(screen.getByLabelText("Join code"), { target: { value: code.toLowerCase() } });
     fireEvent.click(screen.getByRole("button", { name: "Join" }));
     expect(await screen.findByRole("dialog", { name: "Join Tuesday Party" })).toBeTruthy();
-    expect(server.calls).toContainEqual({ method: "POST", path: "/api/join", body: { code } });
+    expect(server.calls).toContainEqual({ method: "POST", path: "/api/join", body: { code: code.replace(/-/g, "") } });
     fireEvent.click(within(dialog()).getByRole("radio", { name: /Bram/ }));
     fireEvent.click(within(dialog()).getByRole("button", { name: "Join with this character" }));
     const card = await screen.findByRole("region", { name: "Tuesday Party" });
     expect(within(card).getByText("Player")).toBeTruthy();
-    expect(within(card).getByText("DM: dana")).toBeTruthy();
+    expect(within(card).getByText(/DM: dana/)).toBeTruthy();
     expect(within(card).getByRole("listitem", { name: "Bram" })).toBeTruthy();
     expect(toastTexts()).toContain("You joined Tuesday Party.");
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("a code that has run out is refused, in the server's words", async () => {
+  it("a code that has run out is refused", async () => {
     const code = await dmMakesCode();
-    server.invites.find((i) => i.code === code)!.usesLeft = 0;
+    server.invites.find((i) => i.code === code.replace(/-/g, ""))!.usesLeft = 0;
     signIn("pl1");
     page();
     await loaded();
     fireEvent.change(screen.getByLabelText("Join code"), { target: { value: code } });
     fireEvent.click(screen.getByRole("button", { name: "Join" }));
-    await waitFor(() => expect(toastTexts()).toContain("That code isn't valid, or it has run out."));
+    await waitFor(() => expect(toastTexts()).toContain("That code isn't valid, or it has expired or run out."));
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("a code entered but not used yet waits under Invitations", async () => {
+    const code = await dmMakesCode();
+    signIn("pl1");
+    page();
+    await loaded();
+    fireEvent.change(screen.getByLabelText("Join code"), { target: { value: code } });
+    fireEvent.click(screen.getByRole("button", { name: "Join" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    const invite = await screen.findByRole("listitem", { name: "Invite to Tuesday Party" });
+    expect(within(invite).getByText(/your join code/)).toBeTruthy();
+  });
+
   it("accepts a username invite, or declines one", async () => {
-    server.parties.push({ id: "p0", name: "Tuesday Party", dmId: "dm1", createdAt: 1 }, { id: "p1", name: "Other", dmId: "dm1", createdAt: 1 });
-    server.invites.push({ id: "i0", partyId: "p0", username: "alice", usesLeft: 1, expiresAt: Date.now() + 1e9 },
-      { id: "i1", partyId: "p1", username: "alice", usesLeft: 1, expiresAt: Date.now() + 1e9 });
+    party("p0", "Tuesday Party");
+    party("p1", "Other");
+    usernameInvite("i0", "p0", "alice");
+    usernameInvite("i1", "p1", "alice");
     signIn("pl1");
     page();
     const declined = await screen.findByRole("listitem", { name: "Invite to Other" });
     fireEvent.click(within(declined).getByRole("button", { name: "Decline" }));
     await waitFor(() => expect(screen.queryByRole("listitem", { name: "Invite to Other" })).toBeNull());
     const invite = screen.getByRole("listitem", { name: "Invite to Tuesday Party" });
+    expect(within(invite).getByText(/sent to you/)).toBeTruthy();
     fireEvent.click(within(invite).getByRole("button", { name: "Accept" }));
     fireEvent.click(within(dialog()).getByRole("button", { name: "Join with this character" }));
     expect(await screen.findByRole("region", { name: "Tuesday Party" })).toBeTruthy();
+    expect(server.calls).toContainEqual({ method: "POST", path: "/api/invites/i0/accept", body: { characterId: ARIA } });
     expect(screen.queryByRole("heading", { name: "Invitations" })).toBeNull();
   });
 
   it("a character already in a party can't be picked (D19)", async () => {
-    server.parties.push({ id: "p0", name: "Tuesday Party", dmId: "dm1", createdAt: 1 }, { id: "p1", name: "Other", dmId: "dm1", createdAt: 1 });
-    server.members.push({ ownerId: "pl1", characterId: "c_a1", partyId: "p0", joinedAt: 1 });
-    server.invites.push({ id: "i1", partyId: "p1", username: "alice", usesLeft: 1, expiresAt: Date.now() + 1e9 });
+    party("p0", "Tuesday Party");
+    party("p1", "Other");
+    member("p0", "pl1", ARIA);
+    usernameInvite("i1", "p1", "alice");
     signIn("pl1");
     page();
     const invite = await screen.findByRole("listitem", { name: "Invite to Other" });
@@ -270,23 +320,26 @@ describe("as a player", () => {
   });
 
   it("the server's refusal of a character in a party shows in the dialog, and the page catches up", async () => {
-    server.parties.push({ id: "p0", name: "Tuesday Party", dmId: "dm1", createdAt: 1 }, { id: "p1", name: "Other", dmId: "dm1", createdAt: 1 });
-    server.invites.push({ id: "i1", partyId: "p1", username: "alice", usesLeft: 1, expiresAt: Date.now() + 1e9 });
+    party("p0", "Tuesday Party");
+    party("p1", "Other");
+    usernameInvite("i1", "p1", "alice");
     signIn("pl1");
     page();
     const invite = await screen.findByRole("listitem", { name: "Invite to Other" });
     fireEvent.click(within(invite).getByRole("button", { name: "Accept" }));
     // Another device put Aria in a party meanwhile.
-    server.members.push({ ownerId: "pl1", characterId: "c_a1", partyId: "p0", joinedAt: 1 });
+    member("p0", "pl1", ARIA);
     fireEvent.click(within(dialog()).getByRole("button", { name: "Join with this character" }));
     expect(await within(dialog()).findByText("That character is already in a party.")).toBeTruthy();
     expect(await screen.findByRole("region", { name: "Tuesday Party" })).toBeTruthy();
   });
 
   it("with every character in a party, says so and offers nothing to join with", async () => {
-    server.parties.push({ id: "p0", name: "Tuesday Party", dmId: "dm1", createdAt: 1 }, { id: "p1", name: "Other", dmId: "dm1", createdAt: 1 });
-    server.members.push({ ownerId: "pl1", characterId: "c_a1", partyId: "p0", joinedAt: 1 }, { ownerId: "pl1", characterId: "c_a2", partyId: "p0", joinedAt: 1 });
-    server.invites.push({ id: "i1", partyId: "p1", username: "alice", usesLeft: 1, expiresAt: Date.now() + 1e9 });
+    party("p0", "Tuesday Party");
+    party("p1", "Other");
+    member("p0", "pl1", ARIA);
+    member("p0", "pl1", BRAM);
+    usernameInvite("i1", "p1", "alice");
     signIn("pl1");
     page();
     fireEvent.click(within(await screen.findByRole("listitem", { name: "Invite to Other" })).getByRole("button", { name: "Accept" }));
@@ -294,23 +347,33 @@ describe("as a player", () => {
     expect((within(dialog()).getByRole("button", { name: "Join with this character" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("leaves a party: the character stays theirs and can join another", async () => {
-    server.parties.push({ id: "p0", name: "Tuesday Party", dmId: "dm1", createdAt: 1 });
-    server.members.push({ ownerId: "pl1", characterId: "c_a1", partyId: "p0", joinedAt: 1 }, { ownerId: "dm1", characterId: "c_dm", partyId: "p0", joinedAt: 1 });
+  it("leaves a party: the character stays theirs; other members show name and level only", async () => {
+    party("p0", "Tuesday Party");
+    member("p0", "pl1", ARIA);
+    member("p0", "dm1", CLERIC);
     signIn("pl1");
     page();
     const card = await screen.findByRole("region", { name: "Tuesday Party" });
-    // Another member's character: name and class only, no card, nothing to press.
     const other = within(card).getByRole("listitem", { name: "Dana's Cleric" });
-    expect(within(other).queryByText("AC")).toBeNull();
+    expect(within(other).getByText(/the DM's character \(dana\)/)).toBeTruthy();
     expect(within(other).queryByRole("button")).toBeNull();
-    const mine = within(card).getByRole("listitem", { name: "Aria" });
-    expect(within(mine).getByText("AC")).toBeTruthy();
     expect(within(card).queryByRole("button", { name: /Invite|Rename|Delete/ })).toBeNull();
+    const mine = within(card).getByRole("listitem", { name: "Aria" });
     fireEvent.click(within(mine).getByRole("button", { name: "Leave" }));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Tuesday Party" })).toBeNull());
-    expect(server.calls).toContainEqual({ method: "DELETE", path: "/api/parties/p0/members/pl1/c_a1" });
+    expect(server.calls).toContainEqual({ method: "DELETE", path: `/api/parties/p0/members/pl1/${ARIA}` });
     expect(screen.getByText("None of your characters is in a party yet.")).toBeTruthy();
+  });
+
+  it("a removed member's party is gone on the next load", async () => {
+    party("p0", "Tuesday Party");
+    member("p0", "pl1", ARIA);
+    signIn("pl1");
+    page();
+    await screen.findByRole("region", { name: "Tuesday Party" });
+    server.members = [];
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Tuesday Party" })).toBeNull());
   });
 
   it("a join link fills in the code", async () => {

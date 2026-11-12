@@ -8,16 +8,18 @@ import { useToast } from "../../src/components/Toast";
 import { useApi } from "../../src/state/ApiContext";
 import { errorMessage } from "../../src/state/useAsync";
 import {
-  acceptInvite, addOwnCharacter, cancelInvite, CHARACTER_IN_PARTY, charactersInParties, createParty, declineInvite,
-  deleteParty, keepJoinCode, keptJoinCode, listMyInvites, listParties, MAX_PARTIES, onPartiesChanged, redeemJoinCode,
-  removeMember, renameParty, type MyInvite, type Party, type PartyMember, type PartyUser,
+  acceptInvite, addOwnCharacter, cancelInvite, CONFLICT, charactersInParties, createParty, declineInvite, deleteParty,
+  keepJoinCode, keptJoinCode, listMyInvites, loadParties, MAX_PARTIES, onPartiesChanged, redeemJoinCode, removeMember,
+  renameParty, type MyInvite, type Party, type PartyMember, type Ruleset,
 } from "../api/overrides/parties";
-import { loadSession } from "../api/session";
 import { InviteDialog, NameDialog, PickCharacterDialog } from "./PartiesDialogs";
 import "./party.css";
 
 /** What the page loaded. */
 interface Loaded {
+  dm: boolean;
+  /** The server has parties switched off (its config). */
+  off: boolean;
   parties: Party[];
   invites: MyInvite[];
   characters: CharacterSummary[];
@@ -32,39 +34,29 @@ type Open =
   | { kind: "add-own"; party: Party };
 
 const day = (at: number) => new Date(at).toLocaleDateString();
+const EDITION: Record<Ruleset, string> = { dnd2024: "2024 rules", dnd2014: "2014 rules" };
+const memberName = (m: PartyMember) => m.name || (m.state === "missing" ? "A deleted character" : "An unreadable character");
 
-/** The numbers on a member's card, as the server projects them (plan 3.5): never read from the owner's files here. */
-function CardStats({ member }: { member: PartyMember }) {
-  const c = member.card;
-  if (!c) return null;
-  const hp = c.hpMax == null ? null : c.hpCurrent == null ? `${c.hpMax}` : `${c.hpCurrent}/${c.hpMax}`;
-  const stats: [string, string | number | null | undefined][] = [
-    ["AC", c.ac], ["HP", hp], ["Passive Perception", c.passivePerception], ["Spell DC", c.spellDc],
-  ];
-  const shown = stats.filter(([, v]) => v != null && v !== "");
-  if (shown.length === 0) return null;
-  return (
-    <dl className="party-stats">
-      {shown.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
-    </dl>
-  );
-}
-
+/**
+ * A member's roster card: what the server reads from the saved file (plan 3.5), read-only. Class and the numbers
+ * (AC, HP, passive Perception, spell DC) come with 0.2.1's card cache.
+ */
 function MemberRow({ member, dm, onRemove, onLeave }: { member: PartyMember; dm: boolean; onRemove: () => void; onLeave: () => void }) {
+  const who = member.mine ? "your character" : member.dmCharacter ? `the DM's character (${member.ownerName})` : member.ownerName;
+  const facts = [member.build, member.level != null ? `Level ${member.level}` : null, member.ruleset ? EDITION[member.ruleset] : null, who]
+    .filter(Boolean).join(" · ");
   return (
-    <li className="party-member" aria-label={member.name}>
+    <li className="party-member" aria-label={memberName(member)}>
       <div className="party-member-head">
         <span className="grow">
-          <strong>{member.name || "Unnamed"}</strong>
-          <span className="muted party-note">
-            {member.classLevel}{member.classLevel ? " · " : ""}{member.mine ? "your character" : member.ownerName}
-          </span>
+          <strong>{memberName(member)}</strong>
+          <span className="muted party-note">{facts}</span>
         </span>
-        {member.unreadable && <Chip tone="warning" title="Its file is gone or can't be read">Unreadable</Chip>}
-        {member.mine && <Button small onClick={onLeave}>Leave</Button>}
-        {dm && !member.mine && <Button small variant="danger" onClick={onRemove}>Remove</Button>}
+        {member.state === "unreadable" && <Chip tone="warning" title="The file is there but can't be read">Unreadable</Chip>}
+        {member.state === "missing" && <Chip tone="warning" title="The character's file is gone">Missing</Chip>}
+        {member.mine && member.ownerId && <Button small onClick={onLeave}>Leave</Button>}
+        {dm && !member.mine && member.ownerId && <Button small variant="danger" onClick={onRemove}>Remove</Button>}
       </div>
-      {(dm || member.mine) && <CardStats member={member} />}
     </li>
   );
 }
@@ -79,17 +71,17 @@ function PartyCard({ party, act, open }: {
   const dm = party.role === "dm";
   const remove = async (m: PartyMember) => {
     const answer = await confirm({
-      title: `Remove ${m.name}?`, danger: true, confirmLabel: "Remove",
-      body: `${m.name} leaves ${party.name}. ${m.ownerName} keeps the character and can join again with a new invite.`,
+      title: `Remove ${memberName(m)}?`, danger: true, confirmLabel: "Remove",
+      body: `${memberName(m)} leaves ${party.name}. ${m.ownerName} keeps the character and can join again with a new invite.`,
     });
-    if (answer === "confirm") await act(() => removeMember(party.id, m.ownerId, m.characterId), `${m.name} was removed.`);
+    if (answer === "confirm" && m.ownerId) await act(() => removeMember(party.id, m.ownerId!, m.characterId), `${memberName(m)} was removed.`);
   };
   const leave = async (m: PartyMember) => {
     const answer = await confirm({
       title: `Leave ${party.name}?`, danger: true, confirmLabel: "Leave",
-      body: `${m.name} leaves the party. You keep the character, and it can join another party.`,
+      body: `${memberName(m)} leaves the party. You keep the character, and it can join another party.`,
     });
-    if (answer === "confirm") await act(() => removeMember(party.id, m.ownerId, m.characterId), `${m.name} left ${party.name}.`);
+    if (answer === "confirm" && m.ownerId) await act(() => removeMember(party.id, m.ownerId!, m.characterId), `${memberName(m)} left ${party.name}.`);
   };
   const destroy = async () => {
     const others = party.members.filter((m) => !m.mine).length;
@@ -105,7 +97,7 @@ function PartyCard({ party, act, open }: {
   return (
     <Card className={`party-card ${dm ? "party-card-dm" : "party-card-player"}`} aria-label={party.name} title={party.name}
       actions={<Chip tone={dm ? "gold" : "accent"}>{dm ? "DM" : "Player"}</Chip>}>
-      {!dm && <p className="muted party-note">DM: {party.dmName}</p>}
+      <p className="muted party-note">{dm ? EDITION[party.ruleset] : `DM: ${party.dmName} · ${EDITION[party.ruleset]}`}</p>
       {dm && (
         <div className="party-actions">
           <Button small icon="send" variant="primary" onClick={() => open({ kind: "invite", party })}>Invite</Button>
@@ -120,7 +112,7 @@ function PartyCard({ party, act, open }: {
         : (
           <ul className="party-list">
             {party.members.map((m) => (
-              <MemberRow key={`${m.ownerId}/${m.characterId}`} member={m} dm={dm} onRemove={() => void remove(m)} onLeave={() => void leave(m)} />
+              <MemberRow key={`${m.ownerName}/${m.characterId}`} member={m} dm={dm} onRemove={() => void remove(m)} onLeave={() => void leave(m)} />
             ))}
           </ul>
         )}
@@ -148,13 +140,12 @@ function PartyCard({ party, act, open }: {
 
 /**
  * Parties (plan 4.1): the ones this account runs as DM and the ones its characters are in, the invites waiting for it,
- * and a join code box. DM tools appear once the account turns them on (Account page, plan D2).
+ * and a join code box. DM tools appear once the account turns them on (Account page, plan D2). Party data is
+ * online-only: the app shows the offline page instead (entry/App.tsx).
  */
 export function PartiesPage() {
   const api = useApi();
   const toast = useToast();
-  const user = loadSession()?.user as PartyUser | undefined;
-  const dmOn = Boolean(user?.dm);
   const [data, setData] = useState<Loaded | null>(null);
   const [loadError, setLoadError] = useState("");
   const [dialog, setDialog] = useState<Open | null>(null);
@@ -163,13 +154,20 @@ export function PartiesPage() {
 
   const load = useCallback(async () => {
     try {
-      const [parties, invites, characters] = await Promise.all([listParties(), listMyInvites(), api.listCharacters()]);
-      setData({ parties, invites, characters });
+      const [list, characters] = await Promise.all([loadParties(), api.listCharacters()]);
+      const invites = list.off ? [] : await listMyInvites();
+      setData({ dm: list.dm, off: Boolean(list.off), parties: list.parties, invites, characters });
       setLoadError("");
     } catch (e) { setLoadError(errorMessage(e)); }
   }, [api]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => onPartiesChanged(() => { void load(); }), [load]);
+  // No live roster before 0.2.1: catch up when the page is looked at again.
+  useEffect(() => {
+    const seen = () => { if (document.visibilityState === "visible") void load(); };
+    document.addEventListener("visibilitychange", seen);
+    return () => document.removeEventListener("visibilitychange", seen);
+  }, [load]);
 
   const act = useCallback(async (work: () => Promise<unknown>, done?: string) => {
     try {
@@ -196,20 +194,29 @@ export function PartiesPage() {
       keepJoinCode(null);
       setCode("");
       setDialog({ kind: "pick", invite });
-    } catch (err) { toast.push(errorMessage(err), "error"); }
-    finally { setJoining(false); }
+    } catch (err) {
+      toast.push((err as { code?: string }).code === "not_found" ? "That code isn't valid, or it has expired or run out." : errorMessage(err), "error");
+    } finally { setJoining(false); }
   };
 
-  /** A refusal because the character is in a party already (plan D19) reads as that, and the page catches up. */
-  const picked = async (work: () => Promise<Party>, done: (p: Party) => string) => {
+  /** A refusal because the character is in a party already (plan D19) shows in the dialog, and the page catches up. */
+  const picked = async (work: () => Promise<unknown>, done: string) => {
     try {
-      const party = await work();
-      toast.push(done(party), "info");
+      await work();
+      toast.push(done, "info");
     } catch (err) {
-      if ((err as { code?: string }).code === CHARACTER_IN_PARTY) void load();
+      if ((err as { code?: string }).code === CONFLICT) void load();
       throw err;
     }
   };
+
+  if (data?.off) {
+    return (
+      <div className="party party-parties">
+        <Alert tone="info">Parties are switched off on this server.</Alert>
+      </div>
+    );
+  }
 
   const parties = data?.parties ?? [];
   const running = parties.filter((p) => p.role === "dm");
@@ -233,10 +240,12 @@ export function PartiesPage() {
         <Card title="Invitations">
           <ul className="party-list">
             {data.invites.map((inv) => (
-              <li key={inv.id} className="party-line party-invite" aria-label={`Invite to ${inv.partyName}`}>
+              <li key={inv.id} className="party-line party-invite" aria-label={`Invite to ${inv.party.name}`}>
                 <span className="grow">
-                  <strong>{inv.partyName}</strong>
-                  <span className="muted party-note">DM: {inv.dmName} · until {day(inv.expiresAt)}</span>
+                  <strong>{inv.party.name}</strong>
+                  <span className="muted party-note">
+                    DM: {inv.party.dmName} · {inv.kind === "code" ? "your join code" : "sent to you"} · until {day(inv.expiresAt)}
+                  </span>
                 </span>
                 <Button small onClick={() => void act(() => declineInvite(inv.id), "Invite declined.")}>Decline</Button>
                 <Button small variant="primary" onClick={() => setDialog({ kind: "pick", invite: inv })}>Accept</Button>
@@ -246,7 +255,7 @@ export function PartiesPage() {
         </Card>
       )}
 
-      {data && dmOn && (
+      {data?.dm && (
         <Card title="Parties I run"
           actions={running.length < MAX_PARTIES ? <Button small icon="plus" variant="primary" onClick={() => setDialog({ kind: "create" })}>New party</Button> : undefined}>
           {running.length === 0 && <EmptyState title="No parties yet">Create one, then invite players by username or with a join code.</EmptyState>}
@@ -264,12 +273,12 @@ export function PartiesPage() {
       )}
       {playing.map((p) => <PartyCard key={p.id} party={p} act={act} open={setDialog} />)}
 
-      {data && !dmOn && (
+      {data && !data.dm && (
         <p className="muted party-note">
           Want to run a game? Turn on Dungeon Master tools on your <Link to="/account">Account</Link> page.
         </p>
       )}
-      <p className="muted party-note">Server admins can read party data on the server.</p>
+      {data && <p className="muted party-note">Server admins can read party data on the server.</p>}
 
       {dialog?.kind === "create" && (
         <NameDialog title="New party" action="Create" onClose={() => setDialog(null)}
@@ -281,12 +290,12 @@ export function PartiesPage() {
       )}
       {dialog?.kind === "invite" && <InviteDialog party={dialog.party} onClose={() => setDialog(null)} />}
       {dialog?.kind === "pick" && data && (
-        <PickCharacterDialog title={`Join ${dialog.invite.partyName}`} characters={data.characters} taken={taken} onClose={() => setDialog(null)}
-          onPick={(id) => picked(() => acceptInvite(dialog.invite.id, id), (p) => `You joined ${p.name}.`)} />
+        <PickCharacterDialog title={`Join ${dialog.invite.party.name}`} characters={data.characters} taken={taken} onClose={() => setDialog(null)}
+          onPick={(id) => picked(() => acceptInvite(dialog.invite.id, id), `You joined ${dialog.invite.party.name}.`)} />
       )}
       {dialog?.kind === "add-own" && data && (
         <PickCharacterDialog title={`Add to ${dialog.party.name}`} characters={data.characters} taken={taken} onClose={() => setDialog(null)}
-          onPick={(id) => picked(() => addOwnCharacter(dialog.party.id, id), (p) => `Your character joined ${p.name}.`)} />
+          onPick={(id) => picked(() => addOwnCharacter(dialog.party.id, id), `Your character joined ${dialog.party.name}.`)} />
       )}
     </div>
   );
