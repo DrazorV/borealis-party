@@ -196,7 +196,12 @@ A `.borealis` bundle made with desktop Borealis's File > Export to bundle can be
 "Import characters" on the Start page, or File > Open bundle.... Borealis's own preview opens, and Accept adds the
 characters and content packs to that account only, exactly as desktop Borealis would.
 
-- Making bundles is not offered, by the server or by the party apps. A bundle comes from Borealis itself.
+- File > Export to bundle... (the desktop app and the browser) makes one from the account, with Borealis's own builder,
+  and saves it as a download. To hand someone all of an account's content, untick every character and choose "All my
+  content packs": that is every pack in the account's library, imported homebrew and packs from indexes alike, in
+  `Borealis content.borealis`. They open it in desktop Borealis or in their own account with File > Open bundle....
+  The index addresses themselves do not travel, only the packs they installed. The phone apps do not offer it (their
+  web view has no download).
 - Device-to-device transfer is not offered either: every device of an account reads the same account on the server.
 - A bundle is uploaded as base64, so the largest one is about three quarters of `MAX_UPLOAD_MB`.
 - Uploaded bundles wait in the account's `sync/incoming` folder until they are accepted or closed. At most eight wait

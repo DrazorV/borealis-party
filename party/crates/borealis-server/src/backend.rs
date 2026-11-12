@@ -7,8 +7,9 @@
 //!
 //! `.borealis` bundles are files, not device transfer: [`stage_bundle`] writes an uploaded bundle into the account's
 //! own `sync/incoming` folder and hands back a pick token, and upstream's `bundle_open`, `bundle_accept` and
-//! `bundle_discard` preview and apply it there. Exporting bundles, the device link (`link_*`, paired devices) and the
-//! OS inbox (`take_opened_*`, one queue for the whole process) stay out.
+//! `bundle_discard` preview and apply it there. [`bundle_export`] builds one with upstream's builder and sends its
+//! bytes back. Sharing bundles from the server's machine (`bundle_share`), the device link (`link_*`, paired devices)
+//! and the OS inbox (`take_opened_*`, one queue for the whole process) stay out.
 
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
@@ -43,6 +44,44 @@ fn export_sheet(
     Ok(state
         .sheet_file(&character_id, &options.unwrap_or_default())?
         .into_base64())
+}
+
+/// The answer to [`bundle_export`]: upstream's `BundleExport` without a path, plus the file's bytes.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BundleFile {
+    file_name: String,
+    characters: usize,
+    packs: usize,
+    bytes: u64,
+    data_base64: String,
+}
+
+/// File > Export to bundle...: upstream's own builder, as desktop Borealis uses it. Upstream's version opens a native
+/// save dialog; the server sends the bytes to the client instead, which saves them as a download. With no characters
+/// and every pack, the file is the account's whole library (imported homebrew and packs from indexes alike).
+#[tauri::command(async)]
+fn bundle_export(
+    sync: tauri::State<'_, Arc<DeviceSync>>,
+    selection: borealis_lib::sync_dto::LinkSelection,
+) -> ApiResult<BundleFile> {
+    use base64::Engine as _;
+    let built = sync.build_bundle_file(&selection)?;
+    let info = borealis_lib::device_sync::export_dto(&built, None);
+    let bytes =
+        std::fs::read(built.file.path()).map_err(|e| ApiError::io("prepare the bundle", e))?;
+    let file_name = if info.characters == 0 {
+        format!("Borealis content.{BUNDLE_EXTENSION}")
+    } else {
+        info.file_name
+    };
+    Ok(BundleFile {
+        file_name,
+        characters: info.characters,
+        packs: info.packs,
+        bytes: info.bytes,
+        data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+    })
 }
 
 /// Upstream's prefix of the per-open folders under `sync/incoming`; it is crate-private there.
@@ -289,7 +328,8 @@ fn offered(name: &str, invocation: &Invocation) -> Option<Result<Value, Value>> 
         commands_content::remove_5etools_url,
         commands_content::update_5etools_url,
         commands_content::import_5etools,
-        // Bundle files, previewed and applied in the account's own folder.
+        // Bundle files, made from and previewed and applied in the account's own folder.
+        bundle_export,
         stage_bundle,
         commands_sync::bundle_open,
         commands_sync::bundle_accept,

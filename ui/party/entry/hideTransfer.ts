@@ -1,9 +1,10 @@
 import { isOffline } from "../api/connectivity";
 
 /**
- * Entry points to what a server doesn't offer: device-to-device transfer and making bundle files (every device already
- * reads the same account), Notes and "Save as" (a folder on the device), the on-device search model, and closing the app.
- * Opening a bundle file is offered: "Open bundle..." stays (api/bundles.ts). Upstream's rows carry no attribute CSS could
+ * Entry points to what a server doesn't offer: device-to-device transfer and sharing bundle files from a phone (every
+ * device already reads the same account), Notes and "Save as" (a folder on the device), the on-device search model, and
+ * closing the app. Bundle files are offered: "Open bundle..." uploads one and "Export to bundle..." downloads one
+ * (api/bundles.ts). Upstream's rows carry no attribute CSS could
  * match, so they are matched by their text as they appear. If upstream rewords one, the row simply comes back and fails
  * with a message.
  */
@@ -12,7 +13,6 @@ const LABELS: ReadonlySet<string> = new Set([
   "Receive from device...",
   "Send to device",
   "Receive from device",
-  "Export to bundle...",
   "Share as a file",
   "Notes",
   "Search settings",

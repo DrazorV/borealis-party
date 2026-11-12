@@ -1,5 +1,5 @@
-import type { ApiError, BundlePreview, CharacterSummary, ImportReport, PickedPath } from "../../src/api/contract";
-import { fileToBase64 } from "../../src/lib/files";
+import type { ApiError, BundleExport, BundlePreview, CharacterSummary, ImportReport, PickedPath } from "../../src/api/contract";
+import { downloadBase64, fileToBase64 } from "../../src/lib/files";
 import { openBundleFile } from "../../src/pages/transfer/openBundle";
 import { serverFetch } from "./http";
 import type { ServerSession } from "./session";
@@ -8,9 +8,29 @@ import type { ServerSession } from "./session";
  * `.borealis` bundles (desktop File > Export to bundle...) on a server. The browser has the file's bytes but no path, and
  * upstream's preview reads a bundle by `bundle-file` token, so the bytes go up first (`stage_bundle`) and come back as a
  * token in this account's own folder. From there upstream's Open bundle window (BundleHost) does the rest unchanged.
+ * Export goes the other way: the server builds the file with upstream's builder and the bytes come down as a download.
  */
 
 type Session = Pick<ServerSession, "baseUrl" | "token">;
+
+/** What the server's `bundle_export` answers: upstream's `BundleExport` without a path, with the file's bytes. */
+interface BundleFile {
+  fileName: string;
+  characters: number;
+  packs: number;
+  bytes: number;
+  dataBase64: string;
+}
+
+/**
+ * File > Export to bundle...: the server builds the bundle and the browser saves it as a download (the desktop app's
+ * web view asks where). The answer names the file as its `path`, so upstream's dialog closes and the status bar says so.
+ */
+export async function exportBundle(session: Session, args: Record<string, unknown>): Promise<BundleExport> {
+  const file = await serverFetch(session, "POST", "/api/rpc/bundle_export", args) as BundleFile;
+  downloadBase64(file.fileName, "application/octet-stream", file.dataBase64);
+  return { fileName: file.fileName, path: file.fileName, characters: file.characters, packs: file.packs, bytes: file.bytes };
+}
 
 /** Uploads a bundle into this account's folder and returns a `bundle-file` token for `bundleOpen`. */
 export async function stageBundle(session: Session, fileName: string, contentBase64: string): Promise<{ token: string; name: string }> {

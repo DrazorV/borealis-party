@@ -45,7 +45,6 @@ link_forget_device
 link_start_receive
 link_start_send
 link_status
-bundle_export
 bundle_share
 
 # Files, folders and pickers on the user's device.

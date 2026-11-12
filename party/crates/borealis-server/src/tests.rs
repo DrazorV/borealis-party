@@ -547,10 +547,9 @@ async fn full_flow(router: Router, data: &Path) {
         "set_documents_dir",
         "get_data_dirs",
         "take_group_notes",
-        // Bundles are opened from uploads only: no export, no OS inbox (one queue for the whole process), no link.
+        // Bundles are opened from uploads and exported as downloads only: no share sheet, no OS inbox (one queue for the whole process), no link.
         "take_opened_bundles",
         "take_opened_files",
-        "bundle_export",
         "bundle_share",
         "link_start_receive",
         "link_start_send",
@@ -1689,4 +1688,59 @@ fn bundle_names_are_one_component() {
         assert!(name.len() <= 255, "{} bytes", name.len());
         assert!(name.ends_with(".borealis"));
     }
+}
+
+/// File > Export to bundle... with no characters and every pack: the account's library as a download, which another
+/// account (or desktop Borealis) opens like any other bundle.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_account_exports_its_content_as_a_bundle() {
+    use base64::Engine as _;
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path();
+    let router = router(data.to_path_buf()).await;
+    let alice = sign_up(&router, "export-alice").await;
+    let bob = sign_up(&router, "export-bob").await;
+    let (status, out) = alice.rpc("import_pack", spell_pack()).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+
+    // A character must be chosen unless every pack goes.
+    let (status, out) = alice
+        .rpc(
+            "bundle_export",
+            json!({ "selection": { "characterIds": [], "packs": "required" } }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{out}");
+
+    let (status, file) = alice
+        .rpc(
+            "bundle_export",
+            json!({ "selection": { "characterIds": [], "packs": "all" } }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{file}");
+    assert_eq!(file["fileName"], "Borealis content.borealis");
+    assert_eq!(file["characters"], 0, "{file}");
+    assert_eq!(file["packs"], 1, "{file}");
+    assert!(file.get("path").is_none(), "{file}");
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(file["dataBase64"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(bytes.len() as u64, file["bytes"].as_u64().unwrap());
+    // Nothing is left behind on the server.
+    let left: Vec<PathBuf> = walk(&data.join("users").join(&alice.id))
+        .into_iter()
+        .filter(|p| p.to_string_lossy().ends_with(".borealis"))
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+
+    let preview = bob
+        .open_bundle(file["fileName"].as_str().unwrap(), &bytes)
+        .await;
+    assert_eq!(actions(&preview), one("pack", "new"), "{preview}");
+    bob.accept_bundle(&preview).await;
+    let (status, out) = bob
+        .rpc("get_element", json!({ "elementId": "ID_PARTY_SPARK" }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
 }

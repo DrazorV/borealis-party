@@ -216,8 +216,8 @@ pub(super) async fn sync_flow(router: Router, data: &Path) {
             assert_eq!(status, StatusCode::BAD_REQUEST, "{command} {bad}: {out}");
         }
     }
-    // Bundles still only come in.
-    for command in ["bundle_export", "bundle_share", "link_status"] {
+    // Bundles leave only as a download (bundle_export), never by share sheet or link.
+    for command in ["bundle_share", "link_status"] {
         let (status, out) = alice.rpc(command, json!({})).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{command}: {out}");
     }

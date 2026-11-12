@@ -42,3 +42,11 @@ it("leaves no device transfer row on upstream's More page, and no empty list whe
   expect(devices?.classList.contains("party-hidden")).toBe(true);
   expect(shown(container.querySelector('[aria-label="More destinations"]')!)).toBe(true);
 });
+
+it("keeps Export to bundle... and Open bundle... in the desktop File menu", async () => {
+  hideUnofferedRows();
+  document.body.innerHTML = '<ul><li><button class="aur-menu-item">Send to device...</button></li><li><button class="aur-menu-item">Export to bundle...</button></li><li><button class="aur-menu-item">Open bundle...</button></li></ul>';
+  await new Promise((resolve) => setTimeout(resolve, 0)); // the observer runs after the change
+  const hidden = [...document.body.querySelectorAll("li")].map((li) => li.classList.contains("party-hidden"));
+  expect(hidden).toEqual([true, false, false]);
+});
