@@ -74,18 +74,44 @@ beforeEach(() => {
 
 afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = ""; });
 
-it("online with nothing unsent: the last sync, then the copy goes and the session ends", async () => {
+/** The "Sign out" button inside the dialog's foot (the page's own button has the same label). */
+const dialogButton = (label: string) => [...document.querySelectorAll<HTMLButtonElement>(".dialog-foot button")].find((b) => b.textContent === label)!;
+
+it("online with nothing unsent: the last sync, a question, then the copy goes and the session ends", async () => {
   saveSession(session);
   await copy("ana", "l1", false);
   render(<Bar />);
   fireEvent.click(screen.getByText("Sign out"));
   await settle();
   expect(device.sync).toEqual(["last"]);
+  // Asked first: Cancel is the default, and nothing is gone yet.
+  expect(screen.getByText(/remove this device's copy/)).toBeTruthy();
+  const buttons = [...document.querySelectorAll(".dialog-foot button")].map((b) => b.textContent);
+  expect(buttons).toEqual(["Cancel", "Sign out"]);
+  expect(document.querySelector(".dialog-foot button")!.hasAttribute("data-autofocus")).toBe(true);
+  expect(device.deleted).toEqual([]);
+  fireEvent.click(dialogButton("Sign out"));
+  await settle();
   expect(device.deleted).toEqual(["l1"]);
   expect(loadMirror("ana")).toBeNull();
   expect(requests).toEqual(["POST http://server/api/auth/logout"]);
   expect(loadSession()).toBeNull();
   expect(reload).toHaveBeenCalledOnce();
+});
+
+it("nothing unsent, and Cancel: everything stays and the sync goes on", async () => {
+  saveSession(session);
+  await copy("ana", "l1", false);
+  render(<Bar />);
+  fireEvent.click(screen.getByText("Sign out"));
+  await settle();
+  fireEvent.click(dialogButton("Cancel"));
+  await settle();
+  expect(document.querySelector(".dialog-foot")).toBeNull();
+  expect(device.deleted).toEqual([]);
+  expect(loadSession()).not.toBeNull();
+  expect(device.sync).toEqual(["last", "resume"]);
+  expect(reload).not.toHaveBeenCalled();
 });
 
 it("offline with an unsent edit: a dialog whose default is Cancel, which keeps everything", async () => {

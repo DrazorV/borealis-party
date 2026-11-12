@@ -1,0 +1,23 @@
+/*
+ * Plan M4: the Menu sheet (and the other content-sized sheets, `data-sheet="auto"`) gets a visible Close. Upstream gives
+ * these flyouts only a screen-reader Close on phones, and they have no footer with Cancel; a phone browser has no app Back
+ * button or Escape key, so they otherwise closed only by a swipe or a scrim tap. The same button is shown here as a round
+ * close button at the head's right edge, like the dialog heads' close (styles/phone/overlays.css), at least 44 px on iOS
+ * and 48 px on Android. Its text stays its accessible name; the cross is drawn by `::before`.
+ */
+html.phone .flyout-overlay[data-sheet="auto"] .flyout-head > button.sr-only {
+  position: relative; flex: none; width: max(var(--ph-hit), 44px); height: max(var(--ph-hit), 44px); min-height: 0;
+  margin: 0 calc(8px - var(--ph-gutter)) 0 auto; padding: 0; overflow: hidden; clip: auto; white-space: nowrap;
+  border: 0; border-radius: var(--ph-r-pill); background: var(--ph-fill); color: var(--ph-text-2);
+  font-size: 0; cursor: pointer; transition: transform var(--ph-d-press) var(--ph-ease-out);
+}
+html.phone.android .flyout-overlay[data-sheet="auto"] .flyout-head > button.sr-only { width: max(var(--ph-hit), 48px); height: max(var(--ph-hit), 48px); }
+html.phone .flyout-overlay[data-sheet="auto"] .flyout-head > button.sr-only::before {
+  content: ""; position: absolute; inset: 0; margin: auto; width: 14px; height: 14px; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M1 1l12 12M13 1L1 13' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M1 1l12 12M13 1L1 13' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+html.phone .flyout-overlay[data-sheet="auto"] .flyout-head > button.sr-only:active { transform: scale(0.94); }
+html.phone .flyout-overlay[data-sheet="auto"] .flyout-head > button.sr-only:focus-visible { outline: 2px solid var(--ph-accent); outline-offset: 2px; }
+/* The title gives way to the button rather than pushing it out. */
+html.phone .flyout-overlay[data-sheet="auto"] .flyout-head:has(> button.sr-only) .flyout-title { flex: 1 1 auto; min-width: 0; }

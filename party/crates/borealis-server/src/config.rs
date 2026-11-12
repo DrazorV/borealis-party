@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::db::Location;
+use crate::net_guard::Cidr;
 
 /// Prefix of the variables that override `config.toml`.
 pub const ENV_PREFIX: &str = "BOREALIS__";
@@ -38,9 +39,20 @@ open_registration = true
 require_approval = true
 # Largest upload in megabytes (a zip of a 5etools data folder can be large).
 max_upload_mb = 512
+# Largest upload in megabytes that gets through the public address. A proxy in front of the server can have a lower
+# cap than max_upload_mb: Cloudflare's free plan stops requests over 100 MB. Files travel as base64, a third larger,
+# so 95 lets about 71 MB of file through. The app checks a file against this before it sends it, when it is connected
+# by an address outside the home network.
+public_upload_mb = 95
 # Where visitors of the website are offered the app for their system: a folder URL that holds the release files
 # (borealis-party-arm64.apk, borealis-party-windows-x64-setup.exe, ...). By default the latest release on GitHub; "off" offers no download.
 # app_download = "https://github.com/DrazorV/borealis-party/releases/latest/download"
+# The reverse proxies in front of the server, as addresses or ranges ("172.20.20.100", "172.18.0.0/16"). Only a
+# request from one of these may say who the client is (CF-Connecting-IP, else the right-most X-Forwarded-For entry
+# that is not one of these). Sign-up and sign-in limits count per client, so behind a proxy list it here, or every
+# client looks like the proxy: one sign-up limit for everyone, and failed sign-ins lock a name for everyone.
+# Empty: the headers are ignored and the connecting address is the client. As a variable, separate with commas.
+trusted_proxies = []
 
 [database]
 # "sqlite" (a file in this folder) or "postgres" (your own server, see [postgres]).
@@ -126,8 +138,12 @@ pub struct ServerSettings {
     pub require_approval: bool,
     /// Largest request in megabytes.
     pub max_upload_mb: usize,
+    /// Largest request in megabytes through the public address (a proxy's cap, such as Cloudflare's 100 MB).
+    pub public_upload_mb: usize,
     /// Where the apps are downloaded from: unset for [`DEFAULT_APP_DOWNLOAD`], `off` for nowhere.
     pub app_download: Option<String>,
+    /// Reverse proxies whose client headers are believed ([`crate::auth::ClientIp`]).
+    pub trusted_proxies: Vec<String>,
 }
 
 impl Default for ServerSettings {
@@ -138,9 +154,70 @@ impl Default for ServerSettings {
             open_registration: true,
             require_approval: true,
             max_upload_mb: 512,
+            public_upload_mb: 95,
             app_download: None,
+            trusted_proxies: Vec::new(),
         }
     }
+}
+
+impl ServerSettings {
+    /// What `/api/server` tells the app about uploads. The public limit is never above the server's own.
+    #[must_use]
+    pub fn upload_limits(&self) -> UploadLimits {
+        UploadLimits {
+            max_upload_mb: self.max_upload_mb,
+            public_upload_mb: self.public_upload_mb.min(self.max_upload_mb),
+        }
+    }
+}
+
+/// The largest request the server takes, and the largest that gets through its public address, in megabytes (MiB).
+/// The app checks a file against these before reading it (`ui/party/api/overrides/errors.ts`).
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadLimits {
+    /// `server.max_upload_mb`: on the home network.
+    pub max_upload_mb: usize,
+    /// `server.public_upload_mb`, at most `max_upload_mb`: through the public address.
+    pub public_upload_mb: usize,
+}
+
+/// What the network code needs from the settings: who may name the client, and the server's own names.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Network {
+    /// `server.trusted_proxies`, parsed.
+    pub trusted_proxies: Vec<Cidr>,
+    /// The host of `server.public_url`, lower case: the server never downloads from itself.
+    pub own_hosts: Vec<String>,
+}
+
+static NETWORK: std::sync::OnceLock<Network> = std::sync::OnceLock::new();
+
+/// The network settings [`Settings::load`] read at start, or none (tests that build the routes by hand): no proxy is
+/// trusted, and the server has no public name.
+#[must_use]
+pub fn network() -> &'static Network {
+    static NONE: std::sync::OnceLock<Network> = std::sync::OnceLock::new();
+    NETWORK
+        .get()
+        .unwrap_or_else(|| NONE.get_or_init(Network::default))
+}
+
+static UPLOAD_LIMITS: std::sync::OnceLock<UploadLimits> = std::sync::OnceLock::new();
+
+/// Sets what [`upload_limits`] answers, once, at start. Later calls are ignored.
+pub fn set_upload_limits(limits: UploadLimits) {
+    let _ = UPLOAD_LIMITS.set(limits);
+}
+
+/// The limits set at start, or the defaults when none were (tests that build the routes by hand).
+#[must_use]
+pub fn upload_limits() -> UploadLimits {
+    UPLOAD_LIMITS
+        .get()
+        .copied()
+        .unwrap_or_else(|| ServerSettings::default().upload_limits())
 }
 
 /// `[database]`.
@@ -372,6 +449,14 @@ fn typed(value: &str, like: Option<&toml::Value>) -> toml::Value {
         Some(toml::Value::Integer(_)) => value
             .parse::<i64>()
             .map_or_else(|_| toml::Value::String(value.into()), toml::Value::Integer),
+        Some(toml::Value::Array(_)) => toml::Value::Array(
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(|v| toml::Value::String(v.into()))
+                .collect(),
+        ),
         _ => toml::Value::String(value.into()),
     }
 }
@@ -421,8 +506,33 @@ impl Settings {
         }
         let text = std::fs::read_to_string(&file)
             .map_err(|e| ConfigError(format!("cannot read {}: {e}", file.display())))?;
-        Self::parse(&text, std::env::vars())
-            .map_err(|e| ConfigError(format!("{}: {e}", file.display())))
+        let settings = Self::parse(&text, std::env::vars())
+            .map_err(|e| ConfigError(format!("{}: {e}", file.display())))?;
+        // Read by the sign-in routes and the download check, which have no settings of their own. Once per process.
+        let _ = NETWORK.set(settings.network());
+        Ok(settings)
+    }
+
+    /// What [`network`] answers after [`Settings::load`].
+    #[must_use]
+    pub fn network(&self) -> Network {
+        Network {
+            trusted_proxies: self
+                .server
+                .trusted_proxies
+                .iter()
+                .filter_map(|p| Cidr::parse(p).ok())
+                .collect(),
+            own_hosts: self
+                .public_url()
+                .and_then(|u| url::Url::parse(&u).ok())
+                .and_then(|u| {
+                    u.host_str()
+                        .map(|h| h.trim_end_matches('.').to_ascii_lowercase())
+                })
+                .into_iter()
+                .collect(),
+        }
     }
 
     /// Settings from file text and variables.
@@ -445,6 +555,9 @@ impl Settings {
     }
 
     fn check(&self) -> Result<(), ConfigError> {
+        for proxy in &self.server.trusted_proxies {
+            Cidr::parse(proxy).map_err(|e| ConfigError(format!("server.trusted_proxies: {e}")))?;
+        }
         if !["disable", "prefer", "require"].contains(&self.postgres.sslmode.as_str()) {
             return Err(ConfigError(
                 "postgres.sslmode must be disable, prefer or require".into(),
@@ -574,6 +687,42 @@ mod tests {
     }
 
     #[test]
+    fn upload_limits_are_exposed_and_the_public_one_is_capped() {
+        let defaults = Settings::parse(DEFAULT_FILE, [])
+            .unwrap()
+            .server
+            .upload_limits();
+        assert_eq!(
+            defaults,
+            UploadLimits {
+                max_upload_mb: 512,
+                public_upload_mb: 95
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(defaults).unwrap(),
+            serde_json::json!({ "maxUploadMb": 512, "publicUploadMb": 95 })
+        );
+        let set = Settings::parse(
+            DEFAULT_FILE,
+            vars(&[
+                ("BOREALIS__SERVER__MAX_UPLOAD_MB", "64"),
+                ("BOREALIS__SERVER__PUBLIC_UPLOAD_MB", "200"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            set.server.upload_limits(),
+            UploadLimits {
+                max_upload_mb: 64,
+                public_upload_mb: 64
+            }
+        );
+        // Nothing set at start (as in the route tests): the defaults.
+        assert_eq!(upload_limits().public_upload_mb, 95);
+    }
+
+    #[test]
     fn variables_win_and_keep_their_types() {
         let s = Settings::parse(
             DEFAULT_FILE,
@@ -601,6 +750,49 @@ mod tests {
         assert!(
             !format!("{s:?}").contains("1234"),
             "passwords stay out of logs"
+        );
+    }
+
+    #[test]
+    fn trusted_proxies_are_ranges_from_the_file_or_a_variable() {
+        assert!(Settings::default().network().trusted_proxies.is_empty());
+        let s = Settings::parse(
+            DEFAULT_FILE,
+            vars(&[
+                (
+                    "BOREALIS__SERVER__TRUSTED_PROXIES",
+                    "172.20.20.100, 172.18.0.0/16",
+                ),
+                ("BOREALIS__SERVER__PUBLIC_URL", "https://Party.Example.com/"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(s.server.trusted_proxies, ["172.20.20.100", "172.18.0.0/16"]);
+        let net = s.network();
+        assert_eq!(net.trusted_proxies.len(), 2);
+        assert!(net.trusted_proxies[1].contains("172.18.4.2".parse().unwrap()));
+        assert_eq!(net.own_hosts, ["party.example.com"]);
+        let file = Settings::parse(
+            "[server]
+trusted_proxies = [\"::1\"]",
+            [],
+        )
+        .unwrap();
+        assert_eq!(file.network().trusted_proxies.len(), 1);
+        assert!(Settings::parse(
+            "[server]
+trusted_proxies = [\"npm\"]",
+            []
+        )
+        .is_err());
+        assert!(Settings::parse(
+            "",
+            vars(&[("BOREALIS__SERVER__TRUSTED_PROXIES", "10.0.0.0/40")])
+        )
+        .is_err());
+        assert!(
+            network().trusted_proxies.is_empty(),
+            "nothing loaded in tests"
         );
     }
 

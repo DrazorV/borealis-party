@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use axum::extract::DefaultBodyLimit;
 use axum::http::{header, HeaderName, HeaderValue, Method};
-use axum::routing::{any, delete, get, post};
+use axum::routing::{any, get};
 use axum::{Json, Router};
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
@@ -23,8 +23,12 @@ mod backend;
 mod config;
 mod db;
 mod error;
+mod jobs;
 mod mail;
 mod migrate;
+mod net_guard;
+#[cfg(test)]
+mod route_tests;
 mod rpc;
 mod settings;
 mod sync;
@@ -116,6 +120,8 @@ async fn server_info(
         "requireApproval": settings.require_approval,
         "email": state.mailer.is_some(),
         "appDownload": state.config.app_download,
+        // The app checks a file's size against these before reading it (ui/party/api/overrides/errors.ts).
+        "uploads": config::upload_limits(),
     })))
 }
 
@@ -124,36 +130,13 @@ async fn no_such_route() -> error::ApiError {
     error::ApiError::NotFound("The server does not offer that.".into())
 }
 
-/// Every route under `/api`.
+/// Every route under `/api`. Each feature module has a `routes()` and adds one `.merge` line here.
 pub fn api_routes(state: AppState, max_upload: usize) -> Router {
     Router::new()
         .route("/api/server", get(server_info))
-        .route("/api/auth/register", post(auth::register))
-        .route("/api/auth/login", post(auth::login))
-        .route("/api/auth/logout", post(auth::logout))
-        .route("/api/auth/confirm/{token}", get(auth::confirm))
-        .route("/api/me", get(auth::me).patch(auth::update_me))
-        .route("/api/me/password", post(auth::change_password))
-        .route("/api/admin/stats", get(admin::stats))
-        .route(
-            "/api/admin/settings",
-            get(admin::settings).patch(admin::save_settings),
-        )
-        .route("/api/admin/activity", get(admin::activity))
-        .route("/api/admin/accounts", get(admin::accounts))
-        .route("/api/admin/accounts/{id}", delete(admin::delete_account))
-        .route("/api/admin/accounts/{id}/status", post(admin::set_status))
-        .route("/api/admin/accounts/{id}/admin", post(admin::set_admin))
-        .route(
-            "/api/admin/accounts/{id}/password",
-            post(admin::reset_password),
-        )
-        .route(
-            "/api/admin/accounts/{id}/sign-out",
-            post(admin::sign_out_everywhere),
-        )
-        .route("/api/rpc/{command}", post(rpc::command))
-        .route("/api/events", get(rpc::events))
+        .merge(auth::routes())
+        .merge(admin::routes())
+        .merge(rpc::routes())
         .route("/api/{*rest}", any(no_such_route))
         .layer(DefaultBodyLimit::max(max_upload))
         .with_state(state)
@@ -398,6 +381,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&data)?;
     let workspaces = Arc::new(Workspaces::new(data, content));
     tokio::spawn(Arc::clone(&workspaces).evict_loop());
+    config::set_upload_limits(settings.server.upload_limits());
     let state = AppState {
         db,
         workspaces: Arc::clone(&workspaces),
