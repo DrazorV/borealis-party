@@ -29,7 +29,9 @@ test.describe("connectivity", () => {
     const field = await page.evaluate(() => {
       const input = document.createElement("input");
       input.id = "phone-rig-field";
-      document.querySelector(".party-bar")!.append(input);
+      // Not in .party-bar: on phones that row is hidden when it has no Sync chip (every browser).
+      input.style.cssText = "position:fixed;left:16px;bottom:16px;z-index:9999";
+      document.body.append(input);
       return input.id;
     });
     await page.locator(`#${field}`).fill("half a note");
