@@ -36,6 +36,15 @@ test.describe("dialogs", () => {
     await expect(menu).toBeHidden();
   });
 
+  test("Menu sheet: Help has no Check for updates (desktop app only)", async ({ page }) => {
+    await open(page, "/characters");
+    await signedInShell(page);
+    await page.getByRole("button", { name: "Menu" }).tap();
+    const menu = page.getByRole("dialog", { name: "Menu" });
+    await expect(menu.getByRole("button", { name: "Privacy Policy" })).toHaveCount(1);
+    await expect(menu.getByRole("button", { name: /Check for updates/ })).toHaveCount(0);
+  });
+
   test("Application Settings opens and closes", async ({ page }, testInfo) => {
     await open(page, "/characters");
     await signedInShell(page);
