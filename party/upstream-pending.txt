@@ -2,12 +2,7 @@
 # Each change must be exactly the PR's patch, so merging upstream after the PR lands makes the diff go away.
 # check-upstream.sh accepts these files and says when one no longer differs (then remove its line).
 
-# Leave out the Ability Score Improvement / Feat placeholders
-crates/borealis-sheet/src/card_model.rs https://github.com/TeamBorealis/borealis/pull/43
-crates/borealis-sheet/src/model_tests.rs https://github.com/TeamBorealis/borealis/pull/43
-crates/borealis-sheet/src/model_text.rs https://github.com/TeamBorealis/borealis/pull/43
-
-# Opt-in "Combine Feature Upgrades" sheet option (model_text.rs is shared with the PR above)
+# Opt-in "Combine Feature Upgrades" sheet option
 crates/borealis-sheet/src/model_text.rs https://github.com/TeamBorealis/borealis/pull/42
 crates/borealis-sheet/src/feature_fold.rs https://github.com/TeamBorealis/borealis/pull/42
 crates/borealis-sheet/src/lib.rs https://github.com/TeamBorealis/borealis/pull/42
