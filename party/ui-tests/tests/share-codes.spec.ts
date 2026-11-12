@@ -1,4 +1,4 @@
-﻿import type { APIRequestContext, Page, TestInfo } from "@playwright/test";
+import type { APIRequestContext, Page, TestInfo } from "@playwright/test";
 import { ACCOUNTS, type AccountName } from "./accounts";
 import { expect, measureOverflow, minTap, open, scrollIntoReach, signedInShell, smallTargets, test } from "./fixtures";
 
