@@ -32,6 +32,7 @@ mod parties;
 mod route_tests;
 mod rpc;
 mod settings;
+mod shares;
 mod sync;
 #[cfg(test)]
 mod tests;
@@ -138,6 +139,7 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
         .merge(auth::routes())
         .merge(admin::routes())
         .merge(rpc::routes())
+        .merge(shares::routes())
         .merge(parties::routes())
         .route("/api/{*rest}", any(no_such_route))
         .layer(DefaultBodyLimit::max(max_upload))
@@ -383,6 +385,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&data)?;
     let workspaces = Arc::new(Workspaces::new(data, content));
     tokio::spawn(Arc::clone(&workspaces).evict_loop());
+    tokio::spawn(shares::sweep_loop(db.clone(), Arc::clone(&workspaces)));
     config::set_upload_limits(settings.server.upload_limits());
     let state = AppState {
         db,

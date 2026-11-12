@@ -26,6 +26,8 @@ mod jobs_tests;
 
 #[path = "parties_tests.rs"]
 mod parties_tests;
+#[path = "shares_tests.rs"]
+mod shares_tests;
 
 const PASSWORD: &str = "correct horse battery";
 
@@ -344,7 +346,7 @@ async fn check_moved(router: &Router) {
 }
 
 /// The rows `some_accounts` makes, as the copy reports them.
-const MOVED: &str = "users 3, sessions 3, server_settings 1, activity 4, account_roles 0, parties 0, party_invites 0, party_invite_holds 0, party_offers 0, party_members 0";
+const MOVED: &str = "users 3, sessions 3, server_settings 1, activity 4, shares 0, share_blocks 0, account_roles 0, parties 0, party_invites 0, party_invite_holds 0, party_offers 0, party_members 0";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_sqlite_instance_moves_with_its_accounts() {
@@ -444,6 +446,8 @@ async fn drop_all(url: &str) {
         "activity",
         "server_settings",
         "party_groups",
+        "share_blocks",
+        "shares",
         "sessions",
         "users",
         "schema_version",

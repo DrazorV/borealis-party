@@ -252,6 +252,26 @@ function Statistics() {
           {tiles.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
         </dl>
       </Card>
+      {stats.shares && (
+        <Card title="Share codes">
+          <dl className="party-stats party-admin-stats">
+            {([
+              ["Waiting to be used", stats.shares.byStatus.pending],
+              ["Opened, not yet accepted", stats.shares.byStatus.claimed],
+              ["Accepted (30 days)", stats.shares.byStatus.done],
+              ["Declined (30 days)", stats.shares.byStatus.declined],
+              ["Expired (30 days)", stats.shares.byStatus.expired],
+              ["Blocks", stats.shares.blocks],
+              ["Shared files", bytes(stats.shares.outgoingBytes)],
+              ["Received, not yet accepted", bytes(stats.shares.stagedBytes)],
+            ] as [string, string | number][]).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+          </dl>
+          <p className="muted small">
+            {stats.shares.enabled ? "On." : "Off (BOREALIS_SHARES=off in the server's environment)."} At most {bytes(stats.shares.maxBytes)} per share
+            and {bytes(stats.shares.diskBytesPerAccount)} of shared and received files per account.
+          </p>
+        </Card>
+      )}
       <Card title="Server">
         <dl className="party-facts">
           <div><dt>Version</dt><dd>{stats.version}</dd></div>

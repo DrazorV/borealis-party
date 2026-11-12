@@ -11,6 +11,8 @@ import { AccountPage } from "../pages/AccountPage";
 import { AdminPage } from "../pages/AdminPage";
 import { ImportHub } from "../pages/ImportHub";
 import { OfflinePage } from "../pages/OfflineBanner";
+import { SharePage } from "../pages/SharePage";
+import { ShareReceivePage } from "../pages/ShareReceivePage";
 import { followReplaced } from "../sync/replaced";
 import { startSync } from "../sync/runner";
 import { hideUnofferedRows } from "./hideTransfer";
@@ -49,6 +51,9 @@ export function App() {
         <Route path="/admin" element={admin ? <AppShell>{offline ? <OfflinePage /> : <AdminPage />}</AppShell> : <Navigate to="/" replace />} />
         {/* One Import screen for every kind of file and link (plan I9). */}
         <Route path="/import-files" element={<AppShell>{offline ? <OfflinePage /> : <ImportHub />}</AppShell>} />
+        {/* Share codes (plan E4): send from any device with no file, and receive by code or link. */}
+        <Route path="/share" element={<AppShell>{offline ? <OfflinePage /> : <SharePage />}</AppShell>} />
+        <Route path="/share/receive/:code?" element={<AppShell>{offline ? <OfflinePage /> : <ShareReceivePage />}</AppShell>} />
         {/* Notes read a folder on the device, which a server doesn't offer. */}
         <Route path="/notes" element={<Navigate to="/" replace />} />
         <Route path="*" element={<UpstreamApp />} />

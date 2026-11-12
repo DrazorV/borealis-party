@@ -63,6 +63,34 @@ const TABLES: &[(&str, &[(&str, Column)])] = &[
             ("ip", Column::Text),
         ],
     ),
+    (
+        "shares",
+        &[
+            ("id", Column::Text),
+            ("from_id", Column::Text),
+            ("code_hash", Column::Text),
+            ("to_id", Column::Text),
+            ("to_name", Column::Text),
+            ("file_name", Column::Text),
+            ("characters", Column::Int),
+            ("packs", Column::Int),
+            ("links", Column::Text),
+            ("bytes", Column::Int),
+            ("created_at", Column::Int),
+            ("expires_at", Column::Int),
+            ("claimed_at", Column::OptInt),
+            ("ended_at", Column::OptInt),
+            ("status", Column::Text),
+        ],
+    ),
+    (
+        "share_blocks",
+        &[
+            ("user_id", Column::Text),
+            ("blocked_id", Column::Text),
+            ("created_at", Column::Int),
+        ],
+    ),
     // M-parties.
     (
         "account_roles",
@@ -283,4 +311,21 @@ pub fn describe(report: &Report) -> String {
         .map(|(table, rows)| format!("{table} {rows}"))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// Each table in [`TABLES`] with its columns, and whether a column is a number that is never NULL (schema test).
+#[cfg(test)]
+pub fn table_columns() -> Vec<(&'static str, Vec<(&'static str, bool)>)> {
+    TABLES
+        .iter()
+        .map(|(table, columns)| {
+            (
+                *table,
+                columns
+                    .iter()
+                    .map(|(name, kind)| (*name, matches!(kind, Column::Int)))
+                    .collect(),
+            )
+        })
+        .collect()
 }

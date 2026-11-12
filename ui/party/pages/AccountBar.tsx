@@ -95,6 +95,7 @@ function MoreRows({ admin, exit }: { admin: boolean; exit: ReturnType<typeof use
         </Link>
       </li>
       <li><Link className="v5-row" to={IMPORT_ROUTE} style={{ textDecoration: "none" }}><Icon name="upload" /><span className="grow">Import</span><Icon name="chevron" /></Link></li>
+      <li><Link className="v5-row" to="/share" style={{ textDecoration: "none" }}><Icon name="send" /><span className="grow">Share with a code</span><Icon name="chevron" /></Link></li>
       {admin && (
         <li><Link className="v5-row" to="/admin" style={{ textDecoration: "none" }}><Icon name="shield" /><span className="grow">Admin</span><Icon name="chevron" /></Link></li>
       )}

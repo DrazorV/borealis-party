@@ -355,7 +355,7 @@ characters and content packs to that account only, exactly as desktop Borealis w
   nothing, so an index it removed stays removed. Desktop Borealis takes the packs only, as a snapshot. The iOS app
   offers it as More > Share as a file, through the share sheet, up to 48 MiB per bundle. The Android app does not
   offer it: its web view can't download or share the file and its own backend has no bundle commands, so Android
-  will send bundles through the server instead (share codes, planned). The export dialog marks packs whose
+  sends bundles with a share code instead (below). The export dialog marks packs whose
   pack info says they are not redistributable; it does not leave them out.
 - The character sheet PDF on Android (Save and Share) is made by the app from its own copy of the character, after a
   sync, and goes to the system save picker or share sheet.
@@ -368,6 +368,35 @@ characters and content packs to that account only, exactly as desktop Borealis w
   account can hold at most eight uploads' worth of disk there (under 8 x `MAX_UPLOAD_MB`).
 - Dropping a `.borealis` file on the window or choosing it with "+" is not supported: those say the file cannot be
   imported. Use "Import characters" or File > Open bundle... instead.
+
+### Share codes (0.1.5)
+
+A player shares characters and content packs with another player from any device, Android included, with no file:
+
+- **Share with a code** (More on a phone; the "Share with a code" button in the export dialog) picks characters and
+  packs. The server builds the bundle from the account's own folder, with the same builder as Export to bundle, and
+  keeps it in `data/users/<id>/sync/outgoing/`. The sender gets a code like `ABCD-EFGH-JKMN-PQRS` (80 random bits,
+  only its hash is stored) and, when `server.public_url` is set, a link to `#/share/receive/<code>`.
+- **Enter a share code** (on the Import screen, or by opening the link) stages the bundle in the recipient's own
+  `sync/incoming` and opens Borealis's own preview. It is received as another player's bundle: nothing the recipient
+  already has is replaced (see above). The recipient can decline, and decline and block the sender.
+- **Links first.** Packs downloaded from an index, or imported from a 5etools address, travel as that address: the
+  recipient adds the index (and downloads it) or imports the 5etools address again, through the server, and every
+  download passes the address checks in [Security and proxies](#security-and-proxies). 5etools packs imported from
+  files, and packs whose address has a query string, a password or a private host, are left out. "Include the files"
+  sends all of them as files instead, after a licence notice.
+- **Limits.** A code works once and for 7 days, for anyone signed in, or only for the username the sender typed. At most
+  20 open codes per account, and 8 redeemed but not yet accepted or declined per recipient from any one sender. A
+  share is at most `server.public_upload_mb`, and one account's shared and received files at most twice that. Making
+  codes (30 an hour) and wrong codes (10 per 15 minutes) are rate-limited per account. Expired shares and their files
+  are removed at start-up and every hour; ended shares are forgotten after 30 days.
+- **Admin page.** Statistics shows how many shares are in each state and how much disk shared and received files take.
+  Never the codes, names or contents.
+- **Emergency off switch.** `BOREALIS_SHARES=off` in the server's environment (not a `BOREALIS__` setting): every
+  `/api/shares` route then answers as if the server did not offer it. Nothing is deleted; turning it on again brings the
+  open shares back.
+- **Database.** Schema step 2 (`M-shares`) adds the `shares` and `share_blocks` tables; it only adds tables, so a 0.1.4
+  database upgrades in place and a 0.1.4 binary still boots on it (it ignores them).
 
 ## Open with, and web links, in the apps
 
