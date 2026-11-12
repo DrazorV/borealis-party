@@ -1,7 +1,7 @@
 import { COMMANDS, EVENTS, type Api, type ApiError, type ApiMethods, type CommandName, type DataDirs, type EventName } from "../../src/api/contract";
 import type { ExportResult, SheetShare } from "../../src/api/contract";
 import { phoneOs } from "../../src/lib/phone";
-import { exportBundle, importWatch, looksLikeBundle, openBundleFromImport, pickBundleFile } from "./bundles";
+import { exportBundle, importWatch, shareBundle, looksLikeBundle, openBundleFromImport, pickBundleFile } from "./bundles";
 import { clearSession, loadSession, saveSession, type ServerSession } from "./session";
 
 function fail(code: string, message: string): ApiError {
@@ -136,6 +136,12 @@ export function createHttpApi(session: ServerSession): Api {
 
   // File > Export to bundle...: the server builds the file and the browser's download stands in for the save dialog.
   methods.bundleExport = (args?: Record<string, unknown>) => exportBundle(session, args ?? {});
+  // The dialog takes upstream's phone path ("Share as a file") here, as the server reports every client as mobile.
+  // Android's web view has neither a download nor a share sheet, as for the sheet PDF above.
+  methods.bundleShare = async (args?: Record<string, unknown>) => {
+    if (phoneOs() === "android") throw unavailable();
+    return shareBundle(session, args ?? {}, phoneOs() !== null);
+  };
 
   // Start page > Import characters with a .borealis file (or a zip under another name): the Open bundle window instead.
   const serverImport = methods.importCharacter as (args?: Record<string, unknown>) => Promise<unknown>;

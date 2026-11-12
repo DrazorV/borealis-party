@@ -178,4 +178,22 @@ describe("Export to bundle", () => {
     expect(saved).toEqual(["Borealis content.borealis"]);
     expect(r).toEqual({ fileName: "Borealis content.borealis", path: "Borealis content.borealis", characters: 0, packs: 3, bytes: 2 });
   });
+  it("Share as a file, the path every party client takes: off a phone, a download that counts as shared", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ path: url.replace(session.baseUrl, ""), body: JSON.parse(String(init.body ?? "{}")) as Record<string, unknown> });
+      return new Response(JSON.stringify({ fileName: "Borealis content.borealis", characters: 0, packs: 3, bytes: 2, dataBase64: "UEs=" }), { status: 200 });
+    }));
+    const saved: string[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { saved.push(this.download); });
+    onTestFinished(() => click.mockRestore());
+    URL.createObjectURL ??= () => "blob:x";
+    URL.revokeObjectURL ??= () => {};
+
+    const selection = { characterIds: [], packs: "all" as const };
+    const r = await createHttpApi(session).bundleShare({ selection });
+
+    expect(calls).toEqual([{ path: "/api/rpc/bundle_export", body: { selection } }]);
+    expect(saved).toEqual(["Borealis content.borealis"]);
+    expect(r).toEqual({ fileName: "Borealis content.borealis", characters: 0, packs: 3, bytes: 2, shared: true, dataBase64: null });
+  });
 });

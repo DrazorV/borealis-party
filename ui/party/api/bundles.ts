@@ -1,4 +1,4 @@
-import type { ApiError, BundleExport, BundlePreview, CharacterSummary, ImportReport, PickedPath } from "../../src/api/contract";
+import type { ApiError, BundleExport, BundlePreview, BundleShare, CharacterSummary, ImportReport, PickedPath } from "../../src/api/contract";
 import { downloadBase64, fileToBase64 } from "../../src/lib/files";
 import { openBundleFile } from "../../src/pages/transfer/openBundle";
 import { serverFetch } from "./http";
@@ -28,8 +28,23 @@ interface BundleFile {
  */
 export async function exportBundle(session: Session, args: Record<string, unknown>): Promise<BundleExport> {
   const file = await serverFetch(session, "POST", "/api/rpc/bundle_export", args) as BundleFile;
-  downloadBase64(file.fileName, "application/octet-stream", file.dataBase64);
+  downloadBase64(file.fileName, BUNDLE_MIME, file.dataBase64);
   return { fileName: file.fileName, path: file.fileName, characters: file.characters, packs: file.packs, bytes: file.bytes };
+}
+
+const BUNDLE_MIME = "application/octet-stream";
+
+/**
+ * The same file for upstream's phone path of that dialog, which every party client takes (the server reports `mobile`
+ * for all of them). On a phone the bytes go back for the web view's share sheet; elsewhere they are saved as a download
+ * at once, so the dialog closes as shared.
+ */
+export async function shareBundle(session: Session, args: Record<string, unknown>, phone: boolean): Promise<BundleShare> {
+  const file = await serverFetch(session, "POST", "/api/rpc/bundle_export", args) as BundleFile;
+  const info = { fileName: file.fileName, characters: file.characters, packs: file.packs, bytes: file.bytes };
+  if (phone) return { ...info, shared: false, dataBase64: file.dataBase64 };
+  downloadBase64(file.fileName, BUNDLE_MIME, file.dataBase64);
+  return { ...info, shared: true, dataBase64: null };
 }
 
 /** Uploads a bundle into this account's folder and returns a `bundle-file` token for `bundleOpen`. */
