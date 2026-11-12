@@ -9,6 +9,7 @@ import { loadSession, updateUser } from "../api/session";
 import { AccountBar } from "../pages/AccountBar";
 import { AccountPage } from "../pages/AccountPage";
 import { AdminPage } from "../pages/AdminPage";
+import { ImportHub } from "../pages/ImportHub";
 import { OfflinePage } from "../pages/OfflineBanner";
 import { followReplaced } from "../sync/replaced";
 import { startSync } from "../sync/runner";
@@ -46,6 +47,8 @@ export function App() {
       <Routes>
         <Route path="/account" element={<AppShell>{offline ? <OfflinePage /> : <AccountPage />}</AppShell>} />
         <Route path="/admin" element={admin ? <AppShell>{offline ? <OfflinePage /> : <AdminPage />}</AppShell> : <Navigate to="/" replace />} />
+        {/* One Import screen for every kind of file and link (plan I9). */}
+        <Route path="/import-files" element={<AppShell>{offline ? <OfflinePage /> : <ImportHub />}</AppShell>} />
         {/* Notes read a folder on the device, which a server doesn't offer. */}
         <Route path="/notes" element={<Navigate to="/" replace />} />
         <Route path="*" element={<UpstreamApp />} />

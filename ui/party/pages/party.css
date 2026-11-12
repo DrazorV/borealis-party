@@ -103,3 +103,30 @@ html.phone .party-more .v5-row:disabled { opacity: 0.6; }
 html.phone .party-admin [role="tab"] { min-height: var(--ph-hit); display: inline-flex; align-items: center; }
 html.phone .party .segmented button { min-width: var(--ph-hit); }
 html.phone .party-app-others { display: inline-flex; align-items: center; min-height: var(--ph-hit); }
+
+/*
+ * The Import screen (ImportHub, plan I9): three ways in, then one list of results. Long file names and addresses
+ * wrap instead of widening the page; on a phone every control is at least a tap target tall.
+ */
+.party-import .card p { margin: 0 0 var(--sp-2); }
+.party-import-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.party-import-link { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.party-import-link .input { flex: 1 1 220px; min-width: 0; }
+.party-import-results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.party-import-row { padding: var(--sp-2) var(--sp-3); background: var(--surface); border: var(--border-w) solid var(--border); border-left-width: 4px; border-radius: var(--radius); min-width: 0; }
+.party-import-row.success { border-left-color: var(--success, #3a7d44); }
+.party-import-row.warning { border-left-color: var(--warning, #b8860b); }
+.party-import-row.error { border-left-color: var(--danger, #b22222); }
+.party-import-row.working, .party-import-row.info { border-left-color: var(--accent, var(--border)); }
+.party-import-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
+.party-import-name { flex: 1 1 10em; min-width: 0; overflow-wrap: anywhere; }
+.party-import-msg, .party-import-detail { margin: var(--sp-1) 0 0; overflow-wrap: anywhere; }
+.party-import-books { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); min-width: 0; }
+.party-import-books > .btn { align-self: flex-start; }
+.party-import .party-import-books .list { max-height: 50vh; overflow-y: auto; }
+html.phone .party-import { padding: var(--sp-3) var(--ph-gutter); }
+html.phone .party-import .btn, html.phone .party-import .input { min-height: var(--ph-hit); }
+html.phone .party-import .input { font-size: 16px; }
+html.phone .party-import-actions > .btn, html.phone .party-import-link > .btn { flex: 1 1 auto; justify-content: center; }
+html.phone .party-import-books input[type="checkbox"] { min-width: 24px; min-height: 24px; }
+.party-import-report { margin-top: var(--sp-2); max-height: 50vh; overflow: auto; min-width: 0; }
