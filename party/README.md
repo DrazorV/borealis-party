@@ -273,6 +273,48 @@ Set `BOREALIS_TEST_POSTGRES_URL` to a database the tests may wipe to run them on
 `party/crates/borealis-server/src/backend.rs`, and an upstream change to `tauri` API usage may need a matching stub in
 `party/crates/tauri`.
 
+## Download the apps
+
+Every `party-v<version>` tag builds the phone apps and attaches them to that GitHub release
+(`.github/workflows/party-apps.yml`). The names carry no version, so these links always fetch the newest release:
+
+| Asset | Link |
+|---|---|
+| Android, phones (arm64) | `https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-arm64.apk` |
+| Android, emulators and x86_64 Chromebooks | `https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-x86_64.apk` |
+| iOS (only when the iOS secrets are set) | `https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-ios.ipa` |
+| Checksums | `https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-SHA256SUMS.txt` |
+
+To release, set the version in `party/Cargo.toml`, merge to `main`, then tag that commit and push the tag:
+
+```sh
+git tag party-v0.1.0
+git push origin party-v0.1.0
+```
+
+The tag must be `party-v` plus that version, or the workflow stops. Actions > Party apps > Run workflow on `main`
+builds the same files as workflow artifacts without a release, to try the build first.
+
+Repository secrets (Settings > Secrets and variables > Actions):
+
+| Secret | Value |
+|---|---|
+| `PARTY_ANDROID_KEYSTORE_B64` | The PKCS#12 keystore `build-apk.ps1` signs with (`ANDROID_KEYSTORE_PATH`), as base64. Its key alias must be `borealis`, with the store's password |
+| `PARTY_ANDROID_KEYSTORE_PASSWORD` | Its password (`ANDROID_KEYSTORE_PASSWORD`) |
+| `PARTY_IOS_CERTIFICATE_P12` | Optional. Apple Distribution (or Development) certificate with its private key, a `.p12` as base64 |
+| `PARTY_IOS_CERTIFICATE_PASSWORD` | Its password |
+| `PARTY_IOS_PROVISIONING_PROFILE` | A provisioning profile for `app.borealis.party` that includes that certificate, as base64 |
+| `PARTY_APPLE_TEAM_ID` | The Apple developer team id |
+
+Base64 for a file, without line breaks: `base64 -w0 file` on Linux, `base64 -i file` on macOS, or
+`[Convert]::ToBase64String([IO.File]::ReadAllBytes("file"))` in PowerShell.
+
+The Android secrets are required: use the same keystore as the hand builds, because Android only installs an update
+signed with the same key. The four iOS secrets go together. Without them the iOS job builds an unsigned app for the
+iOS Simulator, kept only as the workflow artifact `party-ios-simulator`, and the release has no iOS app. With them it
+builds an ad hoc IPA, which installs only on the devices listed in the profile; set the repository variable
+`PARTY_IOS_EXPORT_METHOD` to `debugging` or `app-store-connect` for a profile of that kind.
+
 ## Build the Android app
 
 With JDK 17, the Android SDK and the settings listed at the top of the script:

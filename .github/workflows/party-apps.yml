@@ -1,0 +1,345 @@
+name: Party apps
+
+# Builds the Borealis Party phone apps and, for a party-v<version> tag, attaches them to that GitHub release, so
+# https://github.com/DrazorV/borealis-party/releases/latest/download/<asset> always points at the newest build.
+# The tag's version must be the one in party/Cargo.toml. Asset names carry no version (party/README.md lists them):
+#   borealis-party-arm64.apk     signed release APK for phones
+#   borealis-party-x86_64.apk    signed release APK for emulators and x86_64 Chromebooks
+#   borealis-party-ios.ipa       signed iOS app, only when the iOS signing secrets are set
+#   borealis-party-SHA256SUMS.txt
+# Without the iOS secrets the iOS job builds an unsigned simulator app instead, kept as the workflow artifact
+# party-ios-simulator and never attached to the release.
+#
+# "Run workflow" on main builds everything and keeps it as workflow artifacts; run on a party-v* tag, it also
+# releases. Mirrors party/android/build-apk.ps1: Tauri 2 with party/tauri.party.json and --no-default-features,
+# and party/android/party.init.gradle for the app id, name and HTTP permission (installed as a Gradle init.d script,
+# since Tauri can't pass Gradle --init-script).
+# Secrets (repository secrets, never printed): PARTY_ANDROID_KEYSTORE_B64, PARTY_ANDROID_KEYSTORE_PASSWORD (required);
+# PARTY_IOS_CERTIFICATE_P12, PARTY_IOS_CERTIFICATE_PASSWORD, PARTY_IOS_PROVISIONING_PROFILE, PARTY_APPLE_TEAM_ID
+# (optional, all four or none). Repository variable PARTY_IOS_EXPORT_METHOD: release-testing (default, ad hoc),
+# debugging or app-store-connect; it must match the provisioning profile.
+# This file belongs to the fork (party/check-upstream.sh accepts .github/workflows/party-*.yml).
+on:
+  push:
+    tags: ["party-v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: party-apps-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  NDK_VERSION: 27.2.12479018
+
+jobs:
+  version:
+    if: github.repository == 'DrazorV/borealis-party'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the party version
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' party/Cargo.toml | head -n1)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$REF_TYPE" = "tag" ]; then
+            if [ "$REF_NAME" != "party-v$version" ]; then
+              echo "::error::tag $REF_NAME does not match party/Cargo.toml (expected party-v$version)"
+              exit 1
+            fi
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  android:
+    name: Android APK (${{ matrix.abi }})
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64
+            rust: aarch64-linux-android
+            abi: arm64
+          - target: x86_64
+            rust: x86_64-linux-android
+            abi: x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+        with:
+          # The default list asks for the legacy `tools` package, which sdkmanager no longer offers.
+          packages: platform-tools
+
+      - name: Install NDK, platform, build-tools and CMake
+        run: sdkmanager "ndk;$NDK_VERSION" "platforms;android-37.0" "build-tools;36.0.0" "cmake;3.22.1"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: party-android-${{ matrix.abi }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - run: npm ci
+        working-directory: ui
+
+      # Gradle runs every script in init.d, as `gradlew --init-script` does in build-apk.ps1. The script finds its
+      # res folder next to itself, so both are copied.
+      - name: Party Gradle init script
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cp party/android/party.init.gradle ~/.gradle/init.d/
+          cp -R party/android/res ~/.gradle/init.d/res
+
+      - name: Signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.PARTY_ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.PARTY_ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::set the repository secrets PARTY_ANDROID_KEYSTORE_B64 and PARTY_ANDROID_KEYSTORE_PASSWORD (party/README.md)"
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/party.p12"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/party.p12" >> "$GITHUB_ENV"
+
+      # Without upstream's default features: device-link (device-to-device transfer) and llama (on-device semantic
+      # search). The characters and rules come from the server.
+      - name: Build the release APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.PARTY_ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          ANDROID_NDK: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          export PATH="$ANDROID_HOME/cmake/3.22.1/bin:$PATH"
+          node "$GITHUB_WORKSPACE/ui/node_modules/@tauri-apps/cli/tauri.js" android build --apk --target "$TARGET" \
+            --config party/tauri.party.json --ci -- --no-default-features
+
+      - name: Check the app id and signature
+        env:
+          ABI: ${{ matrix.abi }}
+        run: |
+          set -euo pipefail
+          apk=src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
+          [ -f "$apk" ] || { echo "::error::release APK not found at $apk"; exit 1; }
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          package=$("$tools/aapt2" dump packagename "$apk")
+          [ "$package" = "app.borealis.party" ] \
+            || { echo "::error::APK package is $package, expected app.borealis.party (init script not applied?)"; exit 1; }
+          "$tools/apksigner" verify --print-certs "$apk"
+          mkdir -p dist
+          cp "$apk" "dist/borealis-party-$ABI.apk"
+          ls -l dist
+
+      - name: Remove keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/party.p12"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: party-android-${{ matrix.abi }}
+          path: dist/*
+          if-no-files-found: error
+
+  ios:
+    name: iOS app
+    needs: version
+    runs-on: macos-26
+    timeout-minutes: 150
+    outputs:
+      signed: ${{ steps.mode.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode
+        run: xcodebuild -version && xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Signed or simulator build
+        id: mode
+        env:
+          IOS_CERTIFICATE: ${{ secrets.PARTY_IOS_CERTIFICATE_P12 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.PARTY_IOS_CERTIFICATE_PASSWORD }}
+          IOS_MOBILE_PROVISION: ${{ secrets.PARTY_IOS_PROVISIONING_PROFILE }}
+          TEAM_ID: ${{ secrets.PARTY_APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          count=0
+          for v in IOS_CERTIFICATE IOS_CERTIFICATE_PASSWORD IOS_MOBILE_PROVISION TEAM_ID; do
+            [ -z "${!v}" ] || count=$((count + 1))
+          done
+          if [ "$count" -eq 4 ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "rust=aarch64-apple-ios" >> "$GITHUB_OUTPUT"
+          elif [ "$count" -eq 0 ]; then
+            echo "::warning::no iOS signing secrets: building an unsigned simulator app (artifact party-ios-simulator, not released)"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "rust=aarch64-apple-ios-sim" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::set all four iOS signing secrets or none (party/README.md)"
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ steps.mode.outputs.rust }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: party-ios-${{ steps.mode.outputs.signed }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - run: npm ci
+        working-directory: ui
+
+      # The party front end (party/tauri.party.json), the party app's own identity, as on Android and the desktop,
+      # and party/tauri.party.ios.json on top when the fork has one.
+      - name: Party config
+        env:
+          TEAM_ID: ${{ secrets.PARTY_APPLE_TEAM_ID }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          identity=$(jq -n --arg build "$RUN_NUMBER" --arg team "$TEAM_ID" '
+            {productName: "Borealis Party", identifier: "app.borealis.party",
+             bundle: {iOS: ({bundleVersion: $build} + (if $team == "" then {} else {developmentTeam: $team} end))}}')
+          printf '%s' "$identity" > "$RUNNER_TEMP/identity.json"
+          files=(party/tauri.party.json "$RUNNER_TEMP/identity.json")
+          [ ! -f party/tauri.party.ios.json ] || files+=(party/tauri.party.ios.json)
+          jq -s 'reduce .[] as $c ({}; . * $c)' "${files[@]}" > "$RUNNER_TEMP/party.ios.json"
+          jq . "$RUNNER_TEMP/party.ios.json"
+
+      # Tauri imports the certificate and profile from IOS_CERTIFICATE* and IOS_MOBILE_PROVISION into its own
+      # temporary keychain and signs manually.
+      - name: Build the signed IPA
+        if: steps.mode.outputs.signed == 'true'
+        env:
+          IOS_CERTIFICATE: ${{ secrets.PARTY_IOS_CERTIFICATE_P12 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.PARTY_IOS_CERTIFICATE_PASSWORD }}
+          IOS_MOBILE_PROVISION: ${{ secrets.PARTY_IOS_PROVISIONING_PROFILE }}
+          EXPORT_METHOD: ${{ vars.PARTY_IOS_EXPORT_METHOD || 'release-testing' }}
+        run: |
+          set -euo pipefail
+          node ui/node_modules/@tauri-apps/cli/tauri.js ios build --target aarch64 --export-method "$EXPORT_METHOD" \
+            --config "$RUNNER_TEMP/party.ios.json" --ci -- --no-default-features
+          ipa=$(find src-tauri/gen/apple/build -name '*.ipa' -type f | head -n 1)
+          [ -n "$ipa" ] || { echo "::error::no .ipa under src-tauri/gen/apple/build"; exit 1; }
+          check="$RUNNER_TEMP/ipa-check"
+          mkdir -p "$check"
+          unzip -q "$ipa" -d "$check"
+          app=$(find "$check/Payload" -maxdepth 1 -name '*.app' | head -n 1)
+          bundle_id=$(plutil -extract CFBundleIdentifier raw "$app/Info.plist")
+          [ "$bundle_id" = "app.borealis.party" ] || { echo "::error::IPA bundle id $bundle_id, expected app.borealis.party"; exit 1; }
+          [ -f "$app/embedded.mobileprovision" ] || { echo "::error::the IPA has no provisioning profile"; exit 1; }
+          codesign --verify --deep --strict "$app"
+          mkdir -p dist
+          cp "$ipa" dist/borealis-party-ios.ipa
+          ls -l dist
+
+      - name: Build the simulator app (unsigned)
+        if: steps.mode.outputs.signed != 'true'
+        run: |
+          set -euo pipefail
+          node ui/node_modules/@tauri-apps/cli/tauri.js ios build --debug --target aarch64-sim \
+            --config "$RUNNER_TEMP/party.ios.json" --ci -- --no-default-features
+          app=$(find src-tauri/gen/apple/build -name '*.app' -type d -path '*iphonesimulator*' | head -n 1)
+          [ -n "$app" ] || app=$(find src-tauri/gen/apple/build -name '*.app' -type d | head -n 1)
+          [ -n "$app" ] || { echo "::error::no .app under src-tauri/gen/apple/build"; exit 1; }
+          mkdir -p dist
+          ditto -c -k --keepParent "$app" dist/borealis-party-ios-simulator.zip
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.mode.outputs.signed == 'true' && 'party-ios' || 'party-ios-simulator' }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: GitHub release
+    needs: [version, android, ios]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.version.outputs.version }}
+      SIGNED_IOS: ${{ needs.ios.outputs.signed }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          pattern: party-android-*
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        if: needs.ios.outputs.signed == 'true'
+        with:
+          name: party-ios
+          path: assets
+
+      - name: Check names and write checksums
+        working-directory: assets
+        run: |
+          set -euo pipefail
+          expected="borealis-party-arm64.apk borealis-party-x86_64.apk"
+          [ "$SIGNED_IOS" != "true" ] || expected="$expected borealis-party-ios.ipa"
+          for f in $expected; do
+            [ -f "$f" ] || { echo "::error::missing asset $f"; ls -l; exit 1; }
+          done
+          sha256sum -- * | LC_ALL=C sort -k2 > borealis-party-SHA256SUMS.txt
+          cat borealis-party-SHA256SUMS.txt
+
+      - name: Create or update the release
+        run: |
+          set -euo pipefail
+          if [ "$SIGNED_IOS" = "true" ]; then ios="the iOS app"; else ios="no iOS app (not signed)"; fi
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --latest --title "Borealis Party $VERSION" \
+              --notes "Borealis Party $VERSION: the Android app (arm64 for phones, x86_64 for emulators) and $ios. Verify downloads against borealis-party-SHA256SUMS.txt."
+          fi
+          gh release upload "$TAG" assets/* --clobber
