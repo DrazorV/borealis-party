@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Times the long Borealis Party imports (plan item I0) against a server, signed in as a THROWAWAY account.
 //
-//   node party/tools/measure-imports.mjs --server https://dnd.4tress.click --via-cloudflare \
+//   node party/tools/measure-imports.mjs --server https://party.example.com --via-cloudflare \
 //     --index https://raw.githubusercontent.com/AuroraLegacy/elements/master/core.index \
 //     --5etools-url https://github.com/<owner>/<repo> \
 //     --aurora-zip ./aurora-content.zip

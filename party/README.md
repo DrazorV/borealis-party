@@ -716,7 +716,7 @@ To be run by the owner, against a throwaway account made for it and approved on 
 account's library and removes what it added when it ends):
 
 ```sh
-node party/tools/measure-imports.mjs --server https://dnd.4tress.click --via-cloudflare \
+node party/tools/measure-imports.mjs --server https://party.example.com --via-cloudflare \
   --index <index URL> [--index <index URL> ...] --repeat-update \
   --5etools-url <5etools data repository URL> \
   --aurora-zip <a zip of Aurora content, about 40 MB> \
