@@ -48,18 +48,13 @@ test.describe("import and export entry points", () => {
     await chooser;
   });
 
-  test("Menu: Export to bundle... opens the export dialog, which closes again", async ({ page }, testInfo) => {
+  test("Menu: Export to bundle... opens the export dialog, which closes again", async ({ page }) => {
+    // Only the Android app hides this row (entry/hideTransfer.ts, isTauri); Chrome on Android, as here, downloads it.
     await open(page, "/characters");
     await signedInShell(page);
     await page.getByRole("button", { name: "Menu" }).tap();
     const menu = page.getByRole("dialog", { name: "Menu" });
     const row = menu.getByRole("button", { name: "Export to bundle..." });
-    if (testInfo.project.name.startsWith("android")) {
-      // Android can't save or share a bundle yet (fix/android-export, entry/hideTransfer.ts): the row is hidden.
-      await expect(menu.getByRole("button", { name: "Open bundle..." })).toBeVisible();
-      await expect(row).toBeHidden();
-      return;
-    }
     expect(await scrollIntoReach(page, row, page.viewportSize()!.height)).toBe(true);
     await row.tap();
     // On a phone upstream calls the export "Share as a file".
