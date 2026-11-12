@@ -701,3 +701,15 @@ where
         Ok(user)
     }
 }
+
+/// The account routes: sign-up, sign-in and the signed-in account's own details.
+pub fn routes() -> axum::Router<AppState> {
+    use axum::routing::{get, post};
+    axum::Router::new()
+        .route("/api/auth/register", post(register))
+        .route("/api/auth/login", post(login))
+        .route("/api/auth/logout", post(logout))
+        .route("/api/auth/confirm/{token}", get(confirm))
+        .route("/api/me", get(me).patch(update_me))
+        .route("/api/me/password", post(change_password))
+}

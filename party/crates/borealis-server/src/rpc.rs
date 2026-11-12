@@ -73,3 +73,11 @@ pub async fn events(
     });
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
+
+/// The Borealis commands and the account's event stream.
+pub fn routes() -> axum::Router<AppState> {
+    use axum::routing::{get, post};
+    axum::Router::new()
+        .route("/api/rpc/{command}", post(command))
+        .route("/api/events", get(events))
+}
