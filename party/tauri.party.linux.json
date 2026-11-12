@@ -1,0 +1,15 @@
+{
+  "bundle": {
+    "linux": {
+      "deb": {
+        "files": { "/usr/share/mime/packages/borealis.xml": null }
+      },
+      "rpm": {
+        "files": { "/usr/share/mime/packages/borealis.xml": null }
+      },
+      "appimage": {
+        "files": { "/usr/share/mime/packages/borealis.xml": null }
+      }
+    }
+  }
+}

@@ -286,15 +286,29 @@ Set `BOREALIS_TEST_POSTGRES_URL` to a database the tests may wipe to run them on
 
 ## Download the apps
 
-Every `party-v<version>` tag builds the phone apps and attaches them to that GitHub release
-(`.github/workflows/party-apps.yml`). The names carry no version, so these links always fetch the newest release:
+Every `party-v<version>` tag builds the phone and desktop apps and attaches them to that GitHub release
+(`.github/workflows/party-apps.yml`). The names carry no version, so these links always fetch the newest release
+(each one is `https://github.com/DrazorV/borealis-party/releases/latest/download/` followed by the asset name):
 
-| Asset | Link |
+| App | Asset |
 |---|---|
-| Android, phones (arm64) | `https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-arm64.apk` |
-| Android, emulators and x86_64 Chromebooks | `https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-x86_64.apk` |
-| iOS (only when the iOS secrets are set) | `https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-ios.ipa` |
-| Checksums | `https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-SHA256SUMS.txt` |
+| Android, phones (arm64) | `borealis-party-arm64.apk` |
+| Android, emulators and x86_64 Chromebooks | `borealis-party-x86_64.apk` |
+| iOS (only when the iOS secrets are set) | `borealis-party-ios.ipa` |
+| Windows x64, installer for the current user | `borealis-party-windows-x64-setup.exe` |
+| Windows x64, MSI (only when it built) | `borealis-party-windows-x64.msi` |
+| Linux x86_64, AppImage | `borealis-party-linux-x86_64.AppImage` |
+| Linux x86_64, Debian and Ubuntu | `borealis-party-linux-amd64.deb` |
+| Linux arm64, AppImage (only when it built) | `borealis-party-linux-aarch64.AppImage` |
+| Linux arm64, Debian and Ubuntu (only when it built) | `borealis-party-linux-arm64.deb` |
+| Checksums of all of them | `borealis-party-SHA256SUMS.txt` |
+
+The desktop apps are built as `party/desktop/build-desktop.ps1 -Installer` builds them and keep their data in
+`app.borealis.party`, apart from desktop Borealis. They are not code-signed. Windows SmartScreen therefore shows
+"Windows protected your PC" with "Unknown publisher" when the installer starts; choose More info > Run anyway.
+Some browsers also warn that the file is not commonly downloaded. The AppImage needs `chmod +x` before it runs. The
+Linux packages leave out desktop Borealis's file types, so both can be installed side by side
+(`party/tauri.party.linux.json`).
 
 To release, set the version in `party/Cargo.toml`, merge to `main`, then tag that commit and push the tag:
 

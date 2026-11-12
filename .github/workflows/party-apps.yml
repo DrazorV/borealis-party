@@ -1,11 +1,18 @@
 name: Party apps
 
-# Builds the Borealis Party phone apps and, for a party-v<version> tag, attaches them to that GitHub release, so
-# https://github.com/DrazorV/borealis-party/releases/latest/download/<asset> always points at the newest build.
-# The tag's version must be the one in party/Cargo.toml. Asset names carry no version (party/README.md lists them):
-#   borealis-party-arm64.apk     signed release APK for phones
-#   borealis-party-x86_64.apk    signed release APK for emulators and x86_64 Chromebooks
-#   borealis-party-ios.ipa       signed iOS app, only when the iOS signing secrets are set
+# Builds the Borealis Party phone and desktop apps and, for a party-v<version> tag, attaches them to that GitHub
+# release, so https://github.com/DrazorV/borealis-party/releases/latest/download/<asset> always points at the newest
+# build. The tag's version must be the one in party/Cargo.toml. Asset names carry no version (party/README.md lists
+# them):
+#   borealis-party-arm64.apk                signed release APK for phones
+#   borealis-party-x86_64.apk               signed release APK for emulators and x86_64 Chromebooks
+#   borealis-party-ios.ipa                  signed iOS app, only when the iOS signing secrets are set
+#   borealis-party-windows-x64-setup.exe    Windows installer (NSIS, per user), unsigned
+#   borealis-party-windows-x64.msi          Windows installer (MSI), unsigned; only when WiX succeeded
+#   borealis-party-linux-x86_64.AppImage    Linux x86_64
+#   borealis-party-linux-amd64.deb          Linux x86_64, Debian and Ubuntu
+#   borealis-party-linux-aarch64.AppImage   Linux arm64; only when that build succeeded
+#   borealis-party-linux-arm64.deb          Linux arm64, Debian and Ubuntu; only when that build succeeded
 #   borealis-party-SHA256SUMS.txt
 # Without the iOS secrets the iOS job builds an unsigned simulator app instead, kept as the workflow artifact
 # party-ios-simulator and never attached to the release.
@@ -296,9 +303,134 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  # Mirrors party/desktop/build-desktop.ps1 -Installer: the party config, its own cargo target folder and
+  # --no-default-features. The identifier app.borealis.party keeps its data apart from desktop Borealis
+  # (%APPDATA%\app.borealis.party, ~/.local/share/app.borealis.party). Unsigned. Linux arm64 is optional: if it fails,
+  # the release goes out without it.
+  desktop:
+    name: Desktop (${{ matrix.name }})
+    needs: version
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    continue-on-error: ${{ matrix.optional }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            optional: false
+          # 22.04: the oldest glibc on the runners, so the AppImage starts on more distributions.
+          - name: linux-x86_64
+            os: ubuntu-22.04
+            deb: amd64
+            optional: false
+          - name: linux-aarch64
+            os: ubuntu-22.04-arm
+            deb: arm64
+            optional: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Keep LF line endings and long paths (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+
+      - uses: actions/checkout@v4
+
+      - name: Linux webkit2gtk deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev libxdo-dev
+
+      # Its own cargo target folder, as build-desktop.ps1, so it is never taken for a desktop Borealis build.
+      - name: Party target folder
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then root=$(pwd -W); else root=$PWD; fi
+          echo "CARGO_TARGET_DIR=$root/target/party-desktop" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target/party-desktop"
+          shared-key: party-desktop-${{ matrix.name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - run: npm ci
+        working-directory: ui
+
+      # Without upstream's default features: device-link and llama, as on Android. On Linux,
+      # party/tauri.party.linux.json leaves out upstream's MIME file, which desktop Borealis's package owns.
+      - name: Build the installer
+        run: |
+          set -euo pipefail
+          configs=(--config party/tauri.party.json --config party/tauri.party.desktop.json)
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            bundles=nsis
+          else
+            bundles=deb,appimage
+            configs+=(--config party/tauri.party.linux.json)
+          fi
+          node ui/node_modules/@tauri-apps/cli/tauri.js build "${configs[@]}" --bundles "$bundles" --ci \
+            -- --no-default-features
+
+      # The MSI is extra: the release goes out without it if WiX fails. Cargo has nothing left to compile.
+      - name: Build the MSI (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        run: |
+          node ui/node_modules/@tauri-apps/cli/tauri.js build --config party/tauri.party.json \
+            --config party/tauri.party.desktop.json --bundles msi --ci -- --no-default-features
+
+      - name: Check and rename
+        env:
+          NAME: ${{ matrix.name }}
+          DEB_ARCH: ${{ matrix.deb }}
+        run: |
+          set -euo pipefail
+          bundle="$CARGO_TARGET_DIR/release/bundle"
+          one() {
+            local found
+            found=$(find "$bundle/$1" -maxdepth 1 -type f -name "$2")
+            [ "$(printf '%s\n' "$found" | grep -c .)" = 1 ] || { echo "::error::expected one $2 in $bundle/$1: $found"; exit 1; }
+            printf '%s' "$found"
+          }
+          mkdir -p dist
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp "$(one nsis '*-setup.exe')" "dist/borealis-party-$NAME-setup.exe"
+            if [ -d "$bundle/msi" ]; then cp "$(one msi '*.msi')" "dist/borealis-party-$NAME.msi"; fi
+          else
+            deb=$(one deb '*.deb')
+            dpkg-deb -f "$deb" Package Version Architecture
+            [ "$(dpkg-deb -f "$deb" Architecture)" = "$DEB_ARCH" ] || { echo "::error::deb is not $DEB_ARCH"; exit 1; }
+            if dpkg-deb -c "$deb" | grep -q 'usr/share/mime/packages/borealis.xml'; then
+              echo "::error::the deb carries desktop Borealis's MIME file"
+              exit 1
+            fi
+            cp "$deb" "dist/borealis-party-linux-$DEB_ARCH.deb"
+            cp "$(one appimage '*.AppImage')" "dist/borealis-party-$NAME.AppImage"
+          fi
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: party-desktop-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
   release:
     name: GitHub release
-    needs: [version, android, ios]
+    needs: [version, android, ios, desktop]
     if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -317,6 +449,12 @@ jobs:
           merge-multiple: true
 
       - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          pattern: party-desktop-*
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
         if: needs.ios.outputs.signed == 'true'
         with:
           name: party-ios
@@ -326,7 +464,9 @@ jobs:
         working-directory: assets
         run: |
           set -euo pipefail
-          expected="borealis-party-arm64.apk borealis-party-x86_64.apk"
+          # Linux arm64 and the MSI are optional and released when they built.
+          expected="borealis-party-arm64.apk borealis-party-x86_64.apk borealis-party-windows-x64-setup.exe"
+          expected="$expected borealis-party-linux-x86_64.AppImage borealis-party-linux-amd64.deb"
           [ "$SIGNED_IOS" != "true" ] || expected="$expected borealis-party-ios.ipa"
           for f in $expected; do
             [ -f "$f" ] || { echo "::error::missing asset $f"; ls -l; exit 1; }
@@ -340,6 +480,6 @@ jobs:
           if [ "$SIGNED_IOS" = "true" ]; then ios="the iOS app"; else ios="no iOS app (not signed)"; fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --verify-tag --latest --title "Borealis Party $VERSION" \
-              --notes "Borealis Party $VERSION: the Android app (arm64 for phones, x86_64 for emulators) and $ios. Verify downloads against borealis-party-SHA256SUMS.txt."
+              --notes "Borealis Party $VERSION: the Android app (arm64 for phones, x86_64 for emulators), the Windows and Linux apps (unsigned), and $ios. Verify downloads against borealis-party-SHA256SUMS.txt."
           fi
           gh release upload "$TAG" assets/* --clobber
