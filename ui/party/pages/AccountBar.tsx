@@ -80,7 +80,7 @@ export function AccountBar() {
         <Button small onClick={exit.start} disabled={exit.busy}>{exit.busy ? "Signing out…" : "Sign out"}</Button>
       </div>
       <OfflineBanner />
-      {/* The Start page (the character list) of a phone browser: the app for this device. */}
+      {/* The Start page (the character list) in a browser: the app for this system. */}
       {pathname === "/characters" && <AppOffer />}
       {exit.dialog}
     </>,

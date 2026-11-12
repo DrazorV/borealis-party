@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { IconButton } from "../../src/components/Button";
 import { Icon } from "../../src/components/Icon";
 import { isTauri } from "../../src/lib/tauri";
-import { addressToEnter, appDownloadUrl, browserMobileOs, dismissOffer, offerDismissed, type MobileOs } from "../api/appOffer";
+import { addressToEnter, dismissOffer, isArm, offerDismissed, offerFor, releasesPage, visitorOs, type VisitorOs } from "../api/appOffer";
 import { checkServer } from "../api/party";
 
 /** `/api/server`'s download folder, asked once per page load. */
@@ -17,18 +17,45 @@ export function forgetDownloadFolderForTests(): void {
   asked = null;
 }
 
-const deviceOs = (): MobileOs | null =>
-  typeof navigator === "undefined" ? null : browserMobileOs(navigator.userAgent, navigator.maxTouchPoints ?? 0);
+/** The part of `navigator.userAgentData` the offer reads (Chromium browsers only). */
+interface UaData {
+  platform?: string;
+  getHighEntropyValues?: (hints: string[]) => Promise<{ architecture?: string }>;
+}
+const uaData = (): UaData | undefined =>
+  typeof navigator === "undefined" ? undefined : (navigator as Navigator & { userAgentData?: UaData }).userAgentData;
+
+function browserOs(): VisitorOs | null {
+  if (typeof navigator === "undefined") return null;
+  return visitorOs({ userAgent: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints ?? 0, platform: uaData()?.platform });
+}
+
+/** Whether a Linux browser runs on ARM; the architecture comes from `userAgentData` where offered, after a moment. */
+function useArm(linux: boolean): boolean {
+  const [arm, setArm] = useState(() => linux && typeof navigator !== "undefined" && isArm(navigator.userAgent));
+  useEffect(() => {
+    const ask = uaData()?.getHighEntropyValues;
+    if (!linux || !ask) return;
+    let live = true;
+    ask.call(uaData(), ["architecture"]).then(
+      ({ architecture }) => { if (live && architecture) setArm(isArm(navigator.userAgent, architecture)); },
+      () => { /* not told: the user agent's answer stays */ },
+    );
+    return () => { live = false; };
+  }, [linux]);
+  return arm;
+}
 
 /**
- * A phone or tablet browser on the server's website: the app for this device, and the address to enter in it. On iOS,
- * which can't install an app from a website, a short note instead. Nothing inside the apps, on a computer, when the
- * server offers no download (`server.app_download = "off"`) or once closed in this browser.
+ * A browser on the server's website: the app for this system (Android, Windows, Linux) and the address to enter in it,
+ * or a short note where there is none to install (iOS, macOS), with a link to every build. Nothing inside the apps, on
+ * other systems, when the server offers no download (`server.app_download = "off"`) or once closed in this browser.
  * `folder`: the download folder when the caller already has `/api/server`'s answer (the sign-in page).
  */
 export function AppOffer({ folder }: { folder?: string | null } = {}) {
-  const os = isTauri() ? null : deviceOs();
+  const os = isTauri() ? null : browserOs();
   const [closed, setClosed] = useState(offerDismissed);
+  const arm = useArm(os === "linux");
   const [fetched, setFetched] = useState<string | null | undefined>(undefined);
   const wanted = Boolean(os) && !closed && folder === undefined;
   useEffect(() => {
@@ -38,36 +65,43 @@ export function AppOffer({ folder }: { folder?: string | null } = {}) {
     return () => { live = false; };
   }, [wanted]);
   const base = folder === undefined ? fetched : folder;
-  if (!os || closed || !base) return null;
+  const offer = os && base ? offerFor(base, os, arm) : null;
+  if (!base || !offer || closed) return null;
 
   const close = () => {
     dismissOffer();
     setClosed(true);
   };
-  const dismiss = <IconButton icon="x" label="Dismiss" small onClick={close} />;
-  const url = appDownloadUrl(base, os);
-  if (!url) {
+  const others = <a className="party-app-others" href={releasesPage(base)} target="_blank" rel="noreferrer">Other systems</a>;
+  if (offer.kind === "note") {
     return (
       <aside className="alert info party-app-offer" aria-label="About the app">
         <div className="party-app-offer-text">
-          There is no iPhone or iPad app to install from here: the iOS app is built only for devices registered in
-          advance, and iOS doesn't install it on others. Borealis Party works here in Safari.
+          <span>{offer.note}</span>
+          {others}
         </div>
-        {dismiss}
+        <IconButton icon="x" label="Dismiss" small onClick={close} />
       </aside>
     );
   }
+  const [main, ...more] = offer.links;
   return (
     <aside className="alert info party-app-offer" aria-label="Get the app">
       <div className="party-app-offer-text">
-        <strong>Get the Android app.</strong> It works offline and syncs with this server.
+        <span><strong>Get the {offer.name} app.</strong> It works offline and syncs with this server.</span>
         <span>When it asks for the server address, enter <code className="party-app-address">{addressToEnter(window.location.origin)}</code></span>
-        <a className="btn btn-primary btn-sm" href={url} download>
-          <Icon name="download" />
-          Download the app
-        </a>
+        <span className="party-app-links">
+          {main && (
+            <a className="btn btn-primary btn-sm" href={main.href} download>
+              <Icon name="download" />
+              {main.label}
+            </a>
+          )}
+          {more.map((l) => <a key={l.href} className="btn btn-sm" href={l.href} download>{l.label}</a>)}
+          {others}
+        </span>
       </div>
-      {dismiss}
+      <IconButton icon="x" label="Dismiss" small onClick={close} />
     </aside>
   );
 }
