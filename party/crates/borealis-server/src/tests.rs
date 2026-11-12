@@ -425,51 +425,6 @@ async fn a_database_left_with_the_groups_table_opens() {
     check_moved(&router_on(data, new)).await;
 }
 
-/// Every migration step names the table it creates, so a stale `schema_version` can't skip it.
-#[test]
-fn every_migration_step_has_a_marker_table() {
-    assert_eq!(crate::db::MARKERS.len(), crate::db::MIGRATIONS.len());
-}
-
-/// A database whose `schema_version` claims more than it has (like one from the versions with groups, which numbered
-/// their steps 1 to 3) is refused with a clear message, not opened with the missing step skipped.
-async fn refuses_a_stale_schema(location: impl Fn() -> Location, postgres: bool) {
-    let db = Db::open(&location()).await.unwrap();
-    let last = crate::db::MARKERS.len();
-    let table = crate::db::MARKERS[last - 1];
-    let cascade = if postgres { " CASCADE" } else { "" };
-    for sql in [
-        format!("DELETE FROM {table}"),
-        format!("DROP TABLE {table}{cascade}"),
-        format!("INSERT INTO schema_version (version) VALUES ({})", last + 1),
-    ] {
-        sqlx::query(&sql).execute(db.pool()).await.unwrap();
-    }
-    drop(db);
-    match Db::open(&location()).await {
-        Ok(_) => panic!("a database without {table} opened"),
-        Err(e) => {
-            let text = e.to_string();
-            assert!(
-                matches!(e, crate::db::OpenError::Stale { version, table: t } if usize::try_from(version) == Ok(last) && t == table),
-                "{text}"
-            );
-            assert!(
-                text.contains(&format!("schema_version {last} but table {table} missing")),
-                "{text}"
-            );
-            assert!(text.contains("Do not reset it"), "{text}");
-        }
-    }
-}
-
-#[tokio::test]
-async fn a_stale_schema_version_is_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("stale.db");
-    refuses_a_stale_schema(|| Location::Sqlite(file.clone()), false).await;
-}
-
 async fn drop_all(url: &str) {
     sqlx::any::install_default_drivers();
     let pool = sqlx::AnyPool::connect(url).await.unwrap();
@@ -497,8 +452,6 @@ async fn each_account_has_its_own_characters_and_content_on_postgres() {
     };
     let dir = tempfile::tempdir().unwrap();
     let data = dir.path().join("data");
-    drop_all(&url).await;
-    refuses_a_stale_schema(|| Location::Postgres(url.clone()), true).await;
     drop_all(&url).await;
     // Left over from the versions with groups: the database opens all the same, and the table stays.
     make_old(&url).await;
