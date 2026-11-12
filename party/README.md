@@ -256,6 +256,11 @@ by agreement with the Borealis team: features that need the user's own device st
 coordinated so web-relevant work moves over here safely. Fixes that belong in Borealis itself go to them as pull
 requests.
 
+On the fork, `.github/workflows/party-ci.yml` checks every push and pull request: no upstream file changed, every
+upstream command has a decision, the party web app, and the server on SQLite and PostgreSQL. Upstream's own CI
+(`ci.yml`) is turned off here (Actions > CI > Disable workflow): upstream runs it on the same, unchanged upstream code,
+and on the fork it rebuilt everything from scratch for about an hour. Turn it back on there if it is ever needed.
+
 Each party release is built on a Borealis release (a `vX.Y.Z` tag), not on upstream's `main` between releases. To take
 one, from Git Bash:
 
