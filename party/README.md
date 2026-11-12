@@ -747,3 +747,17 @@ options (`--bundle FILE` uses a given bundle instead of the export it makes).
 - **Chunked upload (I2): not needed.** The largest real files are well under the cap: a 36 MB Aurora zip (48 MB
   request) and a 19.5 MB whole-library export (26 MB request), against 100 MiB per request through Cloudflare. It
   comes back only if a real file or export goes over about 70 MB.
+
+### Long downloads run as jobs (0.1.4)
+
+`update_indexes`, `stage_5etools_url` and `update_5etools_url` now run as background jobs
+(`crates/borealis-server/src/jobs.rs`, client `ui/party/api/overrides/jobs.ts`). The app sends `job_start`, which
+answers at once, and then asks `job_status` every 0.5 to 5 seconds until the job ends, so no request waits long enough
+for Cloudflare's 524. The pages work as before, and progress still comes through the commands' own events.
+
+- Each account runs one job at a time. If another job is running, the app waits for it to finish and then starts its own.
+- A job keeps running if the app is closed, and its workspace stays open until it ends.
+- Each job writes a record to `users/<account>/sync/jobs/<id>.json`, which is kept for a day. If the server stops
+  during a job, the next start reports "The server restarted during this import; run it again."
+- Job ids are random, and an account can see only its own jobs. Every download still goes through the address guard.
+- An app connected to a server older than 0.1.4 makes the plain call instead.
