@@ -712,7 +712,7 @@ the server's disk and CPU.
 
 ### Through the public address, signed in
 
-To be run by the owner, against a throwaway account made for it and approved on the admin page (it writes into that
+Run by the owner on 2026-11-12 against server 0.1.3 through Cloudflare. To repeat it: against a throwaway account made for it and approved on the admin page (it writes into that
 account's library and removes what it added when it ends):
 
 ```sh
@@ -729,13 +729,13 @@ options (`--bundle FILE` uses a given bundle instead of the export it makes).
 
 | Step | Time | Status |
 | --- | --- | --- |
-| `update_indexes`, first download | _to measure_ | |
-| `update_indexes`, again | _to measure_ | |
-| `stage_5etools_url` | _to measure_ | |
-| `import_5etools` | _to measure_ | |
-| `preview_import_pack` + `install_import_preview` | _to measure_ | |
-| `bundle_export` (size) | _to measure_ | |
-| `stage_bundle` + `bundle_open` + `bundle_accept` | _to measure_ | |
+| `update_indexes`, first download (4 community Aurora indexes) | 90.0 s, then about 201 s on the server | **504** from the proxy at 90 s while the server kept going (background jobs, I1, fix this) |
+| `update_indexes`, again | 67.7 s | ok |
+| `stage_5etools_url` | 9.1 s (`scan_5etools_folder` 0.5 s) | ok |
+| `import_5etools` | 19.8 s | ok |
+| `preview_import_pack` + `install_import_preview` | not measured | |
+| `bundle_export` (size) | 4.5 s | ok |
+| `stage_bundle` + `bundle_open` + `bundle_accept` | not measured | |
 
 ### What it means for 0.1.4
 
