@@ -1,0 +1,108 @@
+# Upstream commands the server does not offer, on purpose. One name per line; "#" starts a comment.
+#
+# Every command in upstream's handler list (src-tauri/src/lib.rs) must be either offered in
+# party/crates/borealis-server/src/backend.rs or listed here. party/check-commands.sh fails on a command that is in
+# neither, so each new upstream command gets a decision when we take a Borealis release.
+
+# AI integration (the AI CLIs run on the user's own computer), including "Import anything".
+ai_add_homebrew_to_pack
+ai_cancel_task
+ai_host_begin_pairing
+ai_host_disable
+ai_host_enable
+ai_host_revoke
+ai_host_status
+ai_setup_complete
+ai_setup_confirm_install
+ai_setup_install
+ai_setup_login
+ai_setup_status
+ai_start_task
+ai_status
+ai_validate_homebrew
+set_ai_override
+import_accept_element
+import_choose_parent
+import_discard
+import_finalize
+import_get_draft
+import_regenerate_element
+import_relocate_element
+import_report_preview
+import_report_send
+import_revise
+import_set_text_only
+import_start
+import_update_element
+
+# Device-to-device transfer and making bundle files (every device reads the same account).
+link_accept
+link_cancel
+link_connect
+link_decline
+link_devices
+link_forget_device
+link_start_receive
+link_start_send
+link_status
+bundle_export
+bundle_share
+
+# Files, folders and pickers on the user's device.
+pick_path
+take_opened_bundles
+take_opened_files
+take_picked_files
+get_data_dirs
+set_documents_dir
+set_secondary_content_dir
+unlink_secondary_content_dir
+set_portrait_library_dir
+list_portrait_library
+portrait_library_image
+open_app_folder
+share_sheet
+
+# Notes: an Obsidian vault in a folder on the device.
+set_character_note
+set_vault_dir
+vault_attach
+vault_backlinks
+vault_create_character_note
+vault_create_note
+vault_delete
+vault_image
+vault_link_text
+vault_open_url
+vault_read
+vault_rename
+vault_rename_preview
+vault_resolve
+vault_save
+vault_search
+vault_tags
+vault_tree
+vault_watch
+
+# On-device semantic search model.
+semantic_delete_model
+semantic_download_cancel
+semantic_download_pause
+semantic_download_start
+semantic_model_license
+semantic_status
+
+# The app itself: updates, logs, links, restart, haptics.
+app_update_status
+check_app_update
+install_app_update
+open_download_page
+open_link
+restart_app
+get_recent_logs
+share_logs
+haptics_enabled
+
+# Not offered yet; could suit the server. Decide when needed.
+acceptance_digest
+restore_default_settings

@@ -251,14 +251,38 @@ memory.
 
 ## Keeping up with Borealis
 
-This repository is a fork of [TeamBorealis/borealis](https://github.com/TeamBorealis/borealis). To take new upstream work,
-use GitHub's "Sync fork" button, or:
+This repository is a fork of [TeamBorealis/borealis](https://github.com/TeamBorealis/borealis), kept as a separate port
+by agreement with the Borealis team: features that need the user's own device stay in Borealis, and releases are
+coordinated so web-relevant work moves over here safely. Fixes that belong in Borealis itself go to them as pull
+requests.
+
+Each party release is built on a Borealis release (a `vX.Y.Z` tag), not on upstream's `main` between releases. To take
+one, from Git Bash:
 
 ```sh
-git fetch upstream
-git merge upstream/main
-sh party/check-upstream.sh
+bash party/sync-upstream.sh          # the newest Borealis release, or name one: bash party/sync-upstream.sh v1.4.1
 ```
+
+It merges the tag and runs `check-upstream.sh` and `check-commands.sh`. Don't use GitHub's "Sync fork" button, which
+merges upstream's `main`.
+
+### Releasing
+
+After Borealis releases:
+
+1. `bash party/sync-upstream.sh`, and resolve what it reports.
+2. For each new upstream command `check-commands.sh` names, decide: offer it in
+   `party/crates/borealis-server/src/backend.rs` (only JSON, base64 or backend-issued tokens, never a path from the
+   client), or list it in `party/commands-not-offered.txt` under the reason. Look over upstream's release notes for new
+   menu rows or pages that need hiding on a server.
+3. Build and test (below), and try the web app and the Android app against a test server.
+4. Raise `version` in `party/Cargo.toml`, build once so `Cargo.lock` follows, commit, and push `main`. The push
+   builds the Docker image.
+5. `bash party/release.sh` tags `party-v<version>` with the Borealis release in its message. Push the tag, then make
+   the GitHub release from it with the APK and the server archive, starting the notes with "Based on Borealis X.Y.Z".
+
+A party-only fix between Borealis releases is released the same way, skipping step 1. If `main` has to carry Borealis
+work newer than its last release, `release.sh --unreleased` allows it and says so in the tag.
 
 Our code lives only in `party/` and `ui/party/`, folders upstream never touches, so merges don't conflict.
 `check-upstream.sh` fails if any of upstream's files changes.
@@ -290,7 +314,7 @@ cargo test -p borealis-server
 ```
 
 Set `BOREALIS_TEST_POSTGRES_URL` to a database the tests may wipe to run them on PostgreSQL too. A new upstream command stays off the network until it is added to a list in
-`party/crates/borealis-server/src/backend.rs`, and an upstream change to `tauri` API usage may need a matching stub in
+`party/crates/borealis-server/src/backend.rs` (`check-commands.sh` names each one), and an upstream change to `tauri` API usage may need a matching stub in
 `party/crates/tauri`.
 
 ## Download the apps

@@ -1,3 +1,2 @@
+# Shell scripts must keep LF endings, or bash fails on Windows checkouts with core.autocrlf.
 *.sh text eol=lf
-*.service text eol=lf
-*.example text eol=lf
