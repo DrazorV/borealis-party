@@ -46,6 +46,8 @@ class FakeWindow implements BackWindow {
     back: () => { this.travel(-1); },
     forward: () => { this.travel(1); },
   } as unknown as BackWindow["history"];
+  // The history getter below needs the window; a getter has no arrow form to capture `this`.
+  // eslint-disable-next-line @typescript-eslint/no-this-alias
   constructor() { self = this; }
   addEventListener(_: "popstate", l: () => void) { this.pop.add(l); }
   removeEventListener(_: "popstate", l: () => void) { this.pop.delete(l); }

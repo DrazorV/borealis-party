@@ -15,10 +15,8 @@ vi.mock("react", async (real) => ({
 /** The app's backend with nothing on it: every list is empty, every change does nothing. */
 const local = new Proxy({}, { get: () => async () => [] }) as unknown as LocalApi;
 let reachable: boolean;
-let calls: number;
 /** A server with no characters or packs; with `reachable` false every call gets no answer. */
 const server: ServerCall = async (command) => {
-  calls += 1;
   if (!reachable) throw { code: "network", message: "The server can't be reached. Check your connection." };
   if (command === "party_sync_state") return { nowMs: Date.now(), characters: [], packs: [] };
   if (command === "get_settings") return {};
@@ -33,7 +31,6 @@ beforeEach(() => {
   saveSession({ baseUrl: "http://server", token: "t", user: { id: "u1", username: "a", email: null, admin: false, mustChangePassword: false } });
   resetConnectivity();
   reachable = true;
-  calls = 0;
   useSyncStatus();
 });
 
