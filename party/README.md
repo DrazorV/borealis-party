@@ -344,6 +344,7 @@ Every `party-v<version>` tag builds the phone and desktop apps and attaches them
 | Linux x86_64, Debian and Ubuntu | `borealis-party-linux-amd64.deb` |
 | Linux arm64, AppImage (only when it built) | `borealis-party-linux-aarch64.AppImage` |
 | Linux arm64, Debian and Ubuntu (only when it built) | `borealis-party-linux-arm64.deb` |
+| Desktop update feed, with a `.sig` per installer and AppImage (only with the updater key) | `borealis-party-latest.json` |
 | Checksums of all of them | `borealis-party-SHA256SUMS.txt` |
 
 The desktop apps are built as `party/desktop/build-desktop.ps1 -Installer` builds them and keep their data in
@@ -352,6 +353,10 @@ The desktop apps are built as `party/desktop/build-desktop.ps1 -Installer` build
 Some browsers also warn that the file is not commonly downloaded. The AppImage needs `chmod +x` before it runs. The
 Linux packages leave out desktop Borealis's file types, so both can be installed side by side
 (`party/tauri.party.linux.json`).
+
+The Windows installer and the AppImages update themselves from the newest release: the app offers Install and
+restart when a newer version is out. The `.deb` and the MSI don't. See `party/desktop/updates.md`, including the one
+manual install needed to get there from 0.1.1 or older.
 
 To release, set the version in `party/Cargo.toml`, merge to `main`, then tag that commit and push the tag:
 
@@ -373,6 +378,8 @@ Repository secrets (Settings > Secrets and variables > Actions):
 | `PARTY_IOS_CERTIFICATE_PASSWORD` | Its password |
 | `PARTY_IOS_PROVISIONING_PROFILE` | A provisioning profile for `app.borealis.party` that includes that certificate, as base64 |
 | `PARTY_APPLE_TEAM_ID` | The Apple developer team id |
+| `PARTY_UPDATER_KEY` | Optional. The desktop update signing key, the whole `.key` file (`party/desktop/updates.md`). Without it there is no update feed |
+| `PARTY_UPDATER_KEY_PASSWORD` | Its password |
 
 Base64 for a file, without line breaks: `base64 -w0 file` on Linux, `base64 -i file` on macOS, or
 `[Convert]::ToBase64String([IO.File]::ReadAllBytes("file"))` in PowerShell.

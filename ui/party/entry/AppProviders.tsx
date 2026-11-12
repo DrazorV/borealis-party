@@ -5,6 +5,7 @@ import { decideBoot, offlinePageApi, type Boot } from "../api/connectivity";
 import { loadSession, wantsSignInAgain, type ServerSession } from "../api/session";
 import { ChangePasswordPage } from "../pages/ChangePasswordPage";
 import { ConnectPage } from "../pages/ConnectPage";
+import { DesktopUpdate } from "../pages/DesktopUpdate";
 
 let boot: Promise<Boot> | null = null;
 
@@ -29,12 +30,15 @@ export function AppProviders(props: ComponentProps<typeof UpstreamProviders>) {
     const current = loadSession();
     if (isTauri() && current && !(current.expired && wantsSignInAgain())) void bootOnce(current).then(setMode);
   }, []);
-  if (!session || mode === "signed-out") return <ConnectPage />;
-  if (again) return <ConnectPage again={again} />;
+  // Signed out, the update offer stands above the sign-in (an old app may be what keeps it from the server); signed in,
+  // the account bar shows it.
+  if (!session || mode === "signed-out") return <><DesktopUpdate floating /><ConnectPage /></>;
+  if (again) return <><DesktopUpdate floating /><ConnectPage again={again} /></>;
   if (mode === null) return <div className="party-connect"><p className="muted">Connecting…</p></div>;
   if (mode === "no-copy") {
     return (
       <div className="party-connect">
+        <DesktopUpdate floating />
         <div className="card party-connect-card">
           <h1>Borealis Party</h1>
           <p>Can't reach the server and this device has no offline copy yet.</p>

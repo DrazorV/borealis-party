@@ -13,6 +13,8 @@ name: Party apps
 #   borealis-party-linux-amd64.deb          Linux x86_64, Debian and Ubuntu
 #   borealis-party-linux-aarch64.AppImage   Linux arm64; only when that build succeeded
 #   borealis-party-linux-arm64.deb          Linux arm64, Debian and Ubuntu; only when that build succeeded
+#   borealis-party-latest.json              the desktop apps' update feed, with a .sig per installer and AppImage
+#                                           (only with the updater key, party/desktop/updates.md)
 #   borealis-party-SHA256SUMS.txt
 # Without the iOS secrets the iOS job builds an unsigned simulator app instead, kept as the workflow artifact
 # party-ios-simulator and never attached to the release.
@@ -23,7 +25,8 @@ name: Party apps
 # since Tauri can't pass Gradle --init-script).
 # Secrets (repository secrets, never printed): PARTY_ANDROID_KEYSTORE_B64, PARTY_ANDROID_KEYSTORE_PASSWORD (required);
 # PARTY_IOS_CERTIFICATE_P12, PARTY_IOS_CERTIFICATE_PASSWORD, PARTY_IOS_PROVISIONING_PROFILE, PARTY_APPLE_TEAM_ID
-# (optional, all four or none). Repository variable PARTY_IOS_EXPORT_METHOD: release-testing (default, ad hoc),
+# (optional, all four or none); PARTY_UPDATER_KEY, PARTY_UPDATER_KEY_PASSWORD (optional, both or none: without them
+# the desktop apps are released without an update feed). Repository variable PARTY_IOS_EXPORT_METHOD: release-testing (default, ad hoc),
 # debugging or app-store-connect; it must match the provisioning profile.
 # This file belongs to the fork (party/check-upstream.sh accepts .github/workflows/party-*.yml).
 on:
@@ -307,12 +310,17 @@ jobs:
   # --no-default-features. The identifier app.borealis.party keeps its data apart from desktop Borealis
   # (%APPDATA%\app.borealis.party, ~/.local/share/app.borealis.party). Unsigned. Linux arm64 is optional: if it fails,
   # the release goes out without it.
+  # With the updater key the Windows installer and the AppImages are signed for the party feed (.sig beside each).
   desktop:
     name: Desktop (${{ matrix.name }})
     needs: version
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     continue-on-error: ${{ matrix.optional }}
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PARTY_UPDATER_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PARTY_UPDATER_KEY_PASSWORD }}
+      PARTY_VERSION: ${{ needs.version.outputs.version }}
     strategy:
       fail-fast: false
       matrix:
@@ -353,6 +361,18 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then root=$(pwd -W); else root=$PWD; fi
           echo "CARGO_TARGET_DIR=$root/target/party-desktop" >> "$GITHUB_ENV"
 
+      # As build-desktop.ps1: the party version (the updater compares it with the feed's), and signed update files
+      # when the key is there.
+      - name: Party version and updater config
+        run: |
+          set -euo pipefail
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then updater=true; else updater=false; echo "::notice::no PARTY_UPDATER_KEY: no update feed"; fi
+          if [ "$RUNNER_OS" = "Windows" ]; then out=$(cygpath -m "$RUNNER_TEMP")/party-desktop-build.json; else out=$RUNNER_TEMP/party-desktop-build.json; fi
+          printf '{"version":"%s","bundle":{"createUpdaterArtifacts":%s}}\n' "$PARTY_VERSION" "$updater" > "$out"
+          cat "$out"
+          echo "PARTY_BUILD_CONFIG=$out" >> "$GITHUB_ENV"
+          echo "PARTY_UPDATER=$updater" >> "$GITHUB_ENV"
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
@@ -374,7 +394,7 @@ jobs:
       - name: Build the installer
         run: |
           set -euo pipefail
-          configs=(--config party/tauri.party.json --config party/tauri.party.desktop.json)
+          configs=(--config party/tauri.party.json --config party/tauri.party.desktop.json --config "$PARTY_BUILD_CONFIG")
           if [ "$RUNNER_OS" = "Windows" ]; then
             bundles=nsis
           else
@@ -390,7 +410,7 @@ jobs:
         continue-on-error: true
         run: |
           node ui/node_modules/@tauri-apps/cli/tauri.js build --config party/tauri.party.json \
-            --config party/tauri.party.desktop.json --bundles msi --ci -- --no-default-features
+            --config party/tauri.party.desktop.json --config "$PARTY_BUILD_CONFIG" --bundles msi --ci -- --no-default-features
 
       - name: Check and rename
         env:
@@ -408,6 +428,7 @@ jobs:
           mkdir -p dist
           if [ "$RUNNER_OS" = "Windows" ]; then
             cp "$(one nsis '*-setup.exe')" "dist/borealis-party-$NAME-setup.exe"
+            if [ "$PARTY_UPDATER" = true ]; then cp "$(one nsis '*-setup.exe.sig')" "dist/borealis-party-$NAME-setup.exe.sig"; fi
             if [ -d "$bundle/msi" ]; then cp "$(one msi '*.msi')" "dist/borealis-party-$NAME.msi"; fi
           else
             deb=$(one deb '*.deb')
@@ -419,6 +440,7 @@ jobs:
             fi
             cp "$deb" "dist/borealis-party-linux-$DEB_ARCH.deb"
             cp "$(one appimage '*.AppImage')" "dist/borealis-party-$NAME.AppImage"
+            if [ "$PARTY_UPDATER" = true ]; then cp "$(one appimage '*.AppImage.sig')" "dist/borealis-party-$NAME.AppImage.sig"; fi
           fi
           ls -l dist
 
@@ -459,6 +481,21 @@ jobs:
         with:
           name: party-ios
           path: assets
+
+      - uses: actions/checkout@v4
+        with:
+          path: source
+          sparse-checkout: party/desktop
+
+      # The desktop apps' update feed, when their files were signed (party/desktop/updates.md).
+      - name: Update feed
+        run: |
+          set -euo pipefail
+          if ls assets/*.sig >/dev/null 2>&1; then
+            python3 source/party/desktop/update-feed.py assets "$VERSION" "$TAG"
+          else
+            echo "::notice::no signed desktop files: released without an update feed"
+          fi
 
       - name: Check names and write checksums
         working-directory: assets

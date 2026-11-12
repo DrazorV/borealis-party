@@ -5,6 +5,7 @@ import { Button } from "../../src/components/Button";
 import { loadSession } from "../api/session";
 import { requestSync, useSyncStatus, type SyncStatus } from "../sync/runner";
 import { AppOffer } from "./AppOffer";
+import { DesktopUpdate } from "./DesktopUpdate";
 import { OfflineBanner } from "./OfflineBanner";
 import { useSignOut } from "./SignOut";
 
@@ -80,6 +81,7 @@ export function AccountBar() {
         <Button small onClick={exit.start} disabled={exit.busy}>{exit.busy ? "Signing out…" : "Sign out"}</Button>
       </div>
       <OfflineBanner />
+      <DesktopUpdate />
       {/* The Start page (the character list) in a browser: the app for this system. */}
       {pathname === "/characters" && <AppOffer />}
       {exit.dialog}
