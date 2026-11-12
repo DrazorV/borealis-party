@@ -13,6 +13,10 @@ use crate::db::Location;
 /// Prefix of the variables that override `config.toml`.
 pub const ENV_PREFIX: &str = "BOREALIS__";
 
+/// Where the apps come from unless `server.app_download` says otherwise: the fork's latest release.
+pub const DEFAULT_APP_DOWNLOAD: &str =
+    "https://github.com/DrazorV/borealis-party/releases/latest/download";
+
 /// The file written on first start. Keep it in step with the defaults below (a test checks).
 pub const DEFAULT_FILE: &str = r#"# Borealis Party settings.
 #
@@ -34,6 +38,9 @@ open_registration = true
 require_approval = true
 # Largest upload in megabytes (a zip of a 5etools data folder can be large).
 max_upload_mb = 512
+# Where phone and tablet visitors of the website are offered the app: a folder URL that holds the release files
+# (borealis-party-android.apk, ...). By default the latest release on GitHub; "off" offers no download.
+# app_download = "https://github.com/DrazorV/borealis-party/releases/latest/download"
 
 [database]
 # "sqlite" (a file in this folder) or "postgres" (your own server, see [postgres]).
@@ -119,6 +126,8 @@ pub struct ServerSettings {
     pub require_approval: bool,
     /// Largest request in megabytes.
     pub max_upload_mb: usize,
+    /// Where the apps are downloaded from: unset for [`DEFAULT_APP_DOWNLOAD`], `off` for nowhere.
+    pub app_download: Option<String>,
 }
 
 impl Default for ServerSettings {
@@ -129,6 +138,7 @@ impl Default for ServerSettings {
             open_registration: true,
             require_approval: true,
             max_upload_mb: 512,
+            app_download: None,
         }
     }
 }
@@ -454,6 +464,15 @@ impl Settings {
                 ));
             }
         }
+        if let Some(url) = self.app_download() {
+            let parsed = url::Url::parse(&url)
+                .map_err(|e| ConfigError(format!("server.app_download: {e}")))?;
+            if !["http", "https"].contains(&parsed.scheme()) {
+                return Err(ConfigError(
+                    "server.app_download must start with http:// or https://, or be off".into(),
+                ));
+            }
+        }
         if self.smtp.enabled() {
             if self.public_url().is_none() {
                 return Err(ConfigError(
@@ -478,6 +497,21 @@ impl Settings {
             .as_deref()
             .map(|u| u.trim().trim_end_matches('/').to_string())
             .filter(|u| !u.is_empty())
+    }
+
+    /// The folder URL the app downloads are in, without a trailing slash; `None` when switched off.
+    #[must_use]
+    pub fn app_download(&self) -> Option<String> {
+        let Some(set) = self.server.app_download.as_deref() else {
+            return Some(DEFAULT_APP_DOWNLOAD.to_string());
+        };
+        let url = set.trim().trim_end_matches('/');
+        if url.is_empty()
+            || ["off", "none", "false", "no"].contains(&url.to_ascii_lowercase().as_str())
+        {
+            return None;
+        }
+        Some(url.to_string())
     }
 
     /// A path relative to the config folder, unless absolute.
@@ -619,6 +653,29 @@ mod tests {
                 .is_err(),
             "postgres without a password"
         );
+    }
+
+    #[test]
+    fn the_app_download_has_a_default_and_can_be_moved_or_turned_off() {
+        let get = |value: &str| {
+            Settings::parse(
+                DEFAULT_FILE,
+                vars(&[("BOREALIS__SERVER__APP_DOWNLOAD", value)]),
+            )
+            .map(|s| s.app_download())
+        };
+        assert_eq!(
+            Settings::default().app_download().as_deref(),
+            Some(DEFAULT_APP_DOWNLOAD)
+        );
+        assert_eq!(
+            get("https://files.example.com/apps/").unwrap().as_deref(),
+            Some("https://files.example.com/apps")
+        );
+        assert_eq!(get("off").unwrap(), None);
+        assert_eq!(get("").unwrap(), None);
+        assert!(get("ftp://files.example.com").is_err());
+        assert!(get("not a url").is_err());
     }
 
     #[test]

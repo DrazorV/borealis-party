@@ -6,6 +6,7 @@ import {
 } from "../api/session";
 import { isTauri } from "../../src/lib/tauri";
 import { othersUnsentEdits, removeOtherCopies } from "../sync/account";
+import { AppOffer } from "./AppOffer";
 import { DiscardDialog } from "./SignOut";
 import "./party.css";
 
@@ -159,6 +160,7 @@ export function ConnectPage({ again }: { again?: ServerSession } = {}) {
         )}
         {server && (
           <>
+            {!needsAddress && <AppOffer folder={server.info.appDownload ?? null} />}
             {notice && <div className="alert success" role="status"><div>{notice}</div></div>}
             <label>
               {mode === "in" ? "Username or email" : "Username"}

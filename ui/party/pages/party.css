@@ -21,6 +21,11 @@
 .party-connect-card label { display: flex; flex-direction: column; gap: var(--sp-1); }
 .party-connect-card input.aur-text { min-height: 36px; padding: 0 var(--sp-2); font-size: 16px; box-sizing: border-box; }
 .party-connect-note { margin: 0; font-size: var(--fs-sm); }
+.party-app-offer { align-items: flex-start; font-size: var(--fs-sm); }
+.party-bar-host > .party-app-offer { margin: var(--sp-2) var(--sp-3); }
+.party-app-offer-text { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
+.party-app-address { user-select: all; overflow-wrap: anywhere; }
+.party-app-offer .btn-icon { flex-shrink: 0; margin: calc(-1 * var(--sp-1)) calc(-1 * var(--sp-2)) 0 0; }
 .party-connect-note:empty { display: none; }
 .party-form { display: flex; flex-direction: column; gap: var(--sp-3); }
 .party-form p { margin: 0; }
