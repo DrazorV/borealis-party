@@ -1,5 +1,5 @@
 import { serverFetch } from "./http";
-import { loadSession, type ServerUser } from "./session";
+import { loadSession, type ServerSession, type ServerUser } from "./session";
 
 export interface ServerInfo {
   app: string;
@@ -60,6 +60,20 @@ export const signUp = (baseUrl: string, username: string, email: string, passwor
   serverFetch({ baseUrl, token: "" }, "POST", "/api/auth/register", { username, email, password }) as Promise<SignUpResult>;
 
 export const signOut = () => call<void>("POST", "/api/auth/logout");
+
+/**
+ * End a session on the server while this device leaves it, whatever the answer: unreachable, or a token the server
+ * already refuses, changes nothing here (unlike every other request, nothing reloads).
+ */
+export async function endSession(session: Pick<ServerSession, "baseUrl" | "token">, timeoutMs = 4000): Promise<void> {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), timeoutMs);
+  try {
+    await fetch(`${session.baseUrl}/api/auth/logout`, { method: "POST", headers: { authorization: `Bearer ${session.token}` }, signal: abort.signal });
+  } catch { /* offline: the session ends on the server when unused for 90 days */ } finally {
+    clearTimeout(timer);
+  }
+}
 export const fetchMe = () => call<ServerUser>("GET", "/api/me");
 export const changeEmail = (email: string) => call<ServerUser>("PATCH", "/api/me", { email });
 export const changePassword = (current: string, password: string) => call<ServerUser>("POST", "/api/me/password", { current, password });

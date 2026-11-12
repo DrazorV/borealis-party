@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import { Button } from "../../src/components/Button";
-import { signOut } from "../api/party";
-import { clearSession, loadSession } from "../api/session";
+import { loadSession } from "../api/session";
 import { requestSync, useSyncStatus, type SyncStatus } from "../sync/runner";
 import { OfflineBanner } from "./OfflineBanner";
+import { useSignOut } from "./SignOut";
 
 /** A host element placed in upstream's window, above the content, for as long as that window exists. */
 function useHost(): HTMLElement | null {
@@ -65,13 +65,8 @@ export function AccountBar() {
   const nav = useNavigate();
   const host = useHost();
   const session = loadSession();
+  const exit = useSignOut();
   if (!session || !host) return null;
-  const exit = async () => {
-    try { await signOut(); } catch { /* the token goes either way */ }
-    clearSession();
-    window.location.hash = "/";
-    window.location.reload();
-  };
   return createPortal(
     <>
       <div className="party-bar">
@@ -80,9 +75,10 @@ export function AccountBar() {
         <SyncChip />
         <Button small onClick={() => nav("/account")}>Account</Button>
         {session.user.admin && <Button small onClick={() => nav("/admin")}>Admin</Button>}
-        <Button small onClick={() => void exit()}>Sign out</Button>
+        <Button small onClick={exit.start} disabled={exit.busy}>{exit.busy ? "Signing out…" : "Sign out"}</Button>
       </div>
       <OfflineBanner />
+      {exit.dialog}
     </>,
     host,
   );

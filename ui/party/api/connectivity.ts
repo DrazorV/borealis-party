@@ -5,7 +5,7 @@ import { isTauri } from "../../src/lib/tauri";
 import { hasCopy, loadMirror } from "../sync/mirror";
 import { serverWatch } from "./http";
 import { createOfflineApi, type OfflineApi } from "./offline";
-import { clearSession, loadSession, markExpired, type ServerSession } from "./session";
+import { askSignInAgain, clearSession, loadSession, markExpired, type ServerSession } from "./session";
 
 /**
  * Online or offline, decided when the page starts and kept until it reloads: one page never mixes the server and the
@@ -43,9 +43,11 @@ export interface ConnectivityState {
   mode: "online" | "offline";
   /** Offline, and the server answers again while a character is open: the banner offers to switch. */
   backOnline: boolean;
+  /** Offline because the server no longer takes the session (signed out there, or the account was turned off). */
+  expired: boolean;
 }
 
-let state: ConnectivityState = { mode: "online", backOnline: false };
+let state: ConnectivityState = { mode: "online", backOnline: false, expired: false };
 const watchers = new Set<() => void>();
 let offlineApi: OfflineApi | null = null;
 
@@ -79,15 +81,30 @@ export function offlinePageApi(local: Api = createTauriApi()): OfflineApi {
 
 const reload = () => window.location.reload();
 
+/**
+ * A record whose characters are all gone from the device is no copy: the WebView can lose a storage write when the app
+ * is killed right after it (a sign-out's wipe). When the files can't be listed, the record is taken as it is.
+ */
+async function copyOnDisk(userId: string, local: Pick<Api, "listCharacters">): Promise<boolean> {
+  const wanted = Object.values(loadMirror(userId)?.characters ?? {}).map((m) => m.local);
+  if (wanted.length === 0) return true;
+  try {
+    const onDisk = new Set((await local.listCharacters()).map((c) => c.id));
+    return wanted.some((id) => onDisk.has(id));
+  } catch {
+    return true;
+  }
+}
+
 /** The page starts. Apps only: a browser is always online. */
-export async function decideBoot(session: ServerSession, inApp = isTauri()): Promise<Boot> {
+export async function decideBoot(session: ServerSession, inApp = isTauri(), local?: Pick<Api, "listCharacters">): Promise<Boot> {
   if (!inApp) return "online";
   const reach: Reach = session.expired ? "expired" : await probe(session);
   if (reach === "ok") {
     watchOnline(session);
     return "online";
   }
-  if (!hasCopy(session.user.id)) {
+  if (!hasCopy(session.user.id) || !await copyOnDisk(session.user.id, local ?? createTauriApi())) {
     if (reach === "network") return "no-copy";
     clearSession();
     return "signed-out";
@@ -95,7 +112,7 @@ export async function decideBoot(session: ServerSession, inApp = isTauri()): Pro
   if (reach === "expired") markExpired();
   // party.css and entry/hideTransfer.ts hide what upstream can't refuse with a message (delete, duplicate).
   document.documentElement.classList.add("party-offline-mode");
-  publish({ mode: "offline" });
+  publish({ mode: "offline", expired: reach === "expired" });
   watchOffline(session);
   return "offline";
 }
@@ -140,6 +157,13 @@ function watchOffline(session: ServerSession): void {
     checking = true;
     void probe(session).then((reach) => {
       checking = false;
+      if (reach === "expired") {
+        // Signed out on the server while this device was offline: play goes on, and the banner asks for a sign-in.
+        markExpired();
+        stopWatching?.();
+        publish({ expired: true, backOnline: false });
+        return;
+      }
       if (reach !== "ok") return;
       if ((offlineApi?.openCharacters().length ?? 0) > 0) {
         publish({ backOnline: true });
@@ -167,13 +191,24 @@ export async function goOnline(): Promise<void> {
   try { await offlineApi?.closeAll(); } finally { reload(); }
 }
 
+/** Signed out by the server: save what is open on the device, then the next page asks for the sign-in (ConnectPage). */
+export async function goSignInAgain(): Promise<void> {
+  try { await offlineApi?.closeAll(); } finally {
+    askSignInAgain();
+    reload();
+  }
+}
+
+/** The app's own ids of the copies open on this page (offline); none online. */
+export const openCopies = (): Set<string> => new Set(offlineApi?.openCopies() ?? []);
+
 /** Tests: start over. */
 export function resetConnectivity(): void {
   stopWatching?.();
   stopWatching = null;
   closedHook = null;
   document.documentElement.classList.remove("party-offline-mode");
-  state = { mode: "online", backOnline: false };
+  state = { mode: "online", backOnline: false, expired: false };
   offlineApi = null;
   checking = false;
   delete serverWatch.network;

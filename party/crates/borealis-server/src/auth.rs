@@ -27,7 +27,10 @@ use crate::db::{now, Activity, Db, InsertOutcome, NewAccount};
 use crate::error::{ApiError, ApiResult};
 use crate::AppState;
 
-const SESSION_SECONDS: i64 = 90 * 24 * 60 * 60;
+/// How long a session lasts after it was last used (it slides: see [`RENEW_SECONDS`]).
+pub(crate) const SESSION_SECONDS: i64 = 90 * 24 * 60 * 60;
+/// A session in use is renewed at most this often, so most requests write nothing.
+pub(crate) const RENEW_SECONDS: i64 = 24 * 60 * 60;
 /// How long the emailed link works.
 const CONFIRM_SECONDS: i64 = 48 * 60 * 60;
 /// Failed sign-ins allowed per client and username in [`FAILED_LOGIN_WINDOW`].
@@ -247,7 +250,7 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn token_hash(token: &str) -> String {
+pub(crate) fn token_hash(token: &str) -> String {
     hex(&Sha256::digest(token.as_bytes()))
 }
 
@@ -671,11 +674,24 @@ where
         let state = AppState::from_ref(state);
         let unauthorized = || ApiError::Unauthorized("Please sign in.".into());
         let token = bearer(&parts.headers).ok_or_else(unauthorized)?;
-        let user = state
+        let hash = token_hash(token);
+        let (user, expires_at) = state
             .db
-            .session_user(&token_hash(token))
+            .session_user(&hash)
             .await?
             .ok_or_else(unauthorized)?;
+        // A session in use does not end: an app that syncs now and then stays signed in.
+        // At most once a day, so most requests write nothing; a failed renewal only logs.
+        let renewed = now() + SESSION_SECONDS;
+        if expires_at < renewed - RENEW_SECONDS {
+            if let Err(e) = state
+                .db
+                .renew_session(&hash, renewed, renewed - RENEW_SECONDS)
+                .await
+            {
+                tracing::warn!("renewing a session: {e:?}");
+            }
+        }
         if user.must_change_password && !WHILE_CHANGING_PASSWORD.contains(&parts.uri.path()) {
             return Err(ApiError::Refused(
                 "password_change_required",

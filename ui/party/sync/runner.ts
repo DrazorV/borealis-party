@@ -43,6 +43,8 @@ interface Runner {
 let runner: Runner | null = null;
 let running: Promise<void> | null = null;
 let again = false;
+/** Signing out: no new sync starts (see `lastSync`). */
+let paused = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 function problemText(report: SyncReport): string | null {
@@ -66,7 +68,7 @@ async function run(r: Runner): Promise<void> {
 /** Sync now, or once more after the sync that is running. */
 export function requestSync(): Promise<void> {
   const r = runner;
-  if (!r) return Promise.resolve();
+  if (!r || paused) return Promise.resolve();
   if (running) {
     again = true;
     return running;
@@ -79,6 +81,23 @@ export function requestSync(): Promise<void> {
     running = null;
   })();
   return running;
+}
+
+/**
+ * Signing out: one last sync (after the one running, if any) sends what this device has, then no other starts until
+ * `resumeSync` (the sign-out was cancelled), so the copy can be removed.
+ */
+export async function lastSync(): Promise<void> {
+  if (!runner || paused) return;
+  if (running) await running;
+  await requestSync();
+  paused = true;
+  if (timer) clearTimeout(timer);
+  timer = null;
+}
+
+export function resumeSync(): void {
+  paused = false;
 }
 
 function later(ms: number): void {
@@ -113,6 +132,7 @@ export function startSync(deps?: Partial<Runner>): () => void {
     if (timer) clearTimeout(timer);
     timer = null;
     runner = null;
+    paused = false;
     publish({ state: "idle" });
   };
 }

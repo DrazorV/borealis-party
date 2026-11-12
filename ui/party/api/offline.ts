@@ -49,6 +49,8 @@ export function swapIds<T>(value: T, map: ReadonlyMap<string, string>): T {
 export interface OfflineApi extends Api {
   /** Server ids of the characters open on this page (loaded and not closed). */
   openCharacters(): string[];
+  /** The same, as the app's own ids of their copies. */
+  openCopies(): string[];
   /** Save and close what is open, before the page goes back to the server. */
   closeAll(): Promise<void>;
 }
@@ -96,6 +98,7 @@ export function createOfflineApi(local: Api, serverToLocal: ReadonlyMap<string, 
       return local.subscribe(event, (payload) => handler(swapIds(payload, localToServer)));
     },
     openCharacters: () => [...open],
+    openCopies: () => [...open].map((s) => serverToLocal.get(s) ?? s),
     async closeAll() {
       for (const id of [...open]) {
         await local.closeCharacter({ characterId: serverToLocal.get(id) ?? id, discard: false });

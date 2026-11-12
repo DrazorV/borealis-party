@@ -201,6 +201,19 @@ the app sends its edits first, then fetches what changed on the server.
   account's `characters/` folder as `<id>.json`.
 - Deleted on the server: the device drops its copy, unless it edited the character after the delete; then it comes
   back.
+- The server's settings win: each sync copies them to the app, less the folders and the machine's own flags.
+
+Signing in and out on an app:
+
+- A session lasts 90 days from its last use (renewed at most once a day), so an app that syncs now and then stays
+  signed in; an unused one ends.
+- Sign out removes the account's copy from the device. Online the app syncs first. Changes the server still doesn't
+  have (made offline, or refused) are listed in a dialog first, with Cancel as the default. Offline, the session on the
+  server is not ended (it can't be reached); it ends after 90 days without use, or with "Sign out everywhere".
+- Signed out by the server (an admin's "Sign out everywhere", an ended session, a disabled account): the app keeps
+  playing offline with its copy and asks to sign in again. The same account picks the copy up and sends its changes.
+  Another account signing in on the device removes the earlier copy, after a dialog when it holds unsent changes.
+- A password an admin asked to replace comes first when the server can be reached; the sync starts after it.
 
 ## How it works
 

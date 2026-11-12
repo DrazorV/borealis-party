@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { memoryStorage } from "../test/memoryStorage";
-import { isLocalAddress, loadSession, normaliseAddress, rememberedServer, saveSession, setServerAddress } from "./session";
+import {
+  askSignInAgain, dropSignInAgain, isLocalAddress, loadSession, markExpired, normaliseAddress, rememberedServer, saveSession, setServerAddress, wantsSignInAgain,
+} from "./session";
 
-beforeEach(() => { vi.stubGlobal("localStorage", memoryStorage()); });
+beforeEach(() => { vi.stubGlobal("localStorage", memoryStorage()); vi.stubGlobal("sessionStorage", memoryStorage()); });
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("normaliseAddress", () => {
@@ -52,5 +54,37 @@ describe("setServerAddress", () => {
     setServerAddress("https://party.example.com");
     expect(loadSession()).toBeNull();
     expect(rememberedServer()).toBe("https://party.example.com");
+  });
+});
+
+describe("signed out by the server", () => {
+  const user = { id: "u1", username: "alice", email: null, admin: false, mustChangePassword: false };
+
+  it("an expired session is kept, and says when the account itself was turned off", () => {
+    saveSession({ baseUrl: "", token: "t", user });
+    markExpired();
+    expect(loadSession()).toEqual({ baseUrl: "", token: "t", user, expired: true });
+    markExpired(true);
+    expect(loadSession()).toEqual({ baseUrl: "", token: "t", user, expired: true, blocked: true });
+    // Signing in again replaces both.
+    saveSession({ baseUrl: "", token: "t2", user });
+    expect(loadSession()).toEqual({ baseUrl: "", token: "t2", user });
+  });
+
+  it("'Sign in again' is asked for until signed in or dropped", () => {
+    expect(wantsSignInAgain()).toBe(false);
+    askSignInAgain();
+    expect(wantsSignInAgain()).toBe(true);
+    dropSignInAgain();
+    expect(wantsSignInAgain()).toBe(false);
+  });
+
+  it("another account signing in does not reopen the previous one's character", () => {
+    saveSession({ baseUrl: "", token: "t", user });
+    sessionStorage.setItem("lk.currentCharacter", "c_1");
+    saveSession({ baseUrl: "", token: "t2", user });
+    expect(sessionStorage.getItem("lk.currentCharacter")).toBe("c_1");
+    saveSession({ baseUrl: "", token: "t3", user: { ...user, id: "u2" } });
+    expect(sessionStorage.getItem("lk.currentCharacter")).toBeNull();
   });
 });

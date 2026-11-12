@@ -2,7 +2,7 @@ import { type ComponentProps, useEffect, useState } from "react";
 import { AppProviders as UpstreamProviders } from "../../src/AppProviders";
 import { isTauri } from "../../src/lib/tauri";
 import { decideBoot, offlinePageApi, type Boot } from "../api/connectivity";
-import { loadSession, type ServerSession } from "../api/session";
+import { loadSession, wantsSignInAgain, type ServerSession } from "../api/session";
 import { ChangePasswordPage } from "../pages/ChangePasswordPage";
 import { ConnectPage } from "../pages/ConnectPage";
 
@@ -20,15 +20,17 @@ function bootOnce(session: ServerSession): Promise<Boot> {
  */
 export function AppProviders(props: ComponentProps<typeof UpstreamProviders>) {
   const session = loadSession();
+  // Signed out by the server, and the banner's "Sign in again" was tapped: the sign-in, which can go back to playing.
+  const again = session?.expired && wantsSignInAgain() ? session : null;
   // A browser is always online and has nothing to wait for.
   const [mode, setMode] = useState<Boot | null>(() => (isTauri() ? null : "online"));
   // The session is read once per page: signing in or out reloads it.
   useEffect(() => {
     const current = loadSession();
-    if (isTauri() && current && !current.user.mustChangePassword) void bootOnce(current).then(setMode);
+    if (isTauri() && current && !(current.expired && wantsSignInAgain())) void bootOnce(current).then(setMode);
   }, []);
   if (!session || mode === "signed-out") return <ConnectPage />;
-  if (session.user.mustChangePassword) return <ChangePasswordPage />;
+  if (again) return <ConnectPage again={again} />;
   if (mode === null) return <div className="party-connect"><p className="muted">Connecting…</p></div>;
   if (mode === "no-copy") {
     return (
@@ -41,5 +43,7 @@ export function AppProviders(props: ComponentProps<typeof UpstreamProviders>) {
       </div>
     );
   }
+  // A new password comes first when the server can be reached; offline the app plays from its copy meanwhile.
+  if (session.user.mustChangePassword && mode !== "offline") return <ChangePasswordPage />;
   return <UpstreamProviders {...props} api={mode === "offline" ? offlinePageApi() : props.api} />;
 }

@@ -2,9 +2,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Api } from "../../src/api/contract";
 import { emptyMirror, saveMirror } from "../sync/mirror";
 import { memoryStorage } from "../test/memoryStorage";
-import { connectivity, decideBoot, goOnline, isOffline, offlinePageApi, probe, resetConnectivity } from "./connectivity";
+import { connectivity, decideBoot, goOnline, goSignInAgain, isOffline, offlinePageApi, openCopies, probe, resetConnectivity } from "./connectivity";
 import { serverFetch, serverWatch } from "./http";
-import { loadSession, saveSession, type ServerSession } from "./session";
+import { loadSession, saveSession, wantsSignInAgain, type ServerSession } from "./session";
 
 const user = { id: "u1", username: "ana", email: null, admin: false, mustChangePassword: false };
 const session: ServerSession = { baseUrl: "http://server", token: "t", user };
@@ -90,6 +90,15 @@ it("a first sync cut off part-way is no copy: no answer gives the message, not a
   expect(await decideBoot(session, true)).toBe("no-copy");
 });
 
+it("a record whose characters are gone from the device is no copy", async () => {
+  answer = "down";
+  withCopy();
+  expect(await decideBoot(session, true, { listCharacters: async () => [] })).toBe("no-copy");
+  resetConnectivity();
+  const kept = [{ id: "c_l" }] as Awaited<ReturnType<Api["listCharacters"]>>;
+  expect(await decideBoot(session, true, { listCharacters: async () => kept })).toBe("offline");
+});
+
 it("a refused token: offline with the copy and 'sign in again'; without a copy, signed out", async () => {
   answer = 401;
   withCopy();
@@ -163,7 +172,7 @@ it("offline with a character open: a banner instead of a reload, and its button 
   answer = 200;
   await vi.advanceTimersByTimeAsync(20_000);
   expect(reload).not.toHaveBeenCalled();
-  expect(connectivity()).toEqual({ mode: "offline", backOnline: true });
+  expect(connectivity()).toEqual({ mode: "offline", backOnline: true, expired: false });
   await goOnline();
   expect(api.openCharacters()).toEqual([]);
   expect(reload).toHaveBeenCalledOnce();
@@ -181,5 +190,28 @@ it("with the banner up, closing the character switches online on its own", async
   expect(connectivity().backOnline).toBe(true);
   expect(reload).not.toHaveBeenCalled();
   await api.closeCharacter({ characterId: "c_s", discard: false });
+  expect(reload).toHaveBeenCalledOnce();
+});
+
+it("offline, signed out on the server meanwhile: play goes on, the banner asks for a sign-in and probing stops", async () => {
+  vi.useFakeTimers();
+  withCopy();
+  answer = "down";
+  await decideBoot(session, true);
+  const api = offlinePageApi(nullLocal());
+  await api.loadCharacter({ characterId: "c_s" });
+  answer = 401;
+  await vi.advanceTimersByTimeAsync(20_000);
+  expect(connectivity()).toEqual({ mode: "offline", backOnline: false, expired: true });
+  expect(loadSession()).toMatchObject({ token: "t", expired: true });
+  expect(reload).not.toHaveBeenCalled();
+  fetched = 0;
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(fetched).toBe(0);
+  // The open character is the copy's, by its own id; "Sign in again" saves it and asks for the sign-in on reload.
+  expect([...openCopies()]).toEqual(["c_l"]);
+  await goSignInAgain();
+  expect(api.openCharacters()).toEqual([]);
+  expect(wantsSignInAgain()).toBe(true);
   expect(reload).toHaveBeenCalledOnce();
 });

@@ -457,16 +457,38 @@ impl Db {
     }
 
     /// The active account behind a live session.
-    pub async fn session_user(&self, token_hash: &str) -> ApiResult<Option<User>> {
+    /// The user of a live session, with the time the session ends.
+    pub async fn session_user(&self, token_hash: &str) -> ApiResult<Option<(User, i64)>> {
         let row = sqlx::query(&format!(
-            "SELECT {USER_COLUMNS} FROM sessions s JOIN users u ON u.id = s.user_id
+            "SELECT {USER_COLUMNS}, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id
              WHERE s.token_hash = $1 AND s.expires_at > $2 AND u.status = 'active'"
         ))
         .bind(token_hash)
         .bind(now())
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|r| user_from(&r)).transpose()?)
+        let Some(r) = row else { return Ok(None) };
+        Ok(Some((user_from(&r)?, r.try_get("expires_at")?)))
+    }
+
+    /// Move a live session's end to `expires_at` when it ends before `renew_before` (once a day at most).
+    pub async fn renew_session(
+        &self,
+        token_hash: &str,
+        expires_at: i64,
+        renew_before: i64,
+    ) -> ApiResult<()> {
+        sqlx::query(
+            "UPDATE sessions SET expires_at = $1
+             WHERE token_hash = $2 AND expires_at < $3 AND expires_at > $4",
+        )
+        .bind(expires_at)
+        .bind(token_hash)
+        .bind(renew_before)
+        .bind(now())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     /// Sign a session out.

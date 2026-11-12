@@ -81,15 +81,29 @@ export function loadMirror(userId: string): Mirror | null {
  */
 export function heldByOthers(userId: string): Set<string> {
   const held = new Set<string>();
+  for (const other of mirrorOwners()) {
+    if (other === userId) continue;
+    for (const c of Object.values(loadMirror(other)?.characters ?? {})) held.add(c.local);
+  }
+  return held;
+}
+
+/** The accounts with a record of a copy on this device. */
+export function mirrorOwners(): string[] {
+  const owners: string[] = [];
   try {
     for (let i = 0; i < localStorage.length; i += 1) {
       const k = localStorage.key(i);
-      if (!k?.startsWith("party.mirror.") || k === key(userId)) continue;
-      const other = loadMirror(k.slice("party.mirror.".length));
-      for (const c of Object.values(other?.characters ?? {})) held.add(c.local);
+      if (k?.startsWith("party.mirror.")) owners.push(k.slice("party.mirror.".length));
     }
-  } catch { /* storage refused: no record to keep apart */ }
-  return held;
+  } catch { /* storage refused: no record */ }
+  return owners;
+}
+
+/** Forget an account's copy: its record and its notices (sync/account.ts removes the copy itself). */
+export function forgetMirror(userId: string): void {
+  try { localStorage.removeItem(key(userId)); } catch { /* nothing kept */ }
+  clearNotices(userId);
 }
 
 /** A whole copy to play with offline: one sync of this account ran to the end (a first sync cut off part-way is not). */

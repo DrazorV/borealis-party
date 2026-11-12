@@ -16,6 +16,8 @@ export interface ServerSession {
   user: ServerUser;
   /** The server refused the token while the app had a copy to play offline with: sign in again to sync. */
   expired?: boolean;
+  /** Signing in again was refused for the account itself (disabled or turned down by an admin). */
+  blocked?: boolean;
 }
 
 const KEY = "party.session";
@@ -41,17 +43,18 @@ export function loadSession(): ServerSession | null {
   const text = read(KEY);
   if (!text) return null;
   try {
-    const { baseUrl, token, user, expired } = JSON.parse(text) as Partial<ServerSession>;
+    const { baseUrl, token, user, expired, blocked } = JSON.parse(text) as Partial<ServerSession>;
     if (typeof baseUrl !== "string" || typeof token !== "string" || !user) return null;
-    return { baseUrl, token, user, ...(expired ? { expired: true } : {}) };
+    return { baseUrl, token, user, ...(expired ? { expired: true } : {}), ...(expired && blocked ? { blocked: true } : {}) };
   } catch { return null; }
 }
 
 export function saveSession(session: ServerSession): void {
   if (read(OWNER_KEY) !== session.user.id) {
-    // Another account on this browser: it doesn't get the previous one's portraits and default sources.
+    // Another account on this browser: it doesn't get the previous one's portraits, default sources or open character.
     for (const key of DEVICE_KEYS) write(key, null);
     write(OWNER_KEY, session.user.id);
+    try { sessionStorage.removeItem(CURRENT_CHARACTER_KEY); } catch { /* nothing was remembered then */ }
   }
   write(KEY, JSON.stringify(session));
 }
@@ -62,9 +65,24 @@ export function clearSession(): void {
 }
 
 /** The server no longer takes this session's token; the app keeps it to play offline until the user signs in again. */
-export function markExpired(): void {
+export function markExpired(blocked = false): void {
   const session = loadSession();
-  if (session) write(KEY, JSON.stringify({ ...session, expired: true }));
+  if (session) write(KEY, JSON.stringify({ ...session, expired: true, ...(blocked ? { blocked: true } : {}) }));
+}
+
+/** Offline with an expired session: the next page shows the sign-in again (ConnectPage), until signed in or left. */
+const AGAIN_KEY = "party.signInAgain";
+
+export function askSignInAgain(): void {
+  try { sessionStorage.setItem(AGAIN_KEY, "1"); } catch { /* the banner stays */ }
+}
+
+export function wantsSignInAgain(): boolean {
+  try { return sessionStorage.getItem(AGAIN_KEY) === "1"; } catch { return false; }
+}
+
+export function dropSignInAgain(): void {
+  try { sessionStorage.removeItem(AGAIN_KEY); } catch { /* nothing kept */ }
 }
 
 /** Keep the stored account details in step with the server's. */

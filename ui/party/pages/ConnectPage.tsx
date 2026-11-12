@@ -1,19 +1,36 @@
 import { type FormEvent, useEffect, useState } from "react";
-import { checkServer, signIn, signUp, type ServerInfo } from "../api/party";
-import { normaliseAddress, rememberServer, rememberedServer, saveSession, type ServerUser } from "../api/session";
+import { createTauriApi } from "../../src/api/tauri";
+import { checkServer, endSession, signIn, signUp, type ServerInfo } from "../api/party";
+import {
+  dropSignInAgain, markExpired, normaliseAddress, rememberServer, rememberedServer, saveSession, type ServerSession, type ServerUser,
+} from "../api/session";
 import { isTauri } from "../../src/lib/tauri";
+import { othersUnsentEdits, removeOtherCopies } from "../sync/account";
+import { DiscardDialog } from "./SignOut";
 import "./party.css";
 
 const message = (e: unknown): string => (e as { message?: string }).message ?? "Something went wrong.";
 
-/** The first screen on a device with no session: pick the server (installed apps only), then sign in or sign up. */
-export function ConnectPage() {
+/** What the server answers a sign-in of an account an admin turned off or turned down. */
+const BLOCKED = ["account_disabled", "account_rejected"];
+
+/** A sign-in that waits for the answer to the discard dialog. */
+interface Waiting { baseUrl: string; token: string; user: ServerUser; names: string[] }
+
+/**
+ * The first screen on a device with no session: pick the server (installed apps only), then sign in or sign up.
+ * `again`: the server signed this device out while the app kept its copy (OfflineBanner); the same account picks the
+ * copy up and its next sync sends the changes, and "Keep playing offline" goes back to it. In the apps, a sign-in as
+ * another account removes the copies of the accounts before it, after a dialog when they have unsent changes.
+ */
+export function ConnectPage({ again }: { again?: ServerSession } = {}) {
   // A browser got this page from the server, so the server is already known.
   const needsAddress = isTauri();
-  const [address, setAddress] = useState(rememberedServer());
+  const [address, setAddress] = useState(again?.baseUrl ?? rememberedServer());
   const [server, setServer] = useState<{ baseUrl: string; info: ServerInfo } | null>(null);
   const [mode, setMode] = useState<"in" | "up">("in");
-  const [username, setUsername] = useState("");
+  const [username, setUsername] = useState(again ? again.user.email ?? again.user.username : "");
+  const [waiting, setWaiting] = useState<Waiting | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -30,17 +47,55 @@ export function ConnectPage() {
     finally { setBusy(false); }
   };
 
+  const againAt = again?.baseUrl;
   useEffect(() => {
-    if (!needsAddress) void connect("");
-  }, [needsAddress]);
+    if (againAt !== undefined) void connect(againAt);
+    else if (!needsAddress) void connect("");
+  }, [needsAddress, againAt]);
 
   const submitAddress = (e: FormEvent) => {
     e.preventDefault();
     void connect(normaliseAddress(address));
   };
 
-  const enter = (baseUrl: string, token: string, user: ServerUser) => {
+  const go = (baseUrl: string, token: string, user: ServerUser) => {
+    dropSignInAgain();
     saveSession({ baseUrl, token, user });
+    window.location.hash = "/";
+    window.location.reload();
+  };
+
+  const enter = async (baseUrl: string, token: string, user: ServerUser) => {
+    if (isTauri()) {
+      const local = createTauriApi();
+      let names: string[];
+      try { names = await othersUnsentEdits(local, user.id); } catch { names = ["The characters on this device (they could not be read)"]; }
+      if (names.length > 0) {
+        setWaiting({ baseUrl, token, user, names });
+        return;
+      }
+      await removeOtherCopies(local, user.id);
+    }
+    go(baseUrl, token, user);
+  };
+
+  const answer = async (discard: boolean) => {
+    const w = waiting;
+    if (!w) return;
+    setWaiting(null);
+    if (discard) {
+      await removeOtherCopies(createTauriApi(), w.user.id);
+      go(w.baseUrl, w.token, w.user);
+      return;
+    }
+    // Not this account after all: the session just made ends, and the other account's changes stay.
+    await endSession(w);
+    setPassword("");
+    setBusy(false);
+  };
+
+  const keepPlaying = () => {
+    dropSignInAgain();
     window.location.hash = "/";
     window.location.reload();
   };
@@ -54,12 +109,12 @@ export function ConnectPage() {
     try {
       if (mode === "in") {
         const out = await signIn(server.baseUrl, username, password);
-        enter(server.baseUrl, out.token, out.user);
+        await enter(server.baseUrl, out.token, out.user);
         return;
       }
       const out = await signUp(server.baseUrl, username, email, password);
       if (out.status === "active" && out.token && out.user) {
-        enter(server.baseUrl, out.token, out.user);
+        await enter(server.baseUrl, out.token, out.user);
         return;
       }
       // Waiting for the emailed link or for an admin: back to signing in, with what happens next.
@@ -68,6 +123,10 @@ export function ConnectPage() {
       setPassword("");
       setBusy(false);
     } catch (err) {
+      // The account itself was turned off: the copy keeps its changes, and the banner says why.
+      const typed = username.trim().toLowerCase();
+      const same = again && [again.user.username, again.user.email].some((n) => n?.toLowerCase() === typed);
+      if (same && BLOCKED.includes(String((err as { code?: unknown }).code))) markExpired(true);
       setError(message(err));
       setBusy(false);
     }
@@ -83,6 +142,11 @@ export function ConnectPage() {
     <div className="party-connect">
       <form className="card party-connect-card" onSubmit={(e) => void (server ? submit(e) : submitAddress(e))}>
         <h1>Borealis Party</h1>
+        {again && (
+          <p className="muted">
+            Sign in again as {again.user.username} to send the changes made on this device. Until then they stay here.
+          </p>
+        )}
         {!server && needsAddress && (
           <>
             <p className="muted">Enter the address of your server.</p>
@@ -126,7 +190,17 @@ export function ConnectPage() {
           </>
         )}
         {error && <div className="alert danger" role="alert"><div>{error}</div></div>}
+        {again && <button type="button" className="btn" onClick={keepPlaying}>Keep playing offline</button>}
       </form>
+      {waiting && (
+        <DiscardDialog
+          title={`Sign in as ${waiting.user.username}`}
+          intro={`${again && again.user.id !== waiting.user.id ? `${again.user.username}'s` : "Another account's"} characters on this device have changes the server doesn't have yet. Signing in as ${waiting.user.username} removes them from this device and the changes are lost.`}
+          names={waiting.names}
+          action="Discard and sign in"
+          onResult={(discard) => void answer(discard)}
+        />
+      )}
     </div>
   );
 }

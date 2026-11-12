@@ -3,7 +3,7 @@ import type { ContentPack, ContentSource } from "../../src/api/contract";
 import { saveSession } from "../api/session";
 import { memoryStorage } from "../test/memoryStorage";
 import { clearNotices, loadMirror, loadNotices } from "./mirror";
-import { startSync } from "./runner";
+import { lastSync, requestSync, resumeSync, startSync } from "./runner";
 import { syncOnce, type LocalApi, type ServerCall } from "./sync";
 
 const b64 = (text: string) => btoa(text);
@@ -668,4 +668,21 @@ it("a browser keeps no copy: nothing starts outside the app", async () => {
   stop();
   expect(fetch).not.toHaveBeenCalled();
   expect(loadMirror("u1")).toBeNull();
+});
+
+it("signing out: one last sync after the one running, then none until the sign-out is cancelled", async () => {
+  saveSession({ baseUrl: "", token: "t", user: { id: "u1", username: "a", email: null, admin: false, mustChangePassword: false } });
+  const local = fakeLocal();
+  const server = fakeServer();
+  const stop = startSync({ local: local.api, server: server.call, userId: "u1" });
+  const states = () => server.state.calls.filter((c) => c === "party_sync_state").length;
+  await lastSync();
+  // The sync started by startSync, then the last one.
+  expect(states()).toBe(2);
+  await requestSync();
+  expect(states()).toBe(2);
+  resumeSync();
+  await requestSync();
+  expect(states()).toBe(3);
+  stop();
 });

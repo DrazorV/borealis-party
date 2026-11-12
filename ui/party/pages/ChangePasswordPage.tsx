@@ -1,13 +1,18 @@
 import { type FormEvent, useState } from "react";
-import { changePassword, signOut } from "../api/party";
-import { clearSession, loadSession, updateUser } from "../api/session";
+import { changePassword } from "../api/party";
+import { loadSession, updateUser } from "../api/session";
+import { useSignOut } from "./SignOut";
 import "./party.css";
 
 const message = (e: unknown): string => (e as { message?: string }).message ?? "Something went wrong.";
 
-/** An admin reset this account's password: a new one comes before anything else. */
+/**
+ * An admin reset this account's password: a new one comes before anything else, the app's sync too (the server
+ * refuses it until then; the reload after the change starts it).
+ */
 export function ChangePasswordPage() {
   const session = loadSession();
+  const leave = useSignOut();
   const [current, setCurrent] = useState("");
   const [password, setPassword] = useState("");
   const [again, setAgain] = useState("");
@@ -32,13 +37,6 @@ export function ChangePasswordPage() {
     }
   };
 
-  const leave = async () => {
-    try { await signOut(); } catch { /* the token goes either way */ }
-    clearSession();
-    window.location.hash = "/";
-    window.location.reload();
-  };
-
   return (
     <div className="party-connect">
       <form className="card party-connect-card" onSubmit={(e) => void submit(e)}>
@@ -57,9 +55,10 @@ export function ChangePasswordPage() {
           <input className="aur-text" type="password" autoComplete="new-password" minLength={8} value={again} onChange={(e) => setAgain(e.target.value)} required />
         </label>
         <button className="btn primary" disabled={busy}>Save password</button>
-        <button type="button" className="btn" onClick={() => void leave()}>Sign out</button>
+        <button type="button" className="btn" onClick={leave.start} disabled={leave.busy}>Sign out</button>
         {error && <div className="alert danger" role="alert"><div>{error}</div></div>}
       </form>
+      {leave.dialog}
     </div>
   );
 }

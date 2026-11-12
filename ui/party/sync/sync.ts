@@ -72,14 +72,14 @@ const SERVER_OWNED = ["documentsDir", "secondaryContentDir", "portraitLibraryDir
 
 const message = (e: unknown) => (e as Partial<ApiError>)?.message ?? String(e);
 
-async function sha256(base64: string): Promise<string> {
+export async function sha256(base64: string): Promise<string> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** A copy as upstream exports it: its digest, the server id it carries, and the file itself (base64). */
-async function exported(local: LocalApi, id: string): Promise<{ sha: string; metaId: string; data: string }> {
+export async function exported(local: LocalApi, id: string): Promise<{ sha: string; metaId: string; data: string }> {
   await local.loadCharacter({ characterId: id });
   try {
     const file = await local.exportCharacter({ characterId: id });
@@ -96,7 +96,7 @@ async function exported(local: LocalApi, id: string): Promise<{ sha: string; met
 }
 
 /** Delete a copy here; one already gone is fine. */
-async function drop(local: LocalApi, id: string): Promise<void> {
+export async function drop(local: LocalApi, id: string): Promise<void> {
   try {
     await local.deleteCharacter({ characterId: id });
   } catch (e) {

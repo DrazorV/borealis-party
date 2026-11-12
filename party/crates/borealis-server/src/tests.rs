@@ -456,6 +456,7 @@ async fn each_account_has_its_own_characters_and_content_on_postgres() {
     // The moved first account is the admin here. This ends with sign-up open and no approval needed.
     let admin = sign_in(&router, "moving-admin").await;
     admin_flow(&router, &admin, &data).await;
+    sessions_slide(&router, &db).await;
     bundle_flow(router.clone(), &data).await;
     sync_tests::sync_flow(router.clone(), &data).await;
     sync_tests::push_flow(router.clone(), &data).await;
@@ -1161,6 +1162,75 @@ async fn sessions_are_required_and_passwords_are_checked() {
     }
     let (status, _) = login(&router, "carol", PASSWORD).await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_in_use_slides() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(&Location::Memory).await.unwrap();
+    sessions_slide(&router_on(dir.path().to_path_buf(), db.clone()), &db).await;
+}
+
+/// A request renews its session's 90 days, once a day at most; an ended session stays ended.
+async fn sessions_slide(router: &Router, db: &Db) {
+    use crate::auth::{token_hash, RENEW_SECONDS, SESSION_SECONDS};
+    use crate::db::now;
+    use sqlx::Row;
+    let user = sign_up(router, "slider").await;
+    let hash = token_hash(&user.token);
+    let set = |at: i64| {
+        let hash = hash.clone();
+        async move {
+            sqlx::query("UPDATE sessions SET expires_at = $1 WHERE token_hash = $2")
+                .bind(at)
+                .bind(hash)
+                .execute(db.pool())
+                .await
+                .unwrap();
+        }
+    };
+    let ends = || async {
+        let row = sqlx::query("SELECT expires_at FROM sessions WHERE token_hash = $1")
+            .bind(hash.clone())
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+        row.try_get::<i64, _>(0).unwrap()
+    };
+    let me = || async {
+        send(router, Some(&user.token), "GET", "/api/me", Value::Null)
+            .await
+            .0
+    };
+
+    // Renewed an hour ago: not written again.
+    let recent = now() + SESSION_SECONDS - 3600;
+    set(recent).await;
+    assert_eq!(me().await, StatusCode::OK);
+    assert_eq!(ends().await, recent);
+
+    // Last used more than a day ago: 90 days from now again, for any signed-in request.
+    set(now() + SESSION_SECONDS - RENEW_SECONDS - 60).await;
+    let (status, _) = send(
+        router,
+        Some(&user.token),
+        "POST",
+        "/api/rpc/list_characters",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(ends().await >= now() + SESSION_SECONDS - 5);
+
+    // Nearly over and then used: renewed.
+    set(now() + 10).await;
+    assert_eq!(me().await, StatusCode::OK);
+    assert!(ends().await >= now() + SESSION_SECONDS - 5);
+
+    // Over: refused, and not brought back.
+    set(now() - 1).await;
+    assert_eq!(me().await, StatusCode::UNAUTHORIZED);
+    assert!(ends().await < now());
 }
 
 fn content_root() -> PathBuf {
