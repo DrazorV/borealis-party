@@ -6,6 +6,7 @@ import { clearSession, loadSession, saveSession, type ServerSession } from "./se
 import "./overrides/sheet";
 import "./overrides/bundles";
 import "./overrides/android"; // after sheet and bundles, which it wraps
+import "./overrides/errors";
 
 function fail(code: string, message: string): ApiError {
   return { code, message } as ApiError;
@@ -17,18 +18,58 @@ function fail(code: string, message: string): ApiError {
  */
 export const serverWatch: { network?: () => void; expired?: () => boolean } = {};
 
+/** A request {@link serverFetch} is about to send. `bytes` is the length of its JSON body (0 for none). */
+export interface ServerRequest {
+  baseUrl: string;
+  method: string;
+  path: string;
+  bytes: number;
+}
+
+/**
+ * A request that failed. `status` is 0 when no answer came (the network); `text` is the raw reply, which can be a
+ * proxy's HTML page; `error` is what {@link serverFetch} throws unless a hook replaces it.
+ */
+export interface ServerFailure extends ServerRequest {
+  status: number;
+  text: string;
+  error: ApiError;
+}
+
+/**
+ * Hooks into every {@link serverFetch} (commands, uploads, account calls, sync), for override modules that need the raw
+ * request or reply, so they never edit this file. Add to the lists once per page; they run in the order added.
+ * - `send` runs before the request goes out. Throwing refuses it: nothing is sent and that error is thrown.
+ * - `fail` runs for a request with no answer or a refused one, after the sign-out handling below. Returning an
+ *   ApiError replaces the one thrown (the next hook sees the replacement); returning nothing keeps it.
+ * Used by ./overrides/errors.ts (sizes and readable errors).
+ */
+export const serverHooks: {
+  send: ((request: ServerRequest) => void)[];
+  fail: ((failure: ServerFailure) => ApiError | undefined | void)[];
+} = { send: [], fail: [] };
+
+function failed(failure: ServerFailure): ApiError {
+  let error = failure.error;
+  for (const hook of serverHooks.fail) error = hook({ ...failure, error }) ?? error;
+  return error;
+}
+
 /** JSON request to the server. A rejected token signs the device out, unless the app keeps playing offline. */
 export async function serverFetch(session: Pick<ServerSession, "baseUrl" | "token">, method: string, path: string, body?: unknown): Promise<unknown> {
+  const payload = body === undefined ? undefined : JSON.stringify(body);
+  const request: ServerRequest = { baseUrl: session.baseUrl, method, path, bytes: payload?.length ?? 0 };
+  for (const hook of serverHooks.send) hook(request);
   let response: Response;
   try {
     response = await fetch(`${session.baseUrl}${path}`, {
       method,
       headers: { "content-type": "application/json", ...(session.token ? { authorization: `Bearer ${session.token}` } : {}) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(payload === undefined ? {} : { body: payload }),
     });
   } catch {
     serverWatch.network?.();
-    throw fail("network", "The server can't be reached. Check your connection.");
+    throw failed({ ...request, status: 0, text: "", error: fail("network", "The server can't be reached. Check your connection.") });
   }
   const text = await response.text();
   let parsed: unknown = null;
@@ -49,7 +90,10 @@ export async function serverFetch(session: Pick<ServerSession, "baseUrl" | "toke
       window.location.reload();
     }
   }
-  throw fail(String(error?.code ?? "internal"), String(error?.message ?? `The server answered ${response.status}.`));
+  throw failed({
+    ...request, status: response.status, text,
+    error: fail(String(error?.code ?? "internal"), String(error?.message ?? `The server answered ${response.status}.`)),
+  });
 }
 
 type Local = (args: Record<string, unknown>) => unknown;

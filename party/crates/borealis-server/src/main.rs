@@ -118,6 +118,8 @@ async fn server_info(
         "requireApproval": settings.require_approval,
         "email": state.mailer.is_some(),
         "appDownload": state.config.app_download,
+        // The app checks a file's size against these before reading it (ui/party/api/overrides/errors.ts).
+        "uploads": config::upload_limits(),
     })))
 }
 
@@ -377,6 +379,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&data)?;
     let workspaces = Arc::new(Workspaces::new(data, content));
     tokio::spawn(Arc::clone(&workspaces).evict_loop());
+    config::set_upload_limits(settings.server.upload_limits());
     let state = AppState {
         db,
         workspaces: Arc::clone(&workspaces),
