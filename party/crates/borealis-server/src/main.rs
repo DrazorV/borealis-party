@@ -23,6 +23,7 @@ mod backend;
 mod config;
 mod db;
 mod error;
+mod jobs;
 mod mail;
 mod migrate;
 mod net_guard;
