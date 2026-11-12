@@ -87,6 +87,25 @@ describe("E1b: bundles on Android", () => {
   });
 });
 
+describe("Chrome on Android (not the app)", () => {
+  beforeEach(() => {
+    setPhoneOsForTests("android");
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  });
+
+  it("the sheet PDF comes from the server", async () => {
+    const saved = await api().exportSheet({ characterId: "hero-1", options: { format: "pdf" } } as never);
+    expect(saved).toMatchObject({ dataBase64: "JVBERi0=" });
+    expect(paths).toEqual(["/api/rpc/export_sheet"]);
+    expect(device.calls).toEqual([]);
+  });
+
+  it("bundle sharing goes to the server, as in other browsers", async () => {
+    await expect(api().bundleShare({ selection: { characterIds: ["hero-1"], packs: "required" } } as never)).resolves.toMatchObject({ fileName: "Hero.borealis" });
+    expect(paths).toEqual(["/api/rpc/bundle_export"]);
+  });
+});
+
 describe("E2: bundles on iOS and in browsers", () => {
   const share = () => api().bundleShare({ selection: { characterIds: ["hero-1"], packs: "required" } } as never);
 

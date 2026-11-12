@@ -42,10 +42,12 @@ describe("bundleShare on the phones", () => {
   afterEach(() => {
     setPhoneOsForTests(null);
     vi.unstubAllGlobals();
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   });
 
-  it("Android: not offered, and nothing is asked of the server", async () => {
+  it("the Android app: not offered, and nothing is asked of the server", async () => {
     setPhoneOsForTests("android");
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
     await expect(createHttpApi(session).bundleShare({ characterIds: ["hero-1"] } as never)).rejects.toMatchObject({ code: "not_available" });
     expect(fetched).toEqual([]);
   });
