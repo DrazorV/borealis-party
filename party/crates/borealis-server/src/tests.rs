@@ -2920,3 +2920,63 @@ fn the_proxy_check_keeps_ranges_and_refuses_everyone() {
         assert!(checked_proxies(&list(&[bad])).is_err(), "{bad}");
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn several_trusted_proxies_mixed_addresses_and_ranges() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = router(dir.path().to_path_buf()).await;
+    let admin = sign_up(&router, "multi-admin").await;
+    let save = |list: Value| {
+        send_with(
+            &router,
+            Some(&admin.token),
+            "POST",
+            "/api/admin/proxies",
+            json!({ "proxies": list }),
+            &[("x-forwarded-for", "203.0.113.5")],
+        )
+    };
+    // The request comes through 127.0.0.1, the second entry here (as a range); order and repeats don't matter.
+    let (status, out) = save(json!([
+        "172.20.20.100",
+        "127.0.0.0/8",
+        "2001:db8::7",
+        "172.20.20.100",
+        "10.20.0.0/16"
+    ]))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(
+        out["proxies"],
+        json!([
+            "172.20.20.100",
+            "127.0.0.0/8",
+            "2001:db8::7",
+            "10.20.0.0/16"
+        ])
+    );
+    assert_eq!(out["peerTrusted"], true);
+    assert_eq!(out["clientIp"], "203.0.113.5");
+    // A chain through two listed proxies: the client is left of both.
+    let (_, out) = send_with(
+        &router,
+        Some(&admin.token),
+        "GET",
+        "/api/admin/proxies",
+        Value::Null,
+        &[("x-forwarded-for", "198.51.100.8, 10.20.3.4")],
+    )
+    .await;
+    assert_eq!(out["clientIp"], "198.51.100.8", "{out}");
+    // Removing the entry the request comes through: the peer is the client again; the others stay.
+    let (status, out) = save(json!(["172.20.20.100", "2001:db8::7", "10.20.0.0/16"])).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["peerTrusted"], false);
+    assert_eq!(out["clientIp"], "127.0.0.1");
+    assert_eq!(out["proxies"].as_array().unwrap().len(), 3);
+    // One bad entry refuses the whole list, and the saved one stays.
+    let (status, out) = save(json!(["172.20.20.100", "::/0"])).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
+    let (_, out) = admin.get("/api/admin/proxies").await;
+    assert_eq!(out["proxies"].as_array().unwrap().len(), 3, "{out}");
+}

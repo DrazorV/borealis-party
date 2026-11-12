@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "../../src/components/Button";
 import { Alert, Card, Chip } from "../../src/components/Card";
-import { TextArea } from "../../src/components/Fields";
+import { TextField } from "../../src/components/Fields";
 import { adminProxies, saveAdminProxies, type ProxySettings } from "../api/party";
 
 const message = (e: unknown): string => (e as { message?: string }).message ?? "Something went wrong.";
@@ -69,33 +69,39 @@ function Diagnosis({ p }: { p: ProxySettings }) {
 /** Admin › Settings › Trusted proxies: which reverse proxies may name the client of a request. */
 export function TrustedProxies() {
   const [p, setP] = useState<ProxySettings | null>(null);
-  const [text, setText] = useState("");
+  const [entry, setEntry] = useState("");
   const [error, setError] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const show = (next: ProxySettings) => { setP(next); setText(next.proxies.join("\n")); };
-  useEffect(() => { adminProxies().then(show, (e) => setError(message(e))); }, []);
+  useEffect(() => { adminProxies().then(setP, (e) => setError(message(e))); }, []);
 
-  const save = async (list: string[] | null) => {
+  /** Saves and applies at once; true when the server took it. */
+  const save = async (list: string[] | null): Promise<boolean> => {
     setBusy(true);
     setSaveError(null);
     try {
       const next = await saveAdminProxies(list);
-      show(next);
+      setP(next);
       setSaved(next.clientIp);
+      return true;
     } catch (e) {
       setSaveError(message(e));
       setSaved(null);
+      return false;
     } finally { setBusy(false); }
   };
 
   if (error) return <Alert tone="danger">{error}</Alert>;
   if (!p) return null;
-  const typed = parseProxies(text);
+  const typed = parseProxies(entry);
   const problem = typed.map(proxyProblem).find((m) => m !== null) ?? null;
-  const changed = typed.join("\n") !== p.proxies.join("\n");
+  const fresh = typed.filter((e) => !p.proxies.includes(e));
+  const add = async () => {
+    if (problem || fresh.length === 0) return;
+    if (await save([...p.proxies, ...fresh])) setEntry("");
+  };
 
   return (
     <Card title="Trusted proxies">
@@ -115,27 +121,48 @@ export function TrustedProxies() {
         {saved !== null && <Alert tone="success" role="status">Saved; it applies now. The server sees your request as coming from {saved}.</Alert>}
         {!p.peerTrusted && (
           <div className="party-inline">
-            <Button variant="primary" disabled={busy} onClick={() => void save([...p.proxies.filter((e) => e !== p.peer), p.peer])}>
+            <Button variant="primary" disabled={busy} onClick={() => void save([...p.proxies, p.peer])}>
               Trust this proxy ({p.peer})
             </Button>
           </div>
         )}
-        <TextArea
-          label="Trusted proxies"
-          hint="Addresses or ranges, one per line, such as 172.20.20.100 or 172.18.0.0/16. Empty: trust no proxy."
-          error={problem ?? saveError}
-          rows={3}
-          spellCheck={false}
-          autoCapitalize="off"
-          autoComplete="off"
-          value={text}
-          onChange={(e) => { setText(e.target.value); setSaveError(null); }}
-        />
-        <div className="party-inline">
-          <Button disabled={busy || !changed || problem !== null} onClick={() => void save(typed)}>Save list</Button>
-          {p.source === "admin" && <Button disabled={busy} onClick={() => void save(null)}>Use config.toml instead</Button>}
-        </div>
-        <p className="muted">In force: {where(p)}</p>
+        <p><strong>Trusted now</strong></p>
+        {p.proxies.length === 0
+          ? <p className="muted">None: no proxy is trusted.</p>
+          : (
+            <ul className="party-list" aria-label="Trusted proxies in force">
+              {p.proxies.map((e) => (
+                <li key={e} className="party-line">
+                  <span>{e}</span>
+                  {e === p.peer && <Chip tone="success">This request</Chip>}
+                  <span className="spacer" />
+                  <Button small disabled={busy} aria-label={`Remove ${e}`} onClick={() => void save(p.proxies.filter((x) => x !== e))}>Remove</Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        <form className="party-form" onSubmit={(ev) => { ev.preventDefault(); void add(); }}>
+          <TextField
+            label="Add a trusted proxy"
+            hint="An address or a range, such as 172.20.20.100, 2001:db8::7 or 172.18.0.0/16. Several at once: separate them with spaces or commas."
+            error={entry.trim() ? (problem ?? saveError) : saveError}
+            spellCheck={false}
+            autoCapitalize="off"
+            autoComplete="off"
+            inputMode="url"
+            value={entry}
+            onChange={(e) => { setEntry(e.target.value); setSaveError(null); }}
+          />
+          <div className="party-inline">
+            <Button type="submit" disabled={busy || problem !== null || fresh.length === 0}>Add</Button>
+          </div>
+        </form>
+        {p.source === "admin" && (
+          <div className="party-inline">
+            <Button disabled={busy} onClick={() => void save(null)}>Use config.toml instead</Button>
+          </div>
+        )}
+        <p className="muted">In force: {where(p)}{p.source === "config" ? " Adding or removing here saves your own list, which then wins." : ""}</p>
       </div>
     </Card>
   );
