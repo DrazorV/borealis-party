@@ -1,0 +1,101 @@
+name: Party CI
+
+# Checks the fork's own code on every push and pull request: no upstream file changed, every upstream command has a
+# decision, the party web app (types, tests, build) and the server (fmt, clippy, tests on SQLite and PostgreSQL).
+# Upstream's own CI (ci.yml) is turned off on the fork: upstream runs it on the same upstream code, and
+# party/check-upstream.sh keeps that code unchanged here.
+# This file belongs to the fork (party/check-upstream.sh accepts .github/workflows/party-*.yml).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: party-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: upstream files and commands
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/TeamBorealis/borealis.git
+          git fetch --no-tags upstream main
+      - name: Upstream files untouched
+        run: sh party/check-upstream.sh
+      - name: Every upstream command has a decision
+        run: bash party/check-commands.sh
+
+  web:
+    name: web app
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Types
+        run: npx tsc -p party/tsconfig.json --noEmit
+      - name: Tests
+        run: npx vitest run party
+      - name: Build
+        run: node party/build.mjs
+
+  server:
+    name: server
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: party-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # rust-toolchain.toml asks for components the server checks don't need.
+      RUSTUP_TOOLCHAIN: stable
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: party
+          # Keep the cache after a failed run too, so the next run is not a full build again.
+          cache-on-failure: true
+      - name: Format
+        working-directory: party
+        run: cargo fmt --all --check
+      - name: Clippy
+        working-directory: party
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Tests (SQLite and PostgreSQL)
+        working-directory: party
+        env:
+          BOREALIS_TEST_POSTGRES_URL: postgres://postgres:party-ci@localhost:5432/postgres
+        run: cargo test -p borealis-server --locked
