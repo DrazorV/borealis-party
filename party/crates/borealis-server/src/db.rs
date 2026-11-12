@@ -55,6 +55,68 @@ const MIGRATIONS: &[&[&str]] = &[
             ip TEXT
         )",
     ],
+    // M-parties (0.2.0). Written as step 3, after M-shares (0.1.5); THE RELEASE SESSION FIXES THE NUMBER AT MERGE.
+    // DM capability and parties: rows only, characters stay in their owner's folder (parties.rs). New names only:
+    // a database from the versions with groups may still hold party_groups, invites and members, which stay alone.
+    &[
+        // Written only by the account itself (D2): no admin grants or revokes.
+        "CREATE TABLE IF NOT EXISTS account_roles (
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            role TEXT NOT NULL,
+            granted_at BIGINT NOT NULL,
+            granted_by TEXT,
+            PRIMARY KEY (user_id, role)
+        )",
+        "CREATE TABLE IF NOT EXISTS parties (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            dm_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            ruleset TEXT NOT NULL DEFAULT 'dnd2024',
+            created_at BIGINT NOT NULL,
+            updated_at BIGINT NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS parties_dm ON parties (dm_id)",
+        // A username invite has no foreign key: one to a name nobody has is stored the same way.
+        "CREATE TABLE IF NOT EXISTS party_invites (
+            id TEXT PRIMARY KEY,
+            party_id TEXT NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
+            invited_username_lower TEXT,
+            code_hash TEXT,
+            created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            created_at BIGINT NOT NULL,
+            expires_at BIGINT NOT NULL,
+            uses_left BIGINT NOT NULL DEFAULT 1,
+            declined_at BIGINT
+        )",
+        "CREATE UNIQUE INDEX IF NOT EXISTS party_invites_code ON party_invites (code_hash)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS party_invites_name ON party_invites (party_id, invited_username_lower)",
+        "CREATE INDEX IF NOT EXISTS party_invites_lookup ON party_invites (invited_username_lower)",
+        // Join codes an account entered (kept through sign-up while it waits for approval, D39).
+        "CREATE TABLE IF NOT EXISTS party_invite_holds (
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            invite_id TEXT NOT NULL REFERENCES party_invites(id) ON DELETE CASCADE,
+            created_at BIGINT NOT NULL,
+            PRIMARY KEY (user_id, invite_id)
+        )",
+        "CREATE TABLE IF NOT EXISTS party_offers (
+            id TEXT PRIMARY KEY,
+            invite_id TEXT NOT NULL REFERENCES party_invites(id) ON DELETE CASCADE,
+            owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            character_id TEXT NOT NULL,
+            created_at BIGINT NOT NULL,
+            UNIQUE (owner_id, character_id),
+            UNIQUE (invite_id, owner_id)
+        )",
+        // The key makes a character a member of at most one party (D19).
+        "CREATE TABLE IF NOT EXISTS party_members (
+            owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            character_id TEXT NOT NULL,
+            party_id TEXT NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
+            joined_at BIGINT NOT NULL,
+            PRIMARY KEY (owner_id, character_id)
+        )",
+        "CREATE INDEX IF NOT EXISTS party_members_party ON party_members (party_id)",
+    ],
 ];
 
 /// A table only the versions with groups had. A database that still has it opens like any other: the table is left
@@ -270,6 +332,22 @@ impl Db {
     /// # Errors
     /// When the database can't be reached, its tables can't be created, or it was made by a version with groups.
     pub async fn open(location: &Location) -> Result<Self, OpenError> {
+        Self::open_upto(location, MIGRATIONS.len()).await
+    }
+
+    /// Tests: open with only the first `max_version` migrations applied, as an older release left the database.
+    #[cfg(test)]
+    pub async fn open_at(location: &Location, max_version: usize) -> Result<Self, OpenError> {
+        Self::open_upto(location, max_version).await
+    }
+
+    /// How many migrations this build has.
+    #[cfg(test)]
+    pub fn schema_version() -> usize {
+        MIGRATIONS.len()
+    }
+
+    async fn open_upto(location: &Location, max_version: usize) -> Result<Self, OpenError> {
         sqlx::any::install_default_drivers();
         let (url, sqlite, max) = match location {
             Location::Sqlite(path) => (format!("sqlite://{}?mode=rwc", path.display()), true, 4),
@@ -318,11 +396,11 @@ impl Db {
             pool,
             kind: if sqlite { "sqlite" } else { "postgres" },
         };
-        db.migrate().await?;
+        db.migrate(max_version).await?;
         Ok(db)
     }
 
-    async fn migrate(&self) -> sqlx::Result<()> {
+    async fn migrate(&self, max_version: usize) -> sqlx::Result<()> {
         sqlx::query("CREATE TABLE IF NOT EXISTS schema_version (version BIGINT NOT NULL)")
             .execute(&self.pool)
             .await?;
@@ -330,7 +408,7 @@ impl Db {
             .fetch_one(&self.pool)
             .await?
             .try_get(0)?;
-        for (index, steps) in MIGRATIONS.iter().enumerate() {
+        for (index, steps) in MIGRATIONS.iter().take(max_version).enumerate() {
             let version = i64::try_from(index).unwrap_or(i64::MAX) + 1;
             if version <= current {
                 continue;

@@ -24,7 +24,13 @@ mod sync_tests;
 #[path = "jobs_tests.rs"]
 mod jobs_tests;
 
+#[path = "parties_tests.rs"]
+mod parties_tests;
+
 const PASSWORD: &str = "correct horse battery";
+
+/// The PostgreSQL tests share one database: they take turns.
+static POSTGRES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 struct Client {
     router: Router,
@@ -338,7 +344,7 @@ async fn check_moved(router: &Router) {
 }
 
 /// The rows `some_accounts` makes, as the copy reports them.
-const MOVED: &str = "users 3, sessions 3, server_settings 1, activity 4";
+const MOVED: &str = "users 3, sessions 3, server_settings 1, activity 4, account_roles 0, parties 0, party_invites 0, party_invite_holds 0, party_offers 0, party_members 0";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_sqlite_instance_moves_with_its_accounts() {
@@ -429,6 +435,12 @@ async fn drop_all(url: &str) {
     sqlx::any::install_default_drivers();
     let pool = sqlx::AnyPool::connect(url).await.unwrap();
     for table in [
+        "party_members",
+        "party_offers",
+        "party_invite_holds",
+        "party_invites",
+        "parties",
+        "account_roles",
         "activity",
         "server_settings",
         "party_groups",
@@ -450,6 +462,7 @@ async fn each_account_has_its_own_characters_and_content_on_postgres() {
         eprintln!("skipped: set BOREALIS_TEST_POSTGRES_URL to run against PostgreSQL");
         return;
     };
+    let _one = POSTGRES.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let data = dir.path().join("data");
     drop_all(&url).await;
@@ -589,7 +602,7 @@ async fn full_flow(router: Router, data: &Path) {
     for path in [
         "/api/rpc/personal/list_characters",
         "/api/groups",
-        "/api/invites",
+        // `/api/invites` is the parties' route again since 0.2.0 (parties_tests.rs).
         "/api/characters",
     ] {
         let (status, _) = alice.post(path, json!({})).await;

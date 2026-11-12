@@ -63,7 +63,93 @@ const TABLES: &[(&str, &[(&str, Column)])] = &[
             ("ip", Column::Text),
         ],
     ),
+    // M-parties.
+    (
+        "account_roles",
+        &[
+            ("user_id", Column::Text),
+            ("role", Column::Text),
+            ("granted_at", Column::Int),
+            ("granted_by", Column::Text),
+        ],
+    ),
+    (
+        "parties",
+        &[
+            ("id", Column::Text),
+            ("name", Column::Text),
+            ("dm_id", Column::Text),
+            ("ruleset", Column::Text),
+            ("created_at", Column::Int),
+            ("updated_at", Column::Int),
+        ],
+    ),
+    (
+        "party_invites",
+        &[
+            ("id", Column::Text),
+            ("party_id", Column::Text),
+            ("invited_username_lower", Column::Text),
+            ("code_hash", Column::Text),
+            ("created_by", Column::Text),
+            ("created_at", Column::Int),
+            ("expires_at", Column::Int),
+            ("uses_left", Column::Int),
+            ("declined_at", Column::OptInt),
+        ],
+    ),
+    (
+        "party_invite_holds",
+        &[
+            ("user_id", Column::Text),
+            ("invite_id", Column::Text),
+            ("created_at", Column::Int),
+        ],
+    ),
+    (
+        "party_offers",
+        &[
+            ("id", Column::Text),
+            ("invite_id", Column::Text),
+            ("owner_id", Column::Text),
+            ("character_id", Column::Text),
+            ("created_at", Column::Int),
+        ],
+    ),
+    (
+        "party_members",
+        &[
+            ("owner_id", Column::Text),
+            ("character_id", Column::Text),
+            ("party_id", Column::Text),
+            ("joined_at", Column::Int),
+        ],
+    ),
 ];
+
+/// Tests: every table the copy moves, with its columns as `text`, `int` (never NULL) or `optint`.
+#[cfg(test)]
+pub(crate) fn tables() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
+    TABLES
+        .iter()
+        .map(|(table, columns)| {
+            (
+                *table,
+                columns
+                    .iter()
+                    .map(|(name, kind)| {
+                        let kind = match kind {
+                            Column::Text => "text",
+                            Column::Int => "int",
+                            Column::OptInt => "optint",
+                        };
+                        (*name, kind)
+                    })
+                    .collect(),
+            )
+        })
+        .collect()
+}
 
 /// Rows copied per table.
 pub type Report = Vec<(&'static str, i64)>;
