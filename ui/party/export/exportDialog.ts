@@ -12,6 +12,8 @@ import { loadSession } from "../api/session";
  * - E9: off the phone apps the file is a download, so the dialog says "Export to bundle" and its button "Download".
  * - Everywhere: the help line says a bundle is for other players too.
  * - E6: packs marked not redistributable get a warning chip while packs go into the file.
+ * - E4: a "Share with a code" button: no file at all, which is the way out on Android (it closes the dialog and opens
+ *   pages/SharePage.tsx).
  */
 
 export const PHONE_TITLE = "Share as a file";
@@ -23,6 +25,28 @@ export const LICENCE_LEAD = "Not redistributable:";
 export const LICENCE_TAIL = "Send these only to players who own the source they came from.";
 
 const LICENCE_MARK = "data-party-licence";
+const CODE_MARK = "data-party-share-code";
+export const CODE_LEAD = "No file needed:";
+export const CODE_BUTTON = "Share with a code";
+
+/** The line with the "Share with a code" button, once per dialog, after the help line. */
+function codeLine(dialog: Element, help: Element): void {
+  if (dialog.querySelector(`[${CODE_MARK}]`)) return;
+  const line = document.createElement("p");
+  line.className = "aur-set-help";
+  line.setAttribute(CODE_MARK, "");
+  line.append(`${CODE_LEAD} `);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn small";
+  button.textContent = CODE_BUTTON;
+  button.addEventListener("click", () => {
+    dialog.querySelector<HTMLButtonElement>(".dialog-head button[aria-label='Close']")?.click();
+    window.location.hash = "#/share";
+  });
+  line.append(button, " another player types the code on any device.");
+  help.after(line);
+}
 
 /** Reads the account's packs (tests pass their own). */
 export type PackLister = () => Promise<Pick<ContentPack, "id" | "name" | "redistributable">[]>;
@@ -101,10 +125,11 @@ export function tweakExportDialog(run: () => void): void {
       const foot = dialog.querySelector(".dialog-foot");
       if (foot) setText(foot, "Share", DOWNLOAD);
     }
-    const help = [...dialog.querySelectorAll(".aur-set-help:not([data-party-licence])")]
+    const help = [...dialog.querySelectorAll(".aur-set-help:not([data-party-licence]):not([data-party-share-code])")]
       .find((p) => [UPSTREAM_HELP, PARTY_HELP].includes(p.textContent?.trim() ?? ""));
     if (!help) continue;
     setText(help, UPSTREAM_HELP, PARTY_HELP);
+    codeLine(dialog, help);
     licenceLine(dialog, help, run);
   }
   // The phone More page's row (only the phone apps have that page; iOS keeps upstream's words).

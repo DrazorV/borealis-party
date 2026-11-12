@@ -11,6 +11,7 @@ import "./overrides/errors";
 import "./overrides/opened";
 import "./overrides/links";
 import "./overrides/jobs";
+import "./overrides/shares";
 
 function fail(code: string, message: string): ApiError {
   return { code, message } as ApiError;
