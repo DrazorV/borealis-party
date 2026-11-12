@@ -47,8 +47,8 @@ function useArm(linux: boolean): boolean {
 }
 
 /**
- * A browser on the server's website: the app for this system (Android, Windows, Linux) and the address to enter in it,
- * or a short note where there is none to install (iOS, macOS), with a link to every build. Nothing inside the apps, on
+ * A browser on the server's website: the app for this system (Android, iOS to sideload, Windows, Linux) and the
+ * address to enter in it, or a short note where there is none to install (macOS), with a link to every build. Nothing inside the apps, on
  * other systems, when the server offers no download (`server.app_download = "off"`) or once closed in this browser.
  * `folder`: the download folder when the caller already has `/api/server`'s answer (the sign-in page).
  */
@@ -89,6 +89,7 @@ export function AppOffer({ folder }: { folder?: string | null } = {}) {
     <aside className="alert info party-app-offer" aria-label="Get the app">
       <div className="party-app-offer-text">
         <span><strong>Get the {offer.name} app.</strong> It works offline and syncs with this server.</span>
+        {offer.hint && <span>{offer.hint}</span>}
         <span>When it asks for the server address, enter <code className="party-app-address">{addressToEnter(window.location.origin)}</code></span>
         <span className="party-app-links">
           {main && (
