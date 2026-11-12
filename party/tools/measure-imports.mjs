@@ -331,6 +331,28 @@ async function snapshot() {
   };
 }
 
+/**
+ * After update_indexes failed at a proxy (a 524 at 100 s), the server goes on with it. Wait until every index has been
+ * checked (or 15 minutes), so the later steps and the cleanup do not race it, and record when it really finished.
+ */
+async function waitForIndexes(started, checked) {
+  const last = rows[rows.length - 1];
+  if (!last || (last.status !== 0 && last.status < 500)) return;
+  console.log("  the server may still be updating; checking every 10 s ...");
+  const deadline = started + 15 * 60 * 1000;
+  while (performance.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 10_000));
+    const list = await quiet("list_indexes");
+    if (list && list.length && list.every((i) => i.lastChecked && i.lastChecked !== checked.get(i.url))) {
+      const s = (performance.now() - started) / 1000;
+      facts["update_indexes finished on the server after"] = `about ${s.toFixed(0)} s (the answer was ${last.status || "lost"} after ${last.totalS.toFixed(0)} s)`;
+      console.log(`  finished on the server after about ${s.toFixed(0)} s`);
+      return;
+    }
+  }
+  facts["update_indexes finished on the server after"] = "not within 15 minutes";
+}
+
 async function cleanUp(before, label) {
   const now = await snapshot();
   const extra = (k) => [...now[k]].filter((id) => !before[k].has(id));
@@ -379,7 +401,10 @@ async function main() {
     if (opts.index.length) {
       console.log("Indexes");
       for (const url of opts.index) await rpc("indexes", "add_index", { url }, basename(new URL(url).pathname));
+      const checked = new Map(((await quiet("list_indexes")) ?? []).map((i) => [i.url, i.lastChecked]));
+      const started = performance.now();
       const res = await rpc("indexes", "update_indexes", {}, `${opts.index.length} index(es), first download`);
+      if (!res) await waitForIndexes(started, checked);
       if (res) facts["update_indexes"] = `updated ${res.updated}, failed ${res.failed?.length ?? 0}${res.failed?.length ? ` (${res.failed.join(", ")})` : ""}`;
       if (opts.repeatUpdate) {
         const again = await rpc("indexes", "update_indexes", {}, "again, nothing changed");
