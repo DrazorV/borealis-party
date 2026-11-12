@@ -205,6 +205,12 @@ pub fn clear_selection(
     state.clear_selection(&character_id, &slot_id)
 }
 
+/// Leave the missing content of an open character unselected (its slots open again).
+#[tauri::command(async)]
+pub fn clear_missing_content(state: S<'_>, character_id: String) -> ApiResult<CharacterSnapshot> {
+    state.clear_missing_content(&character_id)
+}
+
 /// B-55: switch a chosen row to another of its versions, keeping the sub-choices that fit.
 #[tauri::command(async)]
 pub fn switch_version(

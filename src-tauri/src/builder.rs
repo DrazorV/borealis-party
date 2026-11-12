@@ -330,6 +330,25 @@ impl AppState {
         })
     }
 
+    /// Leave the content that is not installed unselected: its choices are open again to pick
+    /// something else, options and items that are not installed are removed, and the missing
+    /// content list (with the choices the import could not place) is cleared.
+    ///
+    /// # Errors
+    /// `not_found` if the character is not open.
+    pub fn clear_missing_content(&self, id: &str) -> ApiResult<CharacterSnapshot> {
+        self.mutate(id, |ctx, d| {
+            let out = commands::clear_missing(&ctx.hub.engine, &d.character.build)?;
+            apply(d, out);
+            d.character.unresolved.clear();
+            if let Some(import) = d.character.import.as_mut() {
+                import.missing.clear();
+                import.missing_content = 0;
+            }
+            Ok(())
+        })
+    }
+
     /// Set experience points (never levels up by itself).
     ///
     /// # Errors

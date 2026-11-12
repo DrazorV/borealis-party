@@ -387,6 +387,7 @@ pub fn run() {
             commands::get_slot_options,
             commands::apply_selection,
             commands::clear_selection,
+            commands::clear_missing_content,
             commands::switch_version,
             commands::set_xp,
             commands::level_up,

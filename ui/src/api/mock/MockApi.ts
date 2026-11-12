@@ -365,6 +365,11 @@ export class MockApi implements Api {
     });
   }
 
+  async clearMissingContent({ characterId }: { characterId: string }) {
+    this.missingByChar.delete(characterId);
+    return this.mutate(characterId, (c) => c);
+  }
+
   async replaceSpell({ characterId, slotId }: { characterId: string; slotId: string }) {
     return this.mutate(characterId, (c) => {
       const def = findByWireId(buildSlotDefs(c), slotId);
