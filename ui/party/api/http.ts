@@ -1,4 +1,5 @@
 import { COMMANDS, EVENTS, type Api, type ApiError, type ApiMethods, type CommandName, type DataDirs, type EventName } from "../../src/api/contract";
+import { liveEvents } from "./liveEvents";
 import { OVERRIDES, type Methods } from "./overrides/registry";
 import { clearSession, loadSession, saveSession, type ServerSession } from "./session";
 
@@ -122,34 +123,11 @@ export interface ServerEvent {
   payload: unknown;
 }
 
-/** Server-sent events over `fetch`, since EventSource can't send the Authorization header. Reconnects until closed. */
-export function eventStream(session: ServerSession, onEvent: (e: ServerEvent) => void): () => void {
-  const abort = new AbortController();
-  void (async () => {
-    while (!abort.signal.aborted) {
-      try {
-        const response = await fetch(`${session.baseUrl}/api/events`, { headers: { authorization: `Bearer ${session.token}` }, signal: abort.signal });
-        if (!response.ok || !response.body) throw new Error("events refused");
-        const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-        let buffer = "";
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += value;
-          let end = buffer.indexOf("\n\n");
-          while (end >= 0) {
-            const data = buffer.slice(0, end).split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trim()).join("\n");
-            buffer = buffer.slice(end + 2);
-            if (data) onEvent(JSON.parse(data) as ServerEvent);
-            end = buffer.indexOf("\n\n");
-          }
-        }
-      } catch { /* dropped or refused: try again below */ }
-      if (!abort.signal.aborted) await new Promise((r) => setTimeout(r, 3000));
-    }
-  })();
-  return () => abort.abort();
-}
+/**
+ * Server-sent events over `fetch`, since EventSource can't send the Authorization header. Reconnects until closed, with
+ * a backoff and connectivity.ts told about a server that can't be reached (./liveEvents.ts).
+ */
+export const eventStream = (session: ServerSession, onEvent: (e: ServerEvent) => void): (() => void) => liveEvents(session, onEvent);
 
 /** The Borealis API over HTTP. Pages use this exactly as they use the on-device backend. */
 export function createHttpApi(session: ServerSession): Api {
