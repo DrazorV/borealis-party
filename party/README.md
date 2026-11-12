@@ -53,7 +53,8 @@ Put passwords in variables rather than in the file.
 | `BOREALIS__SERVER__PUBLIC_URL` | | The address people open, such as `https://party.example.com`; needed for email links |
 | `BOREALIS__SERVER__OPEN_REGISTRATION` | `true` | Anyone who can reach the server may ask for an account |
 | `BOREALIS__SERVER__REQUIRE_APPROVAL` | `true` | New accounts wait until an admin approves them |
-| `BOREALIS__SERVER__MAX_UPLOAD_MB` | `512` | Largest upload |
+| `BOREALIS__SERVER__MAX_UPLOAD_MB` | `512` | Largest upload, in MB |
+| `BOREALIS__SERVER__PUBLIC_UPLOAD_MB` | `95` | Largest upload through the public address, in MB (see [Upload size](#upload-size)) |
 | `BOREALIS__SERVER__APP_DOWNLOAD` | the latest GitHub release | Folder URL the website offers the apps from; `off` offers none |
 | `BOREALIS__DATABASE__TYPE` | `sqlite` | `sqlite` or `postgres` |
 | `BOREALIS__SQLITE__PATH` | `party.db` | SQLite file, relative to the config folder |
@@ -179,6 +180,23 @@ On the open internet, put the server behind a reverse proxy that terminates HTTP
 address. Plain HTTP is only sensible on a network you trust, because passwords and session tokens would cross it
 unencrypted.
 
+### Upload size
+
+Files go up as base64 in one request, which is a third larger than the file, so the largest file is about three
+quarters of the request limit. Two limits apply:
+
+- `MAX_UPLOAD_MB` (512) is the server's own. On the home network (a `localhost`, `192.168.x.x`, `10.x.x.x` or
+  `172.16-31.x.x` address, a `.local` or `.lan` name, or a Tailscale `100.64-127.x.x` address) it is the only one, so
+  files up to about 383 MB get through. A reverse proxy there must allow as much (Nginx: `client_max_body_size 512m;`).
+- `PUBLIC_UPLOAD_MB` (95) is the limit through the public address. A proxy or tunnel in front of the server can stop
+  requests long before the server would: Cloudflare's free plan refuses any request over 100 MB, which is about 71 MB
+  of file. Set it to your proxy's cap, less a little room. It is never more than `MAX_UPLOAD_MB`.
+
+The server reports both limits (`/api/server`, `uploads`). The app checks a file against them before it reads it,
+and says how large it may be and that the home-network address takes more, instead of trying and failing. Upload
+errors are put in words too: a refused size, a timeout (Cloudflare gives up after 100 seconds, while the server may
+still be finishing, so look before trying again), a server that is restarting, and a lost connection.
+
 New accounts wait for an admin's approval by default. To close sign-up entirely, set
 `BOREALIS__SERVER__OPEN_REGISTRATION=false` or switch it off on the admin page. Create the first admin with the
 `INITIAL_ADMIN` variables, and other accounts with:
@@ -205,7 +223,9 @@ characters and content packs to that account only, exactly as desktop Borealis w
   nothing, so an index it removed stays removed. Desktop Borealis takes the packs only, as a snapshot. The phone
   apps do not offer it (their web view has no download).
 - Device-to-device transfer is not offered either: every device of an account reads the same account on the server.
-- A bundle is uploaded as base64, so the largest one is about three quarters of `MAX_UPLOAD_MB`.
+- A bundle is uploaded as base64, so the largest one is about three quarters of the upload limit: about 383 MB on the
+  home network, and about 71 MB through Cloudflare's free plan (see [Upload size](#upload-size)). A whole-library
+  bundle over that has to be opened on the home-network address.
 - Uploaded bundles wait in the account's `sync/incoming` folder until they are accepted or closed. At most eight wait
   at once (the oldest go first), and any left over are removed the next time the account's workspace opens. So one
   account can hold at most eight uploads' worth of disk there (under 8 x `MAX_UPLOAD_MB`).

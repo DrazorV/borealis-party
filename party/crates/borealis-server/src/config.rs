@@ -38,6 +38,11 @@ open_registration = true
 require_approval = true
 # Largest upload in megabytes (a zip of a 5etools data folder can be large).
 max_upload_mb = 512
+# Largest upload in megabytes that gets through the public address. A proxy in front of the server can have a lower
+# cap than max_upload_mb: Cloudflare's free plan stops requests over 100 MB. Files travel as base64, a third larger,
+# so 95 lets about 71 MB of file through. The app checks a file against this before it sends it, when it is connected
+# by an address outside the home network.
+public_upload_mb = 95
 # Where visitors of the website are offered the app for their system: a folder URL that holds the release files
 # (borealis-party-arm64.apk, borealis-party-windows-x64-setup.exe, ...). By default the latest release on GitHub; "off" offers no download.
 # app_download = "https://github.com/DrazorV/borealis-party/releases/latest/download"
@@ -126,6 +131,8 @@ pub struct ServerSettings {
     pub require_approval: bool,
     /// Largest request in megabytes.
     pub max_upload_mb: usize,
+    /// Largest request in megabytes through the public address (a proxy's cap, such as Cloudflare's 100 MB).
+    pub public_upload_mb: usize,
     /// Where the apps are downloaded from: unset for [`DEFAULT_APP_DOWNLOAD`], `off` for nowhere.
     pub app_download: Option<String>,
 }
@@ -138,9 +145,48 @@ impl Default for ServerSettings {
             open_registration: true,
             require_approval: true,
             max_upload_mb: 512,
+            public_upload_mb: 95,
             app_download: None,
         }
     }
+}
+
+impl ServerSettings {
+    /// What `/api/server` tells the app about uploads. The public limit is never above the server's own.
+    #[must_use]
+    pub fn upload_limits(&self) -> UploadLimits {
+        UploadLimits {
+            max_upload_mb: self.max_upload_mb,
+            public_upload_mb: self.public_upload_mb.min(self.max_upload_mb),
+        }
+    }
+}
+
+/// The largest request the server takes, and the largest that gets through its public address, in megabytes (MiB).
+/// The app checks a file against these before reading it (`ui/party/api/overrides/errors.ts`).
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadLimits {
+    /// `server.max_upload_mb`: on the home network.
+    pub max_upload_mb: usize,
+    /// `server.public_upload_mb`, at most `max_upload_mb`: through the public address.
+    pub public_upload_mb: usize,
+}
+
+static UPLOAD_LIMITS: std::sync::OnceLock<UploadLimits> = std::sync::OnceLock::new();
+
+/// Sets what [`upload_limits`] answers, once, at start. Later calls are ignored.
+pub fn set_upload_limits(limits: UploadLimits) {
+    let _ = UPLOAD_LIMITS.set(limits);
+}
+
+/// The limits set at start, or the defaults when none were (tests that build the routes by hand).
+#[must_use]
+pub fn upload_limits() -> UploadLimits {
+    UPLOAD_LIMITS
+        .get()
+        .copied()
+        .unwrap_or_else(|| ServerSettings::default().upload_limits())
 }
 
 /// `[database]`.
@@ -571,6 +617,42 @@ mod tests {
             Settings::parse(DEFAULT_FILE, []).unwrap(),
             Settings::default()
         );
+    }
+
+    #[test]
+    fn upload_limits_are_exposed_and_the_public_one_is_capped() {
+        let defaults = Settings::parse(DEFAULT_FILE, [])
+            .unwrap()
+            .server
+            .upload_limits();
+        assert_eq!(
+            defaults,
+            UploadLimits {
+                max_upload_mb: 512,
+                public_upload_mb: 95
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(defaults).unwrap(),
+            serde_json::json!({ "maxUploadMb": 512, "publicUploadMb": 95 })
+        );
+        let set = Settings::parse(
+            DEFAULT_FILE,
+            vars(&[
+                ("BOREALIS__SERVER__MAX_UPLOAD_MB", "64"),
+                ("BOREALIS__SERVER__PUBLIC_UPLOAD_MB", "200"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            set.server.upload_limits(),
+            UploadLimits {
+                max_upload_mb: 64,
+                public_upload_mb: 64
+            }
+        );
+        // Nothing set at start (as in the route tests): the defaults.
+        assert_eq!(upload_limits().public_upload_mb, 95);
     }
 
     #[test]
