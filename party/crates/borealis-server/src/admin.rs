@@ -392,6 +392,8 @@ pub async fn stats(State(state): State<AppState>, _: Admin) -> ApiResult<Json<Va
         "database": state.db.kind(),
         "uptimeSeconds": state.started.elapsed().as_secs(),
         "email": state.mailer.is_some(),
+        // Counts and bytes only (D40).
+        "shares": crate::shares::stats(&state.db, &state.workspaces).await?,
     })))
 }
 

@@ -55,7 +55,40 @@ const MIGRATIONS: &[&[&str]] = &[
             ip TEXT
         )",
     ],
+    // 2 (M-shares, 0.1.5): share codes (shares.rs). Only the code's hash is kept; the file is in the sender's folder.
+    &[
+        "CREATE TABLE IF NOT EXISTS shares (
+            id TEXT PRIMARY KEY,
+            from_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            code_hash TEXT NOT NULL,
+            to_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            to_name TEXT,
+            file_name TEXT NOT NULL,
+            characters BIGINT NOT NULL,
+            packs BIGINT NOT NULL,
+            links TEXT NOT NULL,
+            bytes BIGINT NOT NULL,
+            created_at BIGINT NOT NULL,
+            expires_at BIGINT NOT NULL,
+            claimed_at BIGINT,
+            ended_at BIGINT,
+            status TEXT NOT NULL
+        )",
+        "CREATE UNIQUE INDEX IF NOT EXISTS shares_code ON shares (code_hash)",
+        "CREATE INDEX IF NOT EXISTS shares_from ON shares (from_id, status)",
+        "CREATE INDEX IF NOT EXISTS shares_to ON shares (to_id, status)",
+        "CREATE TABLE IF NOT EXISTS share_blocks (
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            blocked_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            created_at BIGINT NOT NULL,
+            PRIMARY KEY (user_id, blocked_id)
+        )",
+    ],
 ];
+
+/// How many steps [`MIGRATIONS`] has: the schema version a database is at after [`Db::open`].
+#[cfg(test)]
+pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
 
 /// A table only the versions with groups had. A database that still has it opens like any other: the table is left
 /// alone and a warning is logged, so an instance that ran those versions (or rolls back to one) still boots.
@@ -270,6 +303,17 @@ impl Db {
     /// # Errors
     /// When the database can't be reached, its tables can't be created, or it was made by a version with groups.
     pub async fn open(location: &Location) -> Result<Self, OpenError> {
+        Self::open_upto(location, MIGRATIONS.len()).await
+    }
+
+    /// As [`Db::open`], with only the first `max_version` steps applied: a database as an older release left it, for
+    /// upgrade tests.
+    #[cfg(test)]
+    pub async fn open_at(location: &Location, max_version: usize) -> Result<Self, OpenError> {
+        Self::open_upto(location, max_version).await
+    }
+
+    async fn open_upto(location: &Location, max_version: usize) -> Result<Self, OpenError> {
         sqlx::any::install_default_drivers();
         let (url, sqlite, max) = match location {
             Location::Sqlite(path) => (format!("sqlite://{}?mode=rwc", path.display()), true, 4),
@@ -318,11 +362,11 @@ impl Db {
             pool,
             kind: if sqlite { "sqlite" } else { "postgres" },
         };
-        db.migrate().await?;
+        db.migrate(max_version).await?;
         Ok(db)
     }
 
-    async fn migrate(&self) -> sqlx::Result<()> {
+    async fn migrate(&self, max_version: usize) -> sqlx::Result<()> {
         sqlx::query("CREATE TABLE IF NOT EXISTS schema_version (version BIGINT NOT NULL)")
             .execute(&self.pool)
             .await?;
@@ -330,7 +374,7 @@ impl Db {
             .fetch_one(&self.pool)
             .await?
             .try_get(0)?;
-        for (index, steps) in MIGRATIONS.iter().enumerate() {
+        for (index, steps) in MIGRATIONS.iter().enumerate().take(max_version) {
             let version = i64::try_from(index).unwrap_or(i64::MAX) + 1;
             if version <= current {
                 continue;
