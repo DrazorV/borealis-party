@@ -124,9 +124,29 @@ export const importWatch = {
 const plural = (n: number, one: string) => (n === 1 ? `1 ${one}` : `${n} ${one}s`);
 
 /**
+ * An accepted bundle with content packs and no character: a success in the import report ("Imported 4 content packs
+ * into Additional Content."), not a failed file. Upstream's report needs a summary to name the entry, so the packs stand
+ * in for one; nothing else reads it (the character list reloads from the server). As for a character, every pack is
+ * named and warnings tell which ones were already here.
+ */
+function packsOnlyReport(items: BundlePreview["preview"]["items"]): ImportReport {
+  const warnings: string[] = [];
+  const kept = items.filter((i) => i.action === "keep_local").length;
+  const same = items.filter((i) => i.action === "identical").length;
+  if (kept > 0) warnings.push(`${plural(kept, "content pack")} already here ${kept === 1 ? "was" : "were"} edited more recently, so ${kept === 1 ? "it was" : "they were"} kept.`);
+  if (same > 0) warnings.push(`${plural(same, "content pack")} already here ${same === 1 ? "was" : "were"} the same, so nothing changed.`);
+  const summary: CharacterSummary = {
+    id: "", name: `${plural(items.length, "content pack")} into Additional Content`, build: "", level: 0, ruleset: "dnd2014",
+    portrait: null, favorite: false, group: "", updatedAt: "", path: null, missingContent: 0,
+  };
+  return { summary, divergences: [], warnings, missingContent: [], unmappedSlots: [], invalidSelections: [], selectionsImported: 0 };
+}
+
+/**
  * A bundle handed to Import characters: uploaded and checked first, so a bad file gets only the import report's message.
  * A good one opens in upstream's Open bundle window, and the import waits for it, so the report comes after the window
- * (not under it) and tells what happened: the character that came in, or that nothing changed.
+ * (not under it) and tells what happened: the character that came in, the content packs of a bundle with no character,
+ * or that nothing changed.
  */
 export async function openBundleFromImport(session: Session, fileName: string, contentBase64: string): Promise<ImportReport> {
   const staged = await stageBundle(session, fileName, contentBase64);
@@ -141,10 +161,7 @@ export async function openBundleFromImport(session: Session, fileName: string, c
     throw { code: "invalid_argument", message: "it is a Borealis bundle. The Open bundle window was cancelled, so nothing was changed." } satisfies ApiError;
   }
   const first = characters[0];
-  if (!first) {
-    const packs = items.length;
-    throw { code: "invalid_argument", message: `it is a Borealis bundle with no characters. Its ${plural(packs, "content pack")} went into Additional Content.` } satisfies ApiError;
-  }
+  if (!first) return packsOnlyReport(items);
   const list = await serverFetch(session, "POST", "/api/rpc/list_characters", {}) as CharacterSummary[];
   const summary = list.find((c) => c.id === first.key) ?? list.find((c) => c.name === first.label);
   if (!summary) throw { code: "not_found", message: `the bundle was applied, but ${first.label} is not in the list.` } satisfies ApiError;
