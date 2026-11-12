@@ -90,6 +90,12 @@ const MIGRATIONS: &[&[&str]] = &[
 #[cfg(test)]
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
 
+/// The table each step from 2 on creates, by step number (1-based). A database whose `schema_version` says a step ran
+/// but that lacks its table runs the step again at start-up: the removed groups versions also counted 1 to 3, so a
+/// database they left at version 3 would otherwise skip these steps. Every such step must be idempotent (`CREATE ...
+/// IF NOT EXISTS`). Step 1 has none: every database has its tables. A new step adds its own line here.
+const MARKERS: &[(usize, &str)] = &[(2, "shares")];
+
 /// A table only the versions with groups had. A database that still has it opens like any other: the table is left
 /// alone and a warning is logged, so an instance that ran those versions (or rolls back to one) still boots.
 const OLD_TABLE: &str = "party_groups";
@@ -366,6 +372,38 @@ impl Db {
         Ok(db)
     }
 
+    /// True when the table `name` exists.
+    async fn has_table(&self, name: &str) -> sqlx::Result<bool> {
+        Ok(sqlx::query(if self.kind == "sqlite" {
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $1"
+        } else {
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = $1"
+        })
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?
+        .is_some())
+    }
+
+    /// Run one step and record it (unless its version is recorded already), in one transaction.
+    async fn run_step(&self, version: i64, steps: &[&str]) -> sqlx::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for step in steps {
+            sqlx::query(step).execute(&mut *tx).await?;
+        }
+        let recorded = sqlx::query("SELECT 1 FROM schema_version WHERE version = $1")
+            .bind(version)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if recorded.is_none() {
+            sqlx::query("INSERT INTO schema_version (version) VALUES ($1)")
+                .bind(version)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await
+    }
+
     async fn migrate(&self, max_version: usize) -> sqlx::Result<()> {
         sqlx::query("CREATE TABLE IF NOT EXISTS schema_version (version BIGINT NOT NULL)")
             .execute(&self.pool)
@@ -376,18 +414,20 @@ impl Db {
             .try_get(0)?;
         for (index, steps) in MIGRATIONS.iter().enumerate().take(max_version) {
             let version = i64::try_from(index).unwrap_or(i64::MAX) + 1;
-            if version <= current {
+            if version > current {
+                self.run_step(version, steps).await?;
                 continue;
             }
-            let mut tx = self.pool.begin().await?;
-            for step in *steps {
-                sqlx::query(step).execute(&mut *tx).await?;
+            // Recorded as done: trust it unless the step's own table is missing (a database another numbering left).
+            let Some((_, marker)) = MARKERS.iter().find(|(step, _)| *step == index + 1) else {
+                continue;
+            };
+            if !self.has_table(marker).await? {
+                tracing::warn!(
+                    "the database is at schema version {current} but has no {marker} table: running step {version} again (it only adds what is missing)"
+                );
+                self.run_step(version, steps).await?;
             }
-            sqlx::query("INSERT INTO schema_version (version) VALUES ($1)")
-                .bind(version)
-                .execute(&mut *tx)
-                .await?;
-            tx.commit().await?;
         }
         Ok(())
     }

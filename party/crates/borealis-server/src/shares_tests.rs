@@ -711,3 +711,118 @@ fn the_schema_version_file_matches_the_migrations() {
         "tests/schema_version.txt must be the number of steps in db.rs MIGRATIONS (update both in the merging PR)"
     );
 }
+
+/// The versions recorded in `schema_version`, in order.
+async fn versions(db: &Db) -> Vec<i64> {
+    sqlx::query_scalar("SELECT version FROM schema_version ORDER BY version")
+        .fetch_all(db.pool())
+        .await
+        .unwrap()
+}
+
+/// A database the removed groups versions left: their steps 1 to 3 recorded (accounts, then groups tables), with an
+/// account and groups rows, and none of this version's later tables.
+async fn make_groups_era(location: &Location) {
+    let old = Db::open_at(location, SCHEMA_014).await.unwrap();
+    for sql in [
+        "INSERT INTO users (id, username, password_hash, created_at, status, is_admin) VALUES ('old-1', 'old-player', 'x', 1, 'active', 0)",
+        "CREATE TABLE party_groups (id TEXT PRIMARY KEY, name TEXT NOT NULL)",
+        "CREATE TABLE invites (id TEXT PRIMARY KEY, group_id TEXT NOT NULL)",
+        "CREATE TABLE members (group_id TEXT NOT NULL, user_id TEXT NOT NULL)",
+        "CREATE TABLE user_settings (user_id TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        "INSERT INTO party_groups (id, name) VALUES ('g1', 'Old group')",
+        "INSERT INTO invites (id, group_id) VALUES ('i1', 'g1')",
+        "INSERT INTO members (group_id, user_id) VALUES ('g1', 'old-1')",
+        "INSERT INTO user_settings (user_id, value) VALUES ('old-1', 'dark')",
+        "INSERT INTO schema_version (version) VALUES (2)",
+        "INSERT INTO schema_version (version) VALUES (3)",
+    ] {
+        sqlx::query(sql).execute(old.pool()).await.unwrap();
+    }
+    old.pool().close().await;
+}
+
+/// Opened by this version, a groups-era database at version 3 still gets the share tables, and keeps all it had.
+async fn check_groups_era(location: &Location) {
+    let db = Db::open(location).await.unwrap();
+    schema_has_shares(&db).await;
+    assert_eq!(
+        versions(&db).await,
+        [1, 2, 3],
+        "no step recorded twice, none lost"
+    );
+    for (table, rows) in [
+        ("users", 1),
+        ("party_groups", 1),
+        ("invites", 1),
+        ("members", 1),
+        ("user_settings", 1),
+    ] {
+        let n: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+        assert_eq!(n, rows, "{table} untouched");
+    }
+    db.pool().close().await;
+    // Opening again finds everything in place and changes nothing.
+    let again = Db::open(location).await.unwrap();
+    assert_eq!(versions(&again).await, [1, 2, 3]);
+    again.pool().close().await;
+}
+
+async fn schema_has_shares(db: &Db) {
+    for table in ["shares", "share_blocks"] {
+        let n: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(db.pool())
+            .await
+            .unwrap_or_else(|e| panic!("{table}: {e}"));
+        assert_eq!(n, 0, "{table}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_database_gets_the_share_tables() {
+    // Fresh.
+    let fresh = Db::open(&Location::Memory).await.unwrap();
+    schema_has_shares(&fresh).await;
+    assert_eq!(versions(&fresh).await, [1, 2]);
+    // A groups-era file at version 3 without them.
+    let dir = tempfile::tempdir().unwrap();
+    let location = Location::Sqlite(dir.path().join("groups.db"));
+    make_groups_era(&location).await;
+    check_groups_era(&location).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_groups_era_postgres_database_gets_the_share_tables() {
+    let Ok(url) = std::env::var("BOREALIS_TEST_POSTGRES_URL") else {
+        eprintln!("skipped: set BOREALIS_TEST_POSTGRES_URL to run against PostgreSQL");
+        return;
+    };
+    sqlx::any::install_default_drivers();
+    let server = sqlx::AnyPool::connect(&url).await.unwrap();
+    for era in ["fresh", "groups"] {
+        let name = format!("bp_shares_{era}_{}", uuid::Uuid::new_v4().simple());
+        sqlx::query(&format!("CREATE DATABASE {name}"))
+            .execute(&server)
+            .await
+            .unwrap();
+        let mut own = url::Url::parse(&url).unwrap();
+        own.set_path(&format!("/{name}"));
+        let location = Location::Postgres(own.to_string());
+        if era == "fresh" {
+            let db = Db::open(&location).await.unwrap();
+            schema_has_shares(&db).await;
+            assert_eq!(versions(&db).await, [1, 2]);
+            db.pool().close().await;
+        } else {
+            make_groups_era(&location).await;
+            check_groups_era(&location).await;
+        }
+        sqlx::query(&format!("DROP DATABASE {name} WITH (FORCE)"))
+            .execute(&server)
+            .await
+            .unwrap();
+    }
+}
