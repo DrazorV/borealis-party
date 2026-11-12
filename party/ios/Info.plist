@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged by `tauri ios build` into upstream's Info.plist (party/tauri.party.ios.json > bundle > iOS > infoPlist), so
+  upstream's Xcode project stays as it is. The iOS side of party/android/party.init.gradle: the app's name, and plain
+  HTTP for servers on a home network.
+-->
+<plist version="1.0">
+<dict>
+	<!-- The name under the home screen icon (Android: res/values/strings.xml app_name). -->
+	<key>CFBundleDisplayName</key>
+	<string>Borealis Party</string>
+	<!--
+	  App Transport Security allows only HTTPS by default. An address such as 192.168.1.20:8787, a .local name or a
+	  typed http:// is plain HTTP (ui/party/api/session.ts normaliseAddress), as Android's usesCleartextTraffic allows.
+	  No other ATS key may be added: with NSAllowsLocalNetworking or NSAllowsArbitraryLoadsInWebContent present, iOS
+	  ignores this one.
+	-->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<!-- Asked before the first connection to an address on this network (iOS 14 and later). Replaces upstream's text. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Borealis Party connects to your party server on this network.</string>
+</dict>
+</plist>
