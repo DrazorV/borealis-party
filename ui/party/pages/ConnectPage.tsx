@@ -7,6 +7,7 @@ import {
 import { usePhone } from "../../src/lib/phone";
 import { isTauri } from "../../src/lib/tauri";
 import { othersUnsentEdits, removeOtherCopies } from "../sync/account";
+import { keepJoinCode, keptJoinCode, normaliseCode } from "../api/overrides/parties";
 import { AppOffer } from "./AppOffer";
 import { DiscardDialog } from "./SignOut";
 import "./party.css";
@@ -37,6 +38,8 @@ export function ConnectPage({ again }: { again?: ServerSession } = {}) {
   const [waiting, setWaiting] = useState<Waiting | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // A join link opened before signing up (plan D39): the code goes with the sign-up.
+  const [joinCode, setJoinCode] = useState(() => keptJoinCode());
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -116,13 +119,20 @@ export function ConnectPage({ again }: { again?: ServerSession } = {}) {
         await enter(server.baseUrl, out.token, out.user);
         return;
       }
-      const out = await signUp(server.baseUrl, username, email, password);
+      const code = normaliseCode(joinCode);
+      const out = await signUp(server.baseUrl, username, email, password, code || undefined);
+      // The server keeps the code now: as an invite on the new account, or until an admin approves it.
+      if (code) keepJoinCode(null);
       if (out.status === "active" && out.token && out.user) {
         await enter(server.baseUrl, out.token, out.user);
         return;
       }
       // Waiting for the emailed link or for an admin: back to signing in, with what happens next.
-      setNotice(out.message ?? "Your account is waiting for approval.");
+      const waits = out.message ?? "Your account is waiting for approval.";
+      const join = out.pendingJoin;
+      setNotice(join
+        ? `${waits} You'll join ${join.partyName} once an admin approves you; the invite is kept until ${new Date(join.expiresAt).toLocaleDateString()}.`
+        : waits);
       setMode("in");
       setPassword("");
       setBusy(false);
@@ -179,6 +189,12 @@ export function ConnectPage({ again }: { again?: ServerSession } = {}) {
               Password
               <input className="input" type="password" autoComplete={mode === "in" ? "current-password" : "new-password"} value={password} onChange={(e) => setPassword(e.target.value)} required minLength={mode === "up" ? 8 : undefined} />
             </label>
+            {mode === "up" && (
+              <label>
+                Join code (optional)
+                <input className="input" aria-label="Join code (optional)" autoCapitalize="characters" autoComplete="off" spellCheck={false} value={joinCode} onChange={(e) => setJoinCode(e.target.value)} />
+              </label>
+            )}
             {mode === "up" && (
               <p className="muted party-connect-note">
                 {server.info.email ? "We'll email you a link to confirm your address. " : ""}

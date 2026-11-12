@@ -130,3 +130,39 @@ html.phone .party-import .input { font-size: 16px; }
 html.phone .party-import-actions > .btn, html.phone .party-import-link > .btn { flex: 1 1 auto; justify-content: center; }
 html.phone .party-import-books input[type="checkbox"] { min-width: 24px; min-height: 24px; }
 .party-import-report { margin-top: var(--sp-2); max-height: 50vh; overflow: auto; min-width: 0; }
+
+/*
+ * Parties (plan 4.1): a card per party with a gradient head stripe (gold for the DM's, accent for a player's), member
+ * cards with the server's read-only numbers, and the join code in large letters. Phone first: every control is a tap
+ * target tall, rows wrap instead of widening the page. The dialogs are portalled, so their classes are not under
+ * `.party-parties`.
+ */
+.party-parties .party-card { border-top: 3px solid transparent; border-image: linear-gradient(90deg, var(--accent, #4a6fa5), transparent) 1; }
+.party-parties .party-card-dm { border-image: linear-gradient(90deg, var(--gold, #b8860b), transparent) 1; }
+.party-parties .card-head h2 { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; overflow-wrap: anywhere; }
+.party-sub { margin: var(--sp-3) 0 var(--sp-1); font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.75; }
+.party-note { display: block; font-size: var(--fs-sm); margin: var(--sp-1) 0 0; overflow-wrap: anywhere; }
+.party-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.party-member .grow, .party-invite .grow, .party-pick-row .grow { flex: 1 1 10em; min-width: 0; overflow-wrap: anywhere; }
+.party-invite { padding: var(--sp-1) 0; border-bottom: var(--border-w) solid var(--border); gap: var(--sp-2); }
+.party-invite:last-child { border-bottom: 0; }
+.party-code-input { text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--font-mono, monospace); }
+.party-code { display: block; padding: var(--sp-3); text-align: center; font-family: var(--font-mono, monospace); font-size: 22px; letter-spacing: 0.08em;
+  user-select: all; overflow-wrap: anywhere; background: var(--surface-2, var(--surface)); border: var(--border-w) dashed var(--border); border-radius: var(--radius); }
+.party-field { display: flex; flex-direction: column; gap: var(--sp-1); }
+.party-segmented { display: flex; gap: 0; }
+.party-segmented .btn { flex: 1 1 0; justify-content: center; border-radius: 0; }
+.party-segmented .btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.party-segmented .btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+.party-numbers { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.party-pick { max-height: 50vh; overflow-y: auto; }
+.party-pick-row { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: var(--border-w) solid var(--border); border-radius: var(--radius); cursor: pointer; }
+.party-pick-row.chosen { border-color: var(--accent, var(--border)); background: var(--surface-2, var(--surface)); }
+.party-pick-row.disabled { opacity: 0.55; cursor: default; }
+.party-pick-row input { flex: none; width: 20px; height: 20px; margin: 0; }
+html.phone .party-parties { padding: var(--sp-3) var(--ph-gutter); }
+html.phone .party-parties .btn, html.phone .party-parties .input, html.phone .party-form .btn, html.phone .party-form .input,
+html.phone .party-pick-row, html.phone .party-parties .aur-switch { min-height: var(--ph-hit); }
+html.phone .party-parties .input, html.phone .party-form .input { font-size: 16px; }
+html.phone .party-parties .party-inline > .btn, html.phone .party-actions > .btn { flex: 1 1 auto; justify-content: center; }
+html.phone .party-parties .party-note a, html.phone .party .party-note a { display: inline-flex; align-items: center; min-height: var(--ph-hit); }

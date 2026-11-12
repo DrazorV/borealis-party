@@ -41,6 +41,8 @@ function useHost(className: string, before: string): HTMLElement | null {
 
 /** The Import screen (ImportHub, plan I9). */
 const IMPORT_ROUTE = "/import-files";
+/** The Parties page (plan 4.1). */
+const PARTIES_ROUTE = "/parties";
 
 function syncLabel(status: SyncStatus): string {
   switch (status.state) {
@@ -79,7 +81,7 @@ function SyncChip({ phone }: { phone: boolean }) {
 }
 
 /**
- * The phone's More page (plan D10): the account's rows (Account, Import, Admin, Sign out), first, in upstream's list look. A phone's top bar keeps only
+ * The phone's More page (plan D10): the account's rows (Account, Import, Parties, Admin, Sign out), first, in upstream's list look. A phone's top bar keeps only
  * the Sync chip, so these are the way to the account page, the admin page and out.
  */
 function MoreRows({ admin, exit }: { admin: boolean; exit: ReturnType<typeof useSignOut> }) {
@@ -95,6 +97,7 @@ function MoreRows({ admin, exit }: { admin: boolean; exit: ReturnType<typeof use
         </Link>
       </li>
       <li><Link className="v5-row" to={IMPORT_ROUTE} style={{ textDecoration: "none" }}><Icon name="upload" /><span className="grow">Import</span><Icon name="chevron" /></Link></li>
+      <li><Link className="v5-row" to={PARTIES_ROUTE} style={{ textDecoration: "none" }}><Icon name="swords" /><span className="grow">Parties</span><Icon name="chevron" /></Link></li>
       {admin && (
         <li><Link className="v5-row" to="/admin" style={{ textDecoration: "none" }}><Icon name="shield" /><span className="grow">Admin</span><Icon name="chevron" /></Link></li>
       )}
@@ -133,6 +136,7 @@ export function AccountBar() {
             {!phone && (
               <>
                 <Button small onClick={() => nav(IMPORT_ROUTE)}>Import</Button>
+                <Button small onClick={() => nav(PARTIES_ROUTE)}>Parties</Button>
                 <Button small onClick={() => nav("/account")}>Account</Button>
                 {admin && <Button small onClick={() => nav("/admin")}>Admin</Button>}
                 <Button small onClick={exit.start} disabled={exit.busy}>{exit.busy ? "Signing out…" : "Sign out"}</Button>

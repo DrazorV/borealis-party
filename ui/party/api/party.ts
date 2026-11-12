@@ -24,6 +24,8 @@ interface SignUpResult {
   user?: ServerUser;
   awaitingEmail?: boolean;
   message?: string;
+  /** A join code sent with the sign-up, kept until an admin approves the account (plan D39). */
+  pendingJoin?: { partyName: string; expiresAt: number } | null;
 }
 
 function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -58,8 +60,8 @@ export async function sameAccountAt(baseUrl: string, token: string, userId: stri
 export const signIn = (baseUrl: string, username: string, password: string) =>
   serverFetch({ baseUrl, token: "" }, "POST", "/api/auth/login", { username, password }) as Promise<SignedIn>;
 
-export const signUp = (baseUrl: string, username: string, email: string, password: string) =>
-  serverFetch({ baseUrl, token: "" }, "POST", "/api/auth/register", { username, email, password }) as Promise<SignUpResult>;
+export const signUp = (baseUrl: string, username: string, email: string, password: string, joinCode?: string) =>
+  serverFetch({ baseUrl, token: "" }, "POST", "/api/auth/register", { username, email, password, ...(joinCode ? { joinCode } : {}) }) as Promise<SignUpResult>;
 
 export const signOut = () => call<void>("POST", "/api/auth/logout");
 

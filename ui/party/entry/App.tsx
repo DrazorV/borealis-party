@@ -10,6 +10,7 @@ import { AccountBar } from "../pages/AccountBar";
 import { AccountPage } from "../pages/AccountPage";
 import { AdminPage } from "../pages/AdminPage";
 import { ImportHub } from "../pages/ImportHub";
+import { JoinRoute, PartiesPage } from "../pages/PartiesPage";
 import { OfflinePage } from "../pages/OfflineBanner";
 import { followReplaced } from "../sync/replaced";
 import { startSync } from "../sync/runner";
@@ -49,6 +50,9 @@ export function App() {
         <Route path="/admin" element={admin ? <AppShell>{offline ? <OfflinePage /> : <AdminPage />}</AppShell> : <Navigate to="/" replace />} />
         {/* One Import screen for every kind of file and link (plan I9). */}
         <Route path="/import-files" element={<AppShell>{offline ? <OfflinePage /> : <ImportHub />}</AppShell>} />
+        {/* Parties (plan 4.1); a join link keeps its code and opens them. */}
+        <Route path="/parties" element={<AppShell>{offline ? <OfflinePage /> : <PartiesPage />}</AppShell>} />
+        <Route path="/join/:code" element={<JoinRoute />} />
         {/* Notes read a folder on the device, which a server doesn't offer. */}
         <Route path="/notes" element={<Navigate to="/" replace />} />
         <Route path="*" element={<UpstreamApp />} />
