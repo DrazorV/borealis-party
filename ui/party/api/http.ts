@@ -63,13 +63,13 @@ const LOCAL: Partial<Record<CommandName, Local>> = {
 
 const unavailable = (): ApiError => fail("not_available", "That isn't available when connected to a server.");
 
-interface ServerEvent {
+export interface ServerEvent {
   event: string;
   payload: unknown;
 }
 
 /** Server-sent events over `fetch`, since EventSource can't send the Authorization header. Reconnects until closed. */
-function eventStream(session: ServerSession, onEvent: (e: ServerEvent) => void): () => void {
+export function eventStream(session: ServerSession, onEvent: (e: ServerEvent) => void): () => void {
   const abort = new AbortController();
   void (async () => {
     while (!abort.signal.aborted) {

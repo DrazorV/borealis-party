@@ -8,6 +8,7 @@ import { loadSession, updateUser } from "../api/session";
 import { AccountBar } from "../pages/AccountBar";
 import { AccountPage } from "../pages/AccountPage";
 import { AdminPage } from "../pages/AdminPage";
+import { startSync } from "../sync/runner";
 import { hideUnofferedRows } from "./hideTransfer";
 import "../pages/party.css";
 
@@ -26,6 +27,8 @@ export function App() {
       if (before && (before.admin !== user.admin || before.mustChangePassword !== user.mustChangePassword)) window.location.reload();
     }, () => { /* offline, or signed out: the next request says so */ });
   }, []);
+  // The apps keep a copy of the account (sync/); a browser doesn't.
+  useEffect(() => startSync(), []);
   return (
     <>
       <AccountBar />

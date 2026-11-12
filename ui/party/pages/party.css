@@ -11,6 +11,8 @@
 .party-stats dd { margin: 0; font-size: 18px; font-weight: 600; }
 .party-bar { display: flex; gap: var(--sp-2); align-items: center; padding: var(--sp-1) var(--sp-3); background: var(--surface); border-bottom: var(--border-w) solid var(--border); font-size: var(--fs-sm); }
 .party-bar-host { flex: none; }
+.party-bar .party-bar-name, .party-bar .party-sync-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.party-bar .party-bar-name { flex-shrink: 0; max-width: 35%; }
 .party-bar .spacer, .party-member-head .spacer, .party-line .spacer, .party-inline .spacer { flex: 1; }
 .party-connect { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; background: var(--bg); color: var(--text, inherit); }
 .party-connect-card { display: flex; flex-direction: column; gap: var(--sp-3); width: 100%; max-width: 360px; padding: var(--sp-5); }

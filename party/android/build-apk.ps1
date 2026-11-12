@@ -56,6 +56,16 @@ Remove-Item -Recurse -Force "$jni\*" -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force "$jni\$abi" | Out-Null
 Copy-Item $library "$jni\$abi\" -Force
 
+# The bundled rules (tauri.conf.json "resources"), which the app extracts at start: Tauri copies them only after the
+# symlink step above, so without this the app starts with no content and can't install a pack. The AI profile is not
+# used on phones.
+$assets = "src-tauri\gen\android\app\src\main\assets\content"
+Remove-Item -Recurse -Force $assets -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $assets | Out-Null
+foreach ($pack in "core", "srd-5.1", "srd-5.2.1", "srd-5.1-monsters", "srd-5.2.1-monsters", "srd-5.1-rules-text", "srd-5.2.1-rules-text") {
+    Copy-Item -Recurse "content\$pack" "$assets\$pack"
+}
+
 $init = (Resolve-Path "party\android\party.init.gradle").Path
 Push-Location "src-tauri\gen\android"
 .\gradlew.bat --init-script $init "assemble$flavor$variant" -x "rustBuild$flavor$variant" --console=plain
