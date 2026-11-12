@@ -1,5 +1,5 @@
 import { type FormEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { type Navigator, type To, UNSAFE_NavigationContext } from "react-router";
+import { type Navigator, type To, UNSAFE_NavigationContext, useNavigate } from "react-router";
 import type { Api, ContentProgress, FiveToolsImportReport, FiveToolsSource, ImportReport } from "../../src/api/contract";
 import { Button } from "../../src/components/Button";
 import { Card } from "../../src/components/Card";
@@ -22,6 +22,7 @@ import { loadSession } from "../api/session";
 import { inboxEmpty, onInbox, sendFiles, takeFocus, takeInbox } from "../import/door";
 import { KIND_LABEL, needsNotice, planImport, sentence } from "../import/plan";
 import { classifyLink, LATEST_5ETOOLS_URL, type LinkKind } from "../import/sniff";
+import { receiveRoute } from "./ShareReceivePage";
 import "./party.css";
 
 /**
@@ -150,6 +151,8 @@ export function ImportHub() {
   const nextId = useRef(1);
   const [rows, setRows] = useState<Row[]>([]);
   const [link, setLink] = useState("");
+  const [shareCode, setShareCode] = useState("");
+  const nav = useNavigate();
   const [busy, setBusyState] = useState(false);
   // Read by work that outlives a render (the inbox is emptied in a loop).
   const busyRef = useRef(false);
@@ -366,6 +369,14 @@ export function ImportHub() {
         {/* No accept filter: Android's web view fails on extensions it has no type for, and the files are sniffed anyway. */}
         <input ref={fileRef} type="file" multiple hidden aria-label="Choose files to import"
           onChange={(e) => { const files = Array.from(e.target.files ?? []); e.target.value = ""; sendFiles(files); }} />
+      </Card>
+      <Card title="Share code">
+        <form className="party-import-link" onSubmit={(e) => { e.preventDefault(); if (shareCode.trim()) nav(receiveRoute(shareCode.trim())); }}>
+          <input className="input" autoCapitalize="characters" autoCorrect="off" autoComplete="off" spellCheck={false}
+            aria-label="Share code to enter" placeholder="ABCD-EFGH-JKMN-PQRS" value={shareCode} onChange={(e) => setShareCode(e.target.value)} />
+          <Button type="submit" icon="download" disabled={!shareCode.trim()}>Enter a share code</Button>
+        </form>
+        <p className="muted small">Another player's characters and content, from a code they made with Share with a code.</p>
       </Card>
       <Card title="Paste a link">
         <form className="party-import-link" onSubmit={(e) => void submitLink(e)}>

@@ -113,6 +113,18 @@ export interface ServerStats {
   database: "sqlite" | "postgres";
   uptimeSeconds: number;
   email: boolean;
+  /** Share codes: counts and bytes only (absent on servers before 0.1.5). */
+  shares?: ShareStats;
+}
+
+export interface ShareStats {
+  enabled: boolean;
+  byStatus: Record<"pending" | "claimed" | "done" | "declined" | "cancelled" | "expired", number>;
+  blocks: number;
+  outgoingBytes: number;
+  stagedBytes: number;
+  maxBytes: number;
+  diskBytesPerAccount: number;
 }
 
 interface SignUpSettings {
