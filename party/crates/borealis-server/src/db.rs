@@ -57,8 +57,8 @@ const MIGRATIONS: &[&[&str]] = &[
     ],
 ];
 
-/// A table only the versions with groups had. Their databases and data folders are laid out differently and are not
-/// read by this version.
+/// A table only the versions with groups had. A database that still has it opens like any other: the table is left
+/// alone and a warning is logged, so an instance that ran those versions (or rolls back to one) still boots.
 const OLD_TABLE: &str = "party_groups";
 
 /// Rows the activity log keeps; older ones are pruned as new ones arrive.
@@ -67,8 +67,6 @@ pub const ACTIVITY_KEPT: i64 = 10_000;
 /// Why the database could not be opened.
 #[derive(Debug)]
 pub enum OpenError {
-    /// It was made by a version with groups.
-    OldLayout,
     /// It can't be reached, or its tables can't be created.
     Database(sqlx::Error),
 }
@@ -76,11 +74,6 @@ pub enum OpenError {
 impl std::fmt::Display for OpenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::OldLayout => f.write_str(
-                "this database was made by an older Borealis Party (the one with groups), which this version does \
-                 not read. This version starts from a fresh config folder: move the old folder away, keep it as a \
-                 backup, and start the server on an empty one",
-            ),
             Self::Database(e) => write!(f, "database: {e}"),
         }
     }
@@ -310,8 +303,10 @@ impl Db {
         .fetch_optional(&pool)
         .await?;
         if old.is_some() {
-            pool.close().await;
-            return Err(OpenError::OldLayout);
+            // No refusal, and no "schema too new" refusal either: rolling back depends on older binaries booting.
+            tracing::warn!(
+                "the database still has the {OLD_TABLE} table from a version with groups; it is not used and is left alone"
+            );
         }
         if sqlite {
             // Persistent per file; memory databases ignore it.

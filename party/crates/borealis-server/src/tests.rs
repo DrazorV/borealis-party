@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 use crate::auth::RateLimiter;
-use crate::db::{Db, Location, OpenError};
+use crate::db::{Db, Location};
 use crate::mail::{Mailer, Recorder};
 use crate::workspaces::Workspaces;
 use crate::{api_routes, AppState, Config};
@@ -380,29 +380,46 @@ async fn make_old(url: &str) {
     pool.close().await;
 }
 
-fn refused(opened: Result<Db, OpenError>) {
-    match opened {
-        Err(error @ OpenError::OldLayout) => {
-            assert!(error.to_string().contains("fresh config folder"), "{error}")
-        }
-        Err(other) => panic!("{other}"),
-        Ok(_) => panic!("an old database was opened"),
-    }
+/// True when the database still has the table only the versions with groups had.
+async fn has_old_table(url: &str) -> bool {
+    sqlx::any::install_default_drivers();
+    let pool = sqlx::AnyPool::connect(url).await.unwrap();
+    let found = sqlx::query("SELECT COUNT(*) FROM party_groups")
+        .fetch_one(&pool)
+        .await
+        .is_ok();
+    pool.close().await;
+    found
 }
 
+/// A database that still has the table the versions with groups had opens like any other, its accounts and all, and
+/// the table is left alone. Nor does it stop a move into a new database.
 #[tokio::test(flavor = "multi_thread")]
-async fn an_old_database_is_refused() {
+async fn a_database_left_with_the_groups_table_opens() {
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("old.db");
-    make_old(&format!("sqlite://{}?mode=rwc", file.display())).await;
-    refused(Db::open(&Location::Sqlite(file.clone())).await);
-    // Nor is it copied into a new PostgreSQL database.
+    let file = dir.path().join("party.db");
+    let data = dir.path().join("data");
+    let url = format!("sqlite://{}?mode=rwc", file.display());
+    let old = Db::open(&Location::Sqlite(file.clone())).await.unwrap();
+    some_accounts(&router_on(data.clone(), old)).await;
+    make_old(&url).await;
+    let db = Db::open(&Location::Sqlite(file.clone())).await.unwrap();
+    check_moved(&router_on(data.clone(), db)).await;
+    assert!(has_old_table(&url).await);
+    // A database with only that table opens too.
+    let bare = dir.path().join("bare.db");
+    make_old(&format!("sqlite://{}?mode=rwc", bare.display())).await;
+    let fresh = Db::open(&Location::Sqlite(bare)).await.unwrap();
+    assert_eq!(fresh.user_count().await.unwrap(), 0);
+    // And the instance still moves to a new database.
     let new = Db::open(&Location::Memory).await.unwrap();
-    assert!(matches!(
-        crate::migrate::adopt_sqlite(&new, &file).await,
-        Err(crate::migrate::MigrateError::Source(OpenError::OldLayout))
-    ));
-    assert_eq!(new.user_count().await.unwrap(), 0);
+    let report = crate::migrate::adopt_sqlite(&new, &file)
+        .await
+        .unwrap()
+        .unwrap();
+    let moved = crate::migrate::describe(&report);
+    assert!(moved.starts_with("users 3, "), "{moved}");
+    check_moved(&router_on(data, new)).await;
 }
 
 async fn drop_all(url: &str) {
@@ -433,10 +450,10 @@ async fn each_account_has_its_own_characters_and_content_on_postgres() {
     let dir = tempfile::tempdir().unwrap();
     let data = dir.path().join("data");
     drop_all(&url).await;
+    // Left over from the versions with groups: the database opens all the same, and the table stays.
     make_old(&url).await;
-    refused(Db::open(&Location::Postgres(url.clone())).await);
-    drop_all(&url).await;
     let db = Db::open(&Location::Postgres(url.clone())).await.unwrap();
+    assert!(has_old_table(&url).await);
     // Opening again finds the schema already there.
     Db::open(&Location::Postgres(url)).await.unwrap();
     // First a move from SQLite, as when an instance switches databases.
@@ -459,6 +476,7 @@ async fn each_account_has_its_own_characters_and_content_on_postgres() {
     admin_flow(&router, &admin, &data).await;
     sessions_slide(&router, &db).await;
     bundle_flow(router.clone(), &data).await;
+    receive_flow(router.clone(), &data).await;
     sync_tests::sync_flow(router.clone(), &data).await;
     sync_tests::push_flow(router.clone(), &data).await;
     full_flow(router, &data).await;
@@ -1280,20 +1298,28 @@ impl Desktop {
         id
     }
 
-    /// The bytes of a bundle of `ids` with `packs`.
+    /// The bytes of a bundle of `ids` with `packs`, named as desktop Borealis names its own (not a server account).
     async fn export(&self, ids: &[&str], packs: borealis_lib::sync_dto::LinkPackChoice) -> Vec<u8> {
-        use borealis_lib::device_sync::DeviceSync;
-        use tauri::Manager as _;
+        use borealis_lib::commands_content::TauriSink;
+        use borealis_lib::commands_sync::TauriSyncEvents;
+        use borealis_lib::device_sync::{DeviceSync, SyncConfig};
         let app = self.app.clone();
         let selection = borealis_lib::sync_dto::LinkSelection {
             character_ids: ids.iter().map(|id| (*id).to_string()).collect(),
             packs,
         };
         tokio::task::spawn_blocking(move || {
-            let built = app
-                .state::<Arc<DeviceSync>>()
-                .build_bundle_file(&selection)
-                .unwrap();
+            let sync = DeviceSync::new(
+                Arc::new(app.clone()),
+                Arc::new(TauriSyncEvents(TauriSink(app.clone()))),
+                SyncConfig {
+                    bind_ip: Some(std::net::Ipv4Addr::LOCALHOST.into()),
+                    device_name: "Borealis on Desktop".into(),
+                    discovery: false,
+                },
+                || Err("no device transfer in tests".to_string()),
+            );
+            let built = sync.build_bundle_file(&selection).unwrap();
             std::fs::read(built.file.path()).unwrap()
         })
         .await
@@ -1832,4 +1858,267 @@ async fn a_bundle_brings_the_indexes_its_packs_came_from() {
     dave.accept_bundle(&preview).await;
     let (_, list) = dave.rpc("list_indexes", json!({})).await;
     assert!(indexes(&list).is_empty(), "{list}");
+}
+
+impl Client {
+    /// This account's bundle of `ids` with `packs` (`required`, `all`), as File > Export to bundle downloads it.
+    async fn export_bundle(&self, ids: &[&str], packs: &str) -> Vec<u8> {
+        use base64::Engine as _;
+        let (status, file) = self
+            .rpc(
+                "bundle_export",
+                json!({ "selection": { "characterIds": ids, "packs": packs } }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{file}");
+        base64::engine::general_purpose::STANDARD
+            .decode(file["dataBase64"].as_str().unwrap())
+            .unwrap()
+    }
+
+    /// Set a character's XP and save it.
+    async fn set_xp(&self, id: &str, xp: u32) {
+        let character = json!({ "characterId": id });
+        let (status, out) = self.rpc("load_character", character.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{out}");
+        let (status, out) = self
+            .rpc("set_xp", json!({ "characterId": id, "xp": xp }))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{out}");
+        let (status, out) = self.rpc("save_character", character.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{out}");
+        self.rpc("close_character", character).await;
+    }
+
+    async fn xp(&self, id: &str) -> Value {
+        let character = json!({ "characterId": id });
+        let (status, sheet) = self.rpc("load_character", character.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{sheet}");
+        self.rpc("close_character", character).await;
+        sheet["level"]["xp"].clone()
+    }
+}
+
+/// Make the file's edit clearly later than anything else, as edits are compared by file time.
+fn edited_later(file: &Path, secs: u64) {
+    std::fs::File::options()
+        .write(true)
+        .open(file)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + Duration::from_secs(secs))
+        .unwrap();
+}
+
+fn labels(preview: &Value) -> Vec<String> {
+    preview["preview"]["items"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{preview}"))
+        .iter()
+        .map(|i| i["label"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// Every file under the account's sync trash: what an accepted bundle replaced.
+fn trashed(data: &Path, account: &str) -> Vec<PathBuf> {
+    walk(&data.join("users").join(account).join("sync").join("trash"))
+        .into_iter()
+        .filter(|p| p.is_file())
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn another_players_bundle_never_replaces_what_you_have() {
+    let dir = tempfile::tempdir().unwrap();
+    receive_flow(router(dir.path().to_path_buf()).await, dir.path()).await;
+}
+
+/// Bundles from another player: new items come in as the recipient's own, identical ones change nothing, and a pack or
+/// character the recipient has with different content is refused, never replaced or renamed.
+async fn receive_flow(router: Router, data: &Path) {
+    let alice = sign_up(&router, "receive-alice").await;
+    let bob = sign_up(&router, "receive-bob").await;
+    let (status, hero) = alice.rpc("create_character", new_character("Hero")).await;
+    assert_eq!(status, StatusCode::OK, "{hero}");
+    let id = hero["id"].as_str().unwrap().to_string();
+    alice
+        .rpc("save_character", json!({ "characterId": id }))
+        .await;
+    alice
+        .rpc("close_character", json!({ "characterId": id }))
+        .await;
+    let bundle = alice.export_bundle(&[&id], "required").await;
+
+    // New: it comes in, as the recipient's own copy to edit.
+    let preview = bob.open_bundle("hero.borealis", &bundle).await;
+    assert_eq!(preview["sourceDevice"], "another Borealis Party account");
+    assert_eq!(actions(&preview), one("character", "new"), "{preview}");
+    assert_eq!(bob.accept_bundle(&preview).await["added"], 1);
+    // The same again is identical.
+    let preview = bob.open_bundle("again.borealis", &bundle).await;
+    assert_eq!(
+        actions(&preview),
+        one("character", "identical"),
+        "{preview}"
+    );
+    assert_eq!(labels(&preview), ["Hero"]);
+    let summary = bob.accept_bundle(&preview).await;
+    assert_eq!(summary["identical"], 1, "{summary}");
+    bob.set_xp(&id, 300).await;
+    assert_eq!(bob.xp(&id).await, 300);
+    let bobs = std::fs::read(character_file(data, &bob.id, &id)).unwrap();
+
+    // Alice edits hers later. Between one account's devices the newer copy would win; from another player it is
+    // refused.
+    alice.set_xp(&id, 900).await;
+    edited_later(&character_file(data, &alice.id, &id), 60);
+    let newer = alice.export_bundle(&[&id], "required").await;
+    let preview = bob.open_bundle("newer.borealis", &newer).await;
+    assert_eq!(
+        actions(&preview),
+        one("character", "keep_local"),
+        "{preview}"
+    );
+    assert_eq!(
+        labels(&preview),
+        ["You already have a different copy of Hero; it was not replaced. To take this one, delete yours first."]
+    );
+    let summary = bob.accept_bundle(&preview).await;
+    assert_eq!(
+        summary,
+        json!({ "added": 0, "replaced": 0, "keptLocal": 1, "identical": 0 })
+    );
+    assert_eq!(
+        std::fs::read(character_file(data, &bob.id, &id)).unwrap(),
+        bobs
+    );
+    assert_eq!(bob.xp(&id).await, 300);
+    assert!(
+        trashed(data, &bob.id).is_empty(),
+        "{:?}",
+        trashed(data, &bob.id)
+    );
+    assert!(staged_files(data, &bob.id).is_empty());
+
+    // A bundle with more: the new character and pack come in, the clashing character stays out.
+    let (status, imported) = alice.rpc("import_pack", spell_pack()).await;
+    assert_eq!(status, StatusCode::OK, "{imported}");
+    let pack = imported["pack"]["id"].as_str().unwrap().to_string();
+    let (_, second) = alice.rpc("create_character", new_character("Second")).await;
+    let second = second["id"].as_str().unwrap().to_string();
+    alice
+        .rpc("save_character", json!({ "characterId": second }))
+        .await;
+    let mixed = alice.export_bundle(&[&id, &second], "all").await;
+    let preview = bob.open_bundle("mixed.borealis", &mixed).await;
+    let mut rows = actions(&preview);
+    rows.sort();
+    assert_eq!(
+        rows,
+        [
+            ("character".to_string(), "keep_local".to_string()),
+            ("character".to_string(), "new".to_string()),
+            ("pack".to_string(), "new".to_string()),
+        ],
+        "{preview}"
+    );
+    let summary = bob.accept_bundle(&preview).await;
+    assert_eq!(
+        summary,
+        json!({ "added": 2, "replaced": 0, "keptLocal": 1, "identical": 0 })
+    );
+    let (_, list) = bob.rpc("list_characters", json!({})).await;
+    let mut got = names(&list);
+    got.sort_unstable();
+    assert_eq!(got, ["Hero", "Second"], "{list}");
+    assert_eq!(bob.xp(&id).await, 300);
+    let (status, out) = bob
+        .rpc("get_element", json!({ "elementId": "ID_PARTY_SPARK" }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert!(trashed(data, &bob.id).is_empty());
+    assert!(staged_files(data, &bob.id).is_empty());
+
+    // A pack with the same id and different content is refused as well.
+    let library = |account: &str| data.join("users").join(account).join("library").join(&pack);
+    let input = |account: &str| {
+        walk(&library(account))
+            .into_iter()
+            .find(|p| p.ends_with("input.json"))
+            .unwrap_or_else(|| panic!("{:?}", walk(&library(account))))
+    };
+    let alices = input(&alice.id);
+    let changed = std::fs::read_to_string(&alices).unwrap();
+    assert!(changed.contains("Instantaneous"), "{changed}");
+    let changed = changed.replace("Instantaneous", "1 round");
+    std::fs::write(&alices, changed).unwrap();
+    edited_later(&alices, 120);
+    let bobs_pack = std::fs::read(input(&bob.id)).unwrap();
+    let packs = alice.export_bundle(&[], "all").await;
+    let preview = bob.open_bundle("packs.borealis", &packs).await;
+    assert_eq!(actions(&preview), one("pack", "keep_local"), "{preview}");
+    let label = &labels(&preview)[0];
+    assert!(
+        label.starts_with("You already have a pack called ")
+            && label.ends_with("; it was not replaced. Rename one before sharing."),
+        "{label}"
+    );
+    let summary = bob.accept_bundle(&preview).await;
+    assert_eq!(summary["keptLocal"], 1, "{summary}");
+    assert_eq!(std::fs::read(input(&bob.id)).unwrap(), bobs_pack);
+    assert!(trashed(data, &bob.id).is_empty());
+    assert!(staged_files(data, &bob.id).is_empty());
+
+    // An account's own bundle is named as such and follows upstream's rule.
+    let own = alice.export_bundle(&[&id], "required").await;
+    let preview = alice.open_bundle("own.borealis", &own).await;
+    assert_eq!(preview["sourceDevice"], "this account");
+    assert_eq!(
+        actions(&preview),
+        one("character", "identical"),
+        "{preview}"
+    );
+    alice.accept_bundle(&preview).await;
+
+    // A bundle from elsewhere that the user says came from another player is checked too.
+    let desktop = Desktop::new().await;
+    let other = desktop.character("Wanderer").await;
+    let from_desktop = desktop.export(&[&other], required()).await;
+    let preview = bob.open_bundle("desktop.borealis", &from_desktop).await;
+    assert_eq!(preview["sourceDevice"], "Borealis on Desktop");
+    assert_eq!(bob.accept_bundle(&preview).await["added"], 1);
+    desktop
+        .run("set_xp", json!({ "characterId": other, "xp": 300 }))
+        .await;
+    desktop
+        .run("save_character", json!({ "characterId": other }))
+        .await;
+    edited_later(
+        &desktop
+            .dir
+            .path()
+            .join("characters")
+            .join(format!("{other}.json")),
+        60,
+    );
+    let later = desktop.export(&[&other], required()).await;
+    let before = std::fs::read(character_file(data, &bob.id, &other)).unwrap();
+    let preview = bob.open_bundle("desktop again.borealis", &later).await;
+    assert_eq!(actions(&preview), one("character", "replace"), "{preview}");
+    let (status, summary) = bob
+        .rpc(
+            "bundle_accept",
+            json!({ "bundleId": preview["bundleId"], "fromAnotherPlayer": true }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    assert_eq!(
+        summary,
+        json!({ "added": 0, "replaced": 0, "keptLocal": 1, "identical": 0 })
+    );
+    assert_eq!(
+        std::fs::read(character_file(data, &bob.id, &other)).unwrap(),
+        before
+    );
+    assert!(trashed(data, &bob.id).is_empty());
+    assert!(staged_files(data, &bob.id).is_empty());
 }
