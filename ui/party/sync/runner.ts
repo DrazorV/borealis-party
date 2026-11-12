@@ -4,14 +4,15 @@ import { createTauriApi } from "../../src/api/tauri";
 import { isTauri } from "../../src/lib/tauri";
 import { eventStream, serverFetch } from "../api/http";
 import { loadSession } from "../api/session";
-import { loadMirror } from "./mirror";
+import { hasCopy } from "./mirror";
 import { syncOnce, type LocalApi, type ServerCall, type SyncReport } from "./sync";
 
 /** What the account bar shows. */
 export type SyncStatus =
   | { state: "idle" }
   | { state: "syncing"; first: boolean; done: number; total: number }
-  | { state: "synced"; atMs: number }
+  /** `waiting`: characters edited offline here and not sent yet. */
+  | { state: "synced"; atMs: number; waiting: number }
   | { state: "problem"; message: string };
 
 let status: SyncStatus = { state: "idle" };
@@ -49,12 +50,12 @@ function problemText(report: SyncReport): string | null {
 }
 
 async function run(r: Runner): Promise<void> {
-  const first = !loadMirror(r.userId);
+  const first = !hasCopy(r.userId);
   publish({ state: "syncing", first, done: 0, total: 0 });
   try {
     const report = await syncOnce({ ...r, onProgress: (done, total) => publish({ state: "syncing", first, done, total }) });
     const problem = problemText(report);
-    publish(problem ? { state: "problem", message: problem } : { state: "synced", atMs: Date.now() });
+    publish(problem ? { state: "problem", message: problem } : { state: "synced", atMs: Date.now(), waiting: report.waiting.length });
   } catch (e) {
     publish({ state: "problem", message: (e as Partial<ApiError>)?.message ?? String(e) });
     later(RETRY_MS);

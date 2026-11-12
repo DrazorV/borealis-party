@@ -217,6 +217,28 @@ it("a lost mirror is rebuilt from the copies' server ids, with no copy twice", a
   expect(Object.keys(loadMirror("u1")!.characters).sort()).toEqual(["c_a", "c_b"]);
 });
 
+it("a lost mirror after an offline edit keeps the edited copy, waiting, and later syncs leave it too", async () => {
+  await sync();
+  const m = loadMirror("u1")!.characters.c_a!;
+  local.state.files.set(m.local, { text: character("c_a", "Ana", 3), updatedAt: "offline edit" });
+  const closed: string[] = [];
+  const close = local.api.closeCharacter;
+  local.api.closeCharacter = async (args) => { closed.push(`${args.characterId} ${args.discard}`); return close(args); };
+  localStorage.clear();
+  const report = await sync();
+  expect(report.waiting).toEqual(["c_a"]);
+  // Saved before it was read: an open session's edits are not discarded.
+  expect(closed[0]).toBe(`${m.local} false`);
+  expect(local.state.files.get(m.local)?.text).toBe(character("c_a", "Ana", 3));
+  expect(localTexts()).toEqual([character("c_a", "Ana", 3), character("c_b", "Bo")]);
+  expect(loadMirror("u1")!.characters.c_a!.local).toBe(m.local);
+
+  server.state.characters.set("c_a", character("c_a", "Ana", 20));
+  const again = await sync();
+  expect(again).toMatchObject({ waiting: ["c_a"], pulled: 0 });
+  expect(local.state.files.get(m.local)?.text).toBe(character("c_a", "Ana", 3));
+});
+
 it("a character deleted between the state and the fetch is no problem", async () => {
   const get = server.call;
   server.call = async (command, args) => {
@@ -285,14 +307,65 @@ it("a pack the server can't merge is a problem, tried again next time", async ()
 it("a pack change that rewrites a copy is not taken for an edit", async () => {
   await sync();
   const m = loadMirror("u1")!.characters.c_a!;
-  // Upstream rewrote the file when it found the content it was missing.
-  local.state.files.set(m.local, { text: character("c_a", "Ana", 11), updatedAt: "later" });
+  // Upstream rewrites the file when the new pack has the content it was missing.
+  const importPack = local.api.importPack;
+  local.api.importPack = async (args) => {
+    local.state.files.set(m.local, { text: character("c_a", "Ana", 11), updatedAt: "later" });
+    return importPack(args);
+  };
   server.state.packs = [{ id: "homebrew", sha256: "h1", enabled: true, indexUrl: null }];
-  await sync();
+  const report = await sync();
+  expect(report.waiting).toEqual([]);
   const after = loadMirror("u1")!.characters.c_a!;
   expect(after.local).toBe(m.local);
   expect(after.localMtime).toBe("later");
   expect(after.localSha).not.toBe(m.localSha);
+});
+
+it("a copy edited here waits: a server change does not replace it, a server delete does not remove it", async () => {
+  await sync();
+  const m = loadMirror("u1")!.characters.c_a!;
+  // Played offline: the file on the device changed.
+  local.state.files.set(m.local, { text: character("c_a", "Ana", 3), updatedAt: "offline edit" });
+  server.state.characters.set("c_a", character("c_a", "Ana", 20));
+  server.state.calls = [];
+  const report = await sync();
+  expect(report.waiting).toEqual(["c_a"]);
+  expect(report.pulled).toBe(0);
+  expect(server.state.calls).not.toContain("party_sync_get c_a");
+  expect(local.state.files.get(m.local)?.text).toBe(character("c_a", "Ana", 3));
+  expect(loadMirror("u1")!.characters.c_a).toEqual(m);
+
+  server.state.characters.delete("c_a");
+  // A pack change re-reads the copies afterwards: still not taken for the base.
+  server.state.packs = [{ id: "homebrew", sha256: "h1", enabled: true, indexUrl: null }];
+  const again = await sync();
+  expect(again).toMatchObject({ waiting: ["c_a"], removed: 0 });
+  expect(local.state.files.get(m.local)?.text).toBe(character("c_a", "Ana", 3));
+  expect(loadMirror("u1")!.characters.c_a).toEqual(m);
+});
+
+it("a copy with a new date and the same content is not an edit", async () => {
+  await sync();
+  const m = loadMirror("u1")!.characters.c_a!;
+  local.state.files.set(m.local, { text: local.state.files.get(m.local)!.text, updatedAt: "touched" });
+  server.state.characters.set("c_a", character("c_a", "Ana", 20));
+  const report = await sync();
+  expect(report).toMatchObject({ waiting: [], pulled: 1 });
+  expect(localTexts()).toContain(character("c_a", "Ana", 20));
+});
+
+it("a copy left open by an offline page is saved before it is looked at", async () => {
+  await sync();
+  const closed: string[] = [];
+  const close = local.api.closeCharacter;
+  local.api.closeCharacter = async (args) => {
+    closed.push(`${args.characterId} ${args.discard}`);
+    return close(args);
+  };
+  await sync();
+  const mirror = loadMirror("u1")!;
+  expect(closed.slice(0, 2).sort()).toEqual([`${mirror.characters.c_a!.local} false`, `${mirror.characters.c_b!.local} false`].sort());
 });
 
 it("the server's settings replace the app's, less its own folders and flags", async () => {

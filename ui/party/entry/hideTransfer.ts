@@ -1,3 +1,5 @@
+import { isOffline } from "../api/connectivity";
+
 /**
  * Entry points to what a server doesn't offer: device-to-device transfer and making bundle files (every device already
  * reads the same account), Notes and "Save as" (a folder on the device), the on-device search model, and closing the app.
@@ -20,9 +22,18 @@ const LABELS: ReadonlySet<string> = new Set([
 
 const ROWS = ".aur-menu-item, .menu-tree-item, .v5-row, .v4-foot .btn";
 
+/** Offline (api/offline.ts refuses it), where upstream would show no message: Duplicate in the character's Edit dialog. */
+const OFFLINE_LABELS: ReadonlySet<string> = new Set(["Duplicate"]);
+const OFFLINE_ROWS = ".dialog-foot .btn, .flyout-foot .btn";
+
 function hideRows(): void {
   for (const row of document.querySelectorAll<HTMLElement>(ROWS)) {
     if (LABELS.has(row.textContent?.trim() ?? "")) (row.closest("li") ?? row).classList.add("party-hidden");
+  }
+  if (isOffline()) {
+    for (const row of document.querySelectorAll<HTMLElement>(OFFLINE_ROWS)) {
+      if (OFFLINE_LABELS.has(row.textContent?.trim() ?? "")) row.classList.add("party-hidden");
+    }
   }
   // A phone page list left with no row (the More page's "Your other devices") would still take up space.
   for (const list of document.querySelectorAll<HTMLElement>(".v5-list")) {

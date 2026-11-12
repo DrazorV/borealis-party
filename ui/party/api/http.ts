@@ -8,7 +8,13 @@ function fail(code: string, message: string): ApiError {
   return { code, message } as ApiError;
 }
 
-/** JSON request to the server. A rejected token signs the device out. */
+/**
+ * Who hears about a request that could not reach the server, and about a token the server refused (connectivity.ts).
+ * `expired` answers true when it took care of the refusal; otherwise the device is signed out.
+ */
+export const serverWatch: { network?: () => void; expired?: () => boolean } = {};
+
+/** JSON request to the server. A rejected token signs the device out, unless the app keeps playing offline. */
 export async function serverFetch(session: Pick<ServerSession, "baseUrl" | "token">, method: string, path: string, body?: unknown): Promise<unknown> {
   let response: Response;
   try {
@@ -18,6 +24,7 @@ export async function serverFetch(session: Pick<ServerSession, "baseUrl" | "toke
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
   } catch {
+    serverWatch.network?.();
     throw fail("network", "The server can't be reached. Check your connection.");
   }
   const text = await response.text();
@@ -26,7 +33,7 @@ export async function serverFetch(session: Pick<ServerSession, "baseUrl" | "toke
     try { parsed = JSON.parse(text); } catch { /* an empty or plain reply */ }
   }
   if (response.ok) return parsed;
-  if (response.status === 401 && session.token) {
+  if (response.status === 401 && session.token && !serverWatch.expired?.()) {
     clearSession();
     window.location.reload();
   }
@@ -45,7 +52,7 @@ export async function serverFetch(session: Pick<ServerSession, "baseUrl" | "toke
 type Local = (args: Record<string, unknown>) => unknown;
 
 /** What a device answers itself: the server has no OS "open with", update feed, semantic model or desktop folders. */
-const LOCAL: Partial<Record<CommandName, Local>> = {
+export const LOCAL: Partial<Record<CommandName, Local>> = {
   takeOpenedFiles: () => [],
   takeOpenedBundles: () => [],
   takePickedFiles: () => [],
@@ -61,7 +68,7 @@ const LOCAL: Partial<Record<CommandName, Local>> = {
   listPortraitLibrary: () => { throw unavailable(); },
 };
 
-const unavailable = (): ApiError => fail("not_available", "That isn't available when connected to a server.");
+export const unavailable = (): ApiError => fail("not_available", "That isn't available when connected to a server.");
 
 export interface ServerEvent {
   event: string;

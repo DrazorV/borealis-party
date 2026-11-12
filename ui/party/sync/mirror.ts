@@ -44,6 +44,11 @@ export function loadMirror(userId: string): Mirror | null {
   } catch { return null; }
 }
 
+/** A whole copy to play with offline: one sync of this account ran to the end (a first sync cut off part-way is not). */
+export function hasCopy(userId: string): boolean {
+  return (loadMirror(userId)?.lastSyncMs ?? 0) > 0;
+}
+
 export function saveMirror(mirror: Mirror): void {
   try { localStorage.setItem(key(mirror.userId), JSON.stringify(mirror)); } catch { /* rebuilt from the files next time */ }
 }

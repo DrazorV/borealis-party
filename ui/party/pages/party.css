@@ -11,6 +11,7 @@
 .party-stats dd { margin: 0; font-size: 18px; font-weight: 600; }
 .party-bar { display: flex; gap: var(--sp-2); align-items: center; padding: var(--sp-1) var(--sp-3); background: var(--surface); border-bottom: var(--border-w) solid var(--border); font-size: var(--fs-sm); }
 .party-bar-host { flex: none; }
+.party-offline { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; padding: var(--sp-1) var(--sp-3); background: var(--surface-2, var(--surface)); border-bottom: var(--border-w) solid var(--border); font-size: var(--fs-sm); }
 .party-bar .party-bar-name, .party-bar .party-sync-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .party-bar .party-bar-name { flex-shrink: 0; max-width: 35%; }
 .party-bar .spacer, .party-member-head .spacer, .party-line .spacer, .party-inline .spacer { flex: 1; }
@@ -38,4 +39,6 @@
 html.party-browser .aur-winbtns { display: none; }
 .tabs.sub a[href="#/notes"], .mg-char-notes { display: none; }
 .party-hidden { display: none !important; }
+/* Offline, upstream's delete closes the open character before it asks the backend, and shows no refusal: hidden. */
+html.party-offline-mode .v4-tile-btn[title="Delete"] { display: none; }
 .aur-menu-sep:not(:has(~ .aur-menu-item:not(.party-hidden))) { display: none; }

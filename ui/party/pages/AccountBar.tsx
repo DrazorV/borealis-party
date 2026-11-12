@@ -5,6 +5,7 @@ import { Button } from "../../src/components/Button";
 import { signOut } from "../api/party";
 import { clearSession, loadSession } from "../api/session";
 import { requestSync, useSyncStatus, type SyncStatus } from "../sync/runner";
+import { OfflineBanner } from "./OfflineBanner";
 
 /** A host element placed in upstream's window, above the content, for as long as that window exists. */
 function useHost(): HTMLElement | null {
@@ -37,7 +38,7 @@ function syncLabel(status: SyncStatus): string {
       // Short enough for a phone's account bar; the title says more.
       if (!status.first) return "Syncing…";
       return status.total > 0 ? `Syncing ${status.done}/${status.total}` : "Syncing…";
-    case "synced": return "Synced";
+    case "synced": return status.waiting > 0 ? `${status.waiting} waiting` : "Synced";
     case "problem": return "Sync problem";
     default: return "";
   }
@@ -52,6 +53,7 @@ function SyncChip() {
     <Button small onClick={() => void requestSync()} disabled={status.state === "syncing"}
       title={status.state === "problem" ? status.message
         : status.state === "syncing" && status.first ? "Downloading your characters to this device"
+        : status.state === "synced" && status.waiting > 0 ? "Changes made offline on this device, not sent to the server yet"
         : "Copy the account to this device now"}>
       <span className="party-sync-label">{label}</span>
     </Button>
@@ -71,14 +73,17 @@ export function AccountBar() {
     window.location.reload();
   };
   return createPortal(
-    <div className="party-bar">
-      <span className="muted party-bar-name">{session.user.username}</span>
-      <span className="spacer" />
-      <SyncChip />
-      <Button small onClick={() => nav("/account")}>Account</Button>
-      {session.user.admin && <Button small onClick={() => nav("/admin")}>Admin</Button>}
-      <Button small onClick={() => void exit()}>Sign out</Button>
-    </div>,
+    <>
+      <div className="party-bar">
+        <span className="muted party-bar-name">{session.user.username}</span>
+        <span className="spacer" />
+        <SyncChip />
+        <Button small onClick={() => nav("/account")}>Account</Button>
+        {session.user.admin && <Button small onClick={() => nav("/admin")}>Admin</Button>}
+        <Button small onClick={() => void exit()}>Sign out</Button>
+      </div>
+      <OfflineBanner />
+    </>,
     host,
   );
 }

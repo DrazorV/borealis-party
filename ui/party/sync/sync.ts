@@ -8,7 +8,7 @@ import { emptyMirror, loadMirror, saveMirror, type Mirror } from "./mirror";
  * as one content file for upstream `import_pack`; the server's settings replace the app's.
  * The characters are copied before the index downloads, which can take minutes: upstream re-checks saved characters
  * when packs are installed.
- * Online, nobody edits the copy, so this may replace it freely.
+ * Edits made here offline (api/offline.ts) are "waiting": nothing replaces or removes such a copy until it is sent.
  */
 
 /** The app's own backend, as far as a sync uses it. */
@@ -35,6 +35,8 @@ export interface SyncReport {
   pulled: number;
   removed: number;
   packs: number;
+  /** Server ids of the characters edited here and not sent yet: their copies were left as they are. */
+  waiting: string[];
   /** What did not copy, by character or pack id; it is tried again next time. */
   problems: Record<string, string>;
   /** What copied another way than planned. */
@@ -221,13 +223,15 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
   const now = deps.now ?? Date.now;
   const known = loadMirror(userId);
   const mirror = known ?? emptyMirror(userId);
-  const report: SyncReport = { first: !known, pulled: 0, removed: 0, packs: 0, problems: {}, notes: [] };
+  const report: SyncReport = { first: !known, pulled: 0, removed: 0, packs: 0, waiting: [], problems: {}, notes: [] };
 
   const t0 = now();
   const st = await server("party_sync_state") as ServerState;
   mirror.offsetMs = Math.round(st.nowMs - (t0 + now()) / 2);
   const onServer = new Set(st.characters.map((c) => c.id));
 
+  // A copy still open from an offline page is saved first, so its edits are on file and seen below.
+  for (const m of Object.values(mirror.characters)) await local.closeCharacter({ characterId: m.local, discard: false });
   const localList = await local.listCharacters();
   const localIds = new Set(localList.map((c) => c.id));
   for (const [s, m] of Object.entries(mirror.characters)) if (!localIds.has(m.local)) delete mirror.characters[s];
@@ -238,6 +242,8 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
     for (const c of localList) {
       if (mapped.has(c.id)) continue;
       try {
+        // Open from an offline page whose mirror is gone: its edits go on file first.
+        if (!known) await local.closeCharacter({ characterId: c.id, discard: false });
         const { sha, metaId } = await exported(local, c.id);
         if (mirror.pending.includes(metaId)) {
           await drop(local, c.id);
@@ -249,12 +255,27 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
     mirror.pending = [];
   }
 
+  // Edited here (offline): a changed date alone is not an edit, a changed export is.
+  const waiting = new Set<string>();
+  const listed = new Map(localList.map((c) => [c.id, c.updatedAt]));
+  for (const [s, m] of Object.entries(mirror.characters)) {
+    const updatedAt = listed.get(m.local);
+    if (updatedAt === undefined || updatedAt === m.localMtime) continue;
+    try {
+      if ((await exported(local, m.local)).sha === m.localSha) m.localMtime = updatedAt;
+      else waiting.add(s);
+    } catch {
+      waiting.add(s); // unreadable now: kept, and looked at again next time
+    }
+  }
+  report.waiting = [...waiting];
+
   // Merged packs are quick and come first; the index downloads wait until the characters are here.
   let packsChanged = await copyMerged(deps, await stalePacks(local, st, mirror, false), mirror, report);
   saveMirror(mirror);
 
   const pulledNow = new Set<string>();
-  const todo = st.characters.filter((c) => mirror.characters[c.id]?.serverSha !== c.sha256);
+  const todo = st.characters.filter((c) => !waiting.has(c.id) && mirror.characters[c.id]?.serverSha !== c.sha256);
   deps.onProgress?.(0, todo.length);
   for (const [n, c] of todo.entries()) {
     let spare: string | null = null;
@@ -268,6 +289,20 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
       const id = spare;
       const { sha } = await exported(local, id);
       const before = mirror.characters[c.id];
+      if (before && before.serverSha === null && before.localSha !== sha) {
+        // Found again after a lost mirror, and not the same as the server's copy: maybe an edit made here. It stays
+        // and waits, with the server's copy as its base (an empty date makes every sync compare it again).
+        mirror.characters[c.id] = { local: before.local, serverSha: file.sha256, localSha: sha, localMtime: "" };
+        saveMirror(mirror);
+        await drop(local, id);
+        spare = null;
+        mirror.pending = mirror.pending.filter((s) => s !== c.id);
+        waiting.add(c.id);
+        report.waiting.push(c.id);
+        saveMirror(mirror);
+        deps.onProgress?.(n + 1, todo.length);
+        continue;
+      }
       mirror.characters[c.id] = { local: id, serverSha: file.sha256, localSha: sha, localMtime: imported.summary.updatedAt };
       spare = null;
       // Saved before the old copy goes: a crash in between leaves a spare copy, never no copy.
@@ -293,7 +328,7 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
 
   // Deleted on the server.
   for (const [s, m] of Object.entries(mirror.characters)) {
-    if (onServer.has(s)) continue;
+    if (onServer.has(s) || waiting.has(s)) continue;
     try {
       await drop(local, m.local);
       delete mirror.characters[s];
@@ -315,8 +350,8 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
   // here may export differently now: neither is an edit.
   if (packsChanged) {
     for (const c of await local.listCharacters()) {
-      const m = Object.values(mirror.characters).find((x) => x.local === c.id);
-      if (m && (m.localMtime !== c.updatedAt || pulledNow.has(c.id))) {
+      const [s, m] = Object.entries(mirror.characters).find(([, x]) => x.local === c.id) ?? [];
+      if (s && m && !waiting.has(s) && (m.localMtime !== c.updatedAt || pulledNow.has(c.id))) {
         m.localSha = (await exported(local, c.id)).sha;
         m.localMtime = c.updatedAt;
       }

@@ -14,6 +14,8 @@ export interface ServerSession {
   baseUrl: string;
   token: string;
   user: ServerUser;
+  /** The server refused the token while the app had a copy to play offline with: sign in again to sync. */
+  expired?: boolean;
 }
 
 const KEY = "party.session";
@@ -39,9 +41,9 @@ export function loadSession(): ServerSession | null {
   const text = read(KEY);
   if (!text) return null;
   try {
-    const { baseUrl, token, user } = JSON.parse(text) as Partial<ServerSession>;
+    const { baseUrl, token, user, expired } = JSON.parse(text) as Partial<ServerSession>;
     if (typeof baseUrl !== "string" || typeof token !== "string" || !user) return null;
-    return { baseUrl, token, user };
+    return { baseUrl, token, user, ...(expired ? { expired: true } : {}) };
   } catch { return null; }
 }
 
@@ -57,6 +59,12 @@ export function saveSession(session: ServerSession): void {
 export function clearSession(): void {
   write(KEY, null);
   try { sessionStorage.removeItem(CURRENT_CHARACTER_KEY); } catch { /* nothing was remembered then */ }
+}
+
+/** The server no longer takes this session's token; the app keeps it to play offline until the user signs in again. */
+export function markExpired(): void {
+  const session = loadSession();
+  if (session) write(KEY, JSON.stringify({ ...session, expired: true }));
 }
 
 /** Keep the stored account details in step with the server's. */
