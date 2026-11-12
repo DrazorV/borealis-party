@@ -192,8 +192,7 @@ jobs:
   ios:
     name: iOS app
     needs: version
-    # macos-15, not macos-26: GitHub has far fewer macos-26 runners, and iOS jobs there went unassigned for hours.
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 150
     outputs:
       signed: ${{ steps.mode.outputs.signed }}
