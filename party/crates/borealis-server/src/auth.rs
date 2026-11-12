@@ -112,8 +112,8 @@ impl RateLimiter {
     }
 }
 
-/// The client a request comes from: the connecting address, unless that is one of `server.trusted_proxies`, which
-/// may name the client in `CF-Connecting-IP` or `X-Forwarded-For`.
+/// The client a request comes from: the connecting address, unless that is a trusted proxy (the admin page's list,
+/// else `server.trusted_proxies`), which may name the client in `CF-Connecting-IP` or `X-Forwarded-For`.
 ///
 /// Behind a proxy that is not listed, every request seems to come from the proxy. The headers are still not believed
 /// (anyone could send them), and the server says once in its log which setting to change.
@@ -194,25 +194,32 @@ pub fn client_ip(peer: IpAddr, headers: &HeaderMap, trusted: &[crate::net_guard:
     client
 }
 
-/// Logged once: forwarding headers came from a peer that isn't in `server.trusted_proxies`.
+/// Logged once: forwarding headers came from a peer that isn't a trusted proxy.
 fn warn_untrusted_proxy(peer: IpAddr) {
     static WARNED: std::sync::Once = std::sync::Once::new();
     WARNED.call_once(|| {
         tracing::warn!(
-            "requests from {peer} carry X-Forwarded-For or CF-Connecting-IP, which are ignored: if {peer} is your              reverse proxy, add it to server.trusted_proxies (BOREALIS__SERVER__TRUSTED_PROXIES), or sign-up and              sign-in limits treat every client as one"
+            "requests from {peer} carry X-Forwarded-For or CF-Connecting-IP, which are ignored: if {peer} is your              reverse proxy, trust it on the admin page (Admin > Settings > Trusted proxies) or in              server.trusted_proxies (BOREALIS__SERVER__TRUSTED_PROXIES), or sign-up and sign-in limits treat every              client as one"
         );
     });
 }
 
-impl<S: Send + Sync> FromRequestParts<S> for ClientIp {
-    type Rejection = <ConnectInfo<SocketAddr> as FromRequestParts<S>>::Rejection;
+impl<S> FromRequestParts<S> for ClientIp
+where
+    S: Send + Sync,
+    AppState: FromRef<S>,
+{
+    type Rejection = ApiError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let ConnectInfo(peer) = ConnectInfo::<SocketAddr>::from_request_parts(parts, state).await?;
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, ApiError> {
+        let ConnectInfo(peer) = ConnectInfo::<SocketAddr>::from_request_parts(parts, state)
+            .await
+            .map_err(|e| ApiError::Internal(format!("client address: {e}")))?;
+        let trusted = crate::admin::trusted_proxies(&AppState::from_ref(state)).await?;
         Ok(Self(client_ip(
             peer.ip(),
             &parts.headers,
-            &crate::config::network().trusted_proxies,
+            &trusted.ranges(),
         )))
     }
 }

@@ -845,6 +845,15 @@ impl Db {
         Ok(())
     }
 
+    /// Forget a setting from the admin page, so `config.toml` applies again.
+    pub async fn delete_setting(&self, key: &str) -> ApiResult<()> {
+        sqlx::query("DELETE FROM server_settings WHERE key = $1")
+            .bind(key)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Add to the activity log, and prune it to [`ACTIVITY_KEPT`] rows.
     pub async fn log(&self, entry: &Activity) -> ApiResult<()> {
         // Version 7 ids sort by time, so the newest rows have the largest ids.

@@ -84,7 +84,8 @@ enum Command {
     },
 }
 
-/// Server settings the routes need, from `config.toml`. The admin page can override sign-up and approval.
+/// Server settings the routes need, from `config.toml`. The admin page can override sign-up, approval and the
+/// trusted proxies.
 pub struct Config {
     open_registration: bool,
     require_approval: bool,
@@ -92,6 +93,8 @@ pub struct Config {
     public_url: Option<String>,
     /// `server.app_download`: the folder the apps are downloaded from, if any.
     app_download: Option<String>,
+    /// `server.trusted_proxies`, as written. A list saved on the admin page wins ([`admin::trusted_proxies`]).
+    trusted_proxies: Vec<String>,
 }
 
 /// Shared by every route.
@@ -393,6 +396,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             require_approval: settings.server.require_approval,
             public_url: settings.public_url(),
             app_download: settings.app_download(),
+            trusted_proxies: settings.server.trusted_proxies.clone(),
         }),
         login_limiter: RateLimiter::logins(),
         signup_limiter: RateLimiter::signups(),
