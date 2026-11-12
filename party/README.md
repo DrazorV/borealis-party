@@ -662,3 +662,88 @@ On Windows with the server built in WSL, set `BOREALIS_SERVER_WSL_BIN` to its Li
 Controls smaller than a comfortable tap target (44 px on iOS, 48 px on Android) and content cut off at the screen's
 edge are reported, not failed, in `party/ui-tests/findings.md`, with the tests marked `test.fail` for fixes that are
 planned. CI runs the suite as the "phone UI" job of `party-ci.yml` and adds `findings.md` to the run's summary.
+
+## Measurements
+
+How long the big imports take, and how large the files really are, so we know whether the server needs background
+jobs (a step over about 80 s, because Cloudflare gives up after 100 s with a 524) or chunked uploads (files over
+about 70 MB). Measured 2026-11-12 on server 0.1.3 for release 0.1.4.
+
+### Through the public address, without signing in
+
+From the home network, pinned to Cloudflare's public address (`curl --resolve`), because the home DNS sends the name
+straight to the proxy. Random bytes, a few requests spaced out:
+
+| What | Result |
+| --- | --- |
+| Largest request Cloudflare passes | exactly 100 MiB: 104,857,600 bytes reach the server, one byte more gets Cloudflare's own `413 Payload Too Large` HTML page after about 1.3 MB was sent |
+| Who answered | below the cap the server's own JSON (`401` from `/api/rpc/*`, which refuses before reading the body; `400` from `/api/auth/login`, which reads the whole body first and fails to parse it, so no sign-in is tried); over the cap Cloudflare, so the proxy's 512m and the server's 512 MB are never the limit through the public address |
+| Upload speed, home network → Cloudflare → tunnel → server | 99 MiB read in full by the server in 4.0 s, about 26 MB/s (10 MiB 0.75 s, 60 MiB 2.8 s); this is bounded by the home line, so a phone outside is bounded by its own upload speed instead |
+| `/api/server`, time to first byte | 806 ms on a cold connection (TLS), then 46-50 ms |
+
+`PUBLIC_UPLOAD_MB = 95` (MiB) is therefore right: 95 MiB of request is below the cap, which leaves files of about
+71 MB.
+
+### On the server itself, no proxy
+
+`party/tools/measure-imports.mjs` against a throwaway local server (release build, SQLite, WSL), signed in as its
+first account. Wall-clock seconds for one request:
+
+| Step | Request | Time |
+| --- | --- | --- |
+| `update_indexes`, 5 community Aurora indexes (4 found, 1 gone), first download | 0.2 MB | **194-204 s** |
+| `update_indexes`, the same, again with nothing changed | | **65 s** |
+| `stage_5etools_url`, the full 5etools data repository | | 10.6 s |
+| `import_5etools`, all 128 sources (17,032 elements, 127 packs) | | 7.5 s |
+| `preview_import_pack`, a 36.2 MB Aurora zip (1,873 files, stored) | 48.3 MB | 1.8 s |
+| `install_import_preview`, the same (28,867 elements) | | 2.9 s |
+| `bundle_export`, the whole library (132 packs) | 26.0 MB back | 2.1 s |
+| `stage_bundle` + `bundle_open` + `bundle_accept`, that export into an empty library | 26.0 MB | 0.4 + 0.2 + 2.0 s |
+
+Sizes:
+
+- Whole-library export with everything above: **19.5 MB** (26 MB as base64). The `content.borealis` in use today is
+  4.9 MB.
+- The Aurora content folder: 41 MB of XML, 36.2 MB as a stored zip, 7.7 MB deflated.
+
+`update_indexes` is the slow one: it fetches each file of every index from the index host, one after another, and
+checks every file again on the next update even when nothing changed. Everything else is a few seconds and bound by
+the server's disk and CPU.
+
+### Through the public address, signed in
+
+To be run by the owner, against a throwaway account made for it and approved on the admin page (it writes into that
+account's library and removes what it added when it ends):
+
+```sh
+node party/tools/measure-imports.mjs --server https://dnd.4tress.click --via-cloudflare \
+  --index <index URL> [--index <index URL> ...] --repeat-update \
+  --5etools-url <5etools data repository URL> \
+  --aurora-zip <a zip of Aurora content, about 40 MB> \
+  --json measure-public.json
+```
+
+It asks for the username and the password (not shown) and never prints or saves them. `--via-cloudflare` looks the
+name up over DNS-over-HTTPS so the run goes through Cloudflare even on the home network. `--help` lists the other
+options (`--bundle FILE` uses a given bundle instead of the export it makes).
+
+| Step | Time | Status |
+| --- | --- | --- |
+| `update_indexes`, first download | _to measure_ | |
+| `update_indexes`, again | _to measure_ | |
+| `stage_5etools_url` | _to measure_ | |
+| `import_5etools` | _to measure_ | |
+| `preview_import_pack` + `install_import_preview` | _to measure_ | |
+| `bundle_export` (size) | _to measure_ | |
+| `stage_bundle` + `bundle_open` + `bundle_accept` | _to measure_ | |
+
+### What it means for 0.1.4
+
+- **Background jobs (I1): needed, for index updates.** The first download of a set of indexes took over three minutes
+  on the server alone, and a plain Update with nothing new took 65 s. Through Cloudflare the app gets a 524 at 100 s
+  while the server keeps going, and trying again starts the same work twice. `update_indexes` (and with it the
+  5etools downloads, `stage_5etools_url` and `update_5etools_url`, which depend on another host's speed) should run
+  as a job. The other imports are well under the limit and can stay one request.
+- **Chunked upload (I2): not needed.** The largest real files are well under the cap: a 36 MB Aurora zip (48 MB
+  request) and a 19.5 MB whole-library export (26 MB request), against 100 MiB per request through Cloudflare. It
+  comes back only if a real file or export goes over about 70 MB.
