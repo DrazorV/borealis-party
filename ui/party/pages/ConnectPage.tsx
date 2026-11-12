@@ -4,6 +4,7 @@ import { checkServer, endSession, signIn, signUp, type ServerInfo } from "../api
 import {
   dropSignInAgain, markExpired, normaliseAddress, rememberServer, rememberedServer, saveSession, type ServerSession, type ServerUser,
 } from "../api/session";
+import { usePhone } from "../../src/lib/phone";
 import { isTauri } from "../../src/lib/tauri";
 import { othersUnsentEdits, removeOtherCopies } from "../sync/account";
 import { AppOffer } from "./AppOffer";
@@ -27,6 +28,8 @@ interface Waiting { baseUrl: string; token: string; user: ServerUser; names: str
 export function ConnectPage({ again }: { again?: ServerSession } = {}) {
   // A browser got this page from the server, so the server is already known.
   const needsAddress = isTauri();
+  // On a phone a focused field opens the keyboard over half the card: the first tap does that instead.
+  const focusFirst = !usePhone();
   const [address, setAddress] = useState(again?.baseUrl ?? rememberedServer());
   const [server, setServer] = useState<{ baseUrl: string; info: ServerInfo } | null>(null);
   const [mode, setMode] = useState<"in" | "up">("in");
@@ -153,7 +156,7 @@ export function ConnectPage({ again }: { again?: ServerSession } = {}) {
             <p className="muted">Enter the address of your server.</p>
             <label>
               Server address
-              <input className="aur-text" autoFocus inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="party.example.com" value={address} onChange={(e) => setAddress(e.target.value)} required />
+              <input className="input" autoFocus={focusFirst} inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="party.example.com" value={address} onChange={(e) => setAddress(e.target.value)} required />
             </label>
             <button className="btn primary" disabled={busy}>Connect</button>
           </>
@@ -164,17 +167,17 @@ export function ConnectPage({ again }: { again?: ServerSession } = {}) {
             {notice && <div className="alert success" role="status"><div>{notice}</div></div>}
             <label>
               {mode === "in" ? "Username or email" : "Username"}
-              <input className="aur-text" autoFocus autoCapitalize="none" spellCheck={false} autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+              <input className="input" autoFocus={focusFirst} autoCapitalize="none" spellCheck={false} autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
             </label>
             {mode === "up" && (
               <label>
                 Email
-                <input className="aur-text" type="email" autoCapitalize="none" spellCheck={false} autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                <input className="input" type="email" autoCapitalize="none" spellCheck={false} autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
               </label>
             )}
             <label>
               Password
-              <input className="aur-text" type="password" autoComplete={mode === "in" ? "current-password" : "new-password"} value={password} onChange={(e) => setPassword(e.target.value)} required minLength={mode === "up" ? 8 : undefined} />
+              <input className="input" type="password" autoComplete={mode === "in" ? "current-password" : "new-password"} value={password} onChange={(e) => setPassword(e.target.value)} required minLength={mode === "up" ? 8 : undefined} />
             </label>
             {mode === "up" && (
               <p className="muted party-connect-note">
