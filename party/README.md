@@ -237,6 +237,22 @@ characters and content packs to that account only, exactly as desktop Borealis w
 - Dropping a `.borealis` file on the window or choosing it with "+" is not supported: those say the file cannot be
   imported. Use "Import characters" or File > Open bundle... instead.
 
+## Open with, and web links, in the apps
+
+- **Open with / Share to Borealis Party** (Android and iOS): the app asks first, in its own dialog, "Import
+  Hero.dnd5e into alice?", and Import sends the file to that account on the server, as if it had been chosen there:
+  a `.dnd5e` (or character `.json`) to the character import, Aurora `.xml`, `.index` and `.zip` to the content import
+  preview, 5etools-format `.json` homebrew to Additional Content's 5etools import. Cancel drops it. The upload size
+  limits above apply, with the same messages.
+- A `.borealis` opened on Android goes up to the server and opens the Open bundle window, as File > Open bundle...
+  does. The party apps are built without device transfer, and without it iOS (and the desktop app) would drop an
+  opened `.borealis` without a word, so the iOS app doesn't offer to open `.borealis` files: use File > Open bundle....
+- Offline, an opened file stays on the device and the app says it will import it when it is connected; the online
+  app takes it when it starts. (On Android a file opened while the app was closed is taken on the next online start.)
+- Web links: the apps open Borealis's own pages as before, and any other web page (this server's pages, the app
+  downloads, a link on a party page) in the system browser. If the device can't, a dialog shows the address with
+  Copy link.
+
 ## Offline in the apps
 
 The Android, iOS and desktop apps keep a copy of the account's characters and content packs. Without the server they open,
@@ -430,6 +446,27 @@ Keep the signing key: Android only installs an update signed with the same key.
 Known limit: in the Android app the character sheet cannot be saved or shared as a PDF yet (its web view has no
 download or share sheet). Open the server in the phone's browser for that.
 
+### Android smoke run
+
+A scripted check of the Android app on the emulator (AVD `BalanceLab_Tablet`, started if none is running), from the
+repository root, with Node 22 or later and WSL:
+
+```powershell
+party/android/smoke-open-with.ps1 -Build   # build the x86_64 debug APK first
+party/android/smoke-open-with.ps1          # with the debug APK already built
+```
+
+It sets the screen to 1080x2340 at 450 dpi (384x832 CSS), starts a throwaway server in WSL
+(`party/android/smoke/server.sh`: SQLite in a new `/tmp` folder, an account `smoke` with a random password; never
+the production server), installs the APK fresh and signs in through the app. Then it opens a `.dnd5e`, an Aurora
+`.xml`, a 5etools `.json` and a `.borealis` with the app the way the Files app does (a `content://` URI from
+Downloads), and checks the "Import ... into smoke?" dialog, Cancel, and what each import did on the server. Last, a
+tap on a web link has to reach the system browser. It drives the page over the WebView's DevTools socket, so it
+needs a debug APK. Afterwards it stops the server and removes its folder, deletes the pushed files, clears the app's
+data and resets the screen size (`-Keep` leaves all of that for a look around). Screenshots and `results.json` are
+written to `target/party-android-smoke`. The server binary is `-ServerBin`, by default
+`~/bp-accounts-target/release/borealis-server` in WSL.
+
 ## Build the iOS app
 
 Only on a Mac, with Xcode, the `ui` dependencies (`npm --prefix ui ci`) and the Rust target `aarch64-apple-ios`
@@ -448,8 +485,9 @@ or on-device semantic search, and the script fails if the built app lacks the pa
 - Plain HTTP (`192.168.1.20:8787`, `.local` names, a typed `http://`) is allowed with `NSAllowsArbitraryLoads`, as on
   Android. The first connection to the home network asks for the Local Network permission; allow it.
 - In the iOS app, Share on the character sheet hands the server's PDF to the share sheet, so "Save to Files" works
-  from there. Opening a `.dnd5e` or `.borealis` file with the app from Files does nothing, as on Android: use
-  "Import characters" instead.
+  from there. Opening a file with the app from Files imports it into the account after asking (see
+  [Open with](#open-with-and-web-links-in-the-apps)); `.borealis` files are not offered there. Not yet tried on an
+  iPhone.
 
 ## Build the desktop app
 

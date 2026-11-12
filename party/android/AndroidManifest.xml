@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Merged over upstream's manifest by party.init.gradle (as the debug and release build types' manifest), so
+  upstream's Android project stays as it is.
+
+  Open with / Share (plan I4, decision D11): every file opened with Borealis Party is imported into the signed-in
+  account after an app dialog asks (ui/party/api/overrides/opened.ts). Upstream's filters stay: without device-link,
+  Android's activity reads every opened file into the one queue the app has (`take_opened_files`), .borealis
+  included, so a bundle opens upstream's Open bundle window through the server. Added here: .json, for
+  5etools-format homebrew, which upstream doesn't claim.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity android:name="app.borealis.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/json" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -1,0 +1,10 @@
+{
+  "_meta": {
+    "sources": [
+      { "json": "PartySmoke", "abbreviation": "PSMK", "full": "Party Smoke Test Homebrew", "authors": ["Borealis Party"], "version": "0.0.1" }
+    ]
+  },
+  "feat": [
+    { "name": "Smoke Run Feat", "source": "PartySmoke", "page": 0, "entries": ["A feat that only the Android smoke run imports."] }
+  ]
+}
