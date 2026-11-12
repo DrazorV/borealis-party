@@ -9,13 +9,25 @@ const session: ServerSession = {
 };
 
 let calls: { path: string; body: Record<string, unknown> }[];
+const hero = { id: "hero-1", name: "Hero", build: "Elf Wizard 3", level: 3 };
+const preview = {
+  bundleId: "b-1", fileName: "Hero.borealis", sourceDevice: "Borealis on Windows PC",
+  preview: { totalBytes: 10, items: [
+    { kind: "character", key: "hero-1", label: "Hero", action: "new", size: 5, missingPacks: ["far-realms"] },
+    { kind: "pack", key: "homebrew", label: "homebrew", action: "new", size: 5, missingPacks: [] },
+  ] },
+};
 
 beforeEach(() => {
   calls = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
     const path = url.replace(session.baseUrl, "");
     calls.push({ path, body: JSON.parse(String(init.body ?? "{}")) as Record<string, unknown> });
-    const reply = path === "/api/rpc/stage_bundle" ? { token: "tok-1", name: "Hero.borealis" } : { summary: { name: "Hero" } };
+    const reply = path === "/api/rpc/stage_bundle" ? { token: "tok-1", name: "Hero.borealis" }
+      : path === "/api/rpc/bundle_open" ? preview
+      : path === "/api/rpc/list_characters" ? [{ id: "other", name: "Other" }, hero]
+      : path === "/api/rpc/bundle_accept" ? { added: 2, replaced: 0, keptLocal: 0, identical: 0 }
+      : { summary: { name: "Hero" } };
     return new Response(JSON.stringify(reply), { status: 200 });
   }));
 });
@@ -33,13 +45,56 @@ const opened = (): BundleRequest[] => {
 };
 
 describe("importCharacter on a server", () => {
-  it("stages a .borealis file and opens it in the Open bundle window, with a message for the import report", async () => {
+  /** BundleHost's part: open the requested preview, then press Accept or Cancel. */
+  const window_ = (api: ReturnType<typeof createHttpApi>, press: "accept" | "cancel") => {
+    const off = onBundleRequest((r) => {
+      void api.bundleOpen({ token: r.token }).then(async (b) => {
+        if (press === "accept") await api.bundleAccept({ bundleId: b.bundleId });
+        else await api.bundleDiscard({ bundleId: b.bundleId });
+      });
+    });
+    onTestFinished(off);
+  };
+
+  it("checks a .borealis file, waits for Accept in the Open bundle window, then reports the character", async () => {
     const seen = opened();
     const api = createHttpApi(session);
-    await expect(api.importCharacter({ fileName: "Hero.BOREALIS", contentBase64: "AAAA" }))
-      .rejects.toMatchObject({ message: "it is a Borealis bundle, so it opened in the Open bundle window for review." });
-    expect(calls).toEqual([{ path: "/api/rpc/stage_bundle", body: { fileName: "Hero.BOREALIS", contentBase64: "AAAA" } }]);
+    window_(api, "accept");
+    const report = await api.importCharacter({ fileName: "Hero.BOREALIS", contentBase64: "AAAA" });
+    expect(report.summary).toEqual(hero);
+    expect(report.missingContent).toEqual([]);
+    expect(report.warnings).toEqual(["Content it needs that was not in the bundle: far-realms."]);
+    // The window got the preview the import made: the token is read once.
+    expect(calls.map((c) => c.path)).toEqual(["/api/rpc/stage_bundle", "/api/rpc/bundle_open", "/api/rpc/bundle_accept", "/api/rpc/list_characters"]);
+    expect(calls[1]?.body).toEqual({ token: "tok-1" });
     expect(seen).toEqual([{ token: "tok-1", name: "Hero.borealis" }]);
+  });
+
+  it("says nothing changed when the Open bundle window is cancelled", async () => {
+    const api = createHttpApi(session);
+    window_(api, "cancel");
+    await expect(api.importCharacter({ fileName: "Hero.borealis", contentBase64: "AAAA" }))
+      .rejects.toMatchObject({ message: "it is a Borealis bundle. The Open bundle window was cancelled, so nothing was changed." });
+    expect(calls.map((c) => c.path)).toEqual(["/api/rpc/stage_bundle", "/api/rpc/bundle_open", "/api/rpc/bundle_discard"]);
+  });
+
+  it("gives a refused bundle only the import report's message, with no window", async () => {
+    const seen = opened();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const path = url.replace(session.baseUrl, "");
+      calls.push({ path, body: {} });
+      return path === "/api/rpc/stage_bundle"
+        ? new Response(JSON.stringify({ token: "tok-1", name: "Hero.borealis" }), { status: 200 })
+        : new Response(JSON.stringify({ code: "invalid_argument", message: "That is not a Borealis bundle." }), { status: 422 });
+    }));
+    await expect(createHttpApi(session).importCharacter({ fileName: "Hero.borealis", contentBase64: "AAAA" }))
+      .rejects.toMatchObject({ message: "That is not a Borealis bundle." });
+    expect(seen).toEqual([]);
+  });
+
+  it("opens a bundle the Open bundle menu picked from the server as before", async () => {
+    await createHttpApi(session).bundleOpen({ token: "tok-9" });
+    expect(calls).toEqual([{ path: "/api/rpc/bundle_open", body: { token: "tok-9" } }]);
   });
 
   it("leaves a zip with an extension (a content .zip, a misnamed .json) to import_character", async () => {
@@ -53,9 +108,10 @@ describe("importCharacter on a server", () => {
 
   it("treats a zip with no extension (an opaque provider name) as a bundle", async () => {
     const seen = opened();
-    await expect(createHttpApi(session).importCharacter({ fileName: "document", contentBase64: "UEsDBBQAAAA" }))
-      .rejects.toMatchObject({ message: "it looks like a Borealis bundle, so it opened in the Open bundle window for review." });
-    expect(calls.map((c) => c.path)).toEqual(["/api/rpc/stage_bundle"]);
+    const api = createHttpApi(session);
+    window_(api, "accept");
+    await expect(api.importCharacter({ fileName: "document", contentBase64: "UEsDBBQAAAA" })).resolves.toMatchObject({ summary: hero });
+    expect(calls[0]?.path).toEqual("/api/rpc/stage_bundle");
     expect(seen).toHaveLength(1);
   });
 

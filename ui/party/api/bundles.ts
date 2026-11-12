@@ -1,4 +1,4 @@
-import type { ApiError, PickedPath } from "../../src/api/contract";
+import type { ApiError, BundlePreview, CharacterSummary, ImportReport, PickedPath } from "../../src/api/contract";
 import { fileToBase64 } from "../../src/lib/files";
 import { openBundleFile } from "../../src/pages/transfer/openBundle";
 import { serverFetch } from "./http";
@@ -56,13 +56,69 @@ export function looksLikeBundle(fileName: string, contentBase64: string): boolea
   return /\.borealis$/i.test(name) || (!name.includes(".") && contentBase64.startsWith("UEsD"));
 }
 
+/** A preview opened for Import characters, until the Open bundle window is accepted or cancelled. */
+interface Waiting {
+  preview: BundlePreview;
+  done: (outcome: "accepted" | "cancelled") => void;
+}
+
 /**
- * A bundle handed to Import characters: uploaded and shown in the Open bundle window. The import report still gets a
- * row for it, which it prefixes with "Could not import this file:", so the message is worded to follow that.
+ * Bundles handed to Import characters, by token until BundleHost opens them, then by bundle id. http.ts routes
+ * `bundleOpen`, `bundleAccept` and `bundleDiscard` through {@link importWatch} so the import waits for the window.
  */
-export async function openBundleFromImport(session: Session, fileName: string, contentBase64: string): Promise<never> {
+const byToken = new Map<string, Waiting>();
+const byId = new Map<string, Waiting>();
+
+/** The bundle calls BundleHost makes, so an import waiting on its window learns how it closed. */
+export const importWatch = {
+  /** BundleHost reopening a preview the import already made: the same preview, no second read of the token. */
+  open(token: string): BundlePreview | null {
+    const w = byToken.get(token);
+    if (!w) return null;
+    byToken.delete(token);
+    byId.set(w.preview.bundleId, w);
+    return w.preview;
+  },
+  settle(bundleId: string, outcome: "accepted" | "cancelled"): void {
+    const w = byId.get(bundleId);
+    byId.delete(bundleId);
+    w?.done(outcome);
+  },
+};
+
+const plural = (n: number, one: string) => (n === 1 ? `1 ${one}` : `${n} ${one}s`);
+
+/**
+ * A bundle handed to Import characters: uploaded and checked first, so a bad file gets only the import report's message.
+ * A good one opens in upstream's Open bundle window, and the import waits for it, so the report comes after the window
+ * (not under it) and tells what happened: the character that came in, or that nothing changed.
+ */
+export async function openBundleFromImport(session: Session, fileName: string, contentBase64: string): Promise<ImportReport> {
   const staged = await stageBundle(session, fileName, contentBase64);
-  openBundleFile({ token: staged.token, name: staged.name });
-  const what = /\.borealis$/i.test(fileName.trim()) ? "it is a Borealis bundle" : "it looks like a Borealis bundle";
-  throw { code: "invalid_argument", message: `${what}, so it opened in the Open bundle window for review.` } satisfies ApiError;
+  const preview = await serverFetch(session, "POST", "/api/rpc/bundle_open", { token: staged.token }) as BundlePreview;
+  const outcome = await new Promise<"accepted" | "cancelled">((done) => {
+    byToken.set(staged.token, { preview, done });
+    openBundleFile({ token: staged.token, name: staged.name });
+  });
+  const items = preview.preview.items;
+  const characters = items.filter((i) => i.kind === "character");
+  if (outcome === "cancelled") {
+    throw { code: "invalid_argument", message: "it is a Borealis bundle. The Open bundle window was cancelled, so nothing was changed." } satisfies ApiError;
+  }
+  const first = characters[0];
+  if (!first) {
+    const packs = items.length;
+    throw { code: "invalid_argument", message: `it is a Borealis bundle with no characters. Its ${plural(packs, "content pack")} went into Additional Content.` } satisfies ApiError;
+  }
+  const list = await serverFetch(session, "POST", "/api/rpc/list_characters", {}) as CharacterSummary[];
+  const summary = list.find((c) => c.id === first.key) ?? list.find((c) => c.name === first.label);
+  if (!summary) throw { code: "not_found", message: `the bundle was applied, but ${first.label} is not in the list.` } satisfies ApiError;
+  const warnings: string[] = [];
+  if (first.action === "keep_local") warnings.push("The copy already here was edited more recently, so it was kept.");
+  if (first.action === "identical") warnings.push("The copy already here was the same, so nothing changed.");
+  const missing = [...new Set(characters.flatMap((c) => c.missingPacks))];
+  if (missing.length > 0) warnings.push(`Content it needs that was not in the bundle: ${missing.join(", ")}.`);
+  const others = characters.slice(1).map((c) => c.label);
+  if (others.length > 0) warnings.push(`Also in the bundle: ${others.join(", ")}.`);
+  return { summary, divergences: [], warnings, missingContent: [], unmappedSlots: [], invalidSelections: [], selectionsImported: 0 };
 }

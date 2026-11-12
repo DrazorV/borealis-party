@@ -1,7 +1,7 @@
 import { COMMANDS, EVENTS, type Api, type ApiError, type ApiMethods, type CommandName, type DataDirs, type EventName } from "../../src/api/contract";
 import type { ExportResult, SheetShare } from "../../src/api/contract";
 import { phoneOs } from "../../src/lib/phone";
-import { looksLikeBundle, openBundleFromImport, pickBundleFile } from "./bundles";
+import { importWatch, looksLikeBundle, openBundleFromImport, pickBundleFile } from "./bundles";
 import { clearSession, loadSession, saveSession, type ServerSession } from "./session";
 
 function fail(code: string, message: string): ApiError {
@@ -140,6 +140,21 @@ export function createHttpApi(session: ServerSession): Api {
     const fileName = String(args?.fileName ?? "");
     const content = String(args?.contentBase64 ?? "");
     return looksLikeBundle(fileName, content) ? openBundleFromImport(session, fileName, content) : serverImport(args);
+  };
+
+  // The Open bundle window for such an import: the preview the import already made, and how the window closed.
+  const serverOpen = methods.bundleOpen as (args?: Record<string, unknown>) => Promise<unknown>;
+  const serverAccept = methods.bundleAccept as (args?: Record<string, unknown>) => Promise<unknown>;
+  const serverDiscard = methods.bundleDiscard as (args?: Record<string, unknown>) => Promise<unknown>;
+  methods.bundleOpen = async (args?: Record<string, unknown>) => importWatch.open(String(args?.token ?? "")) ?? await serverOpen(args);
+  methods.bundleAccept = async (args?: Record<string, unknown>) => {
+    const out = await serverAccept(args);
+    importWatch.settle(String(args?.bundleId ?? ""), "accepted");
+    return out;
+  };
+  methods.bundleDiscard = async (args?: Record<string, unknown>) => {
+    importWatch.settle(String(args?.bundleId ?? ""), "cancelled");
+    return await serverDiscard(args);
   };
 
   const listeners = new Map<string, Set<(payload: never) => void>>();
