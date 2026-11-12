@@ -304,6 +304,9 @@ pub struct Registration {
     username: String,
     email: String,
     password: String,
+    /// A party join code typed at sign-up, kept on the account while it waits (`parties.rs`).
+    #[serde(default, rename = "joinCode")]
+    join_code: Option<String>,
 }
 
 /// A successful sign-in.
@@ -553,6 +556,7 @@ pub async fn register(
     )
     .await?;
     drop(_guard);
+    crate::parties::hold_join_code(&state, &user.id, form.join_code.as_deref()).await;
     record(
         &state,
         Activity::new("sign_up")

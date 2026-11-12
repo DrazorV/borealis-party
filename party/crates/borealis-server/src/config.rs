@@ -97,6 +97,11 @@ tls = "starttls"
 # Set BOREALIS__INITIAL_ADMIN__USERNAME and BOREALIS__INITIAL_ADMIN__PASSWORD, and optionally
 # BOREALIS__INITIAL_ADMIN__EMAIL.
 
+[features]
+# Emergency switches, for this file only (no admin page toggles them). A feature switched off answers 404 on all its
+# routes and keeps its data; switch it back on and restart.
+parties = true
+
 [log]
 # error, warn, info, debug or trace. RUST_LOG, when set, wins.
 level = "info"
@@ -120,8 +125,32 @@ pub struct Settings {
     pub smtp: SmtpSettings,
     /// The first account.
     pub initial_admin: InitialAdmin,
+    /// Emergency kill switches.
+    pub features: FeatureSettings,
     /// Logging.
     pub log: LogSettings,
+}
+
+/// `[features]`: emergency kill switches, read once at start.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct FeatureSettings {
+    /// Parties (`parties.rs`).
+    pub parties: bool,
+}
+
+impl Default for FeatureSettings {
+    fn default() -> Self {
+        Self { parties: true }
+    }
+}
+
+static FEATURES: std::sync::OnceLock<FeatureSettings> = std::sync::OnceLock::new();
+
+/// The switches [`Settings::load`] read at start, or all on (tests that build the routes by hand).
+#[must_use]
+pub fn features() -> FeatureSettings {
+    FEATURES.get().copied().unwrap_or_default()
 }
 
 /// `[server]`.
@@ -510,6 +539,7 @@ impl Settings {
             .map_err(|e| ConfigError(format!("{}: {e}", file.display())))?;
         // Read by the sign-in routes and the download check, which have no settings of their own. Once per process.
         let _ = NETWORK.set(settings.network());
+        let _ = FEATURES.set(settings.features);
         Ok(settings)
     }
 

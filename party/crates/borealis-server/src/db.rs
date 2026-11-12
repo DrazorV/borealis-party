@@ -84,6 +84,68 @@ const MIGRATIONS: &[&[&str]] = &[
             PRIMARY KEY (user_id, blocked_id)
         )",
     ],
+    // 3 (M-parties, 0.2.0), after M-shares.
+    // DM capability and parties: rows only, characters stay in their owner's folder (parties.rs). New names only:
+    // a database from the versions with groups may still hold party_groups, invites and members, which stay alone.
+    &[
+        // Written only by the account itself (D2): no admin grants or revokes.
+        "CREATE TABLE IF NOT EXISTS account_roles (
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            role TEXT NOT NULL,
+            granted_at BIGINT NOT NULL,
+            granted_by TEXT,
+            PRIMARY KEY (user_id, role)
+        )",
+        "CREATE TABLE IF NOT EXISTS parties (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            dm_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            ruleset TEXT NOT NULL DEFAULT 'dnd2024',
+            created_at BIGINT NOT NULL,
+            updated_at BIGINT NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS parties_dm ON parties (dm_id)",
+        // A username invite has no foreign key: one to a name nobody has is stored the same way.
+        "CREATE TABLE IF NOT EXISTS party_invites (
+            id TEXT PRIMARY KEY,
+            party_id TEXT NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
+            invited_username_lower TEXT,
+            code_hash TEXT,
+            created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            created_at BIGINT NOT NULL,
+            expires_at BIGINT NOT NULL,
+            uses_left BIGINT NOT NULL DEFAULT 1,
+            declined_at BIGINT
+        )",
+        "CREATE UNIQUE INDEX IF NOT EXISTS party_invites_code ON party_invites (code_hash)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS party_invites_name ON party_invites (party_id, invited_username_lower)",
+        "CREATE INDEX IF NOT EXISTS party_invites_lookup ON party_invites (invited_username_lower)",
+        // Join codes an account entered (kept through sign-up while it waits for approval, D39).
+        "CREATE TABLE IF NOT EXISTS party_invite_holds (
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            invite_id TEXT NOT NULL REFERENCES party_invites(id) ON DELETE CASCADE,
+            created_at BIGINT NOT NULL,
+            PRIMARY KEY (user_id, invite_id)
+        )",
+        "CREATE TABLE IF NOT EXISTS party_offers (
+            id TEXT PRIMARY KEY,
+            invite_id TEXT NOT NULL REFERENCES party_invites(id) ON DELETE CASCADE,
+            owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            character_id TEXT NOT NULL,
+            created_at BIGINT NOT NULL,
+            UNIQUE (owner_id, character_id),
+            UNIQUE (invite_id, owner_id)
+        )",
+        // The key makes a character a member of at most one party (D19).
+        "CREATE TABLE IF NOT EXISTS party_members (
+            owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            character_id TEXT NOT NULL,
+            party_id TEXT NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
+            joined_at BIGINT NOT NULL,
+            PRIMARY KEY (owner_id, character_id)
+        )",
+        "CREATE INDEX IF NOT EXISTS party_members_party ON party_members (party_id)",
+    ],
 ];
 
 /// How many steps [`MIGRATIONS`] has: the schema version a database is at after [`Db::open`].
@@ -93,8 +155,9 @@ pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
 /// The table each step from 2 on creates, by step number (1-based). A database whose `schema_version` says a step ran
 /// but that lacks its table runs the step again at start-up: the removed groups versions also counted 1 to 3, so a
 /// database they left at version 3 would otherwise skip these steps. Every such step must be idempotent (`CREATE ...
-/// IF NOT EXISTS`). Step 1 has none: every database has its tables. A new step adds its own line here.
-const MARKERS: &[(usize, &str)] = &[(2, "shares")];
+/// IF NOT EXISTS`). Step 1 has none: every database has its tables. A new step adds its own line here, with its
+/// main table.
+const MARKERS: &[(usize, &str)] = &[(2, "shares"), (3, "parties")];
 
 /// A table only the versions with groups had. A database that still has it opens like any other: the table is left
 /// alone and a warning is logged, so an instance that ran those versions (or rolls back to one) still boots.
@@ -317,6 +380,12 @@ impl Db {
     #[cfg(test)]
     pub async fn open_at(location: &Location, max_version: usize) -> Result<Self, OpenError> {
         Self::open_upto(location, max_version).await
+    }
+
+    /// How many migrations this build has.
+    #[cfg(test)]
+    pub fn schema_version() -> usize {
+        MIGRATIONS.len()
     }
 
     async fn open_upto(location: &Location, max_version: usize) -> Result<Self, OpenError> {
@@ -903,5 +972,38 @@ impl Db {
             })
             .collect::<sqlx::Result<_>>()?;
         Ok((rows, total))
+    }
+}
+
+#[cfg(test)]
+mod marker_tests {
+    use super::{MARKERS, MIGRATIONS};
+
+    #[test]
+    fn every_step_from_2_has_a_marker_it_creates_and_can_run_twice() {
+        let steps: Vec<usize> = MARKERS.iter().map(|(step, _)| *step).collect();
+        let want: Vec<usize> = (2..=MIGRATIONS.len()).collect();
+        assert_eq!(steps, want, "one marker per step from 2 on, in order");
+        for (step, table) in MARKERS {
+            let sql = MIGRATIONS[step - 1];
+            let creates = format!("CREATE TABLE IF NOT EXISTS {table} (");
+            assert!(
+                sql.iter().any(|s| s.starts_with(&creates)),
+                "step {step} does not create {table}"
+            );
+            for statement in sql {
+                let ok = [
+                    "CREATE TABLE IF NOT EXISTS ",
+                    "CREATE INDEX IF NOT EXISTS ",
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ",
+                ]
+                .iter()
+                .any(|p| statement.starts_with(p));
+                assert!(
+                    ok,
+                    "step {step} has a statement that can't run twice: {statement}"
+                );
+            }
+        }
     }
 }

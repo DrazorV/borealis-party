@@ -771,8 +771,18 @@ async fn check_groups_era(location: &Location) {
     again.pool().close().await;
 }
 
+/// Every table steps 2 (M-shares) and 3 (M-parties) make is there, and empty.
 async fn schema_has_shares(db: &Db) {
-    for table in ["shares", "share_blocks"] {
+    for table in [
+        "shares",
+        "share_blocks",
+        "account_roles",
+        "parties",
+        "party_invites",
+        "party_invite_holds",
+        "party_offers",
+        "party_members",
+    ] {
         let n: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
             .fetch_one(db.pool())
             .await
@@ -786,7 +796,7 @@ async fn every_database_gets_the_share_tables() {
     // Fresh.
     let fresh = Db::open(&Location::Memory).await.unwrap();
     schema_has_shares(&fresh).await;
-    assert_eq!(versions(&fresh).await, [1, 2]);
+    assert_eq!(versions(&fresh).await, [1, 2, 3]);
     // A groups-era file at version 3 without them.
     let dir = tempfile::tempdir().unwrap();
     let location = Location::Sqlite(dir.path().join("groups.db"));
@@ -814,7 +824,7 @@ async fn a_groups_era_postgres_database_gets_the_share_tables() {
         if era == "fresh" {
             let db = Db::open(&location).await.unwrap();
             schema_has_shares(&db).await;
-            assert_eq!(versions(&db).await, [1, 2]);
+            assert_eq!(versions(&db).await, [1, 2, 3]);
             db.pool().close().await;
         } else {
             make_groups_era(&location).await;

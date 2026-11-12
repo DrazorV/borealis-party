@@ -27,6 +27,7 @@ mod jobs;
 mod mail;
 mod migrate;
 mod net_guard;
+mod parties;
 #[cfg(test)]
 mod route_tests;
 mod rpc;
@@ -139,6 +140,7 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
         .merge(admin::routes())
         .merge(rpc::routes())
         .merge(shares::routes())
+        .merge(parties::routes())
         .route("/api/{*rest}", any(no_such_route))
         .layer(DefaultBodyLimit::max(max_upload))
         .with_state(state)
