@@ -11,10 +11,19 @@
 //! from). [`bundle_export`] builds one with upstream's builder and sends its
 //! bytes back. Sharing bundles from the server's machine (`bundle_share`), the device link (`link_*`, paired devices)
 //! and the OS inbox (`take_opened_*`, one queue for the whole process) stay out.
+//!
+//! A bundle from another player is received safely ([`bundle_open`], [`bundle_accept`]): a pack or character this
+//! account already has with different content is refused, never replaced or renamed, and the rest comes in.
 
+use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
+
+use borealis_bundle::{
+    scan_characters, scan_packs, Bundle, BundleMeta, BundleWriter, Item, ItemKind, Limits, Manifest,
+};
+use borealis_lib::sync_dto::{BundlePreview, LinkSummary};
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -110,14 +119,31 @@ fn index_packs(state: &AppState) -> std::collections::BTreeMap<String, (String, 
 /// bundle), and this account now follows that index too, as the one who exported it does. Packs the bundle left as
 /// they were (identical, or newer here) add nothing, so an index this account removed stays removed unless the
 /// bundle brings its content back. An index that can't be added (not HTTPS) leaves the pack as a snapshot.
+///
+/// A bundle from another player (made by another account, or `from_another_player` when the user says so) goes
+/// through [`accept_foreign`] instead, so nothing this account already has is replaced.
 #[tauri::command(async)]
 fn bundle_accept(
     state: tauri::State<'_, AppState>,
     sync: tauri::State<'_, Arc<DeviceSync>>,
+    received: tauri::State<'_, Arc<Received>>,
     bundle_id: String,
-) -> ApiResult<borealis_lib::sync_dto::LinkSummary> {
+    from_another_player: Option<bool>,
+) -> ApiResult<LinkSummary> {
+    let opened = lock(&received.open).remove(&bundle_id);
+    let foreign = from_another_player == Some(true) || opened.as_ref().is_some_and(|o| o.foreign);
     let before = index_packs(&state);
-    let summary = sync.accept_bundle(&bundle_id)?;
+    let summary = match (foreign, opened) {
+        (false, _) => sync.accept_bundle(&bundle_id)?,
+        (true, Some(opened)) => accept_foreign(&state, &sync, &bundle_id, &opened.path)?,
+        (true, None) => {
+            sync.discard_bundle(&bundle_id);
+            return Err(ApiError::invalid(
+                "This bundle could not be checked against what you already have, so nothing was changed. Open it \
+                 again.",
+            ));
+        }
+    };
     let urls: std::collections::BTreeSet<String> = index_packs(&state)
         .into_iter()
         .filter(|(id, now)| before.get(id) != Some(now))
@@ -129,6 +155,235 @@ fn bundle_accept(
         }
     }
     Ok(summary)
+}
+
+/// The start of the source device in every bundle a server account exports. The account's folder name (its id)
+/// follows, so a bundle tells whether this account or another one made it.
+const PARTY_SOURCE: &str = "Borealis Party server";
+
+/// The source device of the bundles the account in `data` exports.
+fn party_source(data: &Path) -> String {
+    data.file_name().map_or_else(
+        || PARTY_SOURCE.to_string(),
+        |id| format!("{PARTY_SOURCE} · {}", id.to_string_lossy()),
+    )
+}
+
+/// What the preview names as the source of a bundle that another account made.
+const FROM_ANOTHER_ACCOUNT: &str = "another Borealis Party account";
+/// What the preview names as the source of a bundle that this account made.
+const FROM_THIS_ACCOUNT: &str = "this account";
+
+/// The bundles of one account that [`stage_bundle`] kept, so [`bundle_accept`] can read them again.
+pub(crate) struct Received {
+    /// This account's own source device ([`party_source`]).
+    own: String,
+    /// Staged files by pick token, until [`bundle_open`] takes the token.
+    staged: Mutex<HashMap<String, PathBuf>>,
+    /// Open previews by bundle id, until accepted or discarded.
+    open: Mutex<HashMap<String, Opened>>,
+}
+
+struct Opened {
+    path: PathBuf,
+    /// Made by another account (or an older server that named no account).
+    foreign: bool,
+}
+
+impl Received {
+    fn new(own: String) -> Self {
+        Self {
+            own,
+            staged: Mutex::default(),
+            open: Mutex::default(),
+        }
+    }
+
+    /// Another account made the bundle: any party source but this account's own. A bundle from before sources named
+    /// the account counts as another's, since it may be.
+    fn is_foreign(&self, source: &str) -> bool {
+        source != self.own && source.starts_with(PARTY_SOURCE)
+    }
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// What the preview row of a refused item says.
+fn refusal(kind: &str, label: &str) -> String {
+    if kind == "pack" {
+        format!("You already have a pack called {label}; it was not replaced. Rename one before sharing.")
+    } else {
+        format!(
+            "You already have a different copy of {label}; it was not replaced. To take this one, delete yours first."
+        )
+    }
+}
+
+/// Upstream's preview, with every pack or character of another player's bundle that differs from this account's
+/// copy shown as refused: its row says why and that this account's copy is kept.
+#[tauri::command(async)]
+fn bundle_open(
+    sync: tauri::State<'_, Arc<DeviceSync>>,
+    received: tauri::State<'_, Arc<Received>>,
+    token: String,
+) -> ApiResult<BundlePreview> {
+    let path = lock(&received.staged).remove(&token);
+    let mut preview = sync.open_bundle(&token)?;
+    let Some(path) = path else {
+        return Ok(preview);
+    };
+    let foreign = received.is_foreign(&preview.source_device);
+    if foreign {
+        preview.source_device = FROM_ANOTHER_ACCOUNT.to_string();
+        for item in &mut preview.preview.items {
+            if matches!(item.action.as_str(), "replace" | "keep_local") {
+                item.label = refusal(&item.kind, &item.label);
+                item.action = "keep_local".to_string();
+            }
+        }
+    } else if preview.source_device == received.own {
+        preview.source_device = FROM_THIS_ACCOUNT.to_string();
+    }
+    let mut open = lock(&received.open);
+    open.retain(|_, o| o.path.exists());
+    open.insert(preview.bundle_id.clone(), Opened { path, foreign });
+    Ok(preview)
+}
+
+/// Accept another player's bundle without replacing anything: every pack or character this account already has with
+/// different content is left out. When nothing is left out the upload is accepted as it is; otherwise the rest is
+/// written as a bundle of its own next to the upload and goes through upstream's own open and accept. Those left out
+/// count as kept.
+fn accept_foreign(
+    state: &AppState,
+    sync: &DeviceSync,
+    bundle_id: &str,
+    path: &Path,
+) -> ApiResult<LinkSummary> {
+    let kept = path.with_file_name(format!(
+        "kept-{}",
+        path.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    let written = without_clashes(state, path, &kept);
+    if matches!(written, Ok(0)) {
+        let _ = std::fs::remove_file(&kept);
+        return sync.accept_bundle(bundle_id);
+    }
+    // The upload is no longer needed: only what was written from it, if anything, goes on.
+    sync.discard_bundle(bundle_id);
+    let refused = match written {
+        Ok(n) if kept.is_file() => n,
+        Ok(n) => {
+            let _ = path.parent().map(std::fs::remove_dir);
+            return Ok(LinkSummary {
+                added: 0,
+                replaced: 0,
+                kept_local: n,
+                identical: 0,
+            });
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&kept);
+            let _ = path.parent().map(std::fs::remove_dir);
+            return Err(e);
+        }
+    };
+    let token = state.picked.grant(kept, PickPurpose::BundleFile)?.token;
+    let preview = sync.open_bundle(&token)?;
+    let mut summary = sync.accept_bundle(&preview.bundle_id)?;
+    summary.kept_local += refused;
+    Ok(summary)
+}
+
+/// How many items of the bundle at `path` this account already has with different content. When there are some and
+/// not every item is one, the others are written to `out`: each read and verified, then written with its own files,
+/// edit stamp and required packs.
+fn without_clashes(state: &AppState, path: &Path, out: &Path) -> ApiResult<usize> {
+    let unusable = |e: borealis_bundle::BundleError| {
+        ApiError::invalid(format!(
+            "This bundle cannot be used: {e}. Nothing was changed."
+        ))
+    };
+    let file = std::fs::File::open(path).map_err(|e| ApiError::io("read the bundle", e))?;
+    let mut bundle = Bundle::open_with(file, Limits::default()).map_err(unusable)?;
+    let manifest = bundle.manifest().clone();
+    let mut local = scan_characters(&state.characters_dir()).map_err(unusable)?;
+    local.extend(scan_packs(&state.paths.library(), &Limits::default()).map_err(unusable)?);
+    let held: HashMap<(ItemKind, &str), &str> = local
+        .iter()
+        .map(|l| ((l.kind, l.key.as_str()), l.sha256.as_str()))
+        .collect();
+    let (clash, keep): (Vec<&Item>, Vec<&Item>) = manifest.items.iter().partition(|item| {
+        held.get(&(item.kind, item.key.as_str()))
+            .is_some_and(|sha| *sha != item.sha256)
+    });
+    for item in &clash {
+        tracing::info!(
+            "bundle: {:?} {} kept; another player's copy differs",
+            item.kind,
+            item.key
+        );
+    }
+    if !clash.is_empty() && !keep.is_empty() {
+        write_items(&mut bundle, &manifest, &keep, out).map_err(unusable)?;
+    }
+    Ok(clash.len())
+}
+
+/// A new bundle at `out` with the `items` of `bundle`, under the same manifest details.
+fn write_items(
+    bundle: &mut Bundle<std::fs::File>,
+    manifest: &Manifest,
+    items: &[&Item],
+    out: &Path,
+) -> borealis_bundle::Result<()> {
+    let meta = BundleMeta {
+        app_version: manifest.app_version.clone(),
+        source_device: manifest.source_device.clone(),
+        created_ms: manifest.created_ms,
+    };
+    let mut writer = BundleWriter::with_limits(std::fs::File::create(out)?, meta, bundle.limits());
+    for item in items {
+        let data = bundle.read_item(item.kind, &item.key)?;
+        match item.kind {
+            ItemKind::Character => {
+                let Some((_, bytes)) = data.files.first() else {
+                    return Err(borealis_bundle::BundleError::Inconsistent(format!(
+                        "character `{}` has no file",
+                        item.key
+                    )));
+                };
+                writer.add_character(
+                    &item.key,
+                    bytes,
+                    item.edited_at_ms,
+                    item.required_packs.clone(),
+                )?;
+            }
+            ItemKind::Pack => {
+                let prefix = format!("packs/{}/", item.key);
+                let files = data
+                    .files
+                    .into_iter()
+                    .map(|(name, bytes)| match name.strip_prefix(&prefix) {
+                        Some(rel) => Ok((rel.to_string(), bytes)),
+                        None => Err(borealis_bundle::BundleError::Inconsistent(format!(
+                            "`{name}` is outside pack `{}`",
+                            item.key
+                        ))),
+                    })
+                    .collect::<borealis_bundle::Result<Vec<_>>>()?;
+                writer.add_pack(&item.key, &files, item.edited_at_ms)?;
+            }
+        }
+    }
+    if let Some(settings) = bundle.read_settings()? {
+        writer.set_portable_settings(&settings)?;
+    }
+    writer.finish()?;
+    Ok(())
 }
 
 /// Upstream's prefix of the per-open folders under `sync/incoming`; it is crate-private there.
@@ -199,6 +454,7 @@ fn staged_folders(incoming: &Path) -> Vec<PathBuf> {
 #[tauri::command(async)]
 fn stage_bundle(
     state: tauri::State<'_, AppState>,
+    received: tauri::State<'_, Arc<Received>>,
     file_name: String,
     content_base64: String,
 ) -> ApiResult<StagedBundle> {
@@ -230,7 +486,11 @@ fn stage_bundle(
         let _ = std::fs::remove_dir_all(&dir);
         return Err(ApiError::io("keep the bundle", e));
     }
-    let picked = state.picked.grant(path, PickPurpose::BundleFile)?;
+    let picked = state.picked.grant(path.clone(), PickPurpose::BundleFile)?;
+    let mut staged = lock(&received.staged);
+    staged.retain(|_, p| p.exists());
+    staged.insert(picked.token.clone(), path);
+    drop(staged);
     Ok(StagedBundle {
         token: picked.token,
         name,
@@ -378,7 +638,7 @@ fn offered(name: &str, invocation: &Invocation) -> Option<Result<Value, Value>> 
         // Bundle files, made from and previewed and applied in the account's own folder.
         bundle_export,
         stage_bundle,
-        commands_sync::bundle_open,
+        bundle_open,
         bundle_accept,
         commands_sync::bundle_discard,
     ])(name, invocation)
@@ -414,6 +674,8 @@ pub fn open_workspace(
     for dir in staged_folders(&incoming_dir(&state)) {
         let _ = std::fs::remove_dir_all(dir);
     }
+    let source = party_source(&state.paths.data);
+    handle.manage(Arc::new(Received::new(source.clone())));
     // Not `commands_sync::install`, which turns discovery on and installs the system keychain: here the link can
     // only ever listen on localhost and has no keychain, should a `link_*` command ever be offered by mistake.
     let sync = DeviceSync::new(
@@ -421,7 +683,7 @@ pub fn open_workspace(
         Arc::new(TauriSyncEvents(TauriSink(handle.clone()))),
         SyncConfig {
             bind_ip: Some(Ipv4Addr::LOCALHOST.into()),
-            device_name: "Borealis Party server".into(),
+            device_name: source,
             discovery: false,
         },
         || Err("Device transfer is not available on the server.".to_string()),
