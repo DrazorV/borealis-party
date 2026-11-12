@@ -157,10 +157,10 @@ back up everything. Running `install.sh` from a newer release upgrades in place 
 Then sign in or create an account.
 
 A phone or tablet that opens the website in its browser sees a small, dismissible note on the sign-in page and the
-Start page. On Android it links to the app (`borealis-party-android.apk` in the `server.app_download` folder, by default
+Start page. On Android it links to the app (`borealis-party-arm64.apk` in the `server.app_download` folder, by default
 `https://github.com/DrazorV/borealis-party/releases/latest/download`) and shows the address to enter in it. On an
-iPhone or iPad it says that there is no app to install from a website, since iOS installs apps only from the App Store
-or TestFlight. To offer your own build, point `BOREALIS__SERVER__APP_DOWNLOAD` at a folder holding the same file
+iPhone or iPad it says that there is no app to install from there: the release's `borealis-party-ios.ipa` is an ad hoc
+build, which installs only on the devices listed in its provisioning profile. To offer your own build, point `BOREALIS__SERVER__APP_DOWNLOAD` at a folder holding the same file
 names; `off` hides the note. The file names are in `ui/party/api/appOffer.ts`.
 
 If the server later moves to a new address (for example from an IP address to a domain name), change it in the app

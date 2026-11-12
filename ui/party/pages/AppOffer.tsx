@@ -50,8 +50,8 @@ export function AppOffer({ folder }: { folder?: string | null } = {}) {
     return (
       <aside className="alert info party-app-offer" aria-label="About the app">
         <div className="party-app-offer-text">
-          There is no iPhone or iPad app to install from a website: iOS only installs apps from the App Store or
-          TestFlight. Borealis Party works here in Safari.
+          There is no iPhone or iPad app to install from here: the iOS app is built only for devices registered in
+          advance, and iOS doesn't install it on others. Borealis Party works here in Safari.
         </div>
         {dismiss}
       </aside>

@@ -32,7 +32,7 @@ it("offers the APK on an Android browser, with the address to enter", async () =
   device(PIXEL);
   render(<AppOffer />);
   const link = await screen.findByRole("link", { name: /download the app/i });
-  expect(link.getAttribute("href")).toBe("https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-android.apk");
+  expect(link.getAttribute("href")).toBe("https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-arm64.apk");
   expect(screen.getByText(window.location.origin.replace(/^https?:\/\//, ""), { exact: false })).toBeTruthy();
 });
 
@@ -60,7 +60,7 @@ it("shows nothing in the app, on a computer, or when the server offers no downlo
 it("uses the sign-in page's answer instead of asking again", () => {
   device(PIXEL);
   render(<AppOffer folder="https://files.example.com/apps" />);
-  expect(screen.getByRole("link", { name: /download the app/i }).getAttribute("href")).toBe("https://files.example.com/apps/borealis-party-android.apk");
+  expect(screen.getByRole("link", { name: /download the app/i }).getAttribute("href")).toBe("https://files.example.com/apps/borealis-party-arm64.apk");
   expect(env.asked).toBe(0);
 });
 
