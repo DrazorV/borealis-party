@@ -199,6 +199,27 @@ const ARMS_CHARACTER: &str = r#"<?xml version="1.0" encoding="utf-8"?>
   </build>
 </character>"#;
 
+/// A level 1 Warden on the Path of Oaks whose chosen Oak Gift and one option are not installed.
+const GONE_CHARACTER: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<character version="1.0.0">
+  <information><name>Gone Hero</name></information>
+  <build>
+    <input/>
+    <elements>
+      <element type="Option" name="Acorn Charm" id="ID_ZZ_SYN_OPTION_ACORN"/>
+      <element type="Option" name="Gone" id="ID_ZZ_GONE_OPTION"/>
+      <element type="Level" name="1" id="ID_LEVEL_1">
+        <element type="Class" name="Class" registered="ID_ZZ_SYN_CLASS_WARDEN" requiredLevel="1">
+          <element type="Archetype" name="Warden Path" registered="ID_ZZ_SYN_ARCHETYPE_OAKS" number="1" requiredLevel="1">
+            <element type="Archetype Feature" name="Oak Gift" registered="ID_ZZ_GONE_FEATURE" number="1" requiredLevel="1"/>
+          </element>
+        </element>
+      </element>
+    </elements>
+    <sum/>
+  </build>
+</character>"#;
+
 #[test]
 fn add_on_grants_under_an_installed_element_are_not_missing_content() {
     let missing = |e: &Engine| -> Vec<String> {
@@ -230,4 +251,44 @@ fn add_on_grants_under_an_installed_element_are_not_missing_content() {
     ] {
         assert!(without.iter().any(|m| m == id), "{id}: {without:?}");
     }
+}
+
+#[test]
+fn missing_choices_can_be_left_unselected_to_pick_again() {
+    let e = engine(true);
+    let out = import_dnd5e(&e, GONE_CHARACTER).expect("import");
+    assert!(
+        out.report.unmapped_slots.is_empty(),
+        "{:?}",
+        out.report.unmapped_slots
+    );
+    let ch = out.character;
+    let gone = Choice::Element("ID_ZZ_GONE_FEATURE".into());
+    let slot = ch
+        .build
+        .selections
+        .iter()
+        .find(|s| s.choice == gone)
+        .expect("the missing pick is stored")
+        .slot
+        .clone();
+
+    let next = borealis_engine::commands::clear_missing(&e, &ch.build)
+        .expect("clear")
+        .state;
+    assert!(!next.selections.iter().any(|s| s.choice == gone));
+    // installed choices and options stay
+    for kept in ["ID_ZZ_SYN_CLASS_WARDEN", "ID_ZZ_SYN_ARCHETYPE_OAKS"] {
+        let kept = Choice::Element(kept.into());
+        assert!(next.selections.iter().any(|s| s.choice == kept), "{kept:?}");
+    }
+    assert_eq!(next.options, vec!["ID_ZZ_SYN_OPTION_ACORN".to_string()]);
+    // the slot is open again, offering the installed feature
+    let snap = e.derive_with(&next, true);
+    let open = snap.slots.iter().find(|s| s.key == slot).expect("slot");
+    assert!(open.chosen.is_none() && open.missing.is_none(), "{open:?}");
+    assert!(open
+        .options
+        .iter()
+        .any(|o| o.id == "ID_ZZ_SYN_FEATURE_BARK"));
 }

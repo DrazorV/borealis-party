@@ -145,6 +145,7 @@ Clean-room note: sample data in the mock is original and SRD-generic.
 | `get_slot_options` | `SlotOptionsArgs` | `Page<SlotOption>` |
 | `apply_selection` | `characterId, { slotId: string; elementId: string }` | `CharacterSnapshot` |
 | `clear_selection` | `characterId, { slotId: string }` | `CharacterSnapshot` |
+| `clear_missing_content` | `characterId` | `CharacterSnapshot` (choices of content that is not installed left open, options and items not installed removed, the missing content list cleared) |
 | `switch_version` | `characterId, { slotId: string; elementId: string }` | `SwitchVersionResult` (`{ snapshot, dropped }`) |
 | `replace_spell` | `characterId, { slotId: string }` | `CharacterSnapshot` |
 

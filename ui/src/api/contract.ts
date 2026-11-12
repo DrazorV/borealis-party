@@ -195,6 +195,8 @@ export interface ApiMethods {
   getSlotOptions(args: SlotOptionsArgs): Promise<Page<SlotOption>>;
   applySelection(args: Cid & { slotId: string; elementId: string }): Promise<CharacterSnapshot>;
   clearSelection(args: Cid & { slotId: string }): Promise<CharacterSnapshot>;
+  /** Leave the content that is not installed unselected: its slots open again, options and items not installed are removed, the missing list is cleared. */
+  clearMissingContent(args: Cid): Promise<CharacterSnapshot>;
   /** B-55: switch the slot's current pick to another version of the same row, keeping sub-choices that still fit. */
   switchVersion(args: Cid & { slotId: string; elementId: string }): Promise<SwitchVersionResult>;
   replaceSpell(args: Cid & { slotId: string }): Promise<CharacterSnapshot>;
@@ -629,6 +631,7 @@ export const COMMANDS = {
   getSlotOptions: "get_slot_options",
   applySelection: "apply_selection",
   clearSelection: "clear_selection",
+  clearMissingContent: "clear_missing_content",
   switchVersion: "switch_version",
   replaceSpell: "replace_spell",
   setXp: "set_xp",

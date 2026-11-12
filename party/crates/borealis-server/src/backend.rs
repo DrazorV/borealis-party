@@ -200,6 +200,7 @@ fn offered(name: &str, invocation: &Invocation) -> Option<Result<Value, Value>> 
         commands::recheck_missing_content,
         commands::apply_selection,
         commands::clear_selection,
+        commands::clear_missing_content,
         commands::switch_version,
         commands::set_xp,
         commands::level_up,

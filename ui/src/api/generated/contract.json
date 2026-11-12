@@ -412,6 +412,16 @@
     }
    }
   },
+  "clear_missing_content": {
+   "args": {
+    "characterId": false
+   },
+   "method": "clearMissingContent",
+   "response": {
+    "k": "ref",
+    "name": "CharacterSnapshot"
+   }
+  },
   "clear_selection": {
    "args": {
     "characterId": false,

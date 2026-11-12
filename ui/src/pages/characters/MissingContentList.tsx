@@ -74,12 +74,14 @@ function EntryBody({ entry }: { entry: MissingContentEntry }) {
  * The content one or several characters name that is not installed (GitHub #37): opened from the Build page's notice and after
  * a Re-check on the Characters page, so the list is never only a count.
  */
-export function MissingContentDialog({ entries, onClose, onOpenContent, onRecheck, rechecking }: {
+export function MissingContentDialog({ entries, onClose, onOpenContent, onRecheck, onLeaveUnselected, rechecking }: {
   entries: MissingContentEntry[];
   onClose: () => void;
   /** Go to Additional Content to install what the characters need. */
   onOpenContent: () => void;
   onRecheck?: () => void;
+  /** Drop what is not installed instead: its choices open again, to pick something else (one open character). */
+  onLeaveUnselected?: () => void;
   rechecking?: boolean;
 }) {
   const shown = entries.filter((e) => e.missing.length > 0 || (e.unmapped?.length ?? 0) > 0);
@@ -89,6 +91,7 @@ export function MissingContentDialog({ entries, onClose, onOpenContent, onRechec
       <>
         {shown.length > 0 && <Button onClick={onOpenContent}>Import the content it needs</Button>}
         {shown.length > 0 && onRecheck && <Button disabled={rechecking} onClick={onRecheck}>Re-check missing content</Button>}
+        {shown.length > 0 && onLeaveUnselected && <Button disabled={rechecking} onClick={onLeaveUnselected}>Leave them unselected</Button>}
         <Button variant="primary" onClick={onClose}>Done</Button>
       </>
     }>

@@ -189,6 +189,28 @@ pub fn clear(engine: &Engine, state: &CharacterState, key: &SlotKey) -> CmdResul
     Ok(CommandOutcome::new(prune(engine, &next)))
 }
 
+/// Drop what the character names that the content does not define: choices (their slots are
+/// open again, to pick something else), options, inventory items and adorners. What depended
+/// on a dropped choice goes with it, as with [`clear`].
+///
+/// # Errors
+/// Never fails; a character with nothing missing comes back unchanged.
+pub fn clear_missing(engine: &Engine, state: &CharacterState) -> CmdResult {
+    let uni = engine.universe(state.ruleset);
+    let gone = |id: &str| uni.get(id).is_none() && !crate::ids::is_generated_with_class(id);
+    let mut next = state.clone();
+    next.selections
+        .retain(|s| !matches!(&s.choice, Choice::Element(id) if gone(id)));
+    next.options.retain(|id| !gone(id));
+    next.inventory.items.retain(|it| !gone(&it.item));
+    for it in &mut next.inventory.items {
+        if it.adorner.as_deref().is_some_and(gone) {
+            it.adorner = None;
+        }
+    }
+    Ok(CommandOutcome::new(prune(engine, &next)))
+}
+
 /// Fill open slots that name a `default` element (new character / level-up helper).
 #[must_use]
 pub fn apply_defaults(engine: &Engine, state: &CharacterState) -> CharacterState {

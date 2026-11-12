@@ -58,6 +58,24 @@ describe("GitHub #37: the Build page lists the missing content its notice counts
     expect(screen.queryByRole("region", { name: "Content notices" })).toBeNull();
   });
 
+  it("leaves the missing content unselected instead, after asking: nothing is listed and the notice goes", async () => {
+    const user = userEvent.setup();
+    const api = mock();
+    const id = await importMissing(api);
+    renderApp("/builder/race", { api, openCharacterId: id });
+    const region = await screen.findByRole("region", { name: "Content notices" });
+    await user.click(within(region).getByRole("button", { name: "Show missing content" }));
+    const dialog = await screen.findByRole("dialog", { name: /Missing content/ });
+
+    await user.click(within(dialog).getByRole("button", { name: "Leave them unselected" }));
+    const ask = await screen.findByRole("dialog", { name: /Leave missing content unselected/ });
+    expect(within(ask).getByText(/Its choices are left open to pick something else/)).toBeTruthy();
+    await user.click(within(ask).getByRole("button", { name: "Leave unselected" }));
+
+    await waitFor(() => expect(within(dialog).getByText("Nothing is missing any more.")).toBeTruthy());
+    expect(screen.queryByRole("region", { name: "Content notices" })).toBeNull();
+  });
+
   it("a character with nothing missing has no Show missing content action", async () => {
     const api = mock();
     const r = await api.importCharacter({ fileName: "fine.dnd5e", contentBase64: b64("<character/>") });
@@ -86,6 +104,8 @@ describe("GitHub #37: Re-check missing content on the Characters page lists what
     expect(within(list).getByText("Radiant Blast")).toBeTruthy();
     expect(within(list).getByText("ID_HOMEBREW_SPELL_RADIANT_BLAST")).toBeTruthy();
     expect(within(dialog).getByText(/Add the content these come from in Additional Content/)).toBeTruthy();
+    // several characters, none open: dropping content is done per open character, on its Build page
+    expect(within(dialog).queryByRole("button", { name: "Leave them unselected" })).toBeNull();
 
     api.makeMissingContentAvailable();
     await user.click(within(dialog).getByRole("button", { name: "Re-check missing content" }));

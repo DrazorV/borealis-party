@@ -1,6 +1,8 @@
 # Upstream files we carry changes to while our pull request to TeamBorealis/borealis is open: "<path> <PR url>".
 # Each change must be exactly the PR's patch, so merging upstream after the PR lands makes the diff go away.
 # check-upstream.sh accepts these files and says when one no longer differs (then remove its line).
+# A fix not sent upstream yet names its local branch instead ("branch:<name>"), cut from upstream/main with
+# exactly the patch the fork carries, so it can become a pull request later.
 
 # Opt-in "Combine Feature Upgrades" sheet option
 crates/borealis-sheet/src/model_text.rs https://github.com/TeamBorealis/borealis/pull/42
@@ -15,3 +17,23 @@ ui/src/api/mock/default-settings.ts https://github.com/TeamBorealis/borealis/pul
 ui/src/api/types/settings.ts https://github.com/TeamBorealis/borealis/pull/42
 ui/src/pages/settings/SheetTab.tsx https://github.com/TeamBorealis/borealis/pull/42
 ui/src/pages/settings/settingsForm.ts https://github.com/TeamBorealis/borealis/pull/42
+
+# Imported characters: add-on grants under installed content are not missing content (not sent upstream yet)
+crates/borealis-character/src/import/sections.rs branch:fix/import-granted-content
+crates/borealis-character/tests/recheck.rs branch:fix/import-granted-content
+
+# Missing content: "Leave them unselected" (not sent upstream yet)
+crates/borealis-character/tests/recheck.rs branch:feat/leave-missing-unselected
+crates/borealis-engine/src/commands/selection.rs branch:feat/leave-missing-unselected
+docs/ui-api-contract.md branch:feat/leave-missing-unselected
+src-tauri/build.rs branch:feat/leave-missing-unselected
+src-tauri/capabilities/default.json branch:feat/leave-missing-unselected
+src-tauri/src/builder.rs branch:feat/leave-missing-unselected
+src-tauri/src/commands.rs branch:feat/leave-missing-unselected
+src-tauri/src/lib.rs branch:feat/leave-missing-unselected
+ui/src/api/contract.ts branch:feat/leave-missing-unselected
+ui/src/api/generated/contract.json branch:feat/leave-missing-unselected
+ui/src/api/mock/MockApi.ts branch:feat/leave-missing-unselected
+ui/src/pages/builder/MissingContentAction.tsx branch:feat/leave-missing-unselected
+ui/src/pages/characters/MissingContentList.tsx branch:feat/leave-missing-unselected
+ui/src/test/i37-missing-content-list.test.tsx branch:feat/leave-missing-unselected
