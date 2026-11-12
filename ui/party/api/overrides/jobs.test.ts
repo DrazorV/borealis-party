@@ -51,10 +51,10 @@ describe("long downloads as background jobs", () => {
     await run(60_000);
     await expect(answer).resolves.toEqual(result);
     expect(calls[0]).toMatchObject({ path: START, body: { command: "update_indexes", args: {} } });
-    const waits = calls.slice(1).map((c, i, all) => c.at - (i === 0 ? calls[0].at : all[i - 1].at));
+    const waits = calls.slice(1).map((c, i, all) => c.at - (i === 0 ? calls[0]!.at : all[i - 1]!.at));
     expect(waits[0]).toBe(FIRST_WAIT_MS);
     expect(waits[1]).toBe(750);
-    expect(waits.every((w, i) => i === 0 || w >= waits[i - 1])).toBe(true);
+    expect(waits.every((w, i) => i === 0 || w >= waits[i - 1]!)).toBe(true);
     expect(Math.max(...waits)).toBe(MAX_WAIT_MS);
     expect(calls.slice(1).every((c) => c.path === STATUS && (c.body as { jobId: string }).jobId === "j1")).toBe(true);
   });
@@ -76,7 +76,7 @@ describe("long downloads as background jobs", () => {
     const answer = api.stage5etoolsUrl({ url: "https://github.com/5etools-mirror-3/5etools-src" });
     await run(1000);
     await expect(answer).resolves.toEqual({ token: "x" });
-    expect(calls[0].body).toEqual({ command: "stage_5etools_url", args: { url: "https://github.com/5etools-mirror-3/5etools-src" } });
+    expect(calls[0]!.body).toEqual({ command: "stage_5etools_url", args: { url: "https://github.com/5etools-mirror-3/5etools-src" } });
 
     const update = server({
       [START]: [{ ...started(), command: "update_5etools_url" }],
@@ -85,7 +85,7 @@ describe("long downloads as background jobs", () => {
     const updated = api.update5etoolsUrl({ url: "https://example.com/5e" });
     await run(1000);
     await expect(updated).resolves.toEqual({ changed: true });
-    expect(update[0].body).toEqual({ command: "update_5etools_url", args: { url: "https://example.com/5e" } });
+    expect(update[0]!.body).toEqual({ command: "update_5etools_url", args: { url: "https://example.com/5e" } });
   });
 
   it("a failed job rejects with the command's own error", async () => {
