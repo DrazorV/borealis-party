@@ -1,4 +1,7 @@
+import { render } from "@testing-library/react";
+import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { CharacterImportReportDialog } from "../../src/pages/characters/CharacterImportReportDialog";
 import { onBundleRequest, type BundleRequest } from "../../src/pages/transfer/openBundle";
 import { createHttpApi } from "./http";
 import type { ServerSession } from "./session";
@@ -76,6 +79,38 @@ describe("importCharacter on a server", () => {
     await expect(api.importCharacter({ fileName: "Hero.borealis", contentBase64: "AAAA" }))
       .rejects.toMatchObject({ message: "it is a Borealis bundle. The Open bundle window was cancelled, so nothing was changed." });
     expect(calls.map((c) => c.path)).toEqual(["/api/rpc/stage_bundle", "/api/rpc/bundle_open", "/api/rpc/bundle_discard"]);
+  });
+
+  it("reports a bundle with content packs and no character as imported, in upstream's report", async () => {
+    const packsOnly = { ...preview, fileName: "content.borealis", preview: { totalBytes: 10, items: [
+      { kind: "pack", key: "a", label: "a", action: "new", size: 4, missingPacks: [] },
+      { kind: "pack", key: "b", label: "b", action: "replace", size: 3, missingPacks: [] },
+      { kind: "pack", key: "c", label: "c", action: "identical", size: 3, missingPacks: [] },
+    ] } };
+    const reply = (path: string) => (path === "/api/rpc/stage_bundle" ? { token: "tok-1", name: "content.borealis" }
+      : path === "/api/rpc/bundle_open" ? packsOnly
+      : { added: 1, replaced: 1, keptLocal: 0, identical: 1 });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const path = url.replace(session.baseUrl, "");
+      calls.push({ path, body: {} });
+      return new Response(JSON.stringify(reply(path)), { status: 200 });
+    }));
+    const api = createHttpApi(session);
+    window_(api, "accept");
+    const report = await api.importCharacter({ fileName: "content.borealis", contentBase64: "AAAA" });
+    expect(report.summary.name).toBe("3 content packs into Additional Content");
+    expect(report.warnings).toEqual(["1 content pack already here was the same, so nothing changed."]);
+    // No character to look up.
+    expect(calls.map((c) => c.path)).toEqual(["/api/rpc/stage_bundle", "/api/rpc/bundle_open", "/api/rpc/bundle_accept"]);
+
+    // Upstream's import report shows it as a success, not as a file that could not be imported.
+    render(createElement(CharacterImportReportDialog, {
+      entries: [{ fileName: "content.borealis", report }], onClose: () => undefined, onOpenContent: () => undefined, onRecheck: () => undefined,
+    }));
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("Imported 3 content packs into Additional Content.");
+    expect(text).not.toContain("Could not import");
+    expect(text).not.toContain("Nothing was imported");
   });
 
   it("gives a refused bundle only the import report's message, with no window", async () => {
