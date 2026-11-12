@@ -5,7 +5,7 @@
 //! for an admin (unless the admin page says otherwise), and with email set up they confirm their address first.
 
 use std::collections::{HashMap, HashSet};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
@@ -109,6 +109,111 @@ impl RateLimiter {
         if let Ok(mut map) = self.attempts.lock() {
             map.remove(key);
         }
+    }
+}
+
+/// The client a request comes from: the connecting address, unless that is one of `server.trusted_proxies`, which
+/// may name the client in `CF-Connecting-IP` or `X-Forwarded-For`.
+///
+/// Behind a proxy that is not listed, every request seems to come from the proxy. The headers are still not believed
+/// (anyone could send them), and the server says once in its log which setting to change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClientIp(pub IpAddr);
+
+impl ClientIp {
+    /// The key the sign-up and sign-in limits count under: the address, or for IPv6 its /64, which one machine
+    /// usually has to itself.
+    #[must_use]
+    pub fn limit_key(self) -> String {
+        match self.0 {
+            IpAddr::V4(v4) => v4.to_string(),
+            IpAddr::V6(v6) => {
+                let s = v6.segments();
+                format!("{:x}:{:x}:{:x}:{:x}::/64", s[0], s[1], s[2], s[3])
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for ClientIp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+const CF_CONNECTING_IP: &str = "cf-connecting-ip";
+const X_FORWARDED_FOR: &str = "x-forwarded-for";
+
+/// One address from a forwarding header: `1.2.3.4`, `1.2.3.4:5678`, `2001:db8::1` or `[2001:db8::1]:443`.
+fn forwarded_ip(text: &str) -> Option<IpAddr> {
+    let text = text.trim();
+    text.parse::<IpAddr>()
+        .ok()
+        .or_else(|| text.parse::<SocketAddr>().ok().map(|a| a.ip()))
+        .map(crate::net_guard::canonical)
+}
+
+/// The client of a request from `peer` with `headers`, believing the headers only from `trusted` peers.
+#[must_use]
+pub fn client_ip(peer: IpAddr, headers: &HeaderMap, trusted: &[crate::net_guard::Cidr]) -> IpAddr {
+    let peer = crate::net_guard::canonical(peer);
+    let is_trusted = |ip: IpAddr| trusted.iter().any(|c| c.contains(ip));
+    if !is_trusted(peer) {
+        if headers.contains_key(X_FORWARDED_FOR) || headers.contains_key(CF_CONNECTING_IP) {
+            warn_untrusted_proxy(peer);
+        }
+        return peer;
+    }
+    // Cloudflare replaces whatever the client sent with the address it saw.
+    if let Some(ip) = headers
+        .get(CF_CONNECTING_IP)
+        .and_then(|v| v.to_str().ok())
+        .and_then(forwarded_ip)
+    {
+        return ip;
+    }
+    // Each proxy appends the address it saw, so only the entries right of the last untrusted one are proxies' own
+    // words; that untrusted one is the client. Anything left of it may be made up.
+    let hops: Vec<&str> = headers
+        .get_all(X_FORWARDED_FOR)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .collect();
+    let mut client = peer;
+    for hop in hops.iter().rev() {
+        let Some(ip) = forwarded_ip(hop) else {
+            // Garbled: nothing further left can be read either.
+            return client;
+        };
+        client = ip;
+        if !is_trusted(ip) {
+            break;
+        }
+    }
+    client
+}
+
+/// Logged once: forwarding headers came from a peer that isn't in `server.trusted_proxies`.
+fn warn_untrusted_proxy(peer: IpAddr) {
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    WARNED.call_once(|| {
+        tracing::warn!(
+            "requests from {peer} carry X-Forwarded-For or CF-Connecting-IP, which are ignored: if {peer} is your              reverse proxy, add it to server.trusted_proxies (BOREALIS__SERVER__TRUSTED_PROXIES), or sign-up and              sign-in limits treat every client as one"
+        );
+    });
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for ClientIp {
+    type Rejection = <ConnectInfo<SocketAddr> as FromRequestParts<S>>::Rejection;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let ConnectInfo(peer) = ConnectInfo::<SocketAddr>::from_request_parts(parts, state).await?;
+        Ok(Self(client_ip(
+            peer.ip(),
+            &parts.headers,
+            &crate::config::network().trusted_proxies,
+        )))
     }
 }
 
@@ -409,14 +514,15 @@ pub fn tell_admins(state: &AppState, username: &str, email: &str) {
 /// what it is waiting for.
 pub async fn register(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    client: ClientIp,
     Json(form): Json<Registration>,
 ) -> ApiResult<Json<Value>> {
-    let ip = peer.ip().to_string();
-    if state.signup_limiter.blocked(&ip) {
+    let ip = client.to_string();
+    let key = client.limit_key();
+    if state.signup_limiter.blocked(&key) {
         return Err(ApiError::TooMany);
     }
-    state.signup_limiter.count(&ip);
+    state.signup_limiter.count(&key);
     let settings = runtime_settings(&state).await?;
     // Held across the count and the insert, so only one account can be the first.
     let _guard = state.accounts.lock().await;
@@ -545,12 +651,12 @@ pub async fn confirm(
 /// `POST /api/auth/login`.
 pub async fn login(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    client: ClientIp,
     Json(form): Json<Credentials>,
 ) -> ApiResult<Json<SessionOut>> {
     let name = form.username.trim().to_string();
-    let ip = peer.ip().to_string();
-    let key = format!("{ip}|{}", name.to_lowercase());
+    let ip = client.to_string();
+    let key = format!("{}|{}", client.limit_key(), name.to_lowercase());
     if state.login_limiter.blocked(&key) {
         return Err(ApiError::TooMany);
     }
