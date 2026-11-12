@@ -27,7 +27,7 @@ test.describe("dialogs", () => {
     await page.getByRole("button", { name: "Menu" }).tap();
     const menu = page.getByRole("dialog", { name: "Menu" });
     await expectFits(page, menu, testInfo);
-    // The phone sheet has no visible close button (its "Close" is for screen readers); Escape and Back close it.
+    // Escape closes it too (the visible Close is checked in phone-browser.spec.ts).
     await page.keyboard.press("Escape");
     await expect(menu).toBeHidden();
     await page.getByRole("button", { name: "Menu" }).tap();
