@@ -10,7 +10,8 @@
 // node party/android/smoke/run.mjs --apk <path> [--out <folder>] [--port 18799] [--avd BalanceLab_Tablet]
 //   [--server-bin <WSL path>] [--keep] [--no-wide] [--sheet-only] [--combat-only] [--max-minutes 20]
 // --sheet-only: sign in, import the character and check its sheet preview (step 7), nothing else.
-// --combat-only: sign in and check the DM's combat tracker (combatTracker below), nothing else.
+// --combat-only: sign in, import the character, and check the DM's combat tracker (combatTracker) and the player's
+// Combat sub-tab (playerCombat), nothing else.
 // Exit code 0 when every check passed.
 
 import { spawn, spawnSync } from "node:child_process";
@@ -295,8 +296,7 @@ async function main() {
   // Upstream's first-start notices, if any, are closed so they don't cover the import dialogs.
   for (const label of ["Close", "Dismiss", "OK", "Got it"]) await smoke(`click(${JSON.stringify(label)}, true)`).catch(() => false);
   await screenshot("02-signed-in");
-  if (combatOnly) { await combatTracker(); return; }
-  if (!sheetOnly) await phoneLayout();
+  if (!sheetOnly && !combatOnly) await phoneLayout();
 
   const characters = async () => (await api(token, "list_characters")).map((c) => c.name);
   const packs = async () => (await api(token, "list_packs")).map((p) => p.name ?? p.id);
@@ -314,6 +314,7 @@ async function main() {
   await sleep(1500);
   await screenshot("04-character-imported");
   if (sheetOnly) { await sheetPreview(token); return; }
+  if (combatOnly) { await combatTracker(); await playerCombat(token); return; }
 
   // 2. The same file again, and Cancel: nothing changes.
   const count = (await characters()).length;
@@ -405,6 +406,7 @@ async function main() {
   await partyLive(token);
   await encounters(token);
   await combatTracker();
+  await playerCombat(token);
 
   // 7. The sheet preview at Android font sizes 1.0 and 1.15 (last: it restarts the app).
   await sheetPreview(token);
@@ -548,6 +550,130 @@ async function combatTracker() {
   } finally {
     await page(`localStorage.removeItem("party.combatMock"); true`).catch(() => null);
     await reloadTo("#/characters").catch(() => null);
+  }
+}
+
+/**
+ * The player's Combat sub-tab in the real app (0.3.0 part F): while the account's party has a live combat, the Live
+ * chip shows in the top chrome, opens the Play tab's Combat sub-tab, and the DM's "Take 2 slashing?" prompt applied
+ * there takes the damage on the player's own character on the server (D7 a); after the app goes to the background
+ * and comes back, the view shows what changed meanwhile (no stale state). Until the combat server is in this tree,
+ * the server's PLAYER projection is answered inside the WebView (a fetch wrapper put into the running page, which
+ * then asks again as it does when the network comes back), so what is checked is the app side: the tab injection,
+ * the chrome, the app's own fetch, the wake-up refresh and the player's own command.
+ */
+async function playerCombat(token) {
+  const hero = (await api(token, "list_characters"))[0];
+  if (!hero) { check("the Combat sub-tab (needs the imported character)", false, "no character"); return; }
+  await rest(token, "POST", "/api/me/roles/dm", {});
+  const party = await rest(token, "POST", "/api/parties", { name: "Smoke Fight" });
+  let shimmed = false;
+  try {
+    await api(token, "load_character", { characterId: hero.id });
+    await rest(token, "POST", `/api/parties/${party.id}/members`, { characterId: hero.id });
+    const combat = {
+      id: "smoke-combat", partyId: party.id, pseq: 1, status: "active", turn: { kind: "combatant", id: "cr1", round: 2 },
+      encounter: { id: "e1", publicName: "Smoke ambush" },
+      order: [
+        { id: "cr1", kind: "creature", name: "Goblin", mine: false, initiative: 16, band: "bloodied", conditions: [{ name: "prone" }],
+          statBlock: { size: ["small"], creature_type: "humanoid", ac: [{ value: 15 }], hp: { average: 7, formula: "2d6" }, actions: [{ name: "Scimitar", text: "Melee Weapon Attack: +4 to hit." }] } },
+        { id: "me", kind: "character", name: hero.name, mine: true, initiative: 12, conditions: [], life: { state: "alive" } },
+      ],
+      me: [{ id: "me", kind: "character", characterId: hero.id, hp: { current: 10, max: 10, temp: 0 }, life: { state: "alive" }, concentrationChecks: [],
+        prompts: [{ id: "pr1", kind: "damage", amount: 2, parts: [{ amount: 2, damage_type: "slashing" }], criticalHit: false }] }],
+    };
+    const shim = `(() => {
+      const state = ${JSON.stringify(combat)};
+      window.__smokeCombat = state;
+      const real = window.__smokeRealFetch || window.fetch.bind(window);
+      window.__smokeRealFetch = real;
+      const json = (v) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
+      window.fetch = (input, init) => {
+        const url = String(typeof input === "string" ? input : input.url);
+        // No regular expressions here: this is a template literal, where a backslash would be lost.
+        const path = url.replace(/^[a-z]+:[/][/][^/]+/, "").split("?")[0];
+        const parts = path.split("/");
+        if (parts[1] === "api" && parts[2] === "parties" && parts[4] === "combat" && parts.length === 5) return Promise.resolve(json({ combat: state.id }));
+        if (parts[1] === "api" && parts[2] === "combats" && parts.length === 4) return Promise.resolve(json(state));
+        const m = parts[1] === "api" && parts[2] === "combats" && parts.length === 5 ? [path, parts[4]] : null;
+        if (m) {
+          const body = JSON.parse((init && init.body) || "{}");
+          const args = body.args || {};
+          if (m[1] === "resolve_prompt") for (const me of state.me) me.prompts = (me.prompts || []).filter((p) => p.id !== args.promptId);
+          if (m[1] === "summon" && args.combatant) {
+            const id = "smoke-s" + state.order.length;
+            const hp = { current: args.combatant.hp.current, max: args.combatant.hp.max, temp: 0 };
+            const at = state.order.findIndex((x) => x.id === args.owner);
+            state.order.splice(at + 1, 0, { id, kind: "creature", name: args.combatant.public_name, mine: true, band: "unhurt", life: { state: "alive" },
+              conditions: [], exhaustion: 0, view: { owner_id: args.owner, hp, ac: args.combatant.ac } });
+            state.me.push({ id, kind: "creature", hp, life: { state: "alive" }, concentrationChecks: [], prompts: [] });
+          }
+          state.pseq += 1;
+          return Promise.resolve(json(state));
+        }
+        return real(input, init);
+      };
+      return true;
+    })()`;
+    await connectPage().catch(() => null);
+    await page(`location.hash = "#/characters"`);
+    await page(shim);
+    shimmed = true;
+    // The page asks for its combats again when the network comes back (combat/player/store.ts).
+    await page(`window.dispatchEvent(new Event("online")), true`);
+    const chip = await until("the Live chip", () => page(`!!document.querySelector(".combat-live-chip")`), 30000).catch(() => false);
+    check("a live combat shows the Live chip in the app's top chrome", !!chip, chip ? "" : await page(`JSON.stringify({ hash: location.hash, shim: String(window.fetch).includes("combat"), bar: (document.querySelector(".party-title-live, .party-bar") || {}).outerHTML?.slice(0, 160) })`).catch((e) => String(e)));
+    if (!chip) { await screenshot("14-combat-no-chip"); return; }
+    await screenshot("14-combat-live-chip");
+    await page(`document.querySelector(".combat-live-chip").click(), true`);
+    const pane = await until("the Combat sub-tab", () => page(`!!document.querySelector('[data-testid="combat-pane"]') && [...document.querySelectorAll('[role="tab"]')].some((t) => t.innerText.trim() === "Combat" && t.getAttribute("aria-selected") === "true")`), 30000).catch(() => false);
+    check("the Live chip opens the Play tab's Combat sub-tab", !!pane);
+    if (!pane) return;
+    const shown = await page(`(() => { const t = document.querySelector('[data-testid="combat-pane"]').textContent; return ["Round 2", "Goblin", "Take 2 slashing damage?"].filter((w) => !t.includes(w)); })()`);
+    check("the sub-tab shows the round, the turn order and the damage prompt", shown.length === 0, shown.length ? `missing ${shown.join(", ")}` : "");
+    const sideways = await page(`document.documentElement.scrollWidth - innerWidth`);
+    check("the Combat sub-tab fits the phone's width", sideways <= 0, `${sideways} px too wide`);
+    await screenshot("15-combat-pane");
+    const before = (await api(token, "get_snapshot", { characterId: hero.id })).play.hitPoints.current;
+    await smoke("clickIn('Take 2 slashing', 'Apply')");
+    const after = await until("the damage on the server", async () => {
+      const hp = (await api(token, "get_snapshot", { characterId: hero.id })).play.hitPoints.current;
+      return hp !== before ? hp : null;
+    }, 15000, 500).catch(() => null);
+    check("Apply takes the damage on the player's own character (D7 a)", after === Math.max(0, before - 2), `${before} -> ${after}`);
+    await screenshot("16-combat-applied");
+
+    // A summon: a quick stat block, right after the PC in the turn order.
+    await smoke("click('Summon…')");
+    await until("the Summon dialog", () => page(`!!document.querySelector("#summon-name")`), 10000);
+    await smoke(`fill("#summon-name", "Spirit Wolf")`);
+    await smoke(`fill("#summon-hp", "11")`);
+    // innerText is as the CSS shows it (headings in capitals), so the dialog is found by its name field.
+    await page(`(() => { const d = document.querySelector("#summon-name").closest('[role="dialog"]'); const b = [...d.querySelectorAll("button")].find((x) => x.textContent.trim() === "Summon"); if (!b || b.disabled) return false; b.click(); return true; })()`);
+    const order = `[...document.querySelectorAll('[data-testid="combat-pane"] .combat-row .combat-row-name')].map((e) => e.textContent)`;
+    const summoned = await until("the summon in the turn order", async () => {
+      const names = await page(order);
+      const at = names.findIndex((n) => n.startsWith("Spirit Wolf"));
+      return at > 0 && names[at - 1].includes("(you)") ? names : null;
+    }, 15000, 500).catch(() => null);
+    check("Summon puts the creature right after the PC in the turn order", !!summoned, summoned ? summoned.join(" | ") : JSON.stringify(await page(order).catch(() => [])));
+    await screenshot("16b-combat-summon");
+
+    // Background and back: what changed meanwhile (no event reached the app) shows when it returns.
+    await page(`(() => { const s = window.__smokeCombat; s.pseq += 5; s.turn = { kind: "combatant", id: "me", round: 4 }; return true; })()`);
+    adbShell("input keyevent KEYCODE_HOME");
+    await sleep(2500);
+    adbShell(`am start -n ${ACTIVITY}`);
+    await sleep(1500);
+    await connectPage().catch(() => null);
+    const woke = await until("the view after coming back", () => page(`(() => { const p = document.querySelector('[data-testid="combat-pane"]'); return !!p && p.textContent.includes("Round 4") && p.textContent.includes("Your turn"); })()`), 15000, 500).catch(() => false);
+    check("back from the background, the Combat sub-tab shows what changed meanwhile", !!woke, woke ? "" : (await page(`(document.querySelector('[data-testid="combat-pane"]') || document.body).innerText.slice(0, 120)`).catch(() => "")));
+    await screenshot("17-combat-after-background");
+  } finally {
+    if (shimmed) await page(`(() => { if (window.__smokeRealFetch) window.fetch = window.__smokeRealFetch; delete window.__smokeCombat; return true; })()`).catch(() => null);
+    await rest(token, "DELETE", `/api/parties/${party.id}`).catch(() => null);
+    await page(`location.hash = "#/characters"`).catch(() => null);
+    await page(`window.dispatchEvent(new Event("online")), true`).catch(() => null);
   }
 }
 

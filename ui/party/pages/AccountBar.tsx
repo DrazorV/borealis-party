@@ -12,6 +12,7 @@ import { DesktopUpdate } from "./DesktopUpdate";
 import { OfflineBanner } from "./OfflineBanner";
 import { useSignOut } from "./SignOut";
 import { IMPORT_PATH } from "../import/door";
+import { LiveChip } from "../combat/player/LiveChip";
 
 /**
  * A host element placed in upstream's page, in front of the element `before` selects, for as long as that element
@@ -156,6 +157,8 @@ export function AccountBar() {
   const compact = compactAccount(phone, { tauri: isTauri(), os: phoneOs() });
   const status = useSyncStatus();
   const host = useHost("party-bar-host", ".aur-window > .aur-content");
+  // A phone's title bar: the Live chip, before Settings (plan D10), so a live combat costs no row of its own.
+  const title = useHost("party-title-live", "header.aur-title.mobile > .aur-iconbtn:last-child");
   const session = loadSession();
   const exit = useSignOut();
   if (!session) return null;
@@ -170,6 +173,9 @@ export function AccountBar() {
         <>
           <div className={compact ? "party-bar party-bar-compact" : "party-bar"}>
             <span className="spacer" />
+            {/* A live combat (plan D10, 4.4): beside the Sync chip; on a phone the chip is in the title bar and only
+                the "Your turn" banner is here. */}
+            <LiveChip mode={compact ? "banner" : "auto"} />
             {chip && <SyncChip phone={compact} />}
             {!compact && (
               <>
@@ -188,6 +194,7 @@ export function AccountBar() {
         </>,
         host,
       )}
+      {compact && title && createPortal(<LiveChip mode="chip" />, title)}
       {exit.dialog}
     </>
   );

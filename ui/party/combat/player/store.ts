@@ -1,0 +1,368 @@
+import { useSyncExternalStore } from "react";
+import { holdReload } from "../../api/connectivity";
+import {
+  actingId, combatPlayerDeps, diffEvents, liveCombat, myCombatant, playerAction, watchCombats,
+  type CombatLogEntry, type OpenCharacter, type PlayerCombat, type WireContext,
+} from "./api";
+import { loadSession } from "../../api/session";
+import { leaveCombatTab } from "./tabState";
+
+/**
+ * The live combats of the signed-in player's parties, for the Play tab's Combat sub-tab, the Live chip and the
+ * "Your turn" banner (plan 4.4, 0.3.0 part F). One watcher per page: it lists the parties the account has a character
+ * in, asks each for its live combat, and follows the combat events on the account's shared event stream.
+ *
+ * Losing the signal (D44): the last combat seen stays on screen with an "Offline" chip, and nothing is dropped
+ * because a request failed. The watcher asks again when the stream reopens or the next event comes. While a combat
+ * is live the page doesn't reload on its own (connectivity.ts `holdReload`), the screen stays on (Screen Wake Lock),
+ * and the phone buzzes when the turn comes to one of the player's characters.
+ */
+
+export interface CombatStore {
+  /** Live combats (setup or active) with one of the player's characters in them, by party. */
+  combats: PlayerCombat[];
+  /** A request failed for want of the server: what's shown is the last state seen. */
+  offline: boolean;
+  /** When `offline` began (ms). */
+  offlineSince: number | null;
+  /** When the last answer came (ms). */
+  updatedAt: number | null;
+  /** The first look at the parties is done. */
+  ready: boolean;
+  /** Live combats this account runs as DM (from the DM tracker, registerDmLiveCombats), for the Live chip. */
+  dmCombats: { id: string; partyName?: string }[];
+}
+
+const EMPTY: CombatStore = { combats: [], offline: false, offlineSince: null, updatedAt: null, ready: false, dmCombats: [] };
+
+let state: CombatStore = EMPTY;
+const subscribers = new Set<() => void>();
+
+function publish(next: Partial<CombatStore>): void {
+  state = { ...state, ...next };
+  subscribers.forEach((s) => s());
+  device();
+}
+
+export const combatStore = (): CombatStore => state;
+
+export function useCombatStore(): CombatStore {
+  return useSyncExternalStore((s) => { subscribers.add(s); return () => subscribers.delete(s); }, () => state);
+}
+
+/** What the page can do on the device; tests swap it. */
+export const deviceDeps = {
+  now: () => Date.now(),
+  /** D44: offline longer than this, what's shown is called old. */
+  staleMs: 60 * 1000,
+  /** No answer for this long, and the sub-tab says "Reconnecting…" (a blip shows nothing). */
+  reconnectingMs: 3000,
+  vibrate: (pattern: number[]) => {
+    try { navigator.vibrate?.(pattern); } catch { /* not on this device */ }
+  },
+  wakeLock: async (): Promise<{ release: () => Promise<void> } | null> => {
+    try {
+      const nav = navigator as Navigator & { wakeLock?: { request: (type: "screen") => Promise<{ release: () => Promise<void> }> } };
+      return (await nav.wakeLock?.request("screen")) ?? null;
+    } catch {
+      return null;
+    }
+  },
+};
+
+/** The buzz on "Your turn". */
+export const YOUR_TURN_BUZZ = [200, 100, 200];
+
+const isLive = (c: PlayerCombat) => c.status !== "ended" && c.pointer.kind !== "ended";
+const isNetwork = (e: unknown) => (e as { code?: string } | null)?.code === "network";
+
+/** How many revealed-event lines are kept per combat. */
+export const LOG_KEEP = 30;
+
+/** Parties with one of the account's characters in them: theirs to play in. */
+let parties = new Map<string, { name: string; myCharacters: string[] }>();
+/** The revealed-events log of each party's combat, built from what changed (api.ts diffEvents). */
+const logs = new Map<string, { combat: string; lines: CombatLogEntry[] }>();
+
+/** What turns a party's projection into the view model (its name, the account's characters in it). */
+export function contextFor(partyId: string): WireContext {
+  const p = parties.get(partyId);
+  return p ? { partyName: p.name, myCharacters: p.myCharacters } : {};
+}
+const lastSeq = new Map<string, number>();
+/** The turn each party's combat was on last time, to buzz once when it becomes the player's. */
+const lastActing = new Map<string, string | null>();
+
+async function listParties(): Promise<void> {
+  const session = loadSession();
+  if (!session) return;
+  const out = await combatPlayerDeps.fetch(session, "GET", "/api/parties") as { parties?: { id: string; name: string; myCharacters?: string[] }[] };
+  parties = new Map((out.parties ?? []).filter((p) => (p.myCharacters ?? []).length > 0)
+    .map((p) => [p.id, { name: p.name, myCharacters: p.myCharacters ?? [] }]));
+}
+
+function wentOffline(): void {
+  if (!state.offline) publish({ offline: true, offlineSince: deviceDeps.now() });
+}
+
+function put(partyId: string, combat: PlayerCombat | null): void {
+  const others = state.combats.filter((c) => c.partyId !== partyId);
+  const before = state.combats.find((c) => c.partyId === partyId) ?? null;
+  // An answer older than what's shown (two requests crossing) never takes it back (no stale states).
+  if (combat && before && before.id === combat.id && combat.seq < before.seq && !optimistic.has(partyId)) {
+    if (state.offline) publish({ offline: false, offlineSince: null, updatedAt: deviceDeps.now() });
+    return;
+  }
+  let keep: PlayerCombat[] = [];
+  if (combat && isLive(combat) && myCombatant(combat)) {
+    const kept = logs.get(partyId);
+    const lines = kept && kept.combat === combat.id ? kept.lines : [];
+    const added = before && before.id === combat.id ? diffEvents(before, combat, deviceDeps.now())
+      : lines.length === 0 ? diffEvents(null, combat, deviceDeps.now()) : [];
+    const log = [...lines, ...combat.log, ...added].slice(-LOG_KEEP);
+    logs.set(partyId, { combat: combat.id, lines: log });
+    keep = [{ ...combat, partyName: combat.partyName ?? parties.get(partyId)?.name, log }];
+  } else logs.delete(partyId);
+  if (combat) lastSeq.set(partyId, combat.seq);
+  else lastSeq.delete(partyId);
+  const was = lastActing.get(partyId) ?? null;
+  const now = keep[0] ? actingId(keep[0]) : null;
+  lastActing.set(partyId, now);
+  if (keep[0] && now && now !== was && keep[0].combatants.some((x) => x.mine && x.id === now)) deviceDeps.vibrate(YOUR_TURN_BUZZ);
+  publish({ combats: [...others, ...keep], offline: false, offlineSince: null, updatedAt: deviceDeps.now() });
+}
+
+/** Requests in flight per party; an event while one is out asks again once it's back, so the newest always lands. */
+const inFlight = new Map<string, { again: boolean; done: Promise<void> }>();
+/** Parties with a player write on its way: what's shown is the player's own guess until the server answers. */
+const optimistic = new Map<string, number>();
+
+/** Ask one party for its combat again. A network failure keeps what's shown (D44). */
+function refresh(partyId: string): Promise<void> {
+  const running = inFlight.get(partyId);
+  if (running) { running.again = true; return running.done; }
+  const entry = { again: false, done: Promise.resolve() };
+  entry.done = (async () => {
+    do {
+      entry.again = false;
+      try {
+        const combat = await liveCombat(partyId, contextFor(partyId));
+        if (!optimistic.has(partyId)) put(partyId, combat);
+      } catch (e) {
+        if (isNetwork(e)) wentOffline();
+        // Any other refusal: the party is gone or no longer this account's; its combat goes too.
+        else put(partyId, null);
+      }
+    } while (entry.again);
+    inFlight.delete(partyId);
+  })();
+  inFlight.set(partyId, entry);
+  return entry.done;
+}
+
+async function refreshAll(): Promise<void> {
+  try {
+    await listParties();
+  } catch (e) {
+    if (isNetwork(e)) { wentOffline(); return; }
+    parties = new Map();
+  }
+  // Combats of parties the account left go.
+  const gone = state.combats.filter((c) => !parties.has(c.partyId));
+  if (gone.length > 0) publish({ combats: state.combats.filter((c) => parties.has(c.partyId)) });
+  await Promise.all([...parties.keys()].map(refresh));
+  if (!state.ready) publish({ ready: true });
+}
+
+/** A player write answered the new projection: show it at once. */
+export function adopt(combat: PlayerCombat): void {
+  put(combat.partyId, combat);
+}
+
+/** How long a player write keeps trying through a lost signal (D44's buffer), and the waits between tries. */
+export const writeDeps = { retryForMs: 60_000, waits: [1000, 2000, 4000, 8000, 15000], sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)) };
+
+/**
+ * One player action (initiative, a death save, a concentration save, resolving a prompt): shown at once as `guess`
+ * would leave it (optimistic), sent with one requestId that every retry reuses, retried through a lost signal for up
+ * to a minute, and on a refusal (409, 400) taken back to what the server says, with the refusal thrown to the caller.
+ */
+export async function playerWrite(combat: PlayerCombat, action: string, args: Record<string, unknown>,
+  guess?: (c: PlayerCombat) => PlayerCombat): Promise<PlayerCombat> {
+  const partyId = combat.partyId;
+  const requestId = combatPlayerDeps.requestId();
+  const before = state.combats.find((c) => c.partyId === partyId) ?? combat;
+  optimistic.set(partyId, (optimistic.get(partyId) ?? 0) + 1);
+  if (guess) publish({ combats: state.combats.map((c) => (c.partyId === partyId ? { ...guess(c), seq: c.seq } : c)) });
+  const started = deviceDeps.now();
+  const settle = () => {
+    const n = (optimistic.get(partyId) ?? 1) - 1;
+    if (n > 0) optimistic.set(partyId, n); else optimistic.delete(partyId);
+  };
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const out = await playerAction(combat.id, action, args, contextFor(partyId), requestId);
+      settle();
+      put(partyId, out);
+      return out;
+    } catch (e) {
+      if (isNetwork(e) && deviceDeps.now() - started < writeDeps.retryForMs) {
+        wentOffline();
+        await writeDeps.sleep(writeDeps.waits[Math.min(attempt, writeDeps.waits.length - 1)]!);
+        continue;
+      }
+      settle();
+      // Taken back: what was shown before, then what the server says now.
+      if (guess) publish({ combats: state.combats.map((c) => (c.partyId === partyId ? before : c)) });
+      void refresh(partyId);
+      throw e;
+    }
+  }
+}
+
+/** Tests and a reconnect: ask everything again. */
+export const refreshCombats = (): Promise<void> => refreshAll();
+
+let running: (() => void) | null = null;
+let first: Promise<void> = Promise.resolve();
+/** Tests: the watcher's first look at the parties. */
+export const combatWatchReady = (): Promise<void> => first;
+
+/** Starts following the account's combats; answers a stop. Once per page (a second start shares the first). */
+export function startCombatWatch(): () => void {
+  if (running) return running;
+  // Events are invalidations in pseq order: one no newer than what's shown is skipped; any newer one (a gap
+  // included) fetches the whole projection and replaces what's shown. A reopened stream is a resync.
+  const stopEvents = watchCombats((e) => {
+    if (e.type === "combat") {
+      if (!parties.has(e.party)) { void refreshAll(); return; }
+      if (e.seq && e.seq <= (lastSeq.get(e.party) ?? -1) && !state.offline) return;
+      void refresh(e.party);
+    } else void refreshAll();
+  });
+  // The phone waking, or the app coming back from the background, or the network back: ask everything again once.
+  const wake = () => { if (document.visibilityState === "visible") void refreshAll(); };
+  const online = () => void refreshAll();
+  document.addEventListener("visibilitychange", wake);
+  window.addEventListener("pageshow", online);
+  window.addEventListener("online", online);
+  const stopDm = startDmWatch();
+  first = refreshAll();
+  running = () => {
+    stopEvents();
+    stopDm();
+    document.removeEventListener("visibilitychange", wake);
+    window.removeEventListener("pageshow", online);
+    window.removeEventListener("online", online);
+    running = null;
+  };
+  return running;
+}
+
+/** Tests: start over. */
+export function resetCombatStore(): void {
+  running?.();
+  running = null;
+  parties = new Map();
+  lastSeq.clear();
+  lastActing.clear();
+  logs.clear();
+  inFlight.clear();
+  optimistic.clear();
+  dmSource = null;
+  state = EMPTY;
+  release();
+  subscribers.forEach((s) => s());
+}
+
+// The device side: no reload and the screen on while a combat is live.
+let reloadHold: (() => void) | null = null;
+let lock: { release: () => Promise<void> } | null = null;
+let locking = false;
+
+function release(): void {
+  reloadHold?.();
+  reloadHold = null;
+  void lock?.release().catch(() => undefined);
+  lock = null;
+}
+
+function device(): void {
+  const live = state.combats.length > 0;
+  // No combat left: the next one starts on the Play page's own sub-tab, not on a Combat tab chosen for the last one.
+  if (!live) { release(); leaveCombatTab(); return; }
+  reloadHold ??= holdReload("combat");
+  if (!lock && !locking) {
+    locking = true;
+    void deviceDeps.wakeLock().then((l) => {
+      locking = false;
+      if (state.combats.length > 0) lock = l;
+      else void l?.release().catch(() => undefined);
+    });
+  }
+}
+
+// A wake lock ends when the page is hidden; take it again when the page comes back.
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") { lock = null; device(); }
+  });
+}
+
+// ---- the DM's own live combats (the DM tracker registers them; this module never imports it) ------------------------
+
+export interface DmLiveSource {
+  /** The live combats this account runs as DM. */
+  list: () => Promise<{ id: string; partyName?: string }[]>;
+  /** Calls `onChange` when that list may have changed; answers a stop. */
+  watch: (onChange: () => void) => () => void;
+  /** The DM tracker's route for a combat. */
+  path: (id: string) => string;
+}
+
+let dmSource: DmLiveSource | null = null;
+let restartDm: (() => void) | null = null;
+
+/** The DM tracker (feat/dm-tracker) calls this once, so the Live chip shows the DM's own live combats too. */
+export function registerDmLiveCombats(source: DmLiveSource): void {
+  dmSource = source;
+  restartDm?.();
+}
+
+export const dmCombatPath = (id: string): string | null => dmSource?.path(id) ?? null;
+
+function startDmWatch(): () => void {
+  let stop: (() => void) | null = null;
+  const load = () => {
+    if (!dmSource) return;
+    dmSource.list().then((dmCombats) => publish({ dmCombats }), () => { /* offline: keep what's shown */ });
+  };
+  const begin = () => {
+    stop?.();
+    stop = dmSource ? dmSource.watch(load) : null;
+    load();
+  };
+  restartDm = begin;
+  begin();
+  return () => { stop?.(); stop = null; restartDm = null; };
+}
+
+/** The live combat that has this (open) character in it, or null. */
+export function combatFor(store: CombatStore, open: OpenCharacter | null | undefined): PlayerCombat | null {
+  if (!open) return null;
+  return store.combats.find((c) => myCombatant(c, open)) ?? null;
+}
+
+export function useCombatFor(open: OpenCharacter | null | undefined): PlayerCombat | null {
+  return combatFor(useCombatStore(), open);
+}
+
+/** The first live combat where it's one of the player's characters' turn, or null. */
+export function myTurn(store: CombatStore): { combat: PlayerCombat; characterId: string | null } | null {
+  for (const c of store.combats) {
+    const id = actingId(c);
+    const mine = c.combatants.find((x) => x.mine && x.id === id);
+    if (mine) return { combat: c, characterId: mine.characterId ?? null };
+  }
+  return null;
+}
