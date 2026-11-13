@@ -124,7 +124,7 @@ describe("encounter builder (DM)", () => {
     fireEvent.click(await within(picker).findByRole("button", { name: "Monstrosity" }));
     await waitFor(() => expect(within(picker).queryByRole("button", { name: "Pick Goblin Warrior" })).toBeNull());
     const search = server.calls.filter((c) => c.path === "/api/bestiary/search").at(-1)!;
-    expect(search.body).toMatchObject({ types: ["monstrosity"], ruleset: "dnd2024" });
+    expect(search.body).toMatchObject({ kinds: ["monster"], types: ["monstrosity"], ruleset: "dnd2024" });
     fireEvent.change(within(picker).getByLabelText("Search monsters"), { target: { value: "owl" } });
     await waitFor(() => expect((server.calls.filter((c) => c.path === "/api/bestiary/search").at(-1)!.body as { text?: string }).text).toBe("owl"));
   });

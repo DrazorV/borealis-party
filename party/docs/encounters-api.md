@@ -141,6 +141,8 @@ Any of `{ name, publicName, ruleset (null = the party's), status, playerVisible,
 Body `{ elementId, count?, dmLabel?, publicName?, hidden? }`. Answers the DM view of the encounter.
 - `elementId` must be a **typed `Monster` element** installed in the DM's own content (D17); anything else is 400
   "Only monsters can be added to an encounter." An unknown id is 400 "That monster isn't in your content."
+  The bestiary search also lists Aurora `Companion` creatures (the user's D17 b, part A); the picker asks it for
+  `kinds: ["monster"]` until companions get a stat block copy of their own (open item).
 - The stat block is **copied** (`statblock_json`) with `elementId`, `packId` (the pack file's name) and `packRev` (a
   fingerprint of the block). Later content changes don't touch it until "Refresh".
 - `count`: 1–20 (default 1). At most 60 creatures per encounter.

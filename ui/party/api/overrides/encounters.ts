@@ -226,6 +226,8 @@ export interface RefreshOutcome { changed: boolean; conflicts: Conflict[]; appli
 // The monster picker (part A's bestiary API).
 
 export interface MonsterQuery {
+  /** Part A lists Aurora companions too (D17 b); encounters take typed Monster elements only for now. */
+  kinds?: ("monster" | "companion")[];
   text?: string;
   crMin?: string;
   crMax?: string;

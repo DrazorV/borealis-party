@@ -58,6 +58,7 @@ export function EncounterPicker({ ruleset, room, onAdd, onClose }: {
   const query = useMemo((): MonsterQuery => {
     const cr = CR_BANDS.find((b) => b.id === band);
     return {
+      kinds: ["monster"],
       ...(text.trim() ? { text: text.trim().slice(0, 100) } : {}),
       ...(edition ? { ruleset: edition } : {}),
       ...(cr ? { crMin: cr.crMin, crMax: cr.crMax } : {}),
