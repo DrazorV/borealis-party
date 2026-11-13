@@ -28,6 +28,11 @@ impl Backend for Mock {
             let n = self.calls.fetch_add(1, Ordering::SeqCst);
             match call {
                 ToolCall::MonsterGet(a) if a.id == "missing" => Err(ToolError::NotFound),
+                ToolCall::MonsterGet(a) if a.id == "bad" => Err(ToolError::RefusedWith {
+                    code: "invalid_homebrew".into(),
+                    message: "The element has 1 error(s)".into(),
+                    details: json!({ "report": { "errors": 1, "issues": [{ "line": 3, "message": "no name" }] } }),
+                }),
                 ToolCall::EncounterCreate(a) => {
                     Ok(json!({ "id": format!("enc-{n}"), "name": a.name }))
                 }
@@ -111,7 +116,23 @@ async fn the_envelope_answers_the_spec_shapes() {
         ),
     )
     .await;
-    assert_eq!(r.body.unwrap()["result"]["isError"], true);
+    assert_eq!(r.body.unwrap()["result"]["isError"], true); // A refusal with details: the model gets them in the error result, to fix and retry.
+    let r = handle(
+        &reg,
+        &b,
+        &c,
+        h,
+        &modern(
+            "tools/call",
+            json!({ "name": "monster_get", "arguments": { "id": "bad" } }),
+        ),
+    )
+    .await;
+    let res = &r.body.unwrap()["result"];
+    assert_eq!(res["isError"], true);
+    let err: Value = serde_json::from_str(res["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(err["code"], "invalid_homebrew");
+    assert_eq!(err["details"]["report"]["issues"][0]["line"], 3, "{err}");
     let r = handle(
         &reg,
         &b,
