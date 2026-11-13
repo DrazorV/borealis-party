@@ -362,8 +362,11 @@ characters and content packs to that account only, exactly as desktop Borealis w
   content packs": that is every pack in the account's library, imported homebrew and packs from indexes alike, in
   `Borealis content.borealis`. They open it in desktop Borealis or in their own account with File > Open bundle....
   Packs from an index keep updating: each records its index, and accepting the bundle in a party account also adds
-  those indexes to that account, so its content updates follow them. Packs the account already had unchanged add
-  nothing, so an index it removed stays removed. Desktop Borealis takes the packs only, as a snapshot. The iOS app
+  those indexes to that account, so its content updates follow them. Packs the account already had bring their index
+  too, except an index the account removed itself (each removal is recorded), unless the bundle changes that pack.
+  Until an index is downloaded, Additional Content names it after its pack. Installed packs whose index the account
+  doesn't follow are listed above the index files with "Add its index". Desktop Borealis takes the packs only, as a
+  snapshot. The iOS app
   offers it as More > Share as a file, through the share sheet, up to 48 MiB per bundle. The Android app does not
   offer it: its web view can't download or share the file and its own backend has no bundle commands, so Android
   sends bundles with a share code instead (below). The export dialog marks packs whose
