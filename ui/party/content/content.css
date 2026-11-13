@@ -1,0 +1,5 @@
+/* Additional Content, party additions: Remove all on each pack group header (PackGroups.tsx). */
+.v4-pack-groups .aur-expander-extra .party-remove-all { white-space: nowrap; }
+html.phone .v4-pack-groups .party-remove-all { min-height: var(--ph-hit); min-width: var(--ph-hit); }
+/* The Remove source dialog (api/overrides/sourceRemoval.ts). */
+.party-remove-source p { margin: 0 0 var(--sp-2); overflow-wrap: anywhere; }

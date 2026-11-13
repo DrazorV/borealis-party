@@ -24,6 +24,8 @@ mod sync_tests;
 #[path = "jobs_tests.rs"]
 mod jobs_tests;
 
+#[path = "content_tools_tests.rs"]
+mod content_tools_tests;
 #[path = "parties_tests.rs"]
 mod parties_tests;
 #[path = "shares_tests.rs"]

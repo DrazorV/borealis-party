@@ -12,6 +12,7 @@ import {
   type Account, type AccountStatus, type ActivityEntry, type AdminSettings, type Paged, type ServerStats,
 } from "../api/party";
 import { loadSession } from "../api/session";
+import { DefaultFiveToolsSource } from "./DefaultFiveToolsSource";
 import { TrustedProxies } from "./TrustedProxies";
 import "./party.css";
 
@@ -326,6 +327,7 @@ function Settings() {
         </div>
       </Card>
       <TrustedProxies />
+      <DefaultFiveToolsSource />
     </>
   );
 }

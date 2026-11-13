@@ -1344,10 +1344,7 @@ mod tests {
     #[test]
     fn only_plain_internet_addresses_travel_as_links() {
         assert!(linkable("https://content.example/homebrew.index", true));
-        assert!(linkable(
-            "https://github.com/5etools-mirror-3/5etools-src",
-            false
-        ));
+        assert!(linkable("https://github.com/example/srd-data", false));
         for url in [
             "http://content.example/homebrew.index",
             "https://me:pw@content.example/homebrew.index",

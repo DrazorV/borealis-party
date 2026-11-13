@@ -1,6 +1,6 @@
 import { type FormEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { type Navigator, type To, UNSAFE_NavigationContext, useNavigate } from "react-router";
-import type { Api, ContentProgress, FiveToolsImportReport, FiveToolsSource, ImportReport } from "../../src/api/contract";
+import type { Api, ContentProgress, FiveToolsImportReport, FiveToolsSource, FiveToolsUrl, ImportReport } from "../../src/api/contract";
 import { Button } from "../../src/components/Button";
 import { Card } from "../../src/components/Card";
 import { useConfirm } from "../../src/components/Confirm";
@@ -8,7 +8,6 @@ import { Check } from "../../src/components/Fields";
 import { Icon, type IconName } from "../../src/components/Icon";
 import { useImportNotice } from "../../src/components/ImportNotice";
 import { fileToBase64, filesToInputs } from "../../src/lib/files";
-import { FiveToolsReport } from "../../src/pages/content/FiveToolsReport";
 import { FiveToolsSources } from "../../src/pages/content/FiveToolsSources";
 import { describeUrlUpdate } from "../../src/pages/content/FiveToolsUrlSection";
 import { ImportPreviewHost } from "../../src/pages/content/ImportPreviewDialog";
@@ -18,12 +17,16 @@ import { useApi } from "../../src/state/ApiContext";
 import { startImportPreview, useImportPreviewState } from "../../src/state/importPreview";
 import { errorMessage } from "../../src/state/useAsync";
 import { openBundleFromImport } from "../api/bundles";
+import { defaultFiveToolsSource } from "../api/importSource";
 import { loadSession } from "../api/session";
 import { inboxEmpty, onInbox, sendFiles, takeFocus, takeInbox } from "../import/door";
 import { KIND_LABEL, needsNotice, planImport, sentence } from "../import/plan";
-import { classifyLink, LATEST_5ETOOLS_URL, type LinkKind } from "../import/sniff";
+import { viewReport } from "../import/reportNotes";
+import { checkFiveToolsSource, classifyLink, type LinkKind } from "../import/sniff";
 import { receiveRoute } from "./ShareReceivePage";
 import "./party.css";
+import { FiveToolsResult } from "./FiveToolsResult";
+import "./importSource.css";
 
 /**
  * One Import screen (plan I9): every kind of file and link the account can take in, so nobody has to know which of
@@ -60,6 +63,8 @@ interface Row {
   choose?: string;
   /** A 5etools import with entries imported in part or skipped: its report. */
   report?: FiveToolsImportReport;
+  /** Where 5etools data came from, when the title doesn't say it. */
+  source?: string;
 }
 
 const ICONS: Record<Tone, IconName> = { working: "update", success: "check", warning: "alert", error: "x", info: "info" };
@@ -140,6 +145,19 @@ function StagedBooks({ api, staged, onDone }: { api: Api; staged: Staged; onDone
 /** The 5etools card, which a door can ask to show. */
 const FIVETOOLS_CARD = "party-import-5etools";
 
+/** This device remembers the last own 5etools source per server and account (a convenience: losing it is fine). */
+const customKey = () => {
+  const s = loadSession();
+  return s ? `borealis-party:5etools-source:${s.baseUrl}:${s.user.username}` : null;
+};
+function readCustom(): string {
+  try { const k = customKey(); return (k && localStorage.getItem(k)) || ""; } catch { return ""; }
+}
+function saveCustom(url: string) {
+  try { const k = customKey(); if (k) localStorage.setItem(k, url); } catch { /* storage off: nothing to remember */ }
+}
+
+
 export function ImportHub() {
   const api = useApi();
   const confirm = useConfirm();
@@ -152,6 +170,23 @@ export function ImportHub() {
   const [rows, setRows] = useState<Row[]>([]);
   const [link, setLink] = useState("");
   const [shareCode, setShareCode] = useState("");
+  const [custom, setCustom] = useState(readCustom);
+  const [customError, setCustomError] = useState<string | null>(null);
+  const customRef = useRef<HTMLInputElement>(null);
+  /** The 5etools addresses this account imported from, each with its packs (Update re-imports the same books). */
+  const [sources, setSources] = useState<FiveToolsUrl[]>([]);
+  /** Pack names by id: a source lists its packs by id. */
+  const [packNames, setPackNames] = useState<Record<string, string>>({});
+  const refreshSources = useCallback(() => {
+    void api.list5etoolsUrls().then((l) => setSources(Array.isArray(l) ? l : []), () => undefined);
+    void api.listPacks().then((l) => setPackNames(Object.fromEntries((Array.isArray(l) ? l : []).map((p) => [p.id, p.name]))), () => undefined);
+  }, [api]);
+  useEffect(refreshSources, [refreshSources]);
+  /** The server's default 5etools source, set by its admin; none ships with the party. */
+  const [defaultUrl, setDefaultUrl] = useState<string | null>(null);
+  useEffect(() => { let live = true; void defaultFiveToolsSource().then((u) => { if (live) setDefaultUrl(u); }); return () => { live = false; }; }, []);
+  /** How a 5etools source is named: the server's default by that name, any other by its address. */
+  const sourceTitle = (url: string) => (defaultUrl && sameUrl(url, defaultUrl) ? "Default 5etools data" : url);
   const nav = useNavigate();
   const [busy, setBusyState] = useState(false);
   // Read by work that outlives a render (the inbox is emptied in a loop).
@@ -183,14 +218,10 @@ export function ImportHub() {
 
   const booksDone = (id: number, report: FiveToolsImportReport | null, error?: string) => {
     if (!report) { patch(id, { tone: "error", message: sentence(error ?? "Nothing was imported."), staged: undefined }); return; }
-    const notes = report.partial.length + report.skipped.length;
-    patch(id, {
-      tone: notes > 0 ? "warning" : "success",
-      message: `Imported ${plural(report.converted, "element")} into ${plural(report.packs.length, "content pack")}.`,
-      details: notes > 0 ? [`${plural(notes, "entry", "entries")} imported in part or skipped:`] : [],
-      report: notes > 0 ? report : undefined,
-      staged: undefined,
-    });
+    // A finished import is a success, its notes calm details; only an import that brought nothing in warns.
+    const view = viewReport(report);
+    patch(id, { tone: view.tone, message: view.headline, details: [], report, staged: undefined });
+    refreshSources();
   };
 
   const importFiles = async (files: File[]) => {
@@ -289,9 +320,11 @@ export function ImportHub() {
       if (known) {
         // Imported from here before: Update re-imports the same books into the same packs.
         const r = await api.update5etoolsUrl({ url: known.url });
-        patch(id, { tone: "success", message: describeUrlUpdate(r.upToDate, r.report) });
+        const view = r.report && !r.upToDate ? viewReport(r.report) : null;
+        patch(id, { tone: view?.tone ?? "success", message: describeUrlUpdate(r.upToDate, r.report), report: view ? r.report ?? undefined : undefined });
       } else await offerBooks(id, (await api.stage5etoolsUrl({ url })).token);
     } catch (e) { fail(id, e); }
+    if (known) refreshSources();
   };
 
   const take = async (kind: LinkKind, id: number, url: string) => {
@@ -319,10 +352,23 @@ export function ImportHub() {
     await take(parsed.kind, id, parsed.url);
   };
 
-  const latest = async () => {
+  /** Download (or update) 5etools data from `url`, in a row named after the source. */
+  const fromSource = async (url: string) => {
     if (busy) return;
-    const id = add({ title: "Latest 5etools data", kind: "5etools-format data", tone: "working", message: "Waiting…" });
-    await take("fivetools", id, LATEST_5ETOOLS_URL);
+    const title = sourceTitle(url);
+    const id = add({ title, kind: "5etools-format data", tone: "working", message: "Waiting…", source: title === url ? undefined : url });
+    await take("fivetools", id, url);
+  };
+
+  const submitCustom = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    const checked = checkFiveToolsSource(custom);
+    if (checked.error !== undefined) { setCustomError(checked.error); customRef.current?.focus(); return; }
+    setCustomError(null);
+    setCustom(checked.url);
+    saveCustom(checked.url);
+    await fromSource(checked.url);
   };
 
   /** What the other doors handed over (../import/door.ts), one pick at a time. */
@@ -387,10 +433,52 @@ export function ImportHub() {
         <p className="muted small">An Aurora or Borealis .index file, or a GitHub repository (or https:// data/ folder) of 5etools-format data. The server downloads it.</p>
       </Card>
       <Card title="5etools data" id={FIVETOOLS_CARD}>
-        <p className="muted">Download the newest 5etools-format data from its public GitHub repository, then choose the books. Next time it re-imports the same books when they changed. Only use content you are entitled to use.</p>
-        <div className="party-import-actions">
-          <Button icon="download" disabled={busy} onClick={() => void latest()}>Get the latest 5etools data</Button>
+        <p className="muted">{defaultUrl
+          ? "Use the source your server offers, or your own, then choose the books."
+          : "Borealis Party comes with no 5etools address. Give the address of 5etools-format data, then choose the books."}{" "}
+          Doing it again later re-imports the same books when they changed. Only use content you are entitled to use.</p>
+        <div className="party-import-sources">
+          {defaultUrl && (
+            <section className="party-import-source" aria-labelledby="party-5et-default">
+              <h3 id="party-5et-default">Default 5etools data</h3>
+              <p className="party-import-source-name">Set by your server</p>
+              <p className="muted small party-import-url">{defaultUrl}</p>
+              <div className="party-import-actions">
+                <Button variant="primary" icon="download" disabled={busy} onClick={() => void fromSource(defaultUrl)}>Get the default 5etools data</Button>
+              </div>
+            </section>
+          )}
+          <section className="party-import-source" aria-labelledby="party-5et-custom">
+            <h3 id="party-5et-custom">My own 5etools source</h3>
+            <form className="party-import-link" noValidate onSubmit={(e) => void submitCustom(e)}>
+              <input ref={customRef} className="input" type="url" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                aria-label="Address of my 5etools source" aria-describedby="party-5et-hint" aria-invalid={customError ? true : undefined}
+                placeholder="https://github.com/owner/repo" value={custom}
+                onChange={(e) => { setCustom(e.target.value); setCustomError(null); }} />
+              <Button type="submit" icon="download" disabled={busy || !custom.trim()}>Import from my source</Button>
+            </form>
+            {customError && <p className="party-import-field-error" role="alert">{customError}</p>}
+            <p id="party-5et-hint" className="muted small">A GitHub repository of 5etools data (a mirror or a fork), a branch or folder in one (…/tree/branch/data), or the https:// address of any data folder that has books.json. Homebrew .json files go in through Choose files.</p>
+          </section>
         </div>
+        {sources.length > 0 && (
+          <div className="party-import-known">
+            <h3 id="party-5et-known">Imported from</h3>
+            <ul aria-labelledby="party-5et-known">
+              {sources.map((s) => (
+                <li key={s.url} className="party-import-known-row">
+                  <div className="party-import-known-text">
+                    <strong className="party-import-url">{sourceTitle(s.url)}</strong>
+                    {sourceTitle(s.url) !== s.url && <span className="muted small party-import-url">{s.url}</span>}
+                    {(s.packs ?? []).length > 0 && <span className="muted small">{plural(s.packs.length, "pack")}: {s.packs.map((id) => packNames[id] ?? id).join(", ")}</span>}
+                    {s.problem && <span className="small party-import-field-error">{s.problem}</span>}
+                  </div>
+                  <Button disabled={busy} aria-label={`Update from ${sourceTitle(s.url)}`} onClick={() => void fromSource(s.url)}>Update</Button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </Card>
       {rows.length > 0 && (
         <Card title="Results" actions={<Button small disabled={busy} onClick={() => setRows([])}>Clear</Button>}>
@@ -406,6 +494,7 @@ export function ImportHub() {
                   {r.message}
                   {r.tone === "working" && progress?.message ? <span className="muted small"> {progress.message}</span> : null}
                 </p>
+                {r.source && <p className="muted small party-import-detail">From {r.source}</p>}
                 {r.details.map((d) => <p key={d} className="muted small party-import-detail">{d}</p>)}
                 {r.choose && (
                   <div className="party-import-actions">
@@ -413,7 +502,7 @@ export function ImportHub() {
                     <Button disabled={busy} onClick={() => void take("fivetools", r.id, r.choose!)}>Import as 5etools data</Button>
                   </div>
                 )}
-                {r.report && <div className="party-import-report"><FiveToolsReport report={r.report} /></div>}
+                {r.report && <div className="party-import-report"><FiveToolsResult report={r.report} headline={false} /></div>}
                 {r.staged && <StagedBooks api={api} staged={r.staged} onDone={(report, error) => booksDone(r.id, report, error)} />}
               </li>
             ))}

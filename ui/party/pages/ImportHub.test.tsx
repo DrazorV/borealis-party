@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api } from "../../src/api/contract";
 import { openImport, resetDoor, sendFiles, sendLink } from "../import/door";
+import { memoryStorage } from "../test/memoryStorage";
 import { AURORA_CHARACTER, AURORA_PACK, BUNDLE_ZIP, fileOf, FIVETOOLS_HOMEBREW, FIVETOOLS_ZIP } from "../import/testFiles";
 
 /** The commands the screen sends, by name, with their arguments. */
@@ -13,6 +14,7 @@ const state = vi.hoisted(() => ({
   indexes: [] as { url: string; name: string; lastChecked: string | null; problem: string | null }[],
   refuse: null as string | null,
   confirm: "confirm" as string,
+  defaultUrl: null as string | null,
 }));
 
 function fakeApi(): Api {
@@ -49,6 +51,7 @@ let api: Api;
 vi.mock("../../src/state/ApiContext", () => ({ useApi: () => api }));
 vi.mock("../../src/components/Confirm", () => ({ useConfirm: () => async () => state.confirm }));
 vi.mock("../../src/components/ImportNotice", () => ({ useImportNotice: () => ({ ensure: async () => true, read: () => undefined }) }));
+vi.mock("../api/importSource", () => ({ defaultFiveToolsSource: async () => state.defaultUrl }));
 vi.mock("../api/session", () => ({ loadSession: () => ({ baseUrl: "http://server", token: "t", user: { username: "ana" } }) }));
 vi.mock("../api/bundles", () => ({
   openBundleFromImport: async (_s: unknown, fileName: string) => {
@@ -94,7 +97,7 @@ const row = (title: string | RegExp) => screen.getByText(title, { selector: ".pa
 beforeEach(() => {
   resetDoor();
   calls.length = 0;
-  Object.assign(state, { packs: [], urls: [], indexes: [], refuse: null, confirm: "confirm" });
+  Object.assign(state, { packs: [], urls: [], indexes: [], refuse: null, confirm: "confirm", defaultUrl: "https://github.com/example/srd-data" });
   api = fakeApi();
 });
 
@@ -199,22 +202,138 @@ describe("Paste a link", () => {
   });
 });
 
-describe("Get the latest 5etools data", () => {
-  it("downloads the preset the first time", async () => {
+const DEFAULT_URL = "https://github.com/example/srd-data";
+const STORE_KEY = "borealis-party:5etools-source:http://server:ana";
+
+describe("5etools data: the default source", () => {
+  beforeEach(() => { vi.stubGlobal("localStorage", memoryStorage()); });
+
+  it("offers the server's default, named with its address", async () => {
     render(<ImportHub />);
-    fireEvent.click(screen.getByRole("button", { name: "Get the latest 5etools data" }));
     await settle();
-    expect(calls.find((c) => c.name === "stage5etoolsUrl")?.args).toEqual({ url: "https://github.com/5etools-mirror-3/5etools-src" });
+    const card = screen.getByRole("region", { name: "Default 5etools data" });
+    expect(within(card).getByText(DEFAULT_URL)).toBeTruthy();
+    expect(within(card).getByText("Set by your server")).toBeTruthy();
+  });
+
+  it("offers only an own source when the server sets no default", async () => {
+    state.defaultUrl = null;
+    render(<ImportHub />);
+    await settle();
+    expect(screen.queryByRole("region", { name: "Default 5etools data" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Get the default 5etools data" })).toBeNull();
+    expect(screen.getByRole("region", { name: "My own 5etools source" })).toBeTruthy();
+    expect(screen.getByText(/comes with no 5etools address/)).toBeTruthy();
+  });
+
+  it("downloads it in one tap the first time, then offers the books", async () => {
+    render(<ImportHub />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
+    await settle();
+    expect(calls.find((c) => c.name === "stage5etoolsUrl")?.args).toEqual({ url: DEFAULT_URL });
+    const r = row("Default 5etools data");
+    expect(within(r).getByText(`From ${DEFAULT_URL}`)).toBeTruthy();
+    expect(within(r).getByRole("button", { name: "Import 1 book" })).toBeTruthy();
   });
 
   it("updates the same books once it was imported", async () => {
-    state.urls = [{ url: "https://github.com/5etools-mirror-3/5etools-src" }];
+    state.urls = [{ url: DEFAULT_URL }];
     render(<ImportHub />);
-    fireEvent.click(screen.getByRole("button", { name: "Get the latest 5etools data" }));
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
     await settle();
     expect(names()).toContain("update5etoolsUrl");
     expect(names()).not.toContain("stage5etoolsUrl");
-    expect(within(row("Latest 5etools data")).getByRole("status").textContent).toBe("Everything is up to date.");
+    expect(within(row("Default 5etools data")).getByRole("status").textContent).toBe("Everything is up to date.");
+  });
+});
+
+describe("5etools data: my own source", () => {
+  beforeEach(() => { vi.stubGlobal("localStorage", memoryStorage()); });
+  const field = () => screen.getByLabelText("Address of my 5etools source") as HTMLInputElement;
+  const send = async (text: string) => {
+    fireEvent.change(field(), { target: { value: text } });
+    fireEvent.click(screen.getByRole("button", { name: "Import from my source" }));
+    await settle();
+  };
+
+  it("says what it takes", () => {
+    render(<ImportHub />);
+    expect(field().getAttribute("aria-describedby")).toBe("party-5et-hint");
+    expect(document.getElementById("party-5et-hint")!.textContent).toMatch(/GitHub repository.*books\.json/);
+  });
+
+  it("downloads from the address, names it in the row and remembers it for this account", async () => {
+    render(<ImportHub />);
+    await send("github.com/someone/my-5e-data");
+    expect(calls.find((c) => c.name === "stage5etoolsUrl")?.args).toEqual({ url: "https://github.com/someone/my-5e-data" });
+    expect(within(row("https://github.com/someone/my-5e-data")).getByRole("button", { name: "Import 1 book" })).toBeTruthy();
+    expect(localStorage.getItem(STORE_KEY)).toBe("https://github.com/someone/my-5e-data");
+  });
+
+  it("starts with the last own source of this account", () => {
+    localStorage.setItem(STORE_KEY, "https://mirror.example.com/data/");
+    render(<ImportHub />);
+    expect(field().value).toBe("https://mirror.example.com/data/");
+  });
+
+  it("works when the device keeps nothing", async () => {
+    const blocked = () => { throw new Error("blocked"); };
+    vi.stubGlobal("localStorage", { getItem: blocked, setItem: blocked, removeItem: blocked, clear: blocked, key: blocked, length: 0 });
+    render(<ImportHub />);
+    expect(field().value).toBe("");
+    await send("https://mirror.example.com/data/");
+    expect(calls.find((c) => c.name === "stage5etoolsUrl")?.args).toEqual({ url: "https://mirror.example.com/data/" });
+  });
+
+  it("checks the address before sending it", async () => {
+    render(<ImportHub />);
+    await send("http://mirror.example.com/data/");
+    expect(screen.getByRole("alert").textContent).toBe("Use an https:// address.");
+    expect(field().getAttribute("aria-invalid")).toBe("true");
+    await send("https://github.com/someone/repo/blob/main/data/books.json");
+    expect(screen.getByRole("alert").textContent).toMatch(/On GitHub/);
+    expect(names()).not.toContain("stage5etoolsUrl");
+    expect(screen.queryByRole("list", { name: "Import results" })).toBeNull();
+    // Typing again clears the complaint.
+    fireEvent.change(field(), { target: { value: "https://github.com/someone/repo" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows the server's refusal as it is", async () => {
+    state.refuse = "The server does not download from private or local network addresses (192.168.1.10).";
+    render(<ImportHub />);
+    await send("https://192.168.1.10/data/");
+    expect(within(row("https://192.168.1.10/data/")).getByRole("alert").textContent).toBe(state.refuse);
+  });
+});
+
+describe("5etools data: imported from", () => {
+  it("lists each source with its packs, and Update uses that source", async () => {
+    state.urls = [
+      { url: DEFAULT_URL, packs: ["PHB", "MM"], sources: [], revision: "abc", lastChecked: null, lastImported: null, problem: null },
+      { url: "https://mirror.example.com/data/", packs: ["Brew"], sources: [], revision: "def", lastChecked: null, lastImported: null, problem: "GitHub said no." },
+    ] as never;
+    render(<ImportHub />);
+    await settle();
+    expect(screen.getByText("2 packs: PHB, MM")).toBeTruthy();
+    expect(screen.getByText("GitHub said no.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Update from https://mirror.example.com/data/" }));
+    await settle();
+    expect(calls.find((c) => c.name === "update5etoolsUrl")?.args).toEqual({ url: "https://mirror.example.com/data/" });
+    expect(within(row("https://mirror.example.com/data/")).getByRole("status").textContent).toBe("Everything is up to date.");
+  });
+
+  it("appears once the first import from a source finished", async () => {
+    render(<ImportHub />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
+    await settle();
+    state.urls = [{ url: DEFAULT_URL, packs: ["SRD sample"] }] as never;
+    fireEvent.click(within(row("Default 5etools data")).getByRole("button", { name: "Import 1 book" }));
+    await settle();
+    expect(screen.getByRole("button", { name: "Update from Default 5etools data" })).toBeTruthy();
   });
 });
 
@@ -264,5 +383,39 @@ describe("from the other doors (../import/door.ts)", () => {
     act(() => openImport("link"));
     await settle();
     expect(document.activeElement).toBe(screen.getByLabelText("Link to import"));
+  });
+});
+
+describe("5etools results", () => {
+  it("a finished import with notes is a success row, its details folded", async () => {
+    const real = api.import5etools;
+    api.import5etools = (async (args: unknown) => {
+      await real(args as never);
+      const partial = Array.from({ length: 833 }, (_, i) => ({ element: `C${i}|SRDX`, kind: "monster", reason: "creature section: variant sidebars not imported" }));
+      return { converted: 16746, replaced: 0, partial, skipped: [], packs: [{ id: "x", name: "SRD sample" }] };
+    }) as never;
+    render(<ImportHub />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
+    await settle();
+    fireEvent.click(within(row("Default 5etools data")).getByRole("button", { name: "Import 1 book" }));
+    await settle();
+    const r = row("Default 5etools data");
+    expect(r.getAttribute("data-tone")).toBe("success");
+    expect(within(r).getAllByRole("status")[0]!.textContent).toBe("Imported 16746 elements into 1 content pack.");
+    expect(within(r).getByText(/833 details couldn't be carried over/)).toBeTruthy();
+    expect(within(r).getByRole("button", { name: "Show details" })).toBeTruthy();
+    expect(within(r).queryByText("Variant sidebars")).toBeNull();
+  });
+
+  it("an import that brought nothing in warns", async () => {
+    api.import5etools = (async () => ({ converted: 0, replaced: 0, partial: [], skipped: [], packs: [] })) as never;
+    render(<ImportHub />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
+    await settle();
+    fireEvent.click(within(row("Default 5etools data")).getByRole("button", { name: "Import 1 book" }));
+    await settle();
+    expect(row("Default 5etools data").getAttribute("data-tone")).toBe("warning");
   });
 });

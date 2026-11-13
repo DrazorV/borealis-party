@@ -61,7 +61,7 @@ test.describe("Import screen (plan I9)", () => {
     expect(box.height).toBeGreaterThanOrEqual(minTap(testInfo) - 0.5);
     await importRow.tap();
     await expect(page.getByRole("button", { name: "Choose files" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Get the latest 5etools data" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Import from my source" })).toBeVisible();
     await expectPhoneLayout(page, testInfo);
   });
 

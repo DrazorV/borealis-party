@@ -23,10 +23,12 @@ mod backend;
 mod config;
 mod db;
 mod error;
+mod import_source;
 mod jobs;
 mod mail;
 mod migrate;
 mod net_guard;
+mod pack_removal;
 mod parties;
 #[cfg(test)]
 mod route_tests;
@@ -144,6 +146,8 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
         .merge(rpc::routes())
         .merge(shares::routes())
         .merge(parties::routes())
+        .merge(import_source::routes())
+        .merge(pack_removal::routes())
         .route("/api/{*rest}", any(no_such_route))
         .layer(DefaultBodyLimit::max(max_upload))
         .with_state(state)
