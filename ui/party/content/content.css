@@ -39,12 +39,53 @@ html.phone .party-activity button { min-height: var(--ph-hit); }
 .v4-content .party-import > .body { display: flex; flex-direction: column; gap: var(--sp-3); }
 html.phone .v4-content .party-import { padding: 0; }
 
-/* Bestiary coverage (BestiaryCoverage.tsx): one row per source, the summary line under its name. */
-.party-bestiary { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-.party-bestiary-pack .party-bestiary-line { margin: var(--sp-1) 0 0; overflow-wrap: anywhere; }
-.party-bestiary-pack .aur-expander-title { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }
+/* Bestiary coverage (BestiaryCoverage.tsx): a summary line, the sources folded under "Show sources", one line each. */
+.party-compact-summary { margin: 0 0 var(--sp-2); }
+.party-bestiary { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.v4-csec .list.party-bestiary { margin-top: 0; background: none; }
+.v4-csec .list.party-bestiary > li + li { border-top: 0; }
+.party-bestiary .aur-expander { margin-bottom: 0; }
+.party-bestiary-pack .aur-expander-toggle { height: auto; padding: 3px 6px; }
+.party-bestiary-pack .aur-expander-title { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--sp-2); text-transform: none; }
+.party-bestiary-name { text-transform: uppercase; overflow-wrap: anywhere; min-width: 0; }
+.party-bestiary-short { margin-left: auto; font-weight: 400; color: var(--text-secondary); font-size: var(--fs-sm); }
+.party-bestiary-pack .chip { text-transform: uppercase; }
+.party-bestiary-pack .aur-expander-body { padding: var(--sp-2) var(--sp-3) var(--sp-3); background: var(--light-1); }
+.party-bestiary-pack .party-bestiary-line { margin: 0; overflow-wrap: anywhere; }
 .party-bestiary-label { margin: var(--sp-2) 0 var(--sp-1); font-weight: 600; }
 .party-bestiary-counts ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-1); }
 .party-bestiary-notes ul { margin: 0; padding-left: var(--sp-3); }
 .party-bestiary-notes li { overflow-wrap: anywhere; }
 html.phone .party-bestiary-pack .aur-expander-toggle { min-height: var(--ph-hit); }
+html.phone .party-bestiary-short { margin-left: 0; flex-basis: 100%; order: 2; }
+
+/* Search, filter and sort above a folded list (BestiaryCoverage.tsx, PackGroups.tsx, pages/ImportedFrom.tsx). */
+.party-compact-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0; }
+.party-compact-search { flex: 1 1 14em; min-width: 0; display: block; }
+.party-compact-search .input, .party-compact-sort .input { width: 100%; box-sizing: border-box; height: 26px; padding: 0 6px; background: var(--bg, #151516); color: var(--text); border: 1px solid #242424; border-radius: 0; font: inherit; font-size: var(--fs-sm); }
+.party-compact-search .input:focus, .party-compact-sort .input:focus { outline: 1px solid var(--gold); outline-offset: 0; }
+.party-compact-filter { display: inline-flex; flex-wrap: wrap; gap: 1px; }
+.party-compact-filter .party-compact-seg { margin: 0; }
+.party-compact-toggle:focus-visible { outline: 1px solid var(--gold); outline-offset: 1px; }
+.party-compact-n { font-weight: 400; opacity: 0.75; margin-left: 2px; }
+.party-compact-sort { flex: 0 0 auto; display: block; }
+.party-compact-count { margin: 0 0 var(--sp-1); }
+.party-pack-search { margin: var(--sp-2) 0; }
+html.phone .party-compact-search .input, html.phone .party-compact-sort .input { min-height: var(--ph-hit); font-size: 16px; }
+html.phone .party-compact-seg { min-height: var(--ph-hit); }
+html.phone .party-compact-filter { flex: 1 1 100%; display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-1); }
+html.phone .party-compact-sort { flex: 1 1 100%; }
+
+/*
+ * A desktop window wide enough: the page as summary cards in two columns. The Import section and the Bestiary (its
+ * open list is long) take the whole width, the Bestiary last; the installed-content cards sit side by side.
+ */
+@media (min-width: 1200px) {
+  html:not(.phone) .v4-content:has(> .party-import) { max-width: 1320px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 26px; grid-auto-flow: row dense; align-items: start; }
+  html:not(.phone) .v4-content:has(> .party-import) > * { grid-column: 1 / -1; }
+  html:not(.phone) .v4-content:has(> .party-import) > section.v4-csec:is([aria-label="Installed packs"], [aria-label="Index files"], [aria-label="Packs without their index"], [aria-label="Update content files"], [aria-label="Import from an address"]) { grid-column: auto; }
+  html:not(.phone) .v4-content:has(> .party-import) > section.v4-csec[aria-label="Bestiary"] { order: 1; }
+  html:not(.phone) .v4-content > .party-import { max-width: none; margin: 0 0 26px; padding: 0; }
+  html:not(.phone) .v4-content .party-import > .body { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+  html:not(.phone) .v4-content .party-import > .body > :nth-child(n + 4) { grid-column: 1 / -1; }
+}

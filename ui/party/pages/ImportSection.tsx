@@ -25,6 +25,7 @@ import { checkFiveToolsSource, classifyLink, type LinkKind } from "../import/sni
 import { receiveRoute } from "./ShareReceivePage";
 import "./party.css";
 import { FiveToolsResult } from "./FiveToolsResult";
+import { ImportedFrom } from "./ImportedFrom";
 import "./importSource.css";
 import { contentSync } from "../content/contentSync";
 
@@ -454,24 +455,7 @@ export function ImportSection() {
             <p id="party-5et-hint" className="muted small">A GitHub repository of 5etools data (a mirror or a fork), a branch or folder in one (…/tree/branch/data), or the https:// address of any data folder that has books.json. Homebrew .json files go in through Choose files.</p>
           </section>
         </div>
-        {sources.length > 0 && (
-          <div className="party-import-known">
-            <h3 id="party-5et-known">Imported from</h3>
-            <ul aria-labelledby="party-5et-known">
-              {sources.map((s) => (
-                <li key={s.url} className="party-import-known-row">
-                  <div className="party-import-known-text">
-                    <strong className="party-import-url">{sourceTitle(s.url)}</strong>
-                    {sourceTitle(s.url) !== s.url && <span className="muted small party-import-url">{s.url}</span>}
-                    {(s.packs ?? []).length > 0 && <span className="muted small">{plural(s.packs.length, "pack")}: {s.packs.map((id) => packNames[id] ?? id).join(", ")}</span>}
-                    {s.problem && <span className="small party-import-field-error">{s.problem}</span>}
-                  </div>
-                  <Button disabled={busy} aria-label={`Update from ${sourceTitle(s.url)}`} onClick={() => void fromSource(s.url)}>Update</Button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        <ImportedFrom sources={sources} packNames={packNames} title={sourceTitle} busy={busy} onUpdate={(url) => void fromSource(url)} />
       </Card>
       {rows.length > 0 && (
         <Card title="Results" actions={<Button small disabled={busy} onClick={() => setRows([])}>Clear</Button>}>

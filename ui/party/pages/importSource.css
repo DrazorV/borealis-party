@@ -28,3 +28,13 @@ html.phone .party-import-report .aur-expander-chev { min-width: var(--ph-hit); }
 .party-report-count { display: inline-block; min-width: 2.5em; color: var(--muted, inherit); font-variant-numeric: tabular-nums; }
 .party-import .party-report .party-report-meaning { margin-bottom: var(--sp-1); }
 .party-report-examples { margin: 0; padding-left: 1.2em; overflow-wrap: anywhere; }
+/* Imported from (ImportedFrom.tsx): a source on one line, its packs folded under Show packs. */
+.party-import-known-acts { display: inline-flex; align-items: center; gap: var(--sp-2); flex: 0 0 auto; }
+.party-compact-toggle { display: inline-flex; align-items: center; gap: 2px; padding: 0 4px; height: 26px; background: transparent; border: 0; color: var(--gold, inherit); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+.party-compact-toggle .icon { width: 16px; height: 16px; }
+.party-import-known-packs { flex: 1 1 100%; min-width: 0; }
+.party-import-known ul.party-import-pack-chips { flex-direction: row; }
+.party-import-pack-chips { list-style: none; margin: var(--sp-1) 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-1); max-height: 16rem; overflow-y: auto; }
+.party-import-pack-chips .chip { flex: 0 1 auto; width: auto; max-width: 100%; margin: 0; white-space: normal; overflow-wrap: anywhere; }
+html.phone .party-compact-toggle { min-height: var(--ph-hit); }
+html.phone .party-import-known-acts { flex: 1 1 100%; justify-content: space-between; }

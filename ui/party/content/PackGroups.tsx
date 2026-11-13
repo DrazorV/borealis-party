@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useId, useState } from "react";
 import type { ContentPack } from "../../src/api/contract";
 import { Button } from "../../src/components/Button";
 import { useConfirm } from "../../src/components/Confirm";
@@ -6,6 +6,7 @@ import { Expander } from "../../src/components/controls";
 import { ORIGIN_GROUPS, packOrigin } from "../../src/pages/content/PackGroups";
 import { errorMessage } from "../../src/state/useAsync";
 import { removePacks } from "../api/packRemoval";
+import { matches, usePref } from "./compact";
 import { contentSync } from "./contentSync";
 import "./content.css";
 
@@ -14,9 +15,34 @@ import "./content.css";
  * on each group but the built-in one. Upstream's Additional Content imports this file in place of its own
  * (ui/party/vite.config.ts). The packs go in one server request. They leave the list at once, with a "Removing…" row
  * above it while the server works (./contentSync.ts), and come back with the server's message if it refuses.
+ * Since 0.3.1 on desktops too (./packsPlatform.ts), each group remembering whether it is open, with a search in a long one.
  */
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** From this many packs on, a group gets a search box. */
+export const SEARCH_FROM = 12;
+
+/** One origin's packs, folded to its count; whether it is open is kept on this device (./compact.ts). */
+function Group({ origin, label, packs, row, extra }: { origin: string; label: string; packs: ContentPack[]; row: (p: ContentPack) => ReactNode; extra?: ReactNode }) {
+  const [open, setOpen] = usePref(`packs.${origin}`, false);
+  const [text, setText] = useState("");
+  const searchId = useId();
+  const shown = packs.filter((p) => matches(p.name, text));
+  return (
+    <Expander title={`${label} (${packs.length})`} open={open} onToggle={setOpen} headerExtra={extra}>
+      {packs.length >= SEARCH_FROM && (
+        <label className="party-compact-search party-pack-search" htmlFor={searchId}>
+          <span className="sr-only">Search {label} packs</span>
+          <input id={searchId} className="input" type="search" placeholder="Search packs" autoComplete="off" spellCheck={false}
+            value={text} onChange={(e) => setText(e.target.value)} />
+        </label>
+      )}
+      {shown.length === 0 && <p className="muted small">No pack matches.</p>}
+      <ul className="list" aria-label={`${label} packs`}>{shown.map(row)}</ul>
+    </Expander>
+  );
+}
 
 export function PackGroups({ packs, row }: { packs: ContentPack[]; row: (p: ContentPack) => ReactNode }) {
   const confirm = useConfirm();
@@ -44,17 +70,17 @@ export function PackGroups({ packs, row }: { packs: ContentPack[]; row: (p: Cont
   return (
     <div className="v4-pack-groups" role="group" aria-label="Content packs by origin">
       {groups.map((g) => (
-        <Expander
+        <Group
           key={g.origin}
-          title={`${g.label} (${g.packs.length})`}
-          defaultOpen={false}
-          headerExtra={g.origin === "bundled" ? undefined : (
+          origin={g.origin}
+          label={g.label}
+          packs={g.packs}
+          row={row}
+          extra={g.origin === "bundled" ? undefined : (
             <Button small variant="danger" className="party-remove-all"
               aria-label={`Remove all ${g.label} packs`} onClick={() => void removeAll(g.label, g.packs)}>Remove all</Button>
           )}
-        >
-          <ul className="list" aria-label={`${g.label} packs`}>{g.packs.map(row)}</ul>
-        </Expander>
+        />
       ))}
     </div>
   );

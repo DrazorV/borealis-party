@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContentPack } from "../../src/api/contract";
+import { memoryStorage } from "../test/memoryStorage";
 
 const state = vi.hoisted(() => ({
   confirm: "confirm" as string,
@@ -36,7 +37,7 @@ const PACKS = [
 ];
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
-beforeEach(() => { resetContentSync(); Object.assign(state, { confirm: "confirm", asked: [], removed: [], toasts: [], refuse: null, hold: null }); });
+beforeEach(() => { vi.stubGlobal("localStorage", memoryStorage()); resetContentSync(); Object.assign(state, { confirm: "confirm", asked: [], removed: [], toasts: [], refuse: null, hold: null }); });
 
 describe("PackGroups with Remove all", () => {
   it("puts Remove all on every group but the built-in one", () => {
@@ -101,5 +102,24 @@ describe("PackGroups with Remove all", () => {
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(toggle);
     expect(within(screen.getByRole("list", { name: "Aurora index packs" })).getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("remembers which groups are open on this device", () => {
+    const view = render(<PackGroups packs={PACKS} row={(p) => <li key={p.id}>{p.name}</li>} />);
+    fireEvent.click(screen.getByRole("button", { name: "Aurora index (2)" }));
+    view.unmount();
+    render(<PackGroups packs={PACKS} row={(p) => <li key={p.id}>{p.name}</li>} />);
+    expect(screen.getByRole("button", { name: "Aurora index (2)" }).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("button", { name: "5etools-format (109)" }).getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("gives a long group a search, a short one none", () => {
+    render(<PackGroups packs={PACKS} row={(p) => <li key={p.id}>{p.name}</li>} />);
+    fireEvent.click(screen.getByRole("button", { name: "Aurora index (2)" }));
+    expect(screen.queryByRole("searchbox", { name: "Search Aurora index packs" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "5etools-format (109)" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search 5etools-format packs" }), { target: { value: "fivetools-10" } });
+    expect(within(screen.getByRole("list", { name: "5etools-format packs" })).getAllByRole("listitem").map((li) => li.textContent))
+      .toEqual(["FIVETOOLS-10", "FIVETOOLS-100", "FIVETOOLS-101", "FIVETOOLS-102", "FIVETOOLS-103", "FIVETOOLS-104", "FIVETOOLS-105", "FIVETOOLS-106", "FIVETOOLS-107", "FIVETOOLS-108"]);
   });
 });
