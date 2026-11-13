@@ -95,14 +95,27 @@ jobs:
       - name: Clippy
         working-directory: party
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      # The server's test binary needs over 10 GB with every test at once (0.3.0's suite was killed, exit 143), so it
-      # runs with two threads, and each PostgreSQL test in its own process. The other crates are small.
+      # The server's tests grow past the runner's memory in one process (0.3.0: killed at exit 143, and with two
+      # threads still cancelled after 7.5 min), so each test module runs in its own process, then everything else (the
+      # --skip list, so a new module is never left out), and each PostgreSQL test alone. The other crates are small.
       - name: Tests (other crates)
         working-directory: party
         run: cargo test --workspace --exclude borealis-server --locked
       - name: Tests (server, SQLite)
         working-directory: party
-        run: cargo test -p borealis-server --locked -- --test-threads=2 --skip postgres
+        run: |
+          modules=$(grep -oE '^mod [a-z_]+_tests;' crates/borealis-server/src/tests.rs | sed -e 's/^mod //' -e 's/;$//')
+          test -n "$modules"
+          skip=""
+          for m in $modules; do
+            echo "::group::tests::$m"
+            cargo test -p borealis-server --locked -- --test-threads=2 --skip postgres "tests::$m::"
+            echo "::endgroup::"
+            skip="$skip --skip tests::$m::"
+          done
+          echo "::group::the rest"
+          cargo test -p borealis-server --locked -- --test-threads=2 --skip postgres $skip
+          echo "::endgroup::"
       - name: Tests (server, PostgreSQL)
         working-directory: party
         env:
