@@ -34,6 +34,7 @@ mod jobs;
 mod mail;
 mod migrate;
 mod net_guard;
+mod oauth;
 mod pack_removal;
 mod parties;
 #[cfg(test)]
@@ -44,6 +45,7 @@ mod shares;
 mod sync;
 #[cfg(test)]
 mod tests;
+mod tokens;
 mod workspaces;
 
 use auth::{RateLimiter, Status};
@@ -159,6 +161,8 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
         .merge(import_source::routes())
         .merge(pack_removal::routes())
         .merge(bestiary::routes())
+        .merge(tokens::routes())
+        .merge(oauth::routes())
         .route("/api/{*rest}", any(no_such_route))
         .layer(DefaultBodyLimit::max(max_upload))
         .with_state(state)
@@ -286,6 +290,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
     let dir = &args.config_dir;
+    // AI app tokens are hashed with a key kept beside config.toml (tokens.rs).
+    if let Err(e) = tokens::load_pepper(dir) {
+        tracing::error!(
+            "{e}: API tokens and connected AI apps will stop working when the server restarts"
+        );
+    }
     let location = settings.database(dir)?;
     tracing::info!(
         "config {}, database {}",
