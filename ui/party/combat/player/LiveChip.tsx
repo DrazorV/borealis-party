@@ -24,37 +24,34 @@ export function useOpenCombat(): (combat: PlayerCombat, characterId?: string | n
 
 /**
  * The Live chip in the top chrome (plan D10, 4.4): shown while one of the player's parties has a live combat, from
- * any page, and it leads to the Combat sub-tab. On the player's turn it reads "Your turn".
+ * any page, and it leads to the Combat sub-tab. On the player's turn it reads "Your turn", and away from the Combat
+ * sub-tab (which says it in its own header) a "Your turn" banner leads there too.
+ * - `auto` (the desktop account bar): the chip, widened into the banner on the player's turn;
+ * - `chip` (a phone's title bar, which has no row to spare): the chip only;
+ * - `banner` (a phone's account bar): the banner only, on the player's turn (hidden on a phone held sideways, party.css).
  */
-export function LiveChip() {
-  const store = useCombatStore();
-  const openCombat = useOpenCombat();
-  const first = store.combats[0];
-  if (!first) return null;
-  const turn = myTurn(store);
-  return (
-    <Button small variant={turn ? "warning" : "danger"} className="combat-live-chip" onClick={() => void openCombat(turn?.combat ?? first, turn?.characterId)}
-      title={turn ? "It's your turn: open the combat" : "A combat is live: open it"}>
-      <span className="combat-live-dot" aria-hidden="true" />{turn ? "Your turn" : "Live"}
-    </Button>
-  );
-}
-
-/**
- * "Your turn" across the top of every page but the Combat sub-tab itself, which says so in its own header. A tap opens
- * the Combat sub-tab.
- */
-export function YourTurnBanner() {
+export function LiveChip({ mode = "auto" }: { mode?: "auto" | "chip" | "banner" }) {
   const store = useCombatStore();
   const openCombat = useOpenCombat();
   const { pathname } = useLocation();
   const onCombat = useCombatTabSelected() && pathname === PLAY_ROUTE;
+  const first = store.combats[0];
+  if (!first) return null;
   const turn = myTurn(store);
-  if (!turn || onCombat) return null;
-  const me = turn.combat.combatants.find((x) => x.mine && x.id === actingId(turn.combat));
+  if (turn && !onCombat && mode !== "chip") {
+    const me = turn.combat.combatants.find((x) => x.mine && x.id === actingId(turn.combat));
+    return (
+      <button type="button" className="btn btn-warning combat-your-turn" onClick={() => void openCombat(turn.combat, turn.characterId)}>
+        <span className="combat-live-dot" aria-hidden="true" /><strong>Your turn</strong>{me && <span className="combat-your-turn-name"> · {me.name}</span>}
+        <span className="combat-your-turn-go">Open combat</span>
+      </button>
+    );
+  }
+  if (mode === "banner") return null;
   return (
-    <button type="button" className="combat-your-turn" onClick={() => void openCombat(turn.combat, turn.characterId)}>
-      <strong>Your turn</strong>{me && <span> · {me.name}</span>}<span className="combat-your-turn-go">Open combat</span>
-    </button>
+    <Button small variant={turn ? "warning" : "danger"} className="combat-live-chip" onClick={() => void openCombat(turn?.combat ?? first, turn?.characterId)}
+      title={turn ? "It's your turn" : "A combat is live: open it"}>
+      <span className="combat-live-dot" aria-hidden="true" />{turn ? "Your turn" : "Live"}
+    </Button>
   );
 }

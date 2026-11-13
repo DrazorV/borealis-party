@@ -47,6 +47,16 @@ async function shot(page: Page, testInfo: TestInfo, name: string) {
   if (dir) await page.screenshot({ path: join(dir, `${testInfo.project.name}-combat-${name}.png`) });
 }
 
+/**
+ * "Your turn" away from the Combat sub-tab: the banner under the title bar, or, on a phone held sideways (no row to
+ * spare), the title bar's chip.
+ */
+function yourTurn(page: Page) {
+  return page.viewportSize()!.height <= 480
+    ? page.getByRole("button", { name: /^Your turn$/ })
+    : page.getByRole("button", { name: /Your turn/ }).filter({ hasText: "Open combat" });
+}
+
 type Row = Record<string, unknown> & { id: string };
 interface Mine { id: string; characterId?: string; hp: { current: number; max: number; temp: number }; life: unknown; concentration: string | null;
   concentrationChecks: { dc: number }[]; prompts: Record<string, unknown>[] }
@@ -172,13 +182,16 @@ test.describe("The player's Combat sub-tab (0.3.0)", () => {
       state.combat = { ...state.combat!, turn: { kind: "combatant", id: "me", round: 1 } };
       await open(page, "/characters");
       await page.reload();
-      const banner = page.getByRole("button", { name: /Your turn/ }).filter({ hasText: "Open combat" });
+      const banner = yourTurn(page);
       await expect(banner).toBeVisible({ timeout: 15_000 });
-      await expect(page.getByRole("button", { name: /^Your turn$/ })).toBeVisible();
+      // One row: the banner is the Live chip widened, and the page stays in view (a phone held sideways too).
+      await expect(page.getByRole("button", { name: /^Live$/ })).toHaveCount(0);
+      await expect(page.locator("main").first()).toBeInViewport();
       await fits(page, testInfo, ".party-bar-host");
       await shot(page, testInfo, "your-turn-banner");
       await banner.tap();
       await expect(page.getByTestId("combat-pane").locator(".combat-now.yours")).toContainText("Your turn");
+      await expect(page.getByRole("button", { name: /^Your turn$/ })).toBeVisible();
 
       // The combat ends: the sub-tab and the chip go.
       state.combat = null;
@@ -187,7 +200,8 @@ test.describe("The player's Combat sub-tab (0.3.0)", () => {
       await asked;
       await expect(page.locator("html.phone")).toHaveCount(1);
       await signedInShell(page);
-      await expect(page.getByText("No character open")).toBeVisible({ timeout: 15_000 });
+      // The browser may or may not open the character again after a reload; either way there is no Combat sub-tab.
+      await expect(page.getByText("No character open").or(page.getByRole("tab", { name: "Abilities" }))).toBeVisible({ timeout: 15_000 });
       await expect(page.getByRole("tab", { name: "Combat" })).toHaveCount(0);
       await expect(page.getByRole("button", { name: /^Live$/ })).toHaveCount(0);
     } finally {
@@ -212,7 +226,7 @@ test.describe("The player's Combat sub-tab (0.3.0)", () => {
     try {
       await signIn("player");
       await open(page, "/characters");
-      await page.getByRole("button", { name: /^Your turn$/ }).tap();
+      await yourTurn(page).tap();
       const saves = page.getByRole("group", { name: "Death saves" });
       await expect(saves).toBeVisible();
       await expect(saves.getByRole("img", { name: "Successes: 1 of 3" })).toBeVisible();

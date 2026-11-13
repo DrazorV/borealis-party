@@ -36,7 +36,7 @@ vi.mock("../../api/connectivity", async (importOriginal) => {
 });
 
 const store = await import("./store");
-const { LiveChip, YourTurnBanner } = await import("./LiveChip");
+const { LiveChip } = await import("./LiveChip");
 const { leaveCombatTab } = await import("./tabState");
 
 let server: FakeCombatServer;
@@ -68,7 +68,6 @@ function renderPlay(route = "/play") {
     <AppProviders api={api}>
       <MemoryRouter initialEntries={[route]}>
         <LiveChip />
-        <YourTurnBanner />
         <UpstreamApp />
       </MemoryRouter>
     </AppProviders>,
@@ -162,6 +161,11 @@ describe("the Play tab's Combat sub-tab", () => {
     expect(screen.queryByTestId("combat-pane")).toBeNull();
     expect(holds).toEqual([]);
     expect(locks.released).toBe(1);
+    // The next combat opens on the Play page's own sub-tab until the Combat tab is chosen.
+    server.combats.set("p1", liveWith({ id: "c-p1-2" }));
+    act(() => server.emit("party://party", { party: "p1", pseq: 5, kind: "combat", id: "c-p1-2" }));
+    expect(await screen.findByRole("tab", { name: "Combat" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Combat" }).getAttribute("aria-selected")).toBe("false");
   });
 
   it("a party event about a combat starting shows the sub-tab without a reload", async () => {
@@ -198,7 +202,7 @@ describe("the Play tab's Combat sub-tab", () => {
     expect(buzz).not.toHaveBeenCalled();
     act(() => server.change("p1", (c) => ({ ...c, turn: { kind: "combatant", id: "me1", round: 2 } })));
     expect(await screen.findByRole("button", { name: /Your turn · Seraphine/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /^Your turn$/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Live$/ }), "the banner takes the chip's place").toBeNull();
     expect(buzz).toHaveBeenCalledTimes(1);
     expect(buzz).toHaveBeenCalledWith(store.YOUR_TURN_BUZZ);
     // The same turn again (a resync) doesn't buzz again.
@@ -209,6 +213,7 @@ describe("the Play tab's Combat sub-tab", () => {
     const pane = await screen.findByTestId("combat-pane");
     expect(pane.querySelector(".combat-now.yours")!.textContent).toContain("Your turn");
     expect(screen.queryByRole("button", { name: /Your turn · Seraphine/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Your turn$/ }), "a chip again on the Combat sub-tab").toBeTruthy();
   });
 
   it("keeps the turn on the last visible combatant while hidden creatures act (D5)", async () => {

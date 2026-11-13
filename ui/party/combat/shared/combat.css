@@ -82,11 +82,20 @@
 .combat-live-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: combat-pulse 1.6s ease-in-out infinite; }
 @keyframes combat-pulse { 50% { opacity: 0.3; } }
 @media (prefers-reduced-motion: reduce) { .combat-live-dot { animation: none; } }
-.combat-your-turn { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 48px; padding: var(--sp-2) var(--sp-3); border: 0;
-  border-bottom: 2px solid var(--warning, #b8860b); background: color-mix(in srgb, var(--warning, #b8860b) 22%, var(--surface, #fff)); color: inherit;
-  font: inherit; text-align: left; cursor: pointer; min-width: 0; }
-.combat-your-turn > span:not(.combat-your-turn-go) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* "Your turn": the Live chip widened across the account bar's row (no row of its own). */
+.party-bar > .combat-your-turn { flex: 1 1 auto; }
+.combat-your-turn { display: flex; align-items: center; gap: var(--sp-2); min-height: 44px; min-width: 0; padding: var(--sp-1) var(--sp-3); text-align: left; }
+.combat-your-turn-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .combat-your-turn-go { margin-left: auto; flex: none; text-decoration: underline; }
 html.phone .combat-pane .btn, html.phone .combat-your-turn { min-height: var(--ph-hit, 48px); }
+/* A phone's title bar holds the Live chip (AccountBar.tsx) between the title and Settings. */
+.party-title-live { display: flex; align-items: center; flex: none; }
+.party-title-live:empty { display: none; }
+html.phone .party-title-live .combat-live-chip { min-height: 40px; padding: 0 var(--sp-2); white-space: nowrap; }
+/* Held sideways, the screen has no row to spare: the title bar's chip says "Your turn" and the banner row goes. */
+@media (max-height: 480px) {
+  html.phone .party-bar > .combat-your-turn { display: none; }
+  html.phone .party-bar.party-bar-compact:not(:has(> .btn:not(.combat-your-turn))) { display: none; }
+}
 html.phone .combat-prompt-actions > .btn, html.phone .combat-roll-buttons > .btn { flex: 1 1 auto; justify-content: center; }
 html.phone .combat-row-side .btn { min-width: var(--ph-hit, 48px); }

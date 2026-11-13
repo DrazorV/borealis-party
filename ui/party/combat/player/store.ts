@@ -5,6 +5,7 @@ import {
   type CombatLogEntry, type OpenCharacter, type PlayerCombat, type WireContext,
 } from "./api";
 import { loadSession } from "../../api/session";
+import { leaveCombatTab } from "./tabState";
 
 /**
  * The live combats of the signed-in player's parties, for the Play tab's Combat sub-tab, the Live chip and the
@@ -205,7 +206,8 @@ function release(): void {
 
 function device(): void {
   const live = state.combats.length > 0;
-  if (!live) { release(); return; }
+  // No combat left: the next one starts on the Play page's own sub-tab, not on a Combat tab chosen for the last one.
+  if (!live) { release(); leaveCombatTab(); return; }
   reloadHold ??= holdReload("combat");
   if (!lock && !locking) {
     locking = true;
