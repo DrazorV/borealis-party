@@ -459,7 +459,7 @@ async function partyLive(token) {
 
 /**
  * The encounter builder in the real app (0.3.0): the account runs a party with an encounter of SRD monsters, the
- * party's Encounters list shows it, the builder opens with its XP and difficulty bar on screen, and neither page
+ * party's Encounters list shows it, the builder opens with its summary bar on screen (no XP: D16), and neither page
  * scrolls sideways.
  */
 async function encounters(token) {
@@ -478,9 +478,9 @@ async function encounters(token) {
     await screenshot("11-encounters-list");
     await page(`(() => { const a = document.querySelector('a.enc-row'); if (a) a.click(); return !!a; })()`);
     const bar = `(() => { const b = document.querySelector('.enc-bar'); if (!b) return null; const r = b.getBoundingClientRect(); return { text: b.textContent, bottom: r.bottom, height: innerHeight }; })()`;
-    const shown = await until("the builder's XP bar", () => page(bar), 30000).catch(() => null);
-    check("the builder shows XP and difficulty (4 x 50 XP)", !!shown && shown.text.includes("200 XP"), shown ? shown.text.slice(0, 80) : "no bar");
-    check("the XP bar is on screen", !!shown && shown.bottom <= shown.height + 1, shown ? `bottom ${Math.round(shown.bottom)} of ${shown.height}` : "");
+    const shown = await until("the builder's summary bar", () => page(bar), 30000).catch(() => null);
+    check("the builder counts the creatures, with no XP", !!shown && shown.text.includes("4 creatures") && !shown.text.includes("XP"), shown ? shown.text.slice(0, 80) : "no bar");
+    check("the summary bar is on screen", !!shown && shown.bottom <= shown.height + 1, shown ? `bottom ${Math.round(shown.bottom)} of ${shown.height}` : "");
     const wideBuilder = await page(`document.documentElement.scrollWidth - innerWidth`);
     check("the builder fits the phone's width", wideBuilder <= 0, `${wideBuilder} px too wide`);
     await screenshot("12-encounter-builder");

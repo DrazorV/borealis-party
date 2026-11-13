@@ -1,3 +1,4 @@
+import { cryptoDie, parseNotation, rollExpr, type DieRoller } from "../../../src/lib/dice";
 import { serverFetch } from "../http";
 import { loadSession, type ServerSession } from "../session";
 import { watchParties, type Ruleset } from "./parties";
@@ -5,22 +6,23 @@ import { override } from "./registry";
 
 /**
  * Encounters (release 0.3.0): the server's `/api/parties/{party}/encounters` and `/api/encounters/*` routes as
- * party/docs/encounters-api.md describes them, and the monster picker's `/api/bestiary/*` search (part A's
+ * party/docs/encounters-api.md describes them, and the creature picker's `/api/bestiary/*` search (part A's
  * party/docs/bestiary-api.md).
  *
- * The DM gets everything; a player gets the server's projection of a player-visible encounter, which never holds a
- * hidden creature or anything DM-only. Every call goes through {@link encountersDeps}, so tests answer them from a
- * fake server (../../test/encountersServer.ts). Times from the server are seconds since the epoch.
+ * The DM gets everything; a player gets the server's projection of a player-visible encounter: only revealed
+ * creatures, each with its whole stat block (the user's D20 b), never anything DM-only. There is no XP or difficulty
+ * anywhere (the user's D16). Every call goes through {@link encountersDeps}, so tests answer them from a fake server
+ * (../../test/encountersServer.ts). Times from the server are seconds since the epoch.
  */
 
 export type Status = "draft" | "ready" | "live" | "ended";
-export type RevealLevel = "name" | "band" | "full";
-export type Band = "trivial" | "low" | "moderate" | "high" | "extreme";
 export type HpMode = "average" | "rolled";
+export type Kind = "monster" | "companion";
+export type InitMode = "after_owner" | "own";
 export type Ability = "str" | "dex" | "con" | "int" | "wis" | "cha";
 export const ABILITIES: Ability[] = ["str", "dex", "con", "int", "wis", "cha"];
 
-/** A stat block (upstream's `MonsterData`, snake_case as the server sends it). Only the parts the app shows. */
+/** A monster's stat block (upstream's `MonsterData`, snake_case as the server sends it, without XP). */
 export interface MonsterBlock {
   ruleset: string;
   size: string[];
@@ -39,22 +41,44 @@ export interface MonsterBlock {
   damage_resistances?: { text?: string; types?: string[] }[];
   damage_immunities?: { text?: string; types?: string[] }[];
   condition_immunities?: string[];
-  senses?: Record<string, unknown>;
   languages?: string[];
   cr?: string;
-  xp?: number;
   traits?: Feature[];
   actions?: Feature[];
   bonus_actions?: Feature[];
   reactions?: Feature[];
-  legendary?: { uses?: number; intro?: string; actions?: Feature[] } & Record<string, unknown>;
+  legendary?: { actions?: Feature[] } & Record<string, unknown>;
 }
+
+/** An Aurora companion's printed block (the bestiary's `CompanionDetail`): what is not printed is null. */
+export interface CompanionBlock {
+  ac: number | null;
+  acText: string | null;
+  hp: number | null;
+  hpText: string | null;
+  hpFormula: string | null;
+  speed: string | null;
+  abilities: Record<Ability, number | null>;
+  saves: Partial<Record<Ability, number>>;
+  skills: string | null;
+  senses: string | null;
+  languages: string | null;
+  challenge: string | null;
+  size: string | null;
+  type: string | null;
+  alignment: string | null;
+  defenses: { name: string; text: string }[];
+  traits: { name: string; text: string }[];
+  actions: { name: string; text: string }[];
+  reactions: { name: string; text: string }[];
+}
+
+export type StatBlock = MonsterBlock | CompanionBlock;
 
 export interface Feature {
   name: string;
   text: string;
   cost?: number;
-  usage?: unknown;
 }
 
 export interface HpValue { average: number; formula?: string }
@@ -83,11 +107,14 @@ export interface OverridesForm {
 export interface Creature {
   id: string;
   sort: number;
+  kind: Kind;
   dmLabel: string;
   publicName: string;
   hidden: boolean;
-  revealLevel: RevealLevel;
   revealedAt: number | null;
+  /** The creature it is controlled by (a pet, a summon), or null. */
+  ownerId: string | null;
+  initMode: InitMode;
   elementId: string;
   packId: string;
   packRev: string;
@@ -95,18 +122,18 @@ export interface Creature {
   source: string;
   ruleset: string;
   mapsTo: string | null;
+  /** As printed; only a stat (nothing rates encounters, D16). */
   cr: string | null;
-  xp: number | null;
   type: string;
   size: string[];
   hp: HpValue | null;
   hpMode: "encounter" | "fixed";
   hpMax: number | null;
   ac: number | null;
-  printed: { hp: HpValue | null; ac: number | null; saves: Record<Ability, number> };
+  printed: { hp: HpValue | null; ac: AcValue | null; saves: Record<Ability, number | null> };
   overrides: Overrides;
   modified: boolean;
-  statBlock: MonsterBlock;
+  statBlock: StatBlock;
 }
 
 export interface Modifiers { ac?: number; speedAdd?: number; speedMult?: number; speedZero?: boolean }
@@ -140,20 +167,13 @@ export interface Rule {
   flags: RuleFlag[];
 }
 
-export interface Warning { kind: string; text: string; creatureIds?: string[]; creatures?: { creatureId: string; ruleset: string; mapsTo: string | null }[]; heuristic?: boolean }
-
-export interface Evaluation {
-  method: "srd521";
-  ruleset: Ruleset;
-  note?: string;
-  party: { levels: number[]; from: "members" | "given" };
-  totalXp: number;
-  band: Band | null;
-  thresholds: { low: number; moderate: number; high: number };
-  remaining: { low: number; moderate: number; high: number };
-  creatures: number;
-  unrated: number;
-  warnings: Warning[];
+/** Creatures or characters of the other edition (D23 b). */
+export interface Warning {
+  kind: "edition" | "characters_edition" | string;
+  text: string;
+  creatureIds?: string[];
+  creatures?: { creatureId: string; ruleset: string; mapsTo: string | null }[];
+  count?: number;
 }
 
 /** An encounter as its DM sees it. */
@@ -162,9 +182,8 @@ export interface Encounter {
   partyId: string;
   name: string;
   publicName: string;
+  /** The party's edition, which every encounter of it uses (D23 b). */
   ruleset: Ruleset;
-  rulesetSet: Ruleset | null;
-  partyRuleset: Ruleset;
   status: Status;
   playerVisible: boolean;
   visibleToPlayers: boolean;
@@ -175,7 +194,7 @@ export interface Encounter {
   creatures: Creature[];
   effects: Effect[];
   rules: Rule[];
-  evaluation: Evaluation;
+  warnings: Warning[];
 }
 
 /** One row of the DM's list. */
@@ -188,22 +207,21 @@ export interface EncounterSummary {
   visibleToPlayers: boolean;
   creatureCount: number;
   hiddenCount: number;
-  xp: number;
-  band: Band | null;
   updatedAt: number;
 }
 
-/** What a player sees of a revealed creature. */
+/** What a player sees of a revealed creature: all of its stat block (D20 b). */
 export interface SeenCreature {
   id: string;
   publicName: string;
-  revealLevel: RevealLevel;
+  kind: Kind;
   size: string[];
   type: string;
   conditions: string[];
-  band?: "unhurt" | "bloodied" | "down";
-  hp?: { current: number; max: number };
-  statBlock?: MonsterBlock;
+  hp: { current: number; max: number };
+  statBlock: StatBlock;
+  /** Its owner, when that one is revealed too. */
+  ownerId?: string;
 }
 
 /** A player-visible encounter as a player sees it. */
@@ -223,11 +241,11 @@ export type EncounterList =
 export interface Conflict { field: string; was: unknown; source: unknown; value: unknown }
 export interface RefreshOutcome { changed: boolean; conflicts: Conflict[]; applied: boolean; encounter: Encounter }
 
-// The monster picker (part A's bestiary API).
+// The creature picker (part A's bestiary API).
 
 export interface MonsterQuery {
-  /** Part A lists Aurora companions too (D17 b); encounters take typed Monster elements only for now. */
-  kinds?: ("monster" | "companion")[];
+  /** Monsters, Aurora companions (D17 b), or both when empty. */
+  kinds?: Kind[];
   text?: string;
   crMin?: string;
   crMax?: string;
@@ -244,9 +262,9 @@ export interface MonsterQuery {
 export interface MonsterSummary {
   id: string;
   name: string;
+  kind?: Kind;
   cr: string | null;
-  xp: number | null;
-  type: string;
+  type: string | null;
   size: string[];
   ac: number | null;
   hp: number | null;
@@ -257,15 +275,18 @@ export interface MonsterSummary {
 
 export interface MonsterPage { total: number; offset: number; limit: number; items: MonsterSummary[] }
 export interface Facet { value: string; count: number; name?: string }
-export interface Facets { total: number; types: Facet[]; sizes: Facet[]; crs: Facet[]; rulesets: Facet[]; sources: Facet[] }
+export interface Facets { total: number; types: Facet[]; sizes: Facet[]; crs: Facet[]; rulesets: Facet[]; sources: Facet[]; kinds?: Facet[] }
 
 export interface EncountersDeps {
   fetch: (session: Pick<ServerSession, "baseUrl" | "token">, method: string, path: string, body?: unknown) => Promise<unknown>;
+  /** The die for "Roll" buttons (D21: every roll can also be typed). */
+  die: DieRoller;
 }
 
 const DEFAULT_DEPS: EncountersDeps = {
   // Late-bound: ../http.ts imports this module before its own exports are set.
   fetch: (session, method, path, body) => serverFetch(session, method, path, body),
+  die: cryptoDie,
 };
 
 export const encountersDeps: EncountersDeps = { ...DEFAULT_DEPS };
@@ -333,7 +354,6 @@ export async function seeEncounter(id: string): Promise<SeenEncounter | null> {
 export interface EncounterFields {
   name?: string;
   publicName?: string;
-  ruleset?: Ruleset | null;
   status?: "draft" | "ready" | "ended";
   playerVisible?: boolean;
   hpMode?: HpMode;
@@ -345,18 +365,17 @@ export const createEncounter = (partyId: string, fields: EncounterFields) =>
 export const updateEncounter = (id: string, fields: EncounterFields) =>
   call<Encounter>("PATCH", `/api/encounters/${seg(id)}`, fields).then(encounter);
 export const deleteEncounter = (id: string) => call<unknown>("DELETE", `/api/encounters/${seg(id)}`);
-export const evaluateEncounter = (id: string, levels?: number[]) =>
-  call<Evaluation>("POST", `/api/encounters/${seg(id)}/evaluate`, levels ? { levels } : {});
 
-export interface AddFields { elementId: string; count?: number; dmLabel?: string; publicName?: string; hidden?: boolean }
+export interface AddFields { elementId: string; count?: number; dmLabel?: string; publicName?: string; hidden?: boolean; ownerId?: string; initMode?: InitMode }
 export interface CreatureFields {
   dmLabel?: string;
   publicName?: string;
   hidden?: boolean;
-  revealLevel?: RevealLevel;
   hpMode?: "encounter" | "fixed";
   hpMax?: number | null;
   sort?: number;
+  ownerId?: string | null;
+  initMode?: InitMode;
   overrides?: OverridesForm;
 }
 
@@ -394,22 +413,21 @@ export function watchEncounters(partyId: string, listener: (encounterId: string 
   });
 }
 
+/** Roll hit dice in the app (D21: the DM may type a total rolled with real dice instead). Null for a bad formula. */
+export function rollFormula(formula: string): number | null {
+  try {
+    return Math.max(1, rollExpr(parseNotation(formula), encountersDeps.die).total);
+  } catch {
+    return null;
+  }
+}
+
 // Words for the app.
 
-export const BAND_WORD: Record<Band, string> = { trivial: "Trivial", low: "Low", moderate: "Moderate", high: "High", extreme: "Beyond High" };
-export const BAND_TONE: Record<Band, "default" | "success" | "info" | "warning" | "danger"> = {
-  trivial: "default", low: "success", moderate: "info", high: "warning", extreme: "danger",
-};
 export const STATUS_WORD: Record<Status, string> = { draft: "Draft", ready: "Ready", live: "Live", ended: "Ended" };
-export const REVEAL_WORD: Record<RevealLevel, string> = { name: "Name", band: "Name + health", full: "Full stat block" };
 export const ABILITY_WORD: Record<Ability, string> = { str: "STR", dex: "DEX", con: "CON", int: "INT", wis: "WIS", cha: "CHA" };
 export const EDITION_WORD: Record<string, string> = { dnd2024: "2024", dnd2014: "2014" };
-
-/** The challenge ratings in order, for the picker's chips. */
-export const CR_STEPS = ["0", "1/8", "1/4", "1/2", ...Array.from({ length: 30 }, (_, i) => String(i + 1))];
-
-/** "1,800 XP". */
-export const xpText = (xp: number) => `${xp.toLocaleString("en-US")} XP`;
+export const INIT_WORD: Record<InitMode, string> = { after_owner: "Acts right after its owner", own: "Its own initiative" };
 
 /** A signed modifier: +3, -1. */
 export const signed = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
@@ -420,6 +438,15 @@ export const modifier = (score: number) => Math.floor((score - 10) / 2);
 /** True for `NdM`, `NdM+K`, `NdM-K` (the server's check). */
 export function validFormula(f: string): boolean {
   return /^([1-9]\d?)d([1-9]\d?|100)([+-]\d{1,4})?$/.test(f.replace(/\s/g, ""));
+}
+
+/** True for a companion's block (the bestiary's `CompanionDetail`). */
+export const isCompanionBlock = (b: StatBlock): b is CompanionBlock => !("creature_type" in b);
+
+/** Encounter creatures in builder order: each one that isn't controlled, followed by the ones it controls. */
+export function nested(list: Creature[]): { creature: Creature; pets: Creature[] }[] {
+  const top = list.filter((c) => !c.ownerId || !list.some((o) => o.id === c.ownerId));
+  return top.map((creature) => ({ creature, pets: list.filter((c) => c.ownerId === creature.id) }));
 }
 
 // Encounters change no upstream command: the module registers so the override list stays complete (registry.test.ts).

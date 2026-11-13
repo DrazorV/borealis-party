@@ -8,10 +8,10 @@ import { ToggleSwitch } from "../../src/components/controls/Controls";
 import { useToast } from "../../src/components/Toast";
 import { errorMessage } from "../../src/state/useAsync";
 import {
-  addCreatures, addEffect, addRule, BAND_TONE, BAND_WORD, deleteEncounter, EDITION_WORD, LIMITS, loadEncounter,
-  refreshCreature, removeCreature, removeEffect, removeRule, REVEAL_WORD, STATUS_WORD, swapCreature, updateCreature,
-  updateEffect, updateEncounter, updateRule, watchEncounters, xpText, type Conflict, type Creature, type Effect,
-  type Encounter, type EncounterFields, type RevealLevel, type Rule,
+  addCreatures, addEffect, addRule, deleteEncounter, EDITION_WORD, INIT_WORD, LIMITS, loadEncounter, nested,
+  refreshCreature, removeCreature, removeEffect, removeRule, STATUS_WORD, swapCreature, updateCreature, updateEffect,
+  updateEncounter, updateRule, watchEncounters, type Conflict, type Creature, type Effect, type Encounter,
+  type EncounterFields, type Rule,
 } from "../api/overrides/encounters";
 import type { Ruleset } from "../api/overrides/parties";
 import { CreatureDialog, DetailsDialog, EffectDialog, RefreshDialog, RuleDialog, WarningsDialog } from "./EncounterDialogs";
@@ -22,7 +22,7 @@ import "./party.css";
 import "./encounters.css";
 
 type Open =
-  | { kind: "picker" }
+  | { kind: "picker"; owner?: Creature }
   | { kind: "details" }
   | { kind: "creature"; creature: Creature }
   | { kind: "block"; creature: Creature }
@@ -32,27 +32,29 @@ type Open =
   | { kind: "warnings" }
   | { kind: "more"; creature: Creature };
 
-const REVEALS: RevealLevel[] = ["name", "band", "full"];
-const REVEAL_SHORT: Record<RevealLevel, string> = { name: "Name", band: "Health", full: "Full" };
-
-/** One creature row: what it is, what players see of it, hide/reveal and how much is revealed (plan 4.3, D20). */
-function CreatureRow({ c, encId, ruleset, act, open }: {
-  c: Creature; encId: string; ruleset: Ruleset;
+/**
+ * One creature row: what it is, whether players see it (hidden, or revealed with its whole stat block: D20 b), and
+ * for a controlled creature, when it acts. Controlled creatures sit under their owner, indented.
+ */
+function CreatureRow({ c, encId, ruleset, owner, act, open }: {
+  c: Creature; encId: string; ruleset: Ruleset; owner?: Creature;
   act: (work: () => Promise<Encounter>, done?: string) => Promise<void>;
   open: (o: Open) => void;
 }) {
   const otherEdition = c.ruleset !== ruleset && Boolean(EDITION_WORD[c.ruleset]);
   return (
-    <li className={`enc-creature ${c.hidden ? "is-hidden" : "is-revealed"}`} aria-label={c.dmLabel}>
+    <li className={`enc-creature ${c.hidden ? "is-hidden" : "is-revealed"} ${owner ? "is-pet" : ""}`} aria-label={c.dmLabel}>
       <div className="enc-creature-head">
         <span className="grow enc-creature-text">
           <strong>{c.dmLabel}</strong>
           <span className="muted party-note">
-            {[c.cr ? `CR ${c.cr}` : "No CR", c.xp != null ? xpText(c.xp) : null, c.ac != null ? `AC ${c.ac}` : null,
+            {[c.cr ? `CR ${c.cr}` : null, c.ac != null ? `AC ${c.ac}` : null,
               c.hpMode === "fixed" && c.hpMax != null ? `HP ${c.hpMax} (typed)` : c.hp ? `HP ${c.hp.average}` : null].filter(Boolean).join(" · ")}
           </span>
-          <span className="muted party-note">{c.hidden ? "Hidden from players" : `Players see "${c.publicName}"`}</span>
+          {owner && <span className="muted party-note">{c.initMode === "own" ? INIT_WORD.own : `Acts right after ${owner.dmLabel}`}</span>}
+          <span className="muted party-note">{c.hidden ? "Hidden from players" : `Players see "${c.publicName}" and its stat block`}</span>
         </span>
+        {c.kind === "companion" && <Chip tone="info">Companion</Chip>}
         {c.modified && <Chip tone="warning" title="Changed for this encounter">Changed</Chip>}
         {otherEdition && <Chip tone="info" title="A stat block of the other edition">{EDITION_WORD[c.ruleset]}</Chip>}
         <IconButton icon="more-vertical" label={`More for ${c.dmLabel}`} onClick={() => open({ kind: "more", creature: c })} />
@@ -60,12 +62,6 @@ function CreatureRow({ c, encId, ruleset, act, open }: {
       <div className="enc-creature-controls">
         <ToggleSwitch checked={!c.hidden} label={`${c.dmLabel}: shown to players`} onLabel="Revealed" offLabel="Hidden"
           onChange={(on) => void act(() => updateCreature(encId, c.id, { hidden: !on }))} />
-        <div className="segmented enc-segmented enc-reveal-level" role="radiogroup" aria-label={`${c.dmLabel}: players see`}>
-          {REVEALS.map((r) => (
-            <button key={r} type="button" role="radio" aria-checked={c.revealLevel === r} title={REVEAL_WORD[r]} disabled={c.hidden}
-              onClick={() => void act(() => updateCreature(encId, c.id, { revealLevel: r }))}>{REVEAL_SHORT[r]}</button>
-          ))}
-        </div>
         <Button small onClick={() => open({ kind: "creature", creature: c })}>Edit</Button>
       </div>
     </li>
@@ -73,10 +69,11 @@ function CreatureRow({ c, encId, ruleset, act, open }: {
 }
 
 /**
- * The encounter builder (plan 4.3, companion C19/C20/C23): pick monsters from the DM's own content into a draft, see
- * XP and difficulty against the party in a bar that stays at the bottom, hide or reveal each creature and choose how
- * much players see, change a creature's numbers for this fight, add starting effects and encounter rules, and show
- * the encounter to the players when it's ready. Only the party's DM gets here; anyone else gets the server's 404.
+ * The encounter builder (plan 4.3, companion C19/C20/C23): pick monsters and Aurora companions from the DM's own
+ * content into a draft, give villains pets and summons, hide or reveal each creature, change a creature's numbers for
+ * this fight, add starting effects and encounter rules, and show the encounter to the players when it's ready. It
+ * uses the party's edition (D23 b) and rates nothing (D16). Only the party's DM gets here; anyone else gets the
+ * server's 404.
  */
 export function EncounterBuilder() {
   const { party: partyId = "", encounter: id = "" } = useParams();
@@ -121,15 +118,17 @@ export function EncounterBuilder() {
   if (!enc) return <div className="party enc-page">{error ? <Alert tone="danger">{error}</Alert> : <p className="muted">Loading…</p>}</div>;
 
   const creatures = enc.creatures;
-  const ev = enc.evaluation;
-  const named = (cid: string | null) => creatures.find((c) => c.id === cid)?.dmLabel ?? "a creature that's gone";
+  const groups = nested(creatures);
+  const byId = (cid: string | null) => creatures.find((c) => c.id === cid);
+  const named = (cid: string | null) => byId(cid)?.dmLabel ?? "a creature that's gone";
   const room = LIMITS.creatures - creatures.length;
+  const shownCount = creatures.filter((c) => !c.hidden).length;
   const showToPlayers = async (on: boolean) => {
     if (on) {
-      const hidden = creatures.filter((c) => c.hidden).length;
+      const hidden = creatures.length - shownCount;
       const answer = await confirm({
         title: `Show "${enc.publicName}" to players?`, confirmLabel: "Show it",
-        body: `Players will see "Next: ${enc.publicName}" and the creatures you revealed${hidden ? `. ${hidden} hidden ${hidden === 1 ? "creature stays" : "creatures stay"} hidden` : ""}.`,
+        body: `Players will see "Next: ${enc.publicName}" and the stat blocks of the creatures you revealed${hidden ? `. ${hidden} hidden ${hidden === 1 ? "creature stays" : "creatures stay"} hidden` : ""}.`,
       });
       if (answer === "confirm") await patch({ status: enc.status === "draft" ? "ready" : undefined, playerVisible: true }, "Shown to players.");
     } else {
@@ -155,7 +154,11 @@ export function EncounterBuilder() {
     } catch (e) { toast.push(errorMessage(e), "error"); }
   };
   const remove = async (c: Creature) => {
-    const answer = await confirm({ title: `Remove ${c.dmLabel}?`, danger: true, confirmLabel: "Remove", body: "Its starting effects go with it." });
+    const pets = creatures.filter((x) => x.ownerId === c.id).length;
+    const answer = await confirm({
+      title: `Remove ${c.dmLabel}?`, danger: true, confirmLabel: "Remove",
+      body: `Its starting effects go with it${pets ? `, and so ${pets === 1 ? "does the creature it controls" : `do the ${pets} creatures it controls`}` : ""}.`,
+    });
     if (answer === "confirm") await act(() => removeCreature(enc.id, c.id), `${c.dmLabel} was removed.`);
   };
   const activeRules = enc.rules.filter((r) => r.active);
@@ -192,15 +195,7 @@ export function EncounterBuilder() {
       </Card>
 
       <Card title="Setup" className="enc-card">
-        <div className="enc-setting-row">
-          <span className="enc-setting-label">Rules</span>
-          <div className="segmented enc-segmented" role="radiogroup" aria-label="Rules edition">
-            <button type="button" role="radio" aria-checked={enc.rulesetSet === null} onClick={() => void patch({ ruleset: null })}>Party's ({EDITION_WORD[enc.partyRuleset]})</button>
-            {(["dnd2024", "dnd2014"] as Ruleset[]).map((r) => (
-              <button key={r} type="button" role="radio" aria-checked={enc.rulesetSet === r} onClick={() => void patch({ ruleset: r })}>{EDITION_WORD[r]}</button>
-            ))}
-          </div>
-        </div>
+        <p className="muted party-note enc-setting-row">Rules: the party's edition ({EDITION_WORD[enc.ruleset]}).</p>
         <div className="enc-setting-row">
           <span className="enc-setting-label">Monster HP</span>
           <div className="segmented enc-segmented" role="radiogroup" aria-label="Monster hit points">
@@ -218,11 +213,18 @@ export function EncounterBuilder() {
         </div>
       </Card>
 
-      <Card title={`Creatures (${creatures.length})`} className="enc-card"
-        actions={room > 0 ? <Button small icon="plus" variant="primary" onClick={() => setDialog({ kind: "picker" })}>Add monsters</Button> : undefined}>
+      <Card title={`Creatures (${creatures.length})`} aria-label="Creatures" className="enc-card"
+        actions={room > 0 ? <Button small icon="plus" variant="primary" onClick={() => setDialog({ kind: "picker" })}>Add creatures</Button> : undefined}>
         {creatures.length === 0
-          ? <EmptyState title="No creatures yet">Add monsters from your content. They start hidden from players.</EmptyState>
-          : <ul className="party-list enc-creatures">{creatures.map((c) => <CreatureRow key={c.id} c={c} encId={enc.id} ruleset={enc.ruleset} act={act} open={setDialog} />)}</ul>}
+          ? <EmptyState title="No creatures yet">Add monsters or companions from your content. They start hidden from players.</EmptyState>
+          : (
+            <ul className="party-list enc-creatures">
+              {groups.flatMap(({ creature, pets }) => [
+                <CreatureRow key={creature.id} c={creature} encId={enc.id} ruleset={enc.ruleset} act={act} open={setDialog} />,
+                ...pets.map((p) => <CreatureRow key={p.id} c={p} owner={creature} encId={enc.id} ruleset={enc.ruleset} act={act} open={setDialog} />),
+              ])}
+            </ul>
+          )}
       </Card>
 
       <Card title="Starting effects" aria-label="Starting effects" className="enc-card"
@@ -278,22 +280,24 @@ export function EncounterBuilder() {
         <Button small variant="danger" icon="trash" onClick={() => void destroy()}>Delete encounter</Button>
       </div>
 
-      <div className="enc-bar" role="status" aria-label="Difficulty">
-        <span className="enc-bar-xp"><strong>{xpText(ev.totalXp)}</strong></span>
-        {ev.band ? <Chip tone={BAND_TONE[ev.band]}>{BAND_WORD[ev.band]}</Chip> : <Chip>No party</Chip>}
-        <span className="grow muted enc-bar-budget">
-          {ev.party.levels.length ? `Low ${ev.thresholds.low.toLocaleString("en-US")} · Moderate ${ev.thresholds.moderate.toLocaleString("en-US")} · High ${ev.thresholds.high.toLocaleString("en-US")}` : "Add characters to the party"}
+      <div className="enc-bar" role="status" aria-label="Encounter summary">
+        <span className="grow enc-bar-text">
+          <strong>{creatures.length === 1 ? "1 creature" : `${creatures.length} creatures`}</strong>
+          <span className="muted party-note">{shownCount === 0 ? "none revealed" : `${shownCount} revealed`}</span>
         </span>
-        <Button small onClick={() => setDialog({ kind: "warnings" })} aria-label={`Difficulty notes (${ev.warnings.length + (ev.note ? 1 : 0)})`}>
-          Notes{ev.warnings.length + (ev.note ? 1 : 0) ? ` (${ev.warnings.length + (ev.note ? 1 : 0)})` : ""}
-        </Button>
+        {enc.warnings.length > 0 && (
+          <Button small onClick={() => setDialog({ kind: "warnings" })} aria-label={`Edition notes (${enc.warnings.length})`}>Notes ({enc.warnings.length})</Button>
+        )}
+        {room > 0 && <Button small icon="plus" variant="primary" onClick={() => setDialog({ kind: "picker" })}>Add</Button>}
       </div>
 
       {dialog?.kind === "picker" && (
-        <EncounterPicker ruleset={enc.ruleset} room={room} onClose={() => setDialog(null)}
+        <EncounterPicker ruleset={enc.ruleset} room={room} owner={dialog.owner?.dmLabel} onClose={() => setDialog(null)}
           onAdd={async (picked) => {
             let latest: Encounter | null = null;
-            for (const p of picked) latest = await addCreatures(enc.id, { elementId: p.monster.id, count: p.count });
+            for (const p of picked) {
+              latest = await addCreatures(enc.id, { elementId: p.monster.id, count: p.count, ...(dialog.owner ? { ownerId: dialog.owner.id } : {}) });
+            }
             if (latest) setEnc(latest);
             const n = picked.reduce((s, p) => s + p.count, 0);
             toast.push(`${n === 1 ? "1 creature" : `${n} creatures`} added, hidden from players.`, "info");
@@ -303,7 +307,7 @@ export function EncounterBuilder() {
         <DetailsDialog enc={enc} onClose={() => setDialog(null)} onSave={async (f) => setEnc(await updateEncounter(enc.id, f))} />
       )}
       {dialog?.kind === "creature" && (
-        <CreatureDialog creature={dialog.creature} onClose={() => setDialog(null)}
+        <CreatureDialog creature={dialog.creature} owner={byId(dialog.creature.ownerId)?.dmLabel} onClose={() => setDialog(null)}
           onSave={async (f) => setEnc(await updateCreature(enc.id, dialog.creature.id, f))} />
       )}
       {dialog?.kind === "refresh" && (
@@ -322,7 +326,7 @@ export function EncounterBuilder() {
         <RuleDialog creatures={creatures} rule={dialog.rule} onClose={() => setDialog(null)}
           onSave={async (f) => setEnc(await (dialog.rule ? updateRule(enc.id, dialog.rule.id, f) : addRule(enc.id, f)))} />
       )}
-      {dialog?.kind === "warnings" && <WarningsDialog warnings={ev.warnings} note={ev.note} onClose={() => setDialog(null)} />}
+      {dialog?.kind === "warnings" && <WarningsDialog warnings={enc.warnings} onClose={() => setDialog(null)} />}
       {dialog?.kind === "block" && (
         <Modal title={dialog.creature.dmLabel} onClose={() => setDialog(null)} footer={<Button onClick={() => setDialog(null)}>Close</Button>}>
           <EncounterStatBlock title={dialog.creature.name} block={dialog.creature.statBlock} />
@@ -332,11 +336,14 @@ export function EncounterBuilder() {
         const c = dialog.creature;
         const swap = c.ruleset !== enc.ruleset && c.mapsTo;
         const close = () => setDialog(null);
+        const index = creatures.findIndex((x) => x.id === c.id);
         return (
           <Modal title={c.dmLabel} onClose={close} footer={<Button onClick={close}>Close</Button>}>
             <div className="enc-menu">
               <Button onClick={() => setDialog({ kind: "block", creature: c })}>Stat block</Button>
-              <Button onClick={() => { close(); void act(() => updateCreature(enc.id, c.id, { sort: Math.max(0, creatures.findIndex((x) => x.id === c.id) - 1) })); }} disabled={creatures[0]?.id === c.id}>Move up</Button>
+              {!c.ownerId && room > 0 && <Button icon="plus" onClick={() => setDialog({ kind: "picker", owner: c })}>Add a pet or summon</Button>}
+              {c.ownerId && <Button onClick={() => { close(); void act(() => updateCreature(enc.id, c.id, { ownerId: null }), `${c.dmLabel} acts on its own now.`); }}>Not controlled any more</Button>}
+              <Button onClick={() => { close(); void act(() => updateCreature(enc.id, c.id, { sort: Math.max(0, index - 1) })); }} disabled={index === 0}>Move up</Button>
               <Button onClick={() => { close(); void refresh(c); }}>Refresh stat block</Button>
               {swap && <Button onClick={() => { close(); void act(() => swapCreature(enc.id, c.id), `${c.dmLabel} now uses the ${EDITION_WORD[enc.ruleset]} stat block.`); }}>Use the {EDITION_WORD[enc.ruleset]} stat block</Button>}
               <Button variant="danger" onClick={() => { close(); void remove(c); }}>Remove</Button>

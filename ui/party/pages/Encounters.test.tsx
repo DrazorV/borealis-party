@@ -1,8 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { sequenceDie } from "../../src/lib/dice";
 import type { ServerEvent } from "../api/http";
-import { encountersDeps, resetEncounters, validFormula } from "../api/overrides/encounters";
+import { encountersDeps, nested, resetEncounters, rollFormula, validFormula, type Creature } from "../api/overrides/encounters";
 import { partiesDeps, resetParties } from "../api/overrides/parties";
 import { saveSession } from "../api/session";
 import { fakeEncountersServer, type FakeEncounters } from "../test/encountersServer";
@@ -47,16 +48,21 @@ async function makeEncounter(name = "Goblin ambush") {
   return server.encounters[0]!.id;
 }
 
-async function addFromPicker(names: [string, number][]) {
-  fireEvent.click(screen.getByRole("button", { name: /Add monsters/ }));
-  const picker = await screen.findByRole("dialog", { name: "Add monsters" });
+/** Pick creatures in the open picker and add them. */
+async function pickAndAdd(title: string, names: [string, number][]) {
+  const picker = await screen.findByRole("dialog", { name: title });
   for (const [name, count] of names) {
     const pick = await within(picker).findByRole("button", { name: `Pick ${name}` });
     for (let i = 0; i < count; i++) fireEvent.click(pick);
   }
   const total = names.reduce((n, [, c]) => n + c, 0);
   fireEvent.click(within(picker).getByRole("button", { name: total === 1 ? "Add 1 creature" : `Add ${total} creatures` }));
-  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add monsters" })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: title })).toBeNull());
+}
+
+async function addFromPicker(names: [string, number][]) {
+  fireEvent.click(within(screen.getByRole("region", { name: "Creatures" })).getByRole("button", { name: /Add creatures/ }));
+  await pickAndAdd("Add creatures", names);
 }
 
 beforeEach(() => {
@@ -86,68 +92,110 @@ describe("encounters list (DM)", () => {
     expect(server.calls.some((c) => c.method === "POST" && c.path === "/api/parties/p1/encounters")).toBe(true);
     expect(screen.getByRole("radio", { name: "Draft" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("switch", { name: "Shown to players" }).getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByText("Rules: the party's edition (2024).")).toBeTruthy();
   });
 
-  it("lists encounters with XP, band and status", async () => {
+  it("lists encounters with their creatures and status, and no XP or difficulty", async () => {
     await makeEncounter("Goblin ambush");
     await addFromPicker([["Goblin Warrior", 4]]);
     cleanup();
     page("/parties/p1/encounters");
     const row = await screen.findByRole("link", { name: "Open Goblin ambush" });
     expect(row.textContent).toContain("4 creatures (4 hidden)");
-    expect(row.textContent).toContain("200 XP");
-    expect(within(row).getByText("Low")).toBeTruthy();
     expect(within(row).getByText("Draft")).toBeTruthy();
+    expect(row.textContent).not.toMatch(/XP|Low|Moderate|High/);
   });
 });
 
 describe("encounter builder (DM)", () => {
-  it("adds monsters from the picker, hidden, and shows XP and difficulty in the bar", async () => {
+  it("adds creatures from the picker, hidden, and counts them in the bar", async () => {
     await makeEncounter();
     await addFromPicker([["Goblin Warrior", 4], ["Owlbear", 1]]);
     const add = server.calls.filter((c) => c.path.endsWith("/creatures") && c.method === "POST");
     expect(add.map((c) => c.body)).toEqual([{ elementId: "ID_SRD521_MONSTER_GOBLIN_WARRIOR", count: 4 }, { elementId: "ID_SRD521_MONSTER_OWLBEAR", count: 1 }]);
-    const bar = screen.getByRole("status", { name: "Difficulty" });
-    // Four level 1 characters: 200 / 300 / 400; 4 x 50 + 700 = 900 XP is past High.
-    expect(bar.textContent).toContain("900 XP");
-    expect(within(bar).getByText("Beyond High")).toBeTruthy();
-    expect(bar.textContent).toContain("Low 200 · Moderate 300 · High 400");
+    const bar = screen.getByRole("status", { name: "Encounter summary" });
+    expect(bar.textContent).toContain("5 creatures");
+    expect(bar.textContent).toContain("none revealed");
+    expect(bar.textContent).not.toContain("XP");
     expect(screen.getAllByText("Hidden from players")).toHaveLength(5);
     expect(state.toasts.at(-1)?.text).toBe("5 creatures added, hidden from players.");
   });
 
-  it("filters the picker with chips and search", async () => {
+  it("filters the picker with chips, monsters and companions, and shows no XP", async () => {
     await makeEncounter();
-    fireEvent.click(screen.getByRole("button", { name: /Add monsters/ }));
-    const picker = await screen.findByRole("dialog", { name: "Add monsters" });
+    fireEvent.click(within(screen.getByRole("region", { name: "Creatures" })).getByRole("button", { name: /Add creatures/ }));
+    const picker = await screen.findByRole("dialog", { name: "Add creatures" });
     await within(picker).findByRole("button", { name: "Pick Owlbear" });
-    fireEvent.click(await within(picker).findByRole("button", { name: "Monstrosity" }));
+    expect(picker.textContent).not.toContain("XP");
+    fireEvent.click(within(picker).getByRole("button", { name: "Monstrosity" }));
     await waitFor(() => expect(within(picker).queryByRole("button", { name: "Pick Goblin Warrior" })).toBeNull());
-    const search = server.calls.filter((c) => c.path === "/api/bestiary/search").at(-1)!;
-    expect(search.body).toMatchObject({ kinds: ["monster"], types: ["monstrosity"], ruleset: "dnd2024" });
-    fireEvent.change(within(picker).getByLabelText("Search monsters"), { target: { value: "owl" } });
+    expect(server.calls.filter((c) => c.path === "/api/bestiary/search").at(-1)!.body).toMatchObject({ types: ["monstrosity"], ruleset: "dnd2024" });
+    fireEvent.click(within(picker).getByRole("button", { name: "Monstrosity" }));
+    fireEvent.click(within(picker).getByRole("button", { name: "2024 rules" }));
+    fireEvent.click(within(picker).getByRole("button", { name: "Companions" }));
+    const owl = await within(picker).findByRole("button", { name: "Pick Owl" });
+    expect(owl.closest("li")!.textContent).toContain("Companion");
+    expect(server.calls.filter((c) => c.path === "/api/bestiary/search").at(-1)!.body).toMatchObject({ kinds: ["companion"] });
+    fireEvent.change(within(picker).getByLabelText("Search creatures"), { target: { value: "owl" } });
     await waitFor(() => expect((server.calls.filter((c) => c.path === "/api/bestiary/search").at(-1)!.body as { text?: string }).text).toBe("owl"));
   });
 
-  it("says so when the server has no monster search", async () => {
+  it("says so when the server has no creature search", async () => {
     server.noBestiary = true;
     await makeEncounter();
-    fireEvent.click(screen.getByRole("button", { name: /Add monsters/ }));
-    expect(await within(await screen.findByRole("dialog", { name: "Add monsters" })).findByText("This server can't search monsters yet.")).toBeTruthy();
+    fireEvent.click(within(screen.getByRole("region", { name: "Creatures" })).getByRole("button", { name: /Add creatures/ }));
+    expect(await within(await screen.findByRole("dialog", { name: "Add creatures" })).findByText("This server can't search creatures yet.")).toBeTruthy();
   });
 
-  it("reveals a creature and sets how much players see", async () => {
+  it("reveals a creature: players then see it with its stat block", async () => {
     await makeEncounter();
     await addFromPicker([["Owlbear", 1]]);
     const row = screen.getByRole("listitem", { name: "Owlbear" });
-    const levels = within(row).getByRole("radiogroup", { name: "Owlbear: players see" });
-    expect((within(levels).getByRole("radio", { name: "Full" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(row).queryByRole("radiogroup")).toBeNull();
     fireEvent.click(within(row).getByRole("switch", { name: "Owlbear: shown to players" }));
-    await waitFor(() => expect(within(row).getByText('Players see "Monstrosity"')).toBeTruthy());
-    fireEvent.click(within(levels).getByRole("radio", { name: "Full" }));
-    await waitFor(() => expect(within(levels).getByRole("radio", { name: "Full" }).getAttribute("aria-checked")).toBe("true"));
-    const patches = server.calls.filter((c) => c.method === "PATCH" && c.path.includes("/creatures/")).map((c) => c.body);
-    expect(patches).toEqual([{ hidden: false }, { revealLevel: "full" }]);
+    await waitFor(() => expect(within(row).getByText('Players see "Monstrosity" and its stat block')).toBeTruthy());
+    expect(server.calls.filter((c) => c.method === "PATCH").map((c) => c.body)).toEqual([{ hidden: false }]);
+    expect(screen.getByRole("status", { name: "Encounter summary" }).textContent).toContain("1 revealed");
+  });
+
+  it("gives a villain a pet, nested under it, acting right after it", async () => {
+    await makeEncounter();
+    await addFromPicker([["Goblin Warrior", 1]]);
+    fireEvent.click(screen.getByRole("button", { name: "More for Goblin Warrior" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Goblin Warrior" })).getByRole("button", { name: "Add a pet or summon" }));
+    await pickAndAdd("Pets and summons for Goblin Warrior", [["Owl", 1]]);
+    const add = server.calls.filter((c) => c.path.endsWith("/creatures") && c.method === "POST").at(-1)!;
+    expect(add.body).toEqual({ elementId: "ID_TEST_COMPANION_OWL", count: 1, ownerId: server.creatures.get(server.encounters[0]!.id)![0]!.id });
+    const owl = screen.getByRole("listitem", { name: "Owl" });
+    expect(owl.className).toContain("is-pet");
+    expect(owl.textContent).toContain("Acts right after Goblin Warrior");
+    expect(owl.textContent).toContain("Companion");
+    const rows = screen.getAllByRole("listitem").filter((li) => li.classList.contains("enc-creature")).map((li) => li.getAttribute("aria-label"));
+    expect(rows).toEqual(["Goblin Warrior", "Owl"]);
+    // Its own initiative instead.
+    fireEvent.click(within(owl).getByRole("button", { name: "Edit" }));
+    const d = await screen.findByRole("dialog", { name: "Owl" });
+    fireEvent.click(within(d).getByRole("radio", { name: "Its own initiative" }));
+    fireEvent.click(within(d).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByRole("listitem", { name: "Owl" }).textContent).toContain("Its own initiative"));
+    expect(server.calls.filter((c) => c.method === "PATCH").at(-1)!.body).toMatchObject({ initMode: "own" });
+  });
+
+  it("starting HP: roll the hit dice in the app or type a real roll (D21)", async () => {
+    encountersDeps.die = sequenceDie([6, 6, 6, 6, 6, 6, 6]);
+    await makeEncounter();
+    await addFromPicker([["Owlbear", 1]]);
+    fireEvent.click(within(screen.getByRole("listitem", { name: "Owlbear" })).getByRole("button", { name: "Edit" }));
+    const d = await screen.findByRole("dialog", { name: "Owlbear" });
+    fireEvent.click(within(d).getByRole("radio", { name: "A number I type" }));
+    fireEvent.click(within(d).getByRole("button", { name: "Roll 7d10+21" }));
+    expect((within(d).getByLabelText("Hit points it starts with") as HTMLInputElement).value).toBe("63");
+    expect(within(d).getByText("Rolled 7d10+21: 63")).toBeTruthy();
+    // A typed total wins.
+    fireEvent.change(within(d).getByLabelText("Hit points it starts with"), { target: { value: "70" } });
+    fireEvent.click(within(d).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Owlbear" })).toBeNull());
+    expect(server.calls.filter((c) => c.method === "PATCH").at(-1)!.body).toMatchObject({ hpMode: "fixed", hpMax: 70 });
   });
 
   it("shows the encounter to players only after the app's own confirm", async () => {
@@ -179,7 +227,6 @@ describe("encounter builder (DM)", () => {
     expect(body.overrides.hp).toEqual({ average: 80 });
     expect(body.overrides.notes).toBe("Tougher one");
     expect(screen.getByText("Changed")).toBeTruthy();
-    expect(screen.getByRole("status", { name: "Difficulty" }).textContent).toContain("Notes (1)");
   });
 
   it("asks which value wins when a refresh finds a conflict", async () => {
@@ -237,7 +284,7 @@ describe("encounter builder (DM)", () => {
 });
 
 describe("players", () => {
-  it("see 'Next:' only once the DM shows an encounter, and only revealed creatures", async () => {
+  it("see 'Next:' only once the DM shows an encounter, and only revealed creatures, with their stat blocks", async () => {
     await makeEncounter("DM's own name");
     await addFromPicker([["Goblin Warrior", 1], ["Owlbear", 1]]);
     const owlbear = server.creatures.get(server.encounters[0]!.id)!.find((c) => c.name === "Owlbear")!;
@@ -257,7 +304,10 @@ describe("players", () => {
     const card = await screen.findByLabelText("Goblin ambush");
     await within(card).findByText("Big beast");
     expect(card.textContent).not.toContain("Goblin Warrior");
-    expect(card.textContent).not.toContain("XP");
+    fireEvent.click(within(card).getByRole("button", { name: "Stat block of Big beast" }));
+    const sheet = await screen.findByRole("article", { name: "Big beast" });
+    expect(sheet.textContent).toContain("Armor Class");
+    expect(sheet.textContent).not.toContain("XP");
   });
 
   it("the DM's party card links to the encounters", () => {
@@ -270,5 +320,17 @@ describe("helpers", () => {
   it("checks hit dice like the server", () => {
     for (const ok of ["4d10+8", "1d6", "26d20+234", "3d6-1", "2d100"]) expect(validFormula(ok)).toBe(true);
     for (const bad of ["d6", "0d6", "4d0", "lots", "4d10+", "100d6"]) expect(validFormula(bad)).toBe(false);
+  });
+
+  it("rolls a formula with the app's die, at least 1", () => {
+    encountersDeps.die = sequenceDie([1]);
+    expect(rollFormula("1d4-3")).toBe(1);
+    expect(rollFormula("lots")).toBeNull();
+  });
+
+  it("nests controlled creatures under their owner", () => {
+    const c = (id: string, ownerId: string | null = null) => ({ id, ownerId }) as Creature;
+    expect(nested([c("a"), c("p", "a"), c("b"), c("q", "a")]).map((g) => [g.creature.id, g.pets.map((p) => p.id)]))
+      .toEqual([["a", ["p", "q"]], ["b", []]]);
   });
 });

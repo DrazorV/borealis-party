@@ -1,6 +1,6 @@
 /*
  * Encounters (0.3.0): the DM's list and builder, the monster picker, the players' "Next:" teaser. Phone first
- * (384x832): tap targets are --ph-hit (44 px iOS, 48 px Android, plan D9) on phones, the XP bar stays at the bottom,
+ * (384x832): tap targets are --ph-hit (44 px iOS, 48 px Android, plan D9) on phones, the summary bar stays at the bottom,
  * and nothing scrolls sideways. Aurora's look: the app's cards, chips, segmented controls and switches.
  */
 .enc-head { flex-wrap: nowrap; }
@@ -29,9 +29,10 @@
 .enc-creature { list-style: none; padding: var(--sp-2) var(--sp-3); border: var(--border-w) solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .enc-creature.is-hidden { border-style: dashed; }
 .enc-creature.is-revealed { border-left: 4px solid var(--success, #3a8a3a); }
+/* A controlled creature (pet, summon) sits under its owner, indented. */
+.enc-creature.is-pet { margin-left: var(--sp-4); }
 .enc-creature-head { display: flex; gap: var(--sp-2); align-items: flex-start; }
 .enc-creature-controls { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin-top: var(--sp-2); }
-.enc-reveal-level { flex: 1 1 180px; }
 .enc-item { flex-wrap: nowrap; }
 .enc-item > .grow { min-width: 0; overflow-wrap: anywhere; }
 .enc-notes { width: 100%; box-sizing: border-box; resize: vertical; }
@@ -39,15 +40,14 @@
 .enc-menu { display: flex; flex-direction: column; gap: var(--sp-2); }
 .enc-menu > .btn { justify-content: center; }
 
-/* The XP and difficulty bar, at the bottom of the screen while the builder scrolls (plan 4.3). */
+/* The summary bar, at the bottom of the screen while the builder scrolls (plan 4.3): no XP or difficulty (D16). */
 .enc-bar {
   position: sticky; bottom: 0; z-index: 5; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap;
   padding: var(--sp-2) var(--sp-3); margin: 0 calc(-1 * var(--sp-4)) calc(-1 * var(--sp-4));
   padding-bottom: max(var(--sp-2), var(--safe-b, 0px));
   background: var(--surface); border-top: var(--border-w) solid var(--border); box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.18);
 }
-.enc-bar-xp { font-size: 16px; white-space: nowrap; }
-.enc-bar-budget { font-size: var(--fs-xs, 12px); min-width: 0; }
+.enc-bar-text { display: flex; flex-direction: column; min-width: 0; }
 
 /* Forms. */
 .enc-form { display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -103,9 +103,12 @@ html.phone .enc-form .enc-segmented button, html.phone .enc-menu .btn, html.phon
 }
 html.phone .enc-page .btn-icon, html.phone .enc-picker .btn-icon, html.phone .enc-picker .enc-chip { min-width: var(--ph-hit); }
 
+html.phone .enc-stepper .btn-icon, html.phone .enc-creature-head .btn-icon {
+  flex: none; box-sizing: border-box; width: var(--ph-hit); height: var(--ph-hit); min-width: var(--ph-hit); min-height: var(--ph-hit);
+}
 html.phone .enc-creature-controls > .aur-switch { flex: 1 1 auto; }
 html.phone .enc-creature-controls > .btn { flex: 1 1 auto; justify-content: center; }
 @media (max-width: 420px) {
   .enc-sb-abilities { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .enc-reveal-level { flex-basis: 100%; }
+  .enc-creature.is-pet { margin-left: var(--sp-2); }
 }

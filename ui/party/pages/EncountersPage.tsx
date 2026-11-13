@@ -5,8 +5,7 @@ import { Alert, Card, Chip, EmptyState } from "../../src/components/Card";
 import { Modal } from "../../src/components/Modal";
 import { errorMessage } from "../../src/state/useAsync";
 import {
-  BAND_TONE, BAND_WORD, createEncounter, LIMITS, listEncounters, STATUS_WORD, watchEncounters, xpText,
-  type EncounterList, type SeenEncounter, seeEncounter,
+  createEncounter, LIMITS, listEncounters, seeEncounter, STATUS_WORD, watchEncounters, type EncounterList, type SeenEncounter,
 } from "../api/overrides/encounters";
 import { loadParty, type Party } from "../api/overrides/parties";
 import { EncounterStatBlock } from "./EncounterStatBlock";
@@ -60,8 +59,8 @@ function NewEncounterDialog({ partyId, onClose }: { partyId: string; onClose: ()
 }
 
 /**
- * A party's encounters (DM, plan 4.3): drafts and ready ones with their XP and difficulty against the party, and a
- * button for a new one. A player who opens this sees only the encounters shown to them (the server decides).
+ * A party's encounters (DM, plan 4.3): drafts and ready ones, how many creatures each has and how many are hidden,
+ * and a button for a new one. No XP or difficulty (the user's D16). A player who opens this sees only the encounters shown to them (the server decides).
  */
 export function EncountersPage() {
   const { party: partyId = "" } = useParams();
@@ -104,12 +103,11 @@ export function EncountersPage() {
                     <strong>{e.name}</strong>
                     <span className="muted party-note">
                       {e.creatureCount === 1 ? "1 creature" : `${e.creatureCount} creatures`}
-                      {e.hiddenCount > 0 ? ` (${e.hiddenCount} hidden)` : ""} · {xpText(e.xp)}
+                      {e.hiddenCount > 0 ? ` (${e.hiddenCount} hidden)` : ""}
                       {e.publicName !== e.name ? ` · players see "${e.publicName}"` : ""}
                     </span>
                   </span>
                   <span className="enc-row-chips">
-                    {e.band && <Chip tone={BAND_TONE[e.band]}>{BAND_WORD[e.band]}</Chip>}
                     <Chip tone={e.status === "draft" ? "default" : e.status === "live" ? "danger" : "accent"}>{STATUS_WORD[e.status]}</Chip>
                     {e.visibleToPlayers && <Chip tone="gold" title="Players see this encounter">Shown</Chip>}
                   </span>
@@ -131,7 +129,7 @@ export function EncountersPage() {
   );
 }
 
-/** A shown encounter as a player sees it: its name and the creatures the DM revealed, at their reveal level. */
+/** A shown encounter as a player sees it: its name and the creatures the DM revealed, each with its stat block. */
 export function SeenEncounterCard({ id }: { id: string }) {
   const [seen, setSeen] = useState<SeenEncounter | null | undefined>(undefined);
   const [open, setOpen] = useState<string | null>(null);
@@ -158,15 +156,15 @@ export function SeenEncounterCard({ id }: { id: string }) {
                   <strong>{c.publicName}</strong>
                   <span className="muted party-note">{[c.size.join(" or "), c.type.toLowerCase()].filter(Boolean).join(" ")}</span>
                 </span>
-                {c.band && <Chip tone={c.band === "unhurt" ? "success" : c.band === "bloodied" ? "warning" : "danger"}>{c.band === "unhurt" ? "Unhurt" : c.band === "bloodied" ? "Bloodied" : "Down"}</Chip>}
-                {c.statBlock && <Button small onClick={() => setOpen(c.id)}>Stat block</Button>}
+                {c.kind === "companion" && <Chip tone="info">Companion</Chip>}
+                <Button small onClick={() => setOpen(c.id)} aria-label={`Stat block of ${c.publicName}`}>Stat block</Button>
               </li>
             ))}
           </ul>
         )}
-      {creature?.statBlock && (
+      {creature && (
         <Modal title={creature.publicName} onClose={() => setOpen(null)} footer={<Button onClick={() => setOpen(null)}>Close</Button>}>
-          <EncounterStatBlock title={creature.publicName} block={creature.statBlock} showXp={false} hp={creature.hp} />
+          <EncounterStatBlock title={creature.publicName} block={creature.statBlock} hp={creature.hp} />
         </Modal>
       )}
     </div>

@@ -8,8 +8,9 @@ import { expect, measureOverflow, minTap, open, settled, smallTargets, test } fr
 /**
  * The encounter builder (release 0.3.0) on the phones, 384x832 (Android) and 390x844 (iPhone): `admin` runs a party
  * as its DM and builds an encounter from the bundled SRD monsters, `player` plays a character in it.
- * - The DM's list and builder fit the screen, every control is a full-size tap target, and the XP bar stays at the
- *   bottom while the builder scrolls.
+ * - The DM's list and builder fit the screen, every control is a full-size tap target, and the summary bar stays at
+ *   the bottom while the builder scrolls. No XP or difficulty anywhere (the user's D16).
+ * - A villain gets a pet, shown under it (controlled creatures).
  * - The picker is a full-screen sheet with chips. Its search is part A's `/api/bestiary/search`; until that is on
  *   the server this spec answers it in the browser with SRD monsters, and adding goes to the real server.
  * - The player sees "Next: <name>" only once the DM shows the encounter, and only revealed creatures, never the DM's
@@ -98,12 +99,12 @@ test.describe("Encounters (0.3.0)", () => {
       // The builder.
       await row.tap();
       await expect(page.getByRole("heading", { name: "The DM's secret name" })).toBeVisible();
-      const bar = page.getByRole("status", { name: "Difficulty" });
-      await expect(bar).toContainText("150 XP");
+      const bar = page.getByRole("status", { name: "Encounter summary" });
+      await expect(bar).toContainText("3 creatures");
 
       // The picker: full screen, with chips; two Owlbears into the encounter.
-      await page.getByRole("button", { name: /Add monsters/ }).tap();
-      const picker = page.getByRole("dialog", { name: "Add monsters" });
+      await page.getByRole("region", { name: "Creatures" }).getByRole("button", { name: /Add creatures/ }).tap();
+      const picker = page.getByRole("dialog", { name: "Add creatures" });
       await settled(picker);
       const box = (await picker.boundingBox())!;
       const view = page.viewportSize()!;
@@ -118,13 +119,24 @@ test.describe("Encounters (0.3.0)", () => {
       await shot(page, testInfo, "picker");
       await picker.getByRole("button", { name: "Add 2 creatures" }).tap();
       await expect(picker).toHaveCount(0);
-      // 3 x 50 + 2 x 700.
-      await expect(bar).toContainText("1,550 XP");
+      await expect(bar).toContainText("5 creatures");
+      await expect(page.locator("main")).not.toContainText("XP");
 
       // Reveal one Owlbear by name.
       const owlbear = page.getByRole("listitem", { name: "Owlbear 1" });
       await owlbear.getByRole("switch", { name: "Owlbear 1: shown to players" }).tap();
-      await expect(owlbear).toContainText('Players see "Monstrosity"');
+      await expect(owlbear).toContainText('Players see "Monstrosity" and its stat block');
+      // A pet for a goblin: picked in the same sheet, shown under its owner.
+      await page.getByRole("button", { name: "More for Goblin Warrior 1" }).tap();
+      await page.getByRole("dialog", { name: "Goblin Warrior 1" }).getByRole("button", { name: "Add a pet or summon" }).tap();
+      const pets = page.getByRole("dialog", { name: "Pets and summons for Goblin Warrior 1" });
+      await settled(pets);
+      await pets.getByRole("button", { name: "Pick Owlbear" }).tap();
+      await pets.getByRole("button", { name: "Add 1 creature" }).tap();
+      await expect(pets).toHaveCount(0);
+      const pet = page.getByRole("listitem", { name: "Owlbear 3" });
+      await expect(pet).toContainText("Acts right after Goblin Warrior 1");
+      await expect(pet).toHaveClass(/is-pet/);
       await fits(page, testInfo, ".enc-builder");
 
       // The bar stays at the bottom of the screen while the builder scrolls.
@@ -135,8 +147,8 @@ test.describe("Encounters (0.3.0)", () => {
         while (p && !/(auto|scroll)/.test(getComputedStyle(p).overflowY)) p = p.parentElement;
         return { bar: el.getBoundingClientRect().bottom, scroller: (p ?? document.documentElement).getBoundingClientRect().bottom };
       });
-      expect(placed.bar, "the XP bar is on screen").toBeLessThanOrEqual(view.height + 1);
-      expect(Math.abs(placed.bar - placed.scroller), `the XP bar sits at the bottom of the scrolling area (${JSON.stringify(placed)})`).toBeLessThanOrEqual(2);
+      expect(placed.bar, "the summary bar is on screen").toBeLessThanOrEqual(view.height + 1);
+      expect(Math.abs(placed.bar - placed.scroller), `the summary bar sits at the bottom of the scrolling area (${JSON.stringify(placed)})`).toBeLessThanOrEqual(2);
       await shot(page, testInfo, "builder");
 
       // The player: nothing yet; then "Next:" once it is shown, and only the revealed Owlbear.
@@ -159,6 +171,12 @@ test.describe("Encounters (0.3.0)", () => {
         await next.tap();
         const seen = playerPage.getByLabel("Goblin ambush");
         await expect(seen.getByText("Monstrosity", { exact: true })).toBeVisible();
+        // A revealed creature comes with its whole stat block (D20 b).
+        await seen.getByRole("button", { name: "Stat block of Monstrosity" }).tap();
+        const sheet = playerPage.getByRole("article", { name: "Monstrosity" });
+        await expect(sheet).toContainText("Armor Class");
+        await fits(playerPage, testInfo, ".enc-statblock");
+        await playerPage.getByRole("dialog").getByRole("button", { name: "Close" }).last().tap();
         const text = (await playerPage.locator("main").textContent()) ?? "";
         expect(text).not.toContain("secret name");
         expect(text).not.toContain("Goblin Warrior");

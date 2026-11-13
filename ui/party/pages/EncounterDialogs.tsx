@@ -4,8 +4,8 @@ import { Alert } from "../../src/components/Card";
 import { Modal } from "../../src/components/Modal";
 import { errorMessage } from "../../src/state/useAsync";
 import {
-  ABILITIES, ABILITY_WORD, LIMITS, signed, validFormula, type Ability, type Conflict, type Creature, type Effect,
-  type EffectFields, type Encounter, type OverridesForm, type Rule, type RuleFields, type Warning,
+  ABILITIES, ABILITY_WORD, INIT_WORD, LIMITS, rollFormula, signed, validFormula, type Ability, type Conflict, type Creature,
+  type Effect, type EffectFields, type Encounter, type InitMode, type OverridesForm, type Rule, type RuleFields, type Warning,
 } from "../api/overrides/encounters";
 import { EncounterStatBlock } from "./EncounterStatBlock";
 
@@ -64,12 +64,15 @@ export function DetailsDialog({ enc, onSave, onClose }: {
 }
 
 /**
- * One creature: the DM's label and the name players see, its starting hit points, and the encounter's changes to
- * its stat block (D41: HP, AC, saves, added traits, a note). Changed numbers show the printed ones beside them.
+ * One creature: the DM's label and the name players see, its starting hit points (rolled in the app or typed from
+ * real dice, D21), for a controlled creature when it acts, and the encounter's changes to its stat block (D41: HP,
+ * AC, saves, added traits, a note). Changed numbers show the printed ones beside them.
  */
-export function CreatureDialog({ creature, onSave, onClose }: {
+export function CreatureDialog({ creature, owner, onSave, onClose }: {
   creature: Creature;
-  onSave: (fields: { dmLabel: string; publicName: string; hpMode: "encounter" | "fixed"; hpMax: number | null; overrides: OverridesForm }) => Promise<unknown>;
+  /** The DM's label of the creature that controls it, if any. */
+  owner?: string;
+  onSave: (fields: { dmLabel: string; publicName: string; hpMode: "encounter" | "fixed"; hpMax: number | null; initMode?: InitMode; overrides: OverridesForm }) => Promise<unknown>;
   onClose: () => void;
 }) {
   const o = creature.overrides;
@@ -85,9 +88,12 @@ export function CreatureDialog({ creature, onSave, onClose }: {
     Object.fromEntries(ABILITIES.map((a) => [a, o.saves?.[a] ? String(o.saves[a]!.value) : ""])) as Record<Ability, string>);
   const [traits, setTraits] = useState(o.traits ?? []);
   const [notes, setNotes] = useState(o.notes ?? "");
+  const [initMode, setInitMode] = useState<InitMode>(creature.initMode);
   const [showBlock, setShowBlock] = useState(false);
+  const [rolled, setRolled] = useState("");
   const { error, busy, save, setError } = useSave(onClose);
   const printed = creature.printed;
+  const dice = (formula.trim() && validFormula(formula) ? formula.trim() : null) ?? creature.hp?.formula ?? printed.hp?.formula ?? null;
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
@@ -112,14 +118,17 @@ export function CreatureDialog({ creature, onSave, onClose }: {
       traits: traits.filter((t) => t.name.trim()).map((t) => ({ name: t.name.trim(), text: t.text.trim() })),
       notes: notes.trim() ? notes.trim() : null,
     };
-    void save(() => onSave({ dmLabel: dmLabel.trim(), publicName: publicName.trim(), hpMode: fixed ? "fixed" : "encounter", hpMax: fixed ? fixedHp : null, overrides }));
+    void save(() => onSave({
+      dmLabel: dmLabel.trim(), publicName: publicName.trim(), hpMode: fixed ? "fixed" : "encounter", hpMax: fixed ? fixedHp : null,
+      ...(owner ? { initMode } : {}), overrides,
+    }));
   };
 
   return (
     <Modal title={creature.dmLabel} full onClose={onClose} className="enc-creature-dialog"
       footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={busy || !dmLabel.trim() || !publicName.trim()} onClick={() => submit()}>Save</Button></>}>
       <form className="party-form enc-form" onSubmit={submit}>
-        <p className="muted party-note">{creature.name} · {creature.source}{creature.cr ? ` · CR ${creature.cr}` : ""}</p>
+        <p className="muted party-note">{creature.name} · {creature.source}{creature.cr ? ` · CR ${creature.cr}` : ""}{creature.kind === "companion" ? " · Companion" : ""}</p>
         <Field label="Your label (only you see it)"><input className="input" aria-label="Your label" maxLength={LIMITS.label} value={dmLabel} onChange={(e) => setDmLabel(e.target.value)} /></Field>
         <Field label="Name players see" hint="Shown only once you reveal it. A number here would tell players how many are hiding.">
           <input className="input" aria-label="Name players see" maxLength={LIMITS.publicName} value={publicName} onChange={(e) => setPublicName(e.target.value)} />
@@ -130,10 +139,35 @@ export function CreatureDialog({ creature, onSave, onClose }: {
           <button type="button" role="radio" aria-checked={!fixed} onClick={() => setFixed(false)}>As the encounter says</button>
           <button type="button" role="radio" aria-checked={fixed} onClick={() => setFixed(true)}>A number I type</button>
         </div>
-        {fixed && <Field label="Hit points it starts with" hint="Rolled with real dice? Type the total."><input className="input" inputMode="numeric" aria-label="Hit points it starts with" value={hpMax} onChange={(e) => setHpMax(e.target.value)} /></Field>}
+        {fixed && (
+          <>
+            <Field label="Hit points it starts with" hint="Rolled with real dice? Type the total.">
+              <input className="input" inputMode="numeric" aria-label="Hit points it starts with" value={hpMax} onChange={(e) => setHpMax(e.target.value)} />
+            </Field>
+            {dice && (
+              <div className="party-line">
+                <Button small icon="dice" onClick={() => {
+                  const total = rollFormula(dice);
+                  if (total != null) { setHpMax(String(total)); setRolled(`Rolled ${dice}: ${total}`); }
+                }}>Roll {dice}</Button>
+                {rolled && <span className="muted party-note" aria-live="polite">{rolled}</span>}
+              </div>
+            )}
+          </>
+        )}
+        {owner && (
+          <>
+            <h4 className="party-sub">Turn (controlled by {owner})</h4>
+            <div className="segmented enc-segmented" role="radiogroup" aria-label="When it acts">
+              {(["after_owner", "own"] as InitMode[]).map((m) => (
+                <button key={m} type="button" role="radio" aria-checked={initMode === m} onClick={() => setInitMode(m)}>{INIT_WORD[m]}</button>
+              ))}
+            </div>
+          </>
+        )}
 
         <h4 className="party-sub">Changes for this encounter</h4>
-        <p className="muted party-note">Leave a field empty to keep the printed value. Difficulty still uses the CR.</p>
+        <p className="muted party-note">Leave a field empty to keep the printed value.</p>
         <div className="enc-grid2">
           <Field label={`Hit points (printed ${printed.hp ? printed.hp.average : "none"})`}>
             <input className="input" inputMode="numeric" aria-label="Hit points" value={hp} onChange={(e) => setHp(e.target.value)} />
@@ -141,7 +175,7 @@ export function CreatureDialog({ creature, onSave, onClose }: {
           <Field label={`Hit dice (printed ${printed.hp?.formula ?? "none"})`}>
             <input className="input" aria-label="Hit dice" placeholder="4d10+8" value={formula} onChange={(e) => setFormula(e.target.value)} />
           </Field>
-          <Field label={`Armor class (printed ${printed.ac ?? "none"})`}>
+          <Field label={`Armor class (printed ${printed.ac?.value ?? "none"})`}>
             <input className="input" inputMode="numeric" aria-label="Armor class" value={ac} onChange={(e) => setAc(e.target.value)} />
           </Field>
           <Field label="What gives it">
@@ -152,7 +186,7 @@ export function CreatureDialog({ creature, onSave, onClose }: {
           <legend>Saving throws</legend>
           {ABILITIES.map((a) => (
             <label key={a} className="enc-save">
-              <span>{ABILITY_WORD[a]} <span className="muted">({signed(printed.saves[a] ?? 0)})</span></span>
+              <span>{ABILITY_WORD[a]} <span className="muted">({printed.saves[a] != null ? signed(printed.saves[a]!) : "none"})</span></span>
               <input className="input" inputMode="numeric" aria-label={`${ABILITY_WORD[a]} save`} value={saves[a]} onChange={(e) => setSaves({ ...saves, [a]: e.target.value })} />
             </label>
           ))}
@@ -323,14 +357,13 @@ export function RuleDialog({ creatures, rule, onSave, onClose }: {
   );
 }
 
-/** Everything the difficulty check says, in full. */
-export function WarningsDialog({ warnings, note, onClose }: { warnings: Warning[]; note?: string; onClose: () => void }) {
+/** The edition notes (D23 b): creatures and characters of the other edition. */
+export function WarningsDialog({ warnings, onClose }: { warnings: Warning[]; onClose: () => void }) {
   return (
-    <Modal title="Difficulty notes" onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
-      {note && <Alert tone="info">{note}</Alert>}
-      {warnings.length === 0 ? <p className="muted">Nothing to note.</p> : (
+    <Modal title="Edition notes" onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
+      {warnings.length === 0 ? <p className="muted">Everything uses the party's edition.</p> : (
         <ul className="party-list">
-          {warnings.map((w, i) => <li key={`${w.kind}-${i}`} className="party-line"><span className="grow">{w.text}{w.heuristic ? " (rule of thumb)" : ""}</span></li>)}
+          {warnings.map((w, i) => <li key={`${w.kind}-${i}`} className="party-line"><span className="grow">{w.text}</span></li>)}
         </ul>
       )}
     </Modal>
