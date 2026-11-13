@@ -46,3 +46,20 @@ describe("shared combat pieces", () => {
   });
 
 });
+
+describe("the encounter builder's doors to the tracker", () => {
+  it("LiveCombatLink opens the party's live combat", async () => {
+    const { combatDeps, resetCombatDeps } = await import("../../api/overrides/combat");
+    const { saveSession } = await import("../../api/session");
+    const { memoryStorage } = await import("../../test/memoryStorage");
+    const { MemoryRouter } = await import("react-router");
+    const { LiveCombatLink } = await import("./StartCombatButton");
+    vi.stubGlobal("localStorage", memoryStorage());
+    saveSession({ baseUrl: "http://server", token: "t", user: { id: "dm1", username: "dana", email: null, admin: false, mustChangePassword: false } });
+    combatDeps.fetch = async (_s, method, path) => (method === "GET" && path === "/api/parties/p1/combat" ? { combat: "c9" } : null);
+    render(<MemoryRouter><LiveCombatLink partyId="p1" /></MemoryRouter>);
+    expect((await screen.findByRole("link", { name: "Open the live combat" })).getAttribute("href")).toBe("/combat/c9");
+    resetCombatDeps();
+    vi.unstubAllGlobals();
+  });
+});
