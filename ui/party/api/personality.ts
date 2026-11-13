@@ -22,16 +22,34 @@ import type { Method } from "./overrides/registry";
 /** The account setting, kept by the server beside upstream's settings (party/crates/borealis-server/src/settings.rs). */
 export const SKIP_KEY = "skipPersonalityChoices";
 
-let skip = true;
+/** The last value the server answered, kept on the device so an app that starts offline follows it too. */
+const REMEMBERED = "party.skipPersonalityChoices";
 
-/** Whether the selection flow skips the personality lists now: the account's setting, on until it says otherwise. */
-export function personalitySkipped(): boolean {
+/** Null until read: from the device's last known value, else the default (on). */
+let skip: boolean | null = null;
+
+function current(): boolean {
+  if (skip === null) {
+    try { skip = localStorage.getItem(REMEMBERED) !== "false"; } catch { skip = true; }
+  }
   return skip;
 }
 
-/** Follow the settings the API answered with (absent = the default, on: an older server, or the app offline). */
+/** Whether the selection flow skips the personality lists now: the account's setting, on until it says otherwise. */
+export function personalitySkipped(): boolean {
+  return current();
+}
+
+/** Follow the settings the API answered with (absent = the default, on: an older server), and remember the value. */
 export function followSettings(settings: unknown): void {
-  if (settings && typeof settings === "object") skip = (settings as Record<string, unknown>)[SKIP_KEY] !== false;
+  if (!settings || typeof settings !== "object") return;
+  skip = (settings as Record<string, unknown>)[SKIP_KEY] !== false;
+  try { localStorage.setItem(REMEMBERED, String(skip)); } catch { /* a private window: the default next time */ }
+}
+
+/** Tests: as a fresh start of the app (the remembered value is read again). */
+export function forgetPersonalityState(): void {
+  skip = null;
 }
 
 const NAME = /(?:^|\s)(?:personality traits?|ideals?|bonds?|flaws?)$/i;
@@ -86,7 +104,7 @@ const isSnapshot = (v: unknown): v is CharacterSnapshot =>
 
 /** An answer with its snapshot rewritten: a snapshot itself, or one under `snapshot` (switch version, convert to 2024). */
 export function rewrite(result: unknown): unknown {
-  if (!skip || !result || typeof result !== "object") return result;
+  if (!current() || !result || typeof result !== "object") return result;
   if (isSnapshot(result)) return withoutPersonality(result);
   const inner = (result as { snapshot?: unknown }).snapshot;
   if (isSnapshot(inner)) return { ...result, snapshot: withoutPersonality(inner) };

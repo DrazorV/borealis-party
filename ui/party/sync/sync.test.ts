@@ -428,6 +428,16 @@ it("the server's settings replace the app's, less its own folders and flags", as
   expect(local.state.calls).not.toContain("saveSettings");
 });
 
+it("the party's own account settings are not the app's: a sync with nothing changed writes no settings", async () => {
+  // The app's backend has no field for them and drops them, so they never compare equal.
+  server.state.settings = { ...server.state.settings, skipPersonalityChoices: false };
+  await sync();
+  expect(local.state.settings).not.toHaveProperty("skipPersonalityChoices");
+  local.state.calls = [];
+  await sync();
+  expect(local.state.calls).not.toContain("saveSettings");
+});
+
 it("a server that can't be reached changes nothing on the device", async () => {
   await sync();
   const files = new Map(local.state.files);

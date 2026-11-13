@@ -4,7 +4,7 @@ import { createHttpApi } from "./http";
 import { createOfflineApi } from "./offline";
 import { saveSession, type ServerSession } from "./session";
 import { memoryStorage } from "../test/memoryStorage";
-import { followSettings, isPersonalitySlot, personalitySkipped, rewrite, SKIP_KEY, withoutPersonality } from "./personality";
+import { followSettings, forgetPersonalityState, isPersonalitySlot, personalitySkipped, rewrite, SKIP_KEY, withoutPersonality } from "./personality";
 
 /** The SRD Acolyte's choices (content/srd-5.1/backgrounds.json): two languages, then the four personality lists. */
 const BG = "ID_BACKGROUND_ACOLYTE";
@@ -164,5 +164,29 @@ describe("over the API", () => {
     expect((await api.getSnapshot({ characterId: "c1" })).progress.nextSlotId).toBe(trait(1).id);
     followSettings({});
     expect((await api.getSnapshot({ characterId: "c1" })).progress.nextSlotId).toBe(language(1).id);
+  });
+
+  it("an app that starts offline follows the last value the server answered, kept on the device", async () => {
+    const local = {
+      getSettings: async () => ({ accentColor: "blue" }),
+      getSnapshot: async () => snapshot([trait(1), language(1)], trait(1).id),
+    } as never;
+    // Online, the account turned it off; then the app is closed and started again with no network.
+    skipOnServer = false;
+    await createHttpApi(session).getSettings();
+    forgetPersonalityState();
+    const offline = createOfflineApi(local, new Map());
+    await offline.getSettings();
+    expect(personalitySkipped()).toBe(false);
+    expect((await offline.getSnapshot({ characterId: "c1" })).progress.nextSlotId).toBe(trait(1).id);
+    // Turned on again: the next cold start skips them.
+    skipOnServer = true;
+    await createHttpApi(session).getSettings();
+    forgetPersonalityState();
+    expect((await createOfflineApi(local, new Map()).getSnapshot({ characterId: "c1" })).progress.nextSlotId).toBe(language(1).id);
+    // Nothing kept on the device (a first start offline): the default, on.
+    localStorage.clear();
+    forgetPersonalityState();
+    expect(personalitySkipped()).toBe(true);
   });
 });

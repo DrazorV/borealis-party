@@ -1,4 +1,5 @@
 import type { Api, ApiError, ContentPack, ContentSource } from "../../src/api/contract";
+import { SKIP_KEY } from "../api/personality";
 import { addNotices, emptyMirror, heldByOthers, loadMirror, saveMirror, type Mirror } from "./mirror";
 
 /**
@@ -67,8 +68,14 @@ interface ServerFile {
   contentBase64: string;
 }
 
-/** Settings the server keeps for itself (party settings.rs FOLDERS and FIXED): never copied to the app. */
-const SERVER_OWNED = ["documentsDir", "secondaryContentDir", "portraitLibraryDir", "vaultDir", "checkAppUpdates", "ai", "mobile", "storeBuild", "aiAvailable"];
+/**
+ * Settings the server keeps for itself (party settings.rs FOLDERS and FIXED), and the party's own account settings
+ * (settings.rs PARTY), which the app's backend has no field for: never copied to the app or compared with its own.
+ */
+const SERVER_OWNED = [
+  "documentsDir", "secondaryContentDir", "portraitLibraryDir", "vaultDir", "checkAppUpdates", "ai", "mobile", "storeBuild", "aiAvailable",
+  SKIP_KEY,
+];
 
 const message = (e: unknown) => (e as Partial<ApiError>)?.message ?? String(e);
 
