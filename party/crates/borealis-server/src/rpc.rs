@@ -42,10 +42,12 @@ pub async fn command(
     }
     let workspace = state.workspaces.get(&user.id).await?;
     let mut result = match command.as_str() {
-        "restore_default_settings" => settings::restore_defaults(&workspace).await?,
+        "restore_default_settings" => {
+            settings::restore_defaults(&workspace, &state.workspaces.dir(&user.id)).await?
+        }
         "save_settings" => {
             if let Some(patch) = args.get_mut("patch") {
-                settings::strip(patch);
+                settings::strip(patch, &state.workspaces.dir(&user.id))?;
             }
             workspace.call(&command, args).await?
         }
@@ -56,7 +58,7 @@ pub async fn command(
         _ => sync::call_upstream(&workspace, &command, args).await?,
     };
     if settings::COMMANDS.contains(&command.as_str()) {
-        result = settings::shown(result);
+        result = settings::shown(result, &state.workspaces.dir(&user.id));
     }
     scrub_paths(&mut result);
     Ok(Json(result))
