@@ -1,0 +1,111 @@
+/*
+ * Encounters (0.3.0): the DM's list and builder, the monster picker, the players' "Next:" teaser. Phone first
+ * (384x832): tap targets are --ph-hit (44 px iOS, 48 px Android, plan D9) on phones, the XP bar stays at the bottom,
+ * and nothing scrolls sideways. Aurora's look: the app's cards, chips, segmented controls and switches.
+ */
+.enc-head { flex-wrap: nowrap; }
+.enc-title { margin: 0; font-size: var(--fs-lg, 18px); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.enc-list > li { list-style: none; }
+.enc-row { display: flex; gap: var(--sp-2); align-items: center; padding: var(--sp-2) var(--sp-3); border: var(--border-w) solid var(--border); border-radius: var(--radius); background: var(--surface); color: inherit; text-decoration: none; min-height: 44px; }
+.enc-row:hover, .enc-row:focus-visible { border-color: var(--accent, currentColor); }
+.enc-row-text, .enc-creature-text, .enc-result-text { display: flex; flex-direction: column; min-width: 0; }
+.enc-row-text strong, .enc-creature-text strong, .enc-result-text strong { overflow-wrap: anywhere; }
+.enc-row-chips { display: flex; gap: var(--sp-1); flex-wrap: wrap; justify-content: flex-end; }
+.enc-card .card-body, .enc-card { min-width: 0; }
+
+/* Rule banners (C20): the DM's reminder while a rule holds. */
+.enc-banner { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-2) var(--sp-3); border: var(--border-w) solid var(--gold, #b38b2d); border-left-width: 4px; border-radius: var(--radius); background: var(--surface-2, var(--surface)); }
+
+.enc-setting { flex-wrap: nowrap; }
+.enc-setting > .grow { display: flex; flex-direction: column; min-width: 0; }
+.enc-setting-row { display: flex; flex-direction: column; gap: var(--sp-1); margin-bottom: var(--sp-3); }
+.enc-setting-label { font-size: var(--fs-sm); opacity: 0.8; }
+.enc-segmented { display: flex; flex-wrap: wrap; gap: 0; max-width: 100%; }
+.enc-segmented button { flex: 1 1 auto; min-height: 36px; padding: 0 var(--sp-2); }
+.enc-segmented button[aria-checked="true"] { font-weight: 600; }
+
+/* Creatures. */
+.enc-creatures { gap: var(--sp-2); }
+.enc-creature { list-style: none; padding: var(--sp-2) var(--sp-3); border: var(--border-w) solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.enc-creature.is-hidden { border-style: dashed; }
+.enc-creature.is-revealed { border-left: 4px solid var(--success, #3a8a3a); }
+.enc-creature-head { display: flex; gap: var(--sp-2); align-items: flex-start; }
+.enc-creature-controls { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin-top: var(--sp-2); }
+.enc-reveal-level { flex: 1 1 180px; }
+.enc-item { flex-wrap: nowrap; }
+.enc-item > .grow { min-width: 0; overflow-wrap: anywhere; }
+.enc-notes { width: 100%; box-sizing: border-box; resize: vertical; }
+.enc-danger { margin-top: var(--sp-2); }
+.enc-menu { display: flex; flex-direction: column; gap: var(--sp-2); }
+.enc-menu > .btn { justify-content: center; }
+
+/* The XP and difficulty bar, at the bottom of the screen while the builder scrolls (plan 4.3). */
+.enc-bar {
+  position: sticky; bottom: 0; z-index: 5; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3); margin: 0 calc(-1 * var(--sp-4)) calc(-1 * var(--sp-4));
+  padding-bottom: max(var(--sp-2), var(--safe-b, 0px));
+  background: var(--surface); border-top: var(--border-w) solid var(--border); box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.18);
+}
+.enc-bar-xp { font-size: 16px; white-space: nowrap; }
+.enc-bar-budget { font-size: var(--fs-xs, 12px); min-width: 0; }
+
+/* Forms. */
+.enc-form { display: flex; flex-direction: column; gap: var(--sp-2); }
+.enc-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--sp-2); }
+.enc-saves { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); border: var(--border-w) solid var(--border); border-radius: var(--radius); padding: var(--sp-2); margin: 0; }
+.enc-saves legend { padding: 0 var(--sp-1); }
+.enc-save { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); min-width: 0; }
+.enc-save .input { width: 100%; box-sizing: border-box; }
+.enc-trait, .enc-flag { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2); border: var(--border-w) solid var(--border); border-radius: var(--radius); }
+.enc-check { gap: var(--sp-2); }
+.enc-form .input, .enc-form select { max-width: 100%; box-sizing: border-box; }
+
+/* The picker: full screen on phones. */
+.enc-picker-body { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.enc-search { width: 100%; box-sizing: border-box; font-size: 16px; }
+.enc-chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.enc-chips-scroll { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; padding-bottom: 2px; }
+.enc-chip {
+  flex: none; min-height: 32px; padding: 0 var(--sp-3); border-radius: 999px; border: var(--border-w) solid var(--border);
+  background: var(--surface); color: inherit; font: inherit; font-size: var(--fs-sm); cursor: pointer;
+}
+.enc-chip.on { background: var(--accent, #2b5797); border-color: var(--accent, #2b5797); color: var(--accent-text, #fff); }
+.enc-results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.enc-result { display: flex; gap: var(--sp-2); align-items: center; padding: var(--sp-2); border: var(--border-w) solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.enc-result.picked { border-color: var(--accent, #2b5797); }
+.enc-stepper { display: flex; align-items: center; gap: 2px; flex: none; }
+.enc-count { min-width: 24px; text-align: center; font-weight: 600; }
+
+/* Players: the teaser on a party card and a shown encounter. */
+.enc-next { display: inline-flex; gap: var(--sp-1); align-items: center; padding: var(--sp-1) var(--sp-3); border-radius: var(--radius); background: var(--surface-2, var(--surface)); border: var(--border-w) solid var(--gold, #b38b2d); color: inherit; text-decoration: none; min-height: 36px; }
+.enc-next-label { opacity: 0.8; }
+.enc-seen-row { flex-wrap: nowrap; }
+.enc-seen-row > .grow { display: flex; flex-direction: column; min-width: 0; }
+
+/* The stat block. */
+.enc-statblock { display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.enc-sb-name { margin: 0; font-size: 18px; }
+.enc-sb-kind { margin: 0 0 var(--sp-1); font-style: italic; }
+.enc-sb-line { margin: 0; }
+.enc-sb-abilities { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2px; margin: var(--sp-2) 0; text-align: center; }
+.enc-sb-ability { display: flex; flex-direction: column; font-size: var(--fs-xs, 12px); }
+.enc-sb-ab-name { font-weight: 600; }
+.enc-sb-ab-score { font-size: 15px; }
+.enc-sb-section h4 { margin: var(--sp-2) 0 2px; border-bottom: var(--border-w) solid var(--border); }
+.enc-sb-feature { margin: 0 0 var(--sp-1); }
+
+/* Phones: full-size targets (plan D9) and a narrower layout. */
+html.phone .enc-page .btn, html.phone .enc-page .aur-switch, html.phone .enc-page .enc-segmented button,
+html.phone .enc-picker .btn, html.phone .enc-picker .enc-chip, html.phone .enc-picker .input,
+html.phone .enc-row, html.phone .enc-next, html.phone .enc-form .input, html.phone .enc-form select,
+html.phone .enc-form .enc-segmented button, html.phone .enc-menu .btn, html.phone .enc-check {
+  min-height: var(--ph-hit);
+}
+html.phone .enc-page .btn-icon, html.phone .enc-picker .btn-icon, html.phone .enc-picker .enc-chip { min-width: var(--ph-hit); }
+
+html.phone .enc-creature-controls > .aur-switch { flex: 1 1 auto; }
+html.phone .enc-creature-controls > .btn { flex: 1 1 auto; justify-content: center; }
+@media (max-width: 420px) {
+  .enc-sb-abilities { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .enc-reveal-level { flex-basis: 100%; }
+}

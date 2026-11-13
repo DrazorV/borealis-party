@@ -400,6 +400,7 @@ async function main() {
   adbShell(`am start -n ${ACTIVITY}`);
   await sleep(2000);
   await partyLive(token);
+  await encounters(token);
 
   // 7. The sheet preview at Android font sizes 1.0 and 1.15 (last: it restarts the app).
   await sheetPreview(token);
@@ -450,6 +451,39 @@ async function partyLive(token) {
     const sideways = await page(`document.documentElement.scrollWidth - innerWidth`);
     check("the sheet fits the phone's width", sideways <= 0, `${sideways} px too wide`);
     await screenshot("10-party-sheet");
+  } finally {
+    await rest(token, "DELETE", `/api/parties/${party.id}`).catch(() => null);
+    await page(`location.hash = "#/characters"`).catch(() => null);
+  }
+}
+
+/**
+ * The encounter builder in the real app (0.3.0): the account runs a party with an encounter of SRD monsters, the
+ * party's Encounters list shows it, the builder opens with its XP and difficulty bar on screen, and neither page
+ * scrolls sideways.
+ */
+async function encounters(token) {
+  await rest(token, "POST", "/api/me/roles/dm", {});
+  const party = await rest(token, "POST", "/api/parties", { name: "Smoke Encounters" });
+  try {
+    const enc = await rest(token, "POST", `/api/parties/${party.id}/encounters`, { name: "Smoke ambush" });
+    await rest(token, "POST", `/api/encounters/${enc.id}/creatures`, { elementId: "ID_SRD521_MONSTER_GOBLIN_WARRIOR", count: 4 });
+    await connectPage().catch(() => null);
+    await page(`location.hash = "#/parties/${party.id}/encounters"`);
+    const row = `(() => { const a = document.querySelector('a.enc-row[aria-label="Open Smoke ambush"]'); return a ? a.textContent : null; })()`;
+    const listed = await until("the Encounters list", () => page(row), 30000).catch(() => null);
+    check("the party's Encounters list shows the encounter", !!listed && listed.includes("4 creatures (4 hidden)"), listed ?? "no row");
+    const wideList = await page(`document.documentElement.scrollWidth - innerWidth`);
+    check("the Encounters list fits the phone's width", wideList <= 0, `${wideList} px too wide`);
+    await screenshot("11-encounters-list");
+    await page(`(() => { const a = document.querySelector('a.enc-row'); if (a) a.click(); return !!a; })()`);
+    const bar = `(() => { const b = document.querySelector('.enc-bar'); if (!b) return null; const r = b.getBoundingClientRect(); return { text: b.textContent, bottom: r.bottom, height: innerHeight }; })()`;
+    const shown = await until("the builder's XP bar", () => page(bar), 30000).catch(() => null);
+    check("the builder shows XP and difficulty (4 x 50 XP)", !!shown && shown.text.includes("200 XP"), shown ? shown.text.slice(0, 80) : "no bar");
+    check("the XP bar is on screen", !!shown && shown.bottom <= shown.height + 1, shown ? `bottom ${Math.round(shown.bottom)} of ${shown.height}` : "");
+    const wideBuilder = await page(`document.documentElement.scrollWidth - innerWidth`);
+    check("the builder fits the phone's width", wideBuilder <= 0, `${wideBuilder} px too wide`);
+    await screenshot("12-encounter-builder");
   } finally {
     await rest(token, "DELETE", `/api/parties/${party.id}`).catch(() => null);
     await page(`location.hash = "#/characters"`).catch(() => null);

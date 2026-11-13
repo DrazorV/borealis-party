@@ -12,6 +12,8 @@ import { AccountPage } from "../pages/AccountPage";
 import { AdminPage } from "../pages/AdminPage";
 import { JoinRoute, PartiesPage } from "../pages/PartiesPage";
 import { PartyCharacterView } from "../pages/PartyCharacterView";
+import { EncounterBuilder } from "../pages/EncounterBuilder";
+import { EncountersPage } from "../pages/EncountersPage";
 import { OfflinePage } from "../pages/OfflineBanner";
 import { IMPORT_PATH, OLD_IMPORT_PATH, setImportNavigate } from "../import/door";
 import { SharePage } from "../pages/SharePage";
@@ -75,6 +77,9 @@ export function App() {
         <Route path="/join/:code" element={<JoinRoute />} />
         {/* The DM's read-only view of a member character (plan 3.5, 0.2.1). */}
         <Route path="/parties/:party/view/:owner/:character" element={<AppShell>{offline ? <OfflinePage /> : <PartyCharacterView />}</AppShell>} />
+        {/* Encounters (0.3.0): the DM's builder; players see only what the server projects for them. */}
+        <Route path="/parties/:party/encounters" element={<AppShell>{offline ? <OfflinePage /> : <EncountersPage />}</AppShell>} />
+        <Route path="/parties/:party/encounters/:encounter" element={<AppShell>{offline ? <OfflinePage /> : <EncounterBuilder />}</AppShell>} />
         {/* Notes read a folder on the device, which a server doesn't offer. */}
         <Route path="/notes" element={<Navigate to="/" replace />} />
         <Route path="*" element={<UpstreamApp />} />
