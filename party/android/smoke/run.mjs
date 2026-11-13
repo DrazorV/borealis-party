@@ -81,6 +81,7 @@ async function ensureDevice() {
   // 1080x2340 at 450 dpi is 384x832 CSS pixels, the phone the party UI is tested on (M7).
   adbShell("wm size 1080x2340");
   adbShell("wm density 450");
+  await sleep(2000);
 }
 
 // ---- server ---------------------------------------------------------------------------------------------------------
@@ -137,10 +138,22 @@ async function connectPage() {
   await new Promise((ok, bad) => { ws.onopen = ok; ws.onerror = bad; });
 }
 
-function cdp(method, params = {}) {
+/** One DevTools call; it fails after `timeoutMs` (a page that went away, as after a screen-size change, never answers). */
+function cdp(method, params = {}, timeoutMs = 60000) {
   const id = nextId++;
   ws.send(JSON.stringify({ id, method, params }));
-  return new Promise((resolveIt, reject) => pending.set(id, { resolve: resolveIt, reject }));
+  return new Promise((resolveIt, reject) => {
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`${method}: no answer in ${timeoutMs / 1000} s`)); }, timeoutMs);
+    pending.set(id, { resolve: (v) => { clearTimeout(timer); resolveIt(v); }, reject: (e) => { clearTimeout(timer); reject(e); } });
+  });
+}
+
+/** After a screen-size change Android may recreate the activity and its WebView: connect to the page again. */
+async function resized(what, fits) {
+  await sleep(3000);
+  await until(what, async () => {
+    try { await connectPage(); return fits(await cdp("Runtime.evaluate", { expression: "innerWidth", returnByValue: true }, 5000).then((r) => r.result.value)); } catch { return false; }
+  }, 60000, 2000);
 }
 
 /** Evaluates `expression` in the page (awaiting a promise) and answers its JSON value. */
@@ -249,7 +262,10 @@ async function main() {
   await connectPage();
 
   // Sign in through the app's own pages: the server's address, then the account.
-  await until("the sign-in page", async () => (await smoke("fill('input[inputmode=url]', 'http://10.0.2.2:" + port + "')")), 60000);
+  // A screen-size change just before the start can recreate the activity once: reconnect and try again.
+  await until("the sign-in page", async () => {
+    try { return await smoke("fill('input[inputmode=url]', 'http://10.0.2.2:" + port + "')"); } catch { await connectPage().catch(() => null); return false; }
+  }, 60000, 1500);
   await smoke("click('Connect')");
   await until("the account form", () => smoke("fill('input[autocomplete=username]', " + JSON.stringify(USER) + ")"), 30000);
   await smoke("fill('input[type=password]', " + JSON.stringify(password) + ")");
@@ -265,6 +281,7 @@ async function main() {
   // Upstream's first-start notices, if any, are closed so they don't cover the import dialogs.
   for (const label of ["Close", "Dismiss", "OK", "Got it"]) await smoke(`click(${JSON.stringify(label)}, true)`).catch(() => false);
   await screenshot("02-signed-in");
+  await phoneLayout();
 
   const characters = async () => (await api(token, "list_characters")).map((c) => c.name);
   const packs = async () => (await api(token, "list_packs")).map((p) => p.name ?? p.id);
@@ -354,6 +371,69 @@ async function main() {
   check("a party link opens outside the app (M5)", !!opened, opened ?? "nothing happened");
   // Back to the app (without -W: bringing a running task forward never reports a launch, so -W would wait for ever).
   adbShell(`am start -n ${ACTIVITY}`);
+}
+
+/**
+ * The phone layout in the real app (plan D10): the account row (name, Sync, Account, Admin, Sign out) is not on screen,
+ * those rows are under More, and the START sub-tabs have exactly one current item, Sources included (/content/sources
+ * is inside /content). The browser rig can't see this: it has no Tauri.
+ */
+async function phoneLayout() {
+  const env = await page(`({ html: document.documentElement.className, tauri: "__TAURI_INTERNALS__" in window,
+    screen: [screen.width, screen.height], inner: [innerWidth, innerHeight], ua: navigator.userAgent })`);
+  log(`      page: ${JSON.stringify(env)}`);
+  check("the app has the phone layout (html.android.phone)", /\bandroid\b/.test(env.html) && /\bphone\b/.test(env.html), env.html);
+  const bar = await page(`(() => {
+    const bar = document.querySelector(".party-bar");
+    const shown = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
+    return { shown: shown(bar), buttons: bar ? [...bar.querySelectorAll("button, a")].filter(shown).map((b) => b.textContent.trim()) : [] };
+  })()`);
+  check("the account row is not on screen", !bar.shown, bar.shown ? `shows ${bar.buttons.join(" | ")}` : "");
+  await page(`location.hash = "#/more"`);
+  const rows = await until("More's account rows", async () => {
+    const r = await page(`[...document.querySelectorAll('[aria-label="Account"] .v5-row')].map((e) => e.textContent.trim())`);
+    return r.length ? r : null;
+  }, 15000).catch(() => []);
+  check("More has Account, Admin and Sign out", ["Account", "Admin", "Sign out"].every((n) => rows.some((r) => r.startsWith(n))), rows.join(" | "));
+  for (const [route, label] of [["/content/sources", "Sources"], ["/content", "Additional Content"], ["/content/sources", "Sources"], ["/characters", "Character Collection"]]) {
+    await page(`location.hash = ${JSON.stringify(`#${route}`)}`);
+    const current = await until(`the ${label} sub-tab`, async () => {
+      const c = await page(`[...document.querySelectorAll('nav[aria-label="Start sections"] [aria-current="page"]')].map((e) => e.textContent.trim())`);
+      return c.includes(label) ? c : null;
+    }, 15000).catch(() => []);
+    check(`on ${route} only ${label} is the current sub-tab`, current.length === 1 && current[0] === label, current.join(" + ") || "none");
+  }
+  await page(`location.hash = "#/content/sources"`);
+  await sleep(800);
+  await screenshot("02b-sources");
+
+  // The AVD's own screen (BalanceLab_Tablet: 1280x800 CSS) gets upstream's desktop shell, without the phone layer: the
+  // account row stays off there too in the Android app, and More still has the rows.
+  adbShell("wm size reset");
+  adbShell("wm density reset");
+  await resized("the wide window", (w) => w >= 900).catch(() => false);
+  await page(`location.hash = "#/characters"`);
+  await sleep(1500);
+  const wide = await page(`({ html: document.documentElement.className, inner: [innerWidth, innerHeight],
+    bar: [...document.querySelectorAll(".party-bar")].filter((b) => b.getClientRects().length).map((b) => b.textContent.trim()) })`);
+  log(`      wide: ${JSON.stringify(wide)}`);
+  await screenshot("02c-wide");
+  if (wide.inner[0] >= 900) {
+    check("in a wide window too, the account row is not on screen", wide.bar.length === 0, wide.bar.join(" / "));
+    await page(`location.hash = "#/more"`);
+    const wideRows = await until("More's account rows (wide)", async () => {
+      const r = await page(`[...document.querySelectorAll('[aria-label="Account"] .v5-row')].map((e) => e.textContent.trim())`);
+      return r.length ? r : null;
+    }, 15000).catch(() => []);
+    check("in a wide window, More has Account, Admin and Sign out", ["Account", "Admin", "Sign out"].every((n) => wideRows.some((r) => r.startsWith(n))), wideRows.join(" | "));
+  } else {
+    log("      (this AVD's own screen is phone-sized: no wide-window check)");
+  }
+  adbShell("wm size 1080x2340");
+  adbShell("wm density 450");
+  await resized("the phone-sized window", (w) => w < 900);
+  await page(`location.hash = "#/characters"`);
+  await sleep(1500);
 }
 
 let failed = false;
