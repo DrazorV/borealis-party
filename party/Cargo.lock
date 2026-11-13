@@ -3651,6 +3651,7 @@ version = "0.3.1"
 dependencies = [
  "borealis-content",
  "party-combat",
+ "party-spells",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -3675,6 +3676,15 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+]
+
+[[package]]
+name = "party-spells"
+version = "0.3.1"
+dependencies = [
+ "party-combat",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

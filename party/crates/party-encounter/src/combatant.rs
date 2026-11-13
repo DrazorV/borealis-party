@@ -146,17 +146,8 @@ pub fn build_creature(
                 key = format!("{base}_{n}");
                 n += 1;
             }
-            let mut ability = Ability {
-                key: key.clone(),
-                name: f.name.clone(),
-                kind,
-                text: f.text.clone(),
-                legendary_cost: None,
-                recharge: None,
-                uses: None,
-                group_limit: None,
-                requires_effect: None,
-            };
+            let mut ability = Ability::new(key.clone(), f.name.clone(), kind);
+            ability.text.clone_from(&f.text);
             if kind == AbilityKind::Legendary {
                 ability.legendary_cost = Some(u32::from(f.cost.unwrap_or(1)));
             }
@@ -214,6 +205,14 @@ pub fn build_creature(
             add(&mut c, f, AbilityKind::Legendary);
         }
     }
+    // 0.3.2: the numbers saves and spells need, and its spellcasting: slots and per-day pools (so casts and precasts
+    // spend them), casting blocks, and one ability per listed spell, linked and with its SRD definition.
+    c.stats = Some(crate::spellbook::stats_of(d));
+    crate::spellbook::equip(
+        &mut c,
+        &crate::spellbook::of_monster(d, None, None),
+        crate::spellbook::edition_of(d),
+    );
     c
 }
 
