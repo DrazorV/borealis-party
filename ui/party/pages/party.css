@@ -97,6 +97,8 @@ html.phone .party-bar { gap: var(--sp-1); padding: 2px var(--sp-2) 2px var(--ph-
 html.phone .party-bar > .btn { flex-shrink: 0; min-height: var(--ph-hit); padding: 0 12px; }
 html.phone .party-bar .party-bar-name { display: none; }
 html.phone .party-bar:not(:has(> .btn)), html.phone.kb-open .party-bar { display: none; }
+/* The Android app in a wide window (no phone layer): the account rows are on More, so an empty bar takes no room. */
+.party-bar.party-bar-compact:not(:has(> .btn)) { display: none; }
 html.phone .party-more { margin-bottom: 10px; }
 html.phone .party-more .v5-row:disabled { opacity: 0.6; }
 /* Party pages' own controls at the phone's tap size (D9): the admin page's tabs, and the app note's text link. */
