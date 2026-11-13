@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { Button, IconButton } from "../../src/components/Button";
 import { Alert, Card, Chip, EmptyState } from "../../src/components/Card";
@@ -17,13 +17,19 @@ import type { Ruleset } from "../api/overrides/parties";
 import { LiveCombatLink, StartCombatButton } from "../combat/dm/StartCombatButton";
 import { CreatureDialog, DetailsDialog, EffectDialog, RefreshDialog, RuleDialog, WarningsDialog } from "./EncounterDialogs";
 import { EncounterPicker } from "./EncounterPicker";
+import { useWide } from "./EncounterToolPanel";
 import { encountersPath } from "./EncountersPage";
 import { EncounterStatBlock } from "./EncounterStatBlock";
 import "./party.css";
 import "./encounters.css";
 
+/**
+ * The tool beside the creatures (EncounterToolPanel): a column on a big screen, a full-screen sheet on a phone. One at a
+ * time; dialogs open over it without closing it. Part C's assistant joins this union.
+ */
+type Tool = { kind: "picker"; owner?: Creature };
+
 type Open =
-  | { kind: "picker"; owner?: Creature }
   | { kind: "details" }
   | { kind: "creature"; creature: Creature }
   | { kind: "block"; creature: Creature }
@@ -81,10 +87,28 @@ export function EncounterBuilder() {
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
+  const wide = useWide();
   const [enc, setEnc] = useState<Encounter | null | undefined>(undefined);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState<Open | null>(null);
+  const [tool, setTool] = useState<Tool | null>(null);
   const [notes, setNotes] = useState<string | null>(null);
+  const root = useRef<HTMLDivElement>(null);
+
+  // "/" opens the creature picker (or puts the focus back in its search), unless the DM is typing somewhere.
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || dialog) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (!root.current) return;
+      e.preventDefault();
+      setTool((old) => (old?.kind === "picker" ? old : { kind: "picker" }));
+      root.current.querySelector<HTMLInputElement>(".enc-search")?.focus();
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [dialog]);
 
   const load = useCallback(async () => {
     try {
@@ -164,149 +188,215 @@ export function EncounterBuilder() {
   };
   const activeRules = enc.rules.filter((r) => r.active);
 
-  return (
-    <div className="party enc-page enc-builder">
-      <div className="party-line enc-head">
-        <Link className="btn btn-sm" to={encountersPath(partyId)} aria-label="Back to encounters">Encounters</Link>
-        <h2 className="grow enc-title">{enc.name}</h2>
-        <Chip tone={enc.status === "draft" ? "default" : enc.status === "live" ? "danger" : "accent"}>{STATUS_WORD[enc.status]}</Chip>
-      </div>
-      {error && <Alert tone="danger">{error}</Alert>}
-      {activeRules.map((r) => (
-        <div key={r.id} className="enc-banner" role="note" aria-label={r.name}>
-          <strong>{r.name}</strong>
-          {r.text && <span>{r.text}</span>}
-          <span className="muted party-note">{r.endsWhen === "creature_down" && r.creatureId ? `Ends when ${named(r.creatureId)} drops.` : "Ends when you end it."}</span>
-        </div>
-      ))}
+  const statusChip = <Chip tone={enc.status === "draft" ? "default" : enc.status === "live" ? "danger" : "accent"}>{STATUS_WORD[enc.status]}</Chip>;
+  const openPicker = () => {
+    setTool({ kind: "picker" });
+    root.current?.querySelector<HTMLInputElement>(".enc-search")?.focus();
+  };
 
-      <Card title="Players" className="enc-card">
-        <div className="party-line enc-setting">
-          <span className="grow">
-            <strong>Shown to players</strong>
-            <span className="muted party-note">{enc.visibleToPlayers ? `They see "Next: ${enc.publicName}" and the creatures you revealed.` : "Players see nothing of this encounter."}</span>
-          </span>
-          <ToggleSwitch checked={enc.visibleToPlayers} label="Shown to players" onLabel="Shown" offLabel="Hidden"
-            disabled={enc.status === "ended"} onChange={(on) => void showToPlayers(on)} />
-        </div>
-        <div className="party-line">
-          {enc.status === "live" ? <LiveCombatLink partyId={partyId} /> : <StartCombatButton encounterId={enc.id} disabled={enc.status !== "ready"} />}
-        </div>
-        <div className="party-line">
-          <span className="grow muted party-note">Players see it as "{enc.publicName}".</span>
-          <Button small icon="pen" onClick={() => setDialog({ kind: "details" })}>Names</Button>
-        </div>
-      </Card>
-
-      <Card title="Setup" className="enc-card">
-        <p className="muted party-note enc-setting-row">Rules: the party's edition ({EDITION_WORD[enc.ruleset]}).</p>
-        <div className="enc-setting-row">
-          <span className="enc-setting-label">Monster HP</span>
-          <div className="segmented enc-segmented" role="radiogroup" aria-label="Monster hit points">
-            <button type="button" role="radio" aria-checked={enc.hpMode === "average"} onClick={() => void patch({ hpMode: "average" })}>Average</button>
-            <button type="button" role="radio" aria-checked={enc.hpMode === "rolled"} onClick={() => void patch({ hpMode: "rolled" })}>Roll at the start</button>
-          </div>
-        </div>
-        <div className="enc-setting-row">
-          <span className="enc-setting-label">Status</span>
-          <div className="segmented enc-segmented" role="radiogroup" aria-label="Status">
-            {(["draft", "ready", "ended"] as const).map((s) => (
-              <button key={s} type="button" role="radio" aria-checked={enc.status === s} disabled={enc.status === "live"} onClick={() => void patch({ status: s })}>{STATUS_WORD[s]}</button>
-            ))}
-          </div>
-        </div>
-      </Card>
-
-      <Card title={`Creatures (${creatures.length})`} aria-label="Creatures" className="enc-card"
-        actions={room > 0 ? <Button small icon="plus" variant="primary" onClick={() => setDialog({ kind: "picker" })}>Add creatures</Button> : undefined}>
-        {creatures.length === 0
-          ? <EmptyState title="No creatures yet">Add monsters or companions from your content. They start hidden from players.</EmptyState>
-          : (
-            <ul className="party-list enc-creatures">
-              {groups.flatMap(({ creature, pets }) => [
-                <CreatureRow key={creature.id} c={creature} encId={enc.id} ruleset={enc.ruleset} act={act} open={setDialog} />,
-                ...pets.map((p) => <CreatureRow key={p.id} c={p} owner={creature} encId={enc.id} ruleset={enc.ruleset} act={act} open={setDialog} />),
-              ])}
-            </ul>
-          )}
-      </Card>
-
-      <Card title="Starting effects" aria-label="Starting effects" className="enc-card"
-        actions={creatures.length > 0 && enc.effects.length < LIMITS.effects ? <Button small icon="plus" onClick={() => setDialog({ kind: "effect" })}>Add</Button> : undefined}>
-        {enc.effects.length === 0
-          ? <p className="muted party-note">Buffs already up when the fight starts, like a spell cast beforehand.</p>
-          : (
-            <ul className="party-list">
-              {enc.effects.map((e) => (
-                <li key={e.id} className="party-line enc-item">
-                  <span className="grow">
-                    <strong>{e.name}</strong> <span className="muted">on {named(e.creatureId)}</span>
-                    <span className="muted party-note">{[e.sourceCreatureId ? `by ${named(e.sourceCreatureId)}` : null, e.durationTurns ? `${e.durationTurns} turns` : null,
-                      e.charges ? `${e.charges} charges` : null, e.slotLevel ? `level ${e.slotLevel} slot` : null, e.concentration ? "concentration" : null].filter(Boolean).join(" · ")}</span>
-                  </span>
-                  <Button small onClick={() => setDialog({ kind: "effect", effect: e })}>Edit</Button>
-                  <IconButton icon="trash" label={`Remove ${e.name}`} onClick={() => void act(() => removeEffect(enc.id, e.id))} />
-                </li>
-              ))}
-            </ul>
-          )}
-      </Card>
-
-      <Card title="Encounter rules" aria-label="Encounter rules" className="enc-card"
-        actions={enc.rules.length < LIMITS.rules ? <Button small icon="plus" onClick={() => setDialog({ kind: "rule" })}>Add</Button> : undefined}>
-        {enc.rules.length === 0
-          ? <p className="muted party-note">A note that holds while a creature stands, shown to you as a banner. Only you see it.</p>
-          : (
-            <ul className="party-list">
-              {enc.rules.map((r) => (
-                <li key={r.id} className="party-line enc-item">
-                  <span className="grow">
-                    <strong>{r.name}</strong>
-                    <span className="muted party-note">{r.creatureId ? `Tied to ${named(r.creatureId)}` : "Not tied to a creature"}{r.flags.length ? ` · switches ${r.flags.length}` : ""}</span>
-                  </span>
-                  <ToggleSwitch checked={r.active} label={`${r.name} active`} onChange={(on) => void act(() => updateRule(enc.id, r.id, { active: on }))} />
-                  <Button small onClick={() => setDialog({ kind: "rule", rule: r })}>Edit</Button>
-                  <IconButton icon="trash" label={`Remove ${r.name}`} onClick={() => void act(() => removeRule(enc.id, r.id))} />
-                </li>
-              ))}
-            </ul>
-          )}
-      </Card>
-
-      <Card title="Notes (only you see them)" className="enc-card">
-        <textarea className="input enc-notes" aria-label="Notes" rows={3} maxLength={LIMITS.notes} value={notes ?? enc.dmNotes}
-          onChange={(e) => setNotes(e.target.value)}
-          onBlur={() => { if (notes !== null && notes !== enc.dmNotes) void patch({ dmNotes: notes }).then(() => setNotes(null)); }} />
-      </Card>
-
-      <div className="party-line enc-danger">
-        <span className="grow" />
-        <Button small variant="danger" icon="trash" onClick={() => void destroy()}>Delete encounter</Button>
-      </div>
-
-      <div className="enc-bar" role="status" aria-label="Encounter summary">
-        <span className="grow enc-bar-text">
-          <strong>{creatures.length === 1 ? "1 creature" : `${creatures.length} creatures`}</strong>
-          <span className="muted party-note">{shownCount === 0 ? "none revealed" : `${shownCount} revealed`}</span>
-        </span>
-        {enc.warnings.length > 0 && (
-          <Button small onClick={() => setDialog({ kind: "warnings" })} aria-label={`Edition notes (${enc.warnings.length})`}>Notes ({enc.warnings.length})</Button>
+  const header = (
+    <div className="party-line enc-head">
+      {!wide && <Link className="btn btn-sm" to={encountersPath(partyId)} aria-label="Back to encounters">Encounters</Link>}
+      <h2 className="enc-title">{enc.name}</h2>
+      {statusChip}
+      {enc.visibleToPlayers && <Chip tone="gold" title="Players see this encounter">Shown</Chip>}
+      <span className="grow" />
+      {/* Actions on the whole encounter: part E's Simulate and part C's assistant go here too. */}
+      <div className="enc-head-actions">
+        {wide && enc.warnings.length > 0 && (
+          <Button small icon="info" onClick={() => setDialog({ kind: "warnings" })} aria-label={`Edition notes (${enc.warnings.length})`}>Edition notes ({enc.warnings.length})</Button>
         )}
-        {room > 0 && <Button small icon="plus" variant="primary" onClick={() => setDialog({ kind: "picker" })}>Add</Button>}
       </div>
+    </div>
+  );
 
-      {dialog?.kind === "picker" && (
-        <EncounterPicker ruleset={enc.ruleset} room={room} owner={dialog.owner?.dmLabel} onClose={() => setDialog(null)}
-          onAdd={async (picked) => {
-            let latest: Encounter | null = null;
-            for (const p of picked) {
-              latest = await addCreatures(enc.id, { elementId: p.monster.id, count: p.count, ...(dialog.owner ? { ownerId: dialog.owner.id } : {}) });
-            }
-            if (latest) setEnc(latest);
-            const n = picked.reduce((s, p) => s + p.count, 0);
-            toast.push(`${n === 1 ? "1 creature" : `${n} creatures`} added, hidden from players.`, "info");
-          }} />
+  const banners = activeRules.map((r) => (
+    <div key={r.id} className="enc-banner" role="note" aria-label={r.name}>
+      <strong>{r.name}</strong>
+      {r.text && <span>{r.text}</span>}
+      <span className="muted party-note">{r.endsWhen === "creature_down" && r.creatureId ? `Ends when ${named(r.creatureId)} drops.` : "Ends when you end it."}</span>
+    </div>
+  ));
+
+  const players = (
+    <Card title="Players and combat" className="enc-card enc-players">
+      <div className="enc-field">
+        <span className="enc-field-text">
+          <strong>Shown to players</strong>
+          <span className="muted party-note">{enc.visibleToPlayers ? `They see "Next: ${enc.publicName}" and the creatures you revealed.` : "Players see nothing of this encounter."}</span>
+        </span>
+        <ToggleSwitch checked={enc.visibleToPlayers} label="Shown to players" onLabel="Shown" offLabel="Hidden"
+          disabled={enc.status === "ended"} onChange={(on) => void showToPlayers(on)} />
+      </div>
+      <div className="enc-field">
+        <span className="enc-field-text">
+          <strong>Name players see</strong>
+          <span className="muted party-note">"{enc.publicName}"</span>
+        </span>
+        <Button small icon="pen" onClick={() => setDialog({ kind: "details" })}>Names</Button>
+      </div>
+      <div className="enc-combat">
+        {enc.status === "live" ? <LiveCombatLink partyId={partyId} /> : <StartCombatButton encounterId={enc.id} disabled={enc.status !== "ready"} />}
+        {(enc.status === "draft" || enc.status === "ended") && (
+          <span className="muted party-note">{enc.status === "draft" ? "Set the status to Ready to start its combat." : "This encounter has ended."}</span>
+        )}
+      </div>
+    </Card>
+  );
+
+  const setup = (
+    <Card title="Setup" className="enc-card">
+      <p className="muted party-note enc-setting-row">Rules: the party's edition ({EDITION_WORD[enc.ruleset]}).</p>
+      <div className="enc-setting-row">
+        <span className="enc-setting-label">Monster HP</span>
+        <div className="segmented enc-segmented" role="radiogroup" aria-label="Monster hit points">
+          <button type="button" role="radio" aria-checked={enc.hpMode === "average"} onClick={() => void patch({ hpMode: "average" })}>Average</button>
+          <button type="button" role="radio" aria-checked={enc.hpMode === "rolled"} onClick={() => void patch({ hpMode: "rolled" })}>Roll at the start</button>
+        </div>
+      </div>
+      <div className="enc-setting-row">
+        <span className="enc-setting-label">Status</span>
+        <div className="segmented enc-segmented" role="radiogroup" aria-label="Status">
+          {(["draft", "ready", "ended"] as const).map((s) => (
+            <button key={s} type="button" role="radio" aria-checked={enc.status === s} disabled={enc.status === "live"} onClick={() => void patch({ status: s })}>{STATUS_WORD[s]}</button>
+          ))}
+        </div>
+      </div>
+    </Card>
+  );
+
+  const creatureCard = (
+    <Card title={`Creatures (${creatures.length})`} aria-label="Creatures" className="enc-card enc-creatures-card"
+      actions={<>
+        {wide && creatures.length > 0 && <span className="muted party-note">{shownCount === 0 ? "none revealed" : `${shownCount} revealed`}</span>}
+        {room > 0 && <Button small icon="plus" variant="primary" onClick={openPicker} title={wide ? "Add creatures (/)" : undefined}>Add creatures</Button>}
+      </>}>
+      {creatures.length === 0
+        ? <EmptyState title="No creatures yet">Add monsters or companions from your content. They start hidden from players.{wide ? " Press / to search." : ""}</EmptyState>
+        : (
+          <ul className="party-list enc-creatures">
+            {groups.flatMap(({ creature, pets }) => [
+              <CreatureRow key={creature.id} c={creature} encId={enc.id} ruleset={enc.ruleset} act={act} open={setDialog} />,
+              ...pets.map((p) => <CreatureRow key={p.id} c={p} owner={creature} encId={enc.id} ruleset={enc.ruleset} act={act} open={setDialog} />),
+            ])}
+          </ul>
+        )}
+    </Card>
+  );
+
+  const effects = (
+    <Card title="Starting effects" aria-label="Starting effects" className="enc-card"
+      actions={creatures.length > 0 && enc.effects.length < LIMITS.effects ? <Button small icon="plus" onClick={() => setDialog({ kind: "effect" })}>Add</Button> : undefined}>
+      {enc.effects.length === 0
+        ? <p className="muted party-note">Buffs already up when the fight starts, like a spell cast beforehand.</p>
+        : (
+          <ul className="party-list">
+            {enc.effects.map((e) => (
+              <li key={e.id} className="party-line enc-item">
+                <span className="grow">
+                  <strong>{e.name}</strong> <span className="muted">on {named(e.creatureId)}</span>
+                  <span className="muted party-note">{[e.sourceCreatureId ? `by ${named(e.sourceCreatureId)}` : null, e.durationTurns ? `${e.durationTurns} turns` : null,
+                    e.charges ? `${e.charges} charges` : null, e.slotLevel ? `level ${e.slotLevel} slot` : null, e.concentration ? "concentration" : null].filter(Boolean).join(" · ")}</span>
+                </span>
+                <Button small onClick={() => setDialog({ kind: "effect", effect: e })}>Edit</Button>
+                <IconButton icon="trash" label={`Remove ${e.name}`} onClick={() => void act(() => removeEffect(enc.id, e.id))} />
+              </li>
+            ))}
+          </ul>
+        )}
+    </Card>
+  );
+
+  const rules = (
+    <Card title="Encounter rules" aria-label="Encounter rules" className="enc-card"
+      actions={enc.rules.length < LIMITS.rules ? <Button small icon="plus" onClick={() => setDialog({ kind: "rule" })}>Add</Button> : undefined}>
+      {enc.rules.length === 0
+        ? <p className="muted party-note">A note that holds while a creature stands, shown to you as a banner. Only you see it.</p>
+        : (
+          <ul className="party-list">
+            {enc.rules.map((r) => (
+              <li key={r.id} className="party-line enc-item">
+                <span className="grow">
+                  <strong>{r.name}</strong>
+                  <span className="muted party-note">{r.creatureId ? `Tied to ${named(r.creatureId)}` : "Not tied to a creature"}{r.flags.length ? ` · switches ${r.flags.length}` : ""}</span>
+                </span>
+                <ToggleSwitch checked={r.active} label={`${r.name} active`} onChange={(on) => void act(() => updateRule(enc.id, r.id, { active: on }))} />
+                <Button small onClick={() => setDialog({ kind: "rule", rule: r })}>Edit</Button>
+                <IconButton icon="trash" label={`Remove ${r.name}`} onClick={() => void act(() => removeRule(enc.id, r.id))} />
+              </li>
+            ))}
+          </ul>
+        )}
+    </Card>
+  );
+
+  const notesCard = (
+    <Card title="Notes (only you see them)" className="enc-card enc-notes-card">
+      <textarea className="input enc-notes" aria-label="Notes" rows={wide ? 6 : 3} maxLength={LIMITS.notes} value={notes ?? enc.dmNotes}
+        onChange={(e) => setNotes(e.target.value)}
+        onBlur={() => { if (notes !== null && notes !== enc.dmNotes) void patch({ dmNotes: notes }).then(() => setNotes(null)); }} />
+    </Card>
+  );
+
+  const danger = (
+    <div className="party-line enc-danger">
+      <span className="grow" />
+      <Button small variant="danger" icon="trash" onClick={() => void destroy()}>Delete encounter</Button>
+    </div>
+  );
+
+  const picker = tool?.kind === "picker" && (
+    <EncounterPicker key={tool.owner?.id ?? "-"} ruleset={enc.ruleset} room={room} owner={tool.owner?.dmLabel} onClose={() => setTool(null)}
+      onAdd={async (picked) => {
+        let latest: Encounter | null = null;
+        for (const p of picked) {
+          latest = await addCreatures(enc.id, { elementId: p.monster.id, count: p.count, ...(tool.owner ? { ownerId: tool.owner.id } : {}) });
+        }
+        if (latest) setEnc(latest);
+        const n = picked.reduce((s, p) => s + p.count, 0);
+        // A big screen's docked picker says so itself ("Added …"), and stays open for the next.
+        if (!wide) toast.push(`${n === 1 ? "1 creature" : `${n} creatures`} added, hidden from players.`, "info");
+      }} />
+  );
+
+  return (
+    <div ref={root} className={`party enc-page enc-builder ${wide ? "is-wide" : ""} ${tool ? "has-tool" : ""}`}>
+      {header}
+      {error && <Alert tone="danger">{error}</Alert>}
+      {banners}
+      {wide ? (
+        <div className="enc-cols">
+          <div className="enc-col-main">
+            {creatureCard}
+            <div className="enc-panels">{effects}{rules}{notesCard}</div>
+          </div>
+          {picker}
+          <div className="enc-col-side">{players}{setup}{danger}</div>
+        </div>
+      ) : (
+        <>
+          {/* The creatures first: they are the work; the bar below keeps Add in reach. */}
+          {creatureCard}
+          {players}
+          {setup}
+          {effects}
+          {rules}
+          {notesCard}
+          {danger}
+          <div className="enc-bar" role="status" aria-label="Encounter summary">
+            <span className="grow enc-bar-text">
+              <strong>{creatures.length === 1 ? "1 creature" : `${creatures.length} creatures`}</strong>
+              <span className="muted party-note">{shownCount === 0 ? "none revealed" : `${shownCount} revealed`}</span>
+            </span>
+            {enc.warnings.length > 0 && (
+              <Button small onClick={() => setDialog({ kind: "warnings" })} aria-label={`Edition notes (${enc.warnings.length})`}>Notes ({enc.warnings.length})</Button>
+            )}
+            {room > 0 && <Button small icon="plus" variant="primary" onClick={openPicker}>Add</Button>}
+          </div>
+          {picker}
+        </>
       )}
+
       {dialog?.kind === "details" && (
         <DetailsDialog enc={enc} onClose={() => setDialog(null)} onSave={async (f) => setEnc(await updateEncounter(enc.id, f))} />
       )}
@@ -345,7 +435,7 @@ export function EncounterBuilder() {
           <Modal title={c.dmLabel} onClose={close} footer={<Button onClick={close}>Close</Button>}>
             <div className="enc-menu">
               <Button onClick={() => setDialog({ kind: "block", creature: c })}>Stat block</Button>
-              {!c.ownerId && room > 0 && <Button icon="plus" onClick={() => setDialog({ kind: "picker", owner: c })}>Add a pet or summon</Button>}
+              {!c.ownerId && room > 0 && <Button icon="plus" onClick={() => { close(); setTool({ kind: "picker", owner: c }); }}>Add a pet or summon</Button>}
               {c.ownerId && <Button onClick={() => { close(); void act(() => updateCreature(enc.id, c.id, { ownerId: null }), `${c.dmLabel} acts on its own now.`); }}>Not controlled any more</Button>}
               <Button onClick={() => { close(); void act(() => updateCreature(enc.id, c.id, { sort: Math.max(0, index - 1) })); }} disabled={index === 0}>Move up</Button>
               <Button onClick={() => { close(); void refresh(c); }}>Refresh stat block</Button>

@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Button } from "../../../src/components/Button";
 import { Dialog } from "../../../src/components/controls/Dialog";
 import { CONDITIONS, conditionWord, type Condition } from "./common";
-import type { Combatant, CompanionOffer, Duration, EffectSpec, Modifier } from "./types";
+import type { Combatant, Duration, EffectSpec, Modifier } from "./types";
 
 /** A one-field app dialog (rename, set HP, concentration): never `window.prompt`. */
 export function TextDialog({ title, label, initial = "", numeric, allowEmpty, onDone, confirm = "OK", note }: {
@@ -225,91 +225,3 @@ export function AddCreatureDialog({ creatures, onDone }: {
   );
 }
 
-export interface SummonChoice {
-  /** A copy of a creature already in the fight, by id, or null for the typed quick block. */
-  copyOf: string | null;
-  /** A companion from the owner's character sheet (an offer's key): the server builds it. */
-  companion?: string;
-  name: string;
-  hp: number;
-  /** Null when the copied creature's block prints no AC (a thin companion). */
-  ac: number | null;
-  initBonus: number;
-  walk: number;
-  /** "" = right after its owner; a number = its own (typed) initiative; "roll" = rolled in the app. */
-  initiative: "" | "roll" | number;
-  visible: boolean;
-}
-
-/**
- * Summon (controlled creatures, plan 4.4): a summon, pet, familiar or companion for `owner`. It is a copy of a stat
- * block already in the fight, or a quick typed block (name, HP, AC, initiative bonus, speed). It acts right after its
- * owner unless given its own initiative (typed or rolled in the app). A PC's summon is its player's and always
- * visible; a creature's is the DM's and starts as hidden as its owner unless revealed here.
- */
-export function SummonDialog({ owner, creatures, offers = [], onDone }: {
-  owner: Combatant;
-  creatures: Combatant[];
-  /** The owner's sheet companions not yet in the fight. */
-  offers?: CompanionOffer[];
-  onDone: (r: SummonChoice | null) => void;
-}) {
-  const [copyOf, setCopyOf] = useState<string>("");
-  const [name, setName] = useState("");
-  const [hp, setHp] = useState("");
-  const [ac, setAc] = useState("");
-  const [init, setInit] = useState("0");
-  const [walk, setWalk] = useState("30");
-  const [mode, setMode] = useState<"after" | "typed" | "roll">("after");
-  const [typedInit, setTypedInit] = useState("");
-  const [visible, setVisible] = useState(owner.visible);
-  const player = owner.kind === "character" || owner.controller?.kind === "player";
-  const offer = offers.find((o) => `companion:${o.key}` === copyOf);
-  const from = offer ? undefined : creatures.find((c) => c.id === copyOf);
-  const num = (t: string) => (t.trim() !== "" && Number.isInteger(Number(t)) ? Number(t) : null);
-  const ok = from || offer ? (mode !== "typed" || num(typedInit) != null) : name.trim() !== "" && (num(hp) ?? 0) > 0 && num(ac) != null && (mode !== "typed" || num(typedInit) != null);
-  const done = () => onDone({
-    copyOf: from?.id ?? null,
-    ...(offer ? { companion: offer.key } : {}),
-    name: name.trim() || (offer ? offer.name : from ? from.label.replace(/\s*\d+$/, "") : ""),
-    hp: offer ? offer.hp : from ? from.hp.max : num(hp)!, ac: offer ? offer.ac : from ? from.ac : num(ac)!,
-    initBonus: offer ? offer.initiative : from ? (from.initiative_bonus ?? 0) : (num(init) ?? 0),
-    walk: from ? (from.speed?.walk ?? 30) : (num(walk) ?? 30),
-    initiative: mode === "after" ? "" : mode === "roll" ? "roll" : num(typedInit)!,
-    visible: player ? true : visible,
-  });
-  return (
-    <Dialog title={`Summon for ${owner.label}`} onClose={() => onDone(null)}
-      footer={<><Button onClick={() => onDone(null)}>Cancel</Button><Button variant="primary" disabled={!ok} onClick={done}>Summon</Button></>}>
-      <div className="cb-form">
-        <label className="cb-field"><span>Stat block</span>
-          <select className="input" value={copyOf} onChange={(e) => setCopyOf(e.target.value)}>
-            <option value="">A quick block (type it below)</option>
-            {offers.map((o) => <option key={o.key} value={`companion:${o.key}`}>From {owner.label}'s sheet: {o.name} ({o.hp} HP, AC {o.ac})</option>)}
-            {creatures.map((c) => <option key={c.id} value={c.id}>A copy of {c.label} ({c.hp.max} HP, AC {c.ac ?? "—"})</option>)}
-          </select>
-        </label>
-        <label className="cb-field"><span>Name</span><input className="input" value={name} placeholder={from ? from.label : "Wolf"} onChange={(e) => setName(e.target.value)} /></label>
-        {!from && !offer && (
-          <div className="cb-frow">
-            <label className="cb-field cb-narrow"><span>HP</span><input className="input" inputMode="numeric" value={hp} onChange={(e) => setHp(e.target.value)} /></label>
-            <label className="cb-field cb-narrow"><span>AC</span><input className="input" inputMode="numeric" value={ac} onChange={(e) => setAc(e.target.value)} /></label>
-            <label className="cb-field cb-narrow"><span>Init ±</span><input className="input" inputMode="numeric" value={init} onChange={(e) => setInit(e.target.value)} /></label>
-            <label className="cb-field cb-narrow"><span>Speed</span><input className="input" inputMode="numeric" value={walk} onChange={(e) => setWalk(e.target.value)} /></label>
-          </div>
-        )}
-        <label className="cb-field"><span>Initiative</span>
-          <select className="input" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
-            <option value="after">Right after {owner.label}</option>
-            <option value="typed">Its own: a table roll</option>
-            <option value="roll">Its own: roll in the app</option>
-          </select>
-        </label>
-        {mode === "typed" && <label className="cb-field cb-narrow"><span>Initiative total</span><input className="input" inputMode="numeric" value={typedInit} onChange={(e) => setTypedInit(e.target.value)} /></label>}
-        {player
-          ? <p className="cb-small muted">A player character's summon is its player's, and players see it.</p>
-          : <label className="cb-check"><input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />Players see it (revealing {owner.label} later doesn't reveal it)</label>}
-      </div>
-    </Dialog>
-  );
-}

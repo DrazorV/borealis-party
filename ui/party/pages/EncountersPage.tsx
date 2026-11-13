@@ -1,5 +1,5 @@
 import { type FormEvent, useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, Navigate, useNavigate, useParams } from "react-router";
 import { Button } from "../../src/components/Button";
 import { Alert, Card, Chip, EmptyState } from "../../src/components/Card";
 import { Modal } from "../../src/components/Modal";
@@ -12,8 +12,21 @@ import { EncounterStatBlock } from "./EncounterStatBlock";
 import "./party.css";
 import "./encounters.css";
 
-export const encountersPath = (partyId: string) => `/parties/${encodeURIComponent(partyId)}/encounters`;
+/**
+ * The DM's encounters live under the Encounters main tab (0.3.1, entry/encountersTab.ts): `/encounters/<party>` and
+ * `/encounters/<party>/<encounter>`. The 0.3.0 addresses under `/parties/<party>/encounters` lead there for a DM, and
+ * stay the players' page of what their DM showed them.
+ */
+export const encountersPath = (partyId: string) => `/encounters/${encodeURIComponent(partyId)}`;
 export const encounterPath = (partyId: string, id: string) => `${encountersPath(partyId)}/${encodeURIComponent(id)}`;
+/** The players' page of a party's shown encounters (and the 0.3.0 address of the DM's list). */
+export const shownEncountersPath = (partyId: string) => `/parties/${encodeURIComponent(partyId)}/encounters`;
+
+/** 0.3.0's address of one encounter in the builder: only a DM ever had it, and it now lives under the Encounters tab. */
+export function OldEncounterRoute() {
+  const { party = "", encounter = "" } = useParams();
+  return <Navigate to={encounterPath(party, encounter)} replace />;
+}
 
 /** A new encounter: its name for the DM, and the name players will see. */
 function NewEncounterDialog({ partyId, onClose }: { partyId: string; onClose: () => void }) {
@@ -59,15 +72,72 @@ function NewEncounterDialog({ partyId, onClose }: { partyId: string; onClose: ()
 }
 
 /**
- * A party's encounters (DM, plan 4.3): drafts and ready ones, how many creatures each has and how many are hidden,
- * and a button for a new one. No XP or difficulty (the user's D16). A player who opens this sees only the encounters shown to them (the server decides).
+ * A party's encounters for its DM (plan 4.3): drafts and ready ones, how many creatures each has and how many are
+ * hidden, and a button for a new one. No XP or difficulty (the user's D16). `current`: the one open beside it (the
+ * Encounters tab's left column on a big screen).
+ */
+export function DmEncounterList({ partyId, list, current, onNew }: {
+  partyId: string;
+  list: Extract<EncounterList, { role: "dm" }>;
+  current?: string;
+  onNew: () => void;
+}) {
+  return (
+    <Card title="Encounters" className="enc-list-card" actions={list.encounters.length < 50
+      ? <Button small icon="plus" variant="primary" onClick={onNew}>New encounter</Button> : undefined}>
+      {list.encounters.length === 0 && <EmptyState title="No encounters yet">Build one from your monsters, then show it to your players when it's ready.</EmptyState>}
+      <ul className="party-list enc-list">
+        {list.encounters.map((e) => (
+          <li key={e.id}>
+            <Link className={`enc-row ${e.id === current ? "is-current" : ""}`} to={encounterPath(partyId, e.id)} aria-label={`Open ${e.name}`}
+              aria-current={e.id === current ? "page" : undefined}>
+              <span className="grow enc-row-text">
+                <strong>{e.name}</strong>
+                <span className="muted party-note">
+                  {e.creatureCount === 1 ? "1 creature" : `${e.creatureCount} creatures`}
+                  {e.hiddenCount > 0 ? ` (${e.hiddenCount} hidden)` : ""}
+                  {e.publicName !== e.name ? ` · players see "${e.publicName}"` : ""}
+                </span>
+              </span>
+              <span className="enc-row-chips">
+                <Chip tone={e.status === "draft" ? "default" : e.status === "live" ? "danger" : "accent"}>{STATUS_WORD[e.status]}</Chip>
+                {e.visibleToPlayers && <Chip tone="gold" title="Players see this encounter">Shown</Chip>}
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+/** A party's encounters with their live updates, for the Encounters tab and the players' page. */
+export function usePartyEncounters(partyId: string) {
+  const [list, setList] = useState<EncounterList | null | undefined>(undefined);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    try {
+      setList(await listEncounters(partyId));
+      setError("");
+    } catch (e) { setError(errorMessage(e)); }
+  }, [partyId]);
+  useEffect(() => { setList(undefined); void load(); }, [load]);
+  useEffect(() => watchEncounters(partyId, () => { void load(); }), [partyId, load]);
+  return { list, error, reload: load };
+}
+
+/** "New encounter", for the Encounters tab. */
+export { NewEncounterDialog };
+
+/**
+ * A party's shown encounters, as a player sees them (the server decides which). Its DM is sent on to the Encounters tab,
+ * where 0.3.0's list now lives.
  */
 export function EncountersPage() {
   const { party: partyId = "" } = useParams();
   const [party, setParty] = useState<Party | null | undefined>(undefined);
   const [list, setList] = useState<EncounterList | null | undefined>(undefined);
   const [error, setError] = useState("");
-  const [creating, setCreating] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -83,6 +153,7 @@ export function EncountersPage() {
   if (party === null || list === null) {
     return <div className="party enc-page"><Alert tone="info">This party isn't there any more, or it isn't yours.</Alert><Link className="btn" to="/parties">Parties</Link></div>;
   }
+  if (list?.role === "dm") return <Navigate to={encountersPath(partyId)} replace />;
   return (
     <div className="party enc-page">
       <div className="party-line enc-head">
@@ -91,32 +162,6 @@ export function EncountersPage() {
       </div>
       {error && <Alert tone="danger">{error}</Alert>}
       {list === undefined && !error && <p className="muted">Loading encounters…</p>}
-      {list?.role === "dm" && (
-        <Card title="Encounters" actions={list.encounters.length < 50
-          ? <Button small icon="plus" variant="primary" onClick={() => setCreating(true)}>New encounter</Button> : undefined}>
-          {list.encounters.length === 0 && <EmptyState title="No encounters yet">Build one from your monsters, then show it to your players when it's ready.</EmptyState>}
-          <ul className="party-list enc-list">
-            {list.encounters.map((e) => (
-              <li key={e.id}>
-                <Link className="enc-row" to={encounterPath(partyId, e.id)} aria-label={`Open ${e.name}`}>
-                  <span className="grow enc-row-text">
-                    <strong>{e.name}</strong>
-                    <span className="muted party-note">
-                      {e.creatureCount === 1 ? "1 creature" : `${e.creatureCount} creatures`}
-                      {e.hiddenCount > 0 ? ` (${e.hiddenCount} hidden)` : ""}
-                      {e.publicName !== e.name ? ` · players see "${e.publicName}"` : ""}
-                    </span>
-                  </span>
-                  <span className="enc-row-chips">
-                    <Chip tone={e.status === "draft" ? "default" : e.status === "live" ? "danger" : "accent"}>{STATUS_WORD[e.status]}</Chip>
-                    {e.visibleToPlayers && <Chip tone="gold" title="Players see this encounter">Shown</Chip>}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
       {list?.role === "player" && (
         <Card title="Encounters">
           {list.encounters.length === 0
@@ -124,7 +169,6 @@ export function EncountersPage() {
             : <ul className="party-list">{list.encounters.map((e) => <li key={e.id}><SeenEncounterCard id={e.id} /></li>)}</ul>}
         </Card>
       )}
-      {creating && <NewEncounterDialog partyId={partyId} onClose={() => setCreating(false)} />}
     </div>
   );
 }
@@ -188,7 +232,7 @@ export function EncounterTeaser({ partyId, dm }: { partyId: string; dm: boolean 
   }
   if (!next) return null;
   return (
-    <Link className="enc-next" to={encountersPath(partyId)} aria-label={`Next: ${next.publicName}`}>
+    <Link className="enc-next" to={shownEncountersPath(partyId)} aria-label={`Next: ${next.publicName}`}>
       <span className="enc-next-label">Next:</span> <strong>{next.publicName}</strong>
       {next.status === "live" && <Chip tone="danger">Live</Chip>}
     </Link>

@@ -247,24 +247,13 @@ describe("CombatTracker", () => {
     server.notify("c1");
     await within(banner).findByText("✕ ENDED");
   });
-  it("summons a quick block under its owner, nested in the roster (controlled creatures)", async () => {
+  it("has no Summon button: Add creature does that job (summon spells come in 0.3.2)", async () => {
     readyAndStart();
     page();
     await loaded();
     fireEvent.click(within(row("mage")).getByRole("button", { name: /^Mage/ }));
-    fireEvent.click(await within(card()).findByRole("button", { name: "Summon…" }));
-    const dialog = await screen.findByRole("dialog", { name: "Summon for Mage" });
-    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Imp" } });
-    fireEvent.change(within(dialog).getByLabelText("HP"), { target: { value: "10" } });
-    fireEvent.change(within(dialog).getByLabelText("AC"), { target: { value: "13" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Summon" }));
-    await waitFor(() => expect(state().combatants.some((c) => c.label === "Imp" && c.owner_id === "mage")).toBe(true));
-    const imp = state().combatants.find((c) => c.label === "Imp")!;
-    await waitFor(() => expect(row(imp.id)).toBeTruthy());
-    const ids = [...document.querySelectorAll("[data-combatant]")].map((e) => e.getAttribute("data-combatant"));
-    expect(ids[ids.indexOf("mage") + 1]).toBe(imp.id);
-    expect(row(imp.id).className).toMatch(/cb-depth-1/);
-    expect(imp.visible).toBe(false);
+    await within(card()).findByRole("button", { name: "Rename" });
+    expect(within(card()).queryByRole("button", { name: /Summon/ })).toBeNull();
   });
 
   it("asks what happens to a pet when its owner drops: keep, own initiative or dismiss", async () => {
@@ -280,34 +269,5 @@ describe("CombatTracker", () => {
     expect(screen.queryByRole("dialog", { name: "Mage is down" })).toBeNull();
   });
 
-  it("summons a PC's sheet companion, which the server builds (offers)", async () => {
-    readyAndStart();
-    page();
-    await loaded();
-    fireEvent.click(within(row("pc-aria")).getByRole("button", { name: /^Aria/ }));
-    fireEvent.click(await within(card()).findByRole("button", { name: "Summon…" }));
-    const dialog = await screen.findByRole("dialog", { name: "Summon for Aria" });
-    fireEvent.change(within(dialog).getByLabelText("Stat block"), { target: { value: "companion:wolf" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Summon" }));
-    await waitFor(() => expect(state().combatants.some((c) => c.label === "Wolf" && c.owner_id === "pc-aria")).toBe(true));
-    const wolf = state().combatants.find((c) => c.label === "Wolf")!;
-    expect(wolf).toMatchObject({ controller: { kind: "player", pc: "pc-aria" }, visible: true, hp: { max: 11 } });
-    expect(server.requests.some((r) => r === "POST /api/combats/c1/summon")).toBe(true);
-  });
-
-  it("summons a copy by id; the server mints its id and copies the stat block", async () => {
-    readyAndStart();
-    page();
-    await loaded();
-    fireEvent.click(within(row("dragon")).getByRole("button", { name: /^Adult Red Dragon/ }));
-    fireEvent.click(await within(card()).findByRole("button", { name: "Summon…" }));
-    const dialog = await screen.findByRole("dialog", { name: "Summon for Adult Red Dragon" });
-    fireEvent.change(within(dialog).getByLabelText("Stat block"), { target: { value: "cultist1" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Summon" }));
-    await waitFor(() => expect(state().combatants.some((c) => c.owner_id === "dragon")).toBe(true));
-    const made = state().combatants.find((c) => c.owner_id === "dragon")!;
-    expect(made.id).toMatch(/^summon-/);
-    expect(combat().view.statblocks[made.id]?.name).toBe("Cultist");
-  });
 });
 
