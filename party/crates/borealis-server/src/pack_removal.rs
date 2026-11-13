@@ -136,6 +136,16 @@ async fn remove_packs(
             Ok((removed, skipped, packs))
         })
         .await?;
+    // Content reloaded: the account's party cards may show other classes and numbers now.
+    if removed > 0 {
+        crate::parties::after_command(
+            &state,
+            &user.id,
+            &workspace,
+            crate::parties::CardTarget::All,
+        )
+        .await;
+    }
     Ok(Json(
         json!({ "removed": removed, "skipped": skipped, "packs": packs }),
     ))

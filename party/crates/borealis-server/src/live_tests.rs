@@ -630,7 +630,10 @@ fn dm_events_last(state: &AppState, dm: &str) -> u64 {
 /// Every name in `PLAY_COMMANDS` is a command the server offers: an upstream rename fails here.
 async fn play_commands_are_offered(router: &Router) {
     let player = sign_up(router, "live-player").await;
-    for name in crate::parties::PLAY_COMMANDS {
+    let names = crate::parties::PLAY_COMMANDS
+        .iter()
+        .chain(crate::parties::CONTENT_COMMANDS.iter());
+    for name in names {
         let (_, out) = player
             .rpc(
                 name,
@@ -700,4 +703,95 @@ async fn the_party_is_live_on_postgres() {
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(&Location::Postgres(url)).await.unwrap();
     live_flow(state_with(dir.path().join("data"), db, Setup::default())).await;
+}
+
+/// A card made up to look stale: the refresh that follows must replace it.
+fn stale(state: &AppState, owner: &str, character: &str) {
+    let card = crate::hub::Card {
+        name: Some("Stale".into()),
+        stats: Some(crate::hub::Stats {
+            hp: 999,
+            hp_max: 999,
+            ..crate::hub::Stats::default()
+        }),
+        ..crate::hub::Card::default()
+    };
+    state.hub.cards.put(owner, character, card);
+}
+
+/// Content changes (a pack imported or removed, over rpc or the bulk removal route) read the owner's member cards
+/// again and tell the DM; a refresh that finds the character gone from its party writes no card back.
+async fn content_and_late_refreshes(state: AppState) {
+    let router = router_of(state.clone(), 64 * 1024 * 1024);
+    let dm = sign_up(&router, "content-dm").await;
+    let player = sign_up(&router, "content-player").await;
+    let party = new_party(&dm, "Content Party").await;
+    let hero = fighter(&player, "Hero").await;
+    join(&dm, &party, &player, &hero).await;
+    let (status, out) = player
+        .rpc("load_character", json!({ "characterId": hero }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let mut dm_events = open_events(&router, &dm.token, None).await;
+    let (card, _) = member(&dm, &party, &hero).await;
+    let max = card["stats"]["hpMax"].as_u64().unwrap();
+    dm_events.parties(QUIET).await;
+
+    // A pack imported over rpc.
+    stale(&state, &player.id, &hero);
+    let (status, imported) = player.rpc("import_pack", super::spell_pack()).await;
+    assert_eq!(status, StatusCode::OK, "{imported}");
+    let pack = imported["pack"]["id"].as_str().unwrap().to_string();
+    let e = dm_events
+        .party(ARRIVES)
+        .await
+        .expect("the DM hears of the reload");
+    assert_eq!(e.payload["kind"], "card");
+    let (card, _) = member(&dm, &party, &hero).await;
+    assert_eq!(card["stats"]["hpMax"].as_u64().unwrap(), max, "{card}");
+    assert_eq!(card["name"], "Hero");
+
+    // The bulk removal route.
+    stale(&state, &player.id, &hero);
+    let (status, out) = player
+        .post("/api/content/remove-packs", json!({ "packIds": [pack] }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["removed"], 1, "{out}");
+    assert!(
+        dm_events.party(ARRIVES).await.is_some(),
+        "the DM hears of the removal"
+    );
+    let (card, _) = member(&dm, &party, &hero).await;
+    assert_eq!(card["stats"]["hpMax"].as_u64().unwrap(), max, "{card}");
+    dm_events.parties(QUIET).await;
+
+    // A refresh under way when the character leaves: the membership is gone and its card forgotten (as `left` does)
+    // before the refresh reads it. The snapshot still comes back; no card is written and the old party hears nothing.
+    sqlx::query("DELETE FROM party_members WHERE owner_id = $1 AND character_id = $2")
+        .bind(&player.id)
+        .bind(&hero)
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+    state.hub.cards.forget(&player.id, &hero);
+    let workspace = state.workspaces.loaded_now(&player.id).unwrap();
+    let snapshot =
+        crate::parties::refresh_card(&state, &player.id, &hero, &workspace, &party).await;
+    assert_eq!(snapshot.map(|s| s.name), Some("Hero".to_string()));
+    assert!(
+        state.hub.cards.get(&player.id, &hero).is_none(),
+        "the card came back"
+    );
+    assert!(
+        dm_events.parties(QUIET).await.is_empty(),
+        "the old party heard of it"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn content_changes_refresh_cards_and_a_late_refresh_writes_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(&Location::Memory).await.unwrap();
+    content_and_late_refreshes(state_with(dir.path().join("data"), db, Setup::default())).await;
 }

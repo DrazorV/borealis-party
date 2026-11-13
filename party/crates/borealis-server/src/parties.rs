@@ -810,14 +810,7 @@ pub async fn remove(
     tracing::info!("party: party_deleted {party} by {}", user.id);
     // Its players hear only that their own list changed; nothing of this party reaches them again.
     state.hub.forget_party(&party);
-    let hub = std::sync::Arc::clone(&state.hub);
-    let gone = members.clone();
-    let _ = tokio::task::spawn_blocking(move || {
-        for (owner, character) in &gone {
-            hub.cards.forget(owner, character);
-        }
-    })
-    .await;
+    forget_cards(&state, &members).await;
     let mut owners: Vec<String> = members.into_iter().map(|(o, _)| o).collect();
     owners.push(user.id.clone());
     owners.sort();
@@ -1694,7 +1687,11 @@ fn snapshot_of(
 
 /// Read a member character's card again from its owner's workspace, keep it, and tell the party when it changed.
 /// Never fails: a card that can't be read stays as it was.
-async fn refresh_card(
+///
+/// Membership is read again under the owner's refresh lock, which [`forget_cards`] takes too: a character that left
+/// its party while this was under way gets no card back and its old party hears nothing. The snapshot is still
+/// answered (the DM's view checked membership itself).
+pub(crate) async fn refresh_card(
     state: &AppState,
     owner: &str,
     character: &str,
@@ -1702,6 +1699,7 @@ async fn refresh_card(
     party: &str,
 ) -> Option<borealis_lib::dto::CharacterSnapshot> {
     let _one = state.hub.cards.refreshing(owner).await;
+    let member = matches!(party_of(state, owner, character).await, Ok(Some(p)) if p == party);
     let hub = std::sync::Arc::clone(&state.hub);
     let (owner_id, id) = (owner.to_string(), character.to_string());
     let read = workspace
@@ -1709,9 +1707,12 @@ async fn refresh_card(
             let Some(snapshot) = snapshot_of(app, &id)? else {
                 return Ok(None);
             };
-            let changed = hub
-                .cards
-                .put(&owner_id, &id, Card::from_snapshot(&snapshot));
+            let changed = if member {
+                hub.cards
+                    .put(&owner_id, &id, Card::from_snapshot(&snapshot))
+            } else {
+                crate::hub::Changed::default()
+            };
             Ok(Some((snapshot, changed)))
         })
         .await;
@@ -1730,6 +1731,17 @@ async fn refresh_card(
     }
 }
 
+/// Cards of characters that left their party (their rows are gone already). Each owner's refresh lock is taken first,
+/// so a refresh under way finishes before its card is forgotten, and one after it sees the membership gone.
+async fn forget_cards(state: &AppState, gone: &[(String, String)]) {
+    for (owner, character) in gone {
+        let _one = state.hub.cards.refreshing(owner).await;
+        let hub = std::sync::Arc::clone(&state.hub);
+        let (o, c) = (owner.clone(), character.clone());
+        let _ = tokio::task::spawn_blocking(move || hub.cards.forget(&o, &c)).await;
+    }
+}
+
 /// A character joined: the party hears, the owner's list changes, and its card is read when its owner has the
 /// workspace open.
 async fn joined(state: &AppState, owner: &str, character: &str, party: &str) {
@@ -1742,9 +1754,7 @@ async fn joined(state: &AppState, owner: &str, character: &str, party: &str) {
 
 /// A character that left its party: its card goes, the party hears, the owner's list changes.
 async fn left(state: &AppState, owner: &str, character: &str, party: &str) {
-    let hub = std::sync::Arc::clone(&state.hub);
-    let (o, c) = (owner.to_string(), character.to_string());
-    let _ = tokio::task::spawn_blocking(move || hub.cards.forget(&o, &c)).await;
+    forget_cards(state, &[(owner.to_string(), character.to_string())]).await;
     publish(state, party, "roster", Some(character), true).await;
     tell_mine(state, owner, "parties");
 }
@@ -1781,6 +1791,25 @@ const READS: [&str; 13] = [
     "party_sync_get",
 ];
 
+/// Upstream commands that reload the account's content (or recheck its characters against it): any card's class
+/// line and numbers may change, so all of the owner's member cards are read again. A test checks each is offered.
+/// The jobs (`job_start`) refresh nothing when they end; a card catches up on the owner's next command.
+pub const CONTENT_COMMANDS: [&str; 13] = [
+    "bundle_accept",
+    "recheck_missing_content",
+    "import_pack",
+    "install_import_preview",
+    "set_pack_enabled",
+    "remove_pack",
+    "set_source_edition",
+    "remove_index",
+    "update_indexes",
+    "clear_downloaded_content",
+    "remove_5etools_url",
+    "update_5etools_url",
+    "import_5etools",
+];
+
 /// What a command's success means for the cards.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CardTarget {
@@ -1797,7 +1826,7 @@ pub enum CardTarget {
 /// Which cards a command may change, from its name and arguments (taken before it runs). Every command that names
 /// one character and isn't a read counts, the [`PLAY_COMMANDS`] among them.
 pub fn card_target(command: &str, args: &serde_json::Map<String, Value>) -> CardTarget {
-    if matches!(command, "bundle_accept" | "recheck_missing_content") {
+    if CONTENT_COMMANDS.contains(&command) {
         return CardTarget::All;
     }
     if READS.contains(&command) && !PLAY_COMMANDS.contains(&command) {
@@ -2025,14 +2054,7 @@ pub async fn before_account_delete(state: &AppState, user: &str) -> ApiResult<De
 pub async fn after_account_delete(state: &AppState, user: &str, departing: Departing) {
     for (party, members) in departing.ran {
         state.hub.forget_party(&party);
-        let hub = std::sync::Arc::clone(&state.hub);
-        let gone = members.clone();
-        let _ = tokio::task::spawn_blocking(move || {
-            for (owner, character) in &gone {
-                hub.cards.forget(owner, character);
-            }
-        })
-        .await;
+        forget_cards(state, &members).await;
         let mut owners: Vec<String> = members.into_iter().map(|(o, _)| o).collect();
         owners.sort();
         owners.dedup();
@@ -2043,6 +2065,7 @@ pub async fn after_account_delete(state: &AppState, user: &str, departing: Depar
     for party in departing.played {
         publish(state, &party, "roster", None, true).await;
     }
+    let _one = state.hub.cards.refreshing(user).await;
     let hub = std::sync::Arc::clone(&state.hub);
     let owner = user.to_string();
     let _ = tokio::task::spawn_blocking(move || hub.cards.forget_owner(&owner)).await;
