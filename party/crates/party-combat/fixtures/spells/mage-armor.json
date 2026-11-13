@@ -1,0 +1,22 @@
+[
+  {
+    "v": 1, "key": "ID_PHB_SPELL_MAGE_ARMOR", "edition": "2014", "name": "Mage Armor", "rev": 1,
+    "level": 1, "concentration": false, "cast": "action",
+    "targeting": { "kind": "creatures", "max": "1", "filter": { "kind": "willing" }, "include_self": true },
+    "delivery": { "kind": "auto" },
+    "always": [{ "kind": "ac_base", "base": 13, "add_dex": true }],
+    "duration": { "kind": "long" },
+    "tier": "auto",
+    "notes": ["Only on a creature wearing no armor; ends if it dons armor."]
+  },
+  {
+    "v": 1, "key": "ID_2024_SPELL_MAGE_ARMOR", "edition": "2024", "name": "Mage Armor", "rev": 1,
+    "level": 1, "concentration": false, "cast": "action",
+    "targeting": { "kind": "creatures", "max": "1", "filter": { "kind": "willing" }, "include_self": true },
+    "delivery": { "kind": "auto" },
+    "always": [{ "kind": "ac_base", "base": 13, "add_dex": true }],
+    "duration": { "kind": "long" },
+    "tier": "auto",
+    "notes": ["Only on a creature wearing no armor; ends if it dons armor."]
+  }
+]

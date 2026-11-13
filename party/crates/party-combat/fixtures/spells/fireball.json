@@ -1,0 +1,20 @@
+[
+  {
+    "v": 1, "key": "ID_PHB_SPELL_FIREBALL", "edition": "2014", "name": "Fireball", "rev": 1,
+    "level": 3, "cast": "action",
+    "targeting": { "kind": "area", "shape": "sphere", "size_ft": 20 },
+    "delivery": { "kind": "save", "ability": "dex", "success": "half" },
+    "on_land": [{ "kind": "damage", "dice": "8d6+(slot_above)d6", "damage_type": "fire" }],
+    "tier": "auto",
+    "notes": ["Ignites unattended flammable objects."]
+  },
+  {
+    "v": 1, "key": "ID_2024_SPELL_FIREBALL", "edition": "2024", "name": "Fireball", "rev": 1,
+    "level": 3, "cast": "action",
+    "targeting": { "kind": "area", "shape": "sphere", "size_ft": 20 },
+    "delivery": { "kind": "save", "ability": "dex", "success": "half" },
+    "on_land": [{ "kind": "damage", "dice": "8d6+(slot_above)d6", "damage_type": "fire" }],
+    "tier": "auto",
+    "notes": ["Ignites unattended flammable objects."]
+  }
+]

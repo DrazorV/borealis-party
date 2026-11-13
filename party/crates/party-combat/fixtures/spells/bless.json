@@ -1,0 +1,26 @@
+[
+  {
+    "v": 1, "key": "ID_PHB_SPELL_BLESS", "edition": "2014", "name": "Bless", "rev": 1,
+    "level": 1, "concentration": true, "cast": "action",
+    "targeting": { "kind": "creatures", "max": "3+slot_above", "filter": { "kind": "willing" }, "include_self": true },
+    "delivery": { "kind": "auto" },
+    "always": [
+      { "kind": "roll_dice", "on": "attacks", "term": { "count": 1, "sides": 4 } },
+      { "kind": "roll_dice", "on": "saves", "term": { "count": 1, "sides": 4 } }
+    ],
+    "duration": { "kind": "minutes", "n": 1 },
+    "tier": "auto"
+  },
+  {
+    "v": 1, "key": "ID_2024_SPELL_BLESS", "edition": "2024", "name": "Bless", "rev": 1,
+    "level": 1, "concentration": true, "cast": "action",
+    "targeting": { "kind": "creatures", "max": "3+slot_above", "filter": { "kind": "willing" }, "include_self": true },
+    "delivery": { "kind": "auto" },
+    "always": [
+      { "kind": "roll_dice", "on": "attacks", "term": { "count": 1, "sides": 4 } },
+      { "kind": "roll_dice", "on": "saves", "term": { "count": 1, "sides": 4 } }
+    ],
+    "duration": { "kind": "minutes", "n": 1 },
+    "tier": "auto"
+  }
+]

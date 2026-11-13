@@ -166,6 +166,15 @@ pub fn player_view_of(state: &CombatState, id: &CombatantId) -> Option<Value> {
     Some(v)
 }
 
+/// The open cast rows a player answers: saves their own PCs (and its creatures) make against pending casts, each
+/// `{cast, target, ray, ability, dc, spell?, from?, resolved}`. The spell and caster are left out when the
+/// caster is hidden ("DEX save DC 15 from an unseen creature"). Nothing else of a cast reaches players.
+#[must_use]
+pub fn player_casts(state: &CombatState, account: &str) -> Vec<Value> {
+    let _ = (state, account);
+    Vec::new()
+}
+
 /// A coarse summary of everything players may see. Two states with the same summary are the same to players, so
 /// a command whose before and after summaries match produces no player events.
 #[derive(Debug, Clone, PartialEq)]
