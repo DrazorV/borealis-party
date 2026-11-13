@@ -49,6 +49,7 @@ mod rpc;
 mod settings;
 mod shares;
 mod simulate;
+mod simulate_tools;
 mod sync;
 #[cfg(test)]
 mod tests;

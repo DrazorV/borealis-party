@@ -1,7 +1,7 @@
 //! The MCP server end to end (0.3.1 part B): protocol conformance over HTTP (modern 2026-07-28 and legacy
 //! `initialize`, errors, auth challenges, Origin, the kill switch), the scope matrix, the leak suite (a player-owned
 //! token calling every tool with hidden ids, random ids and malformed arguments gets nothing hidden or DM-only),
-//! no tool for live combats (D25) and placeholders that write nothing, and idempotent writes.
+//! no tool for live combats (D25) and simulations that write nothing, and idempotent writes.
 //!
 //! Tokens are real personal tokens checked by part A's `TokenAuth` (`mcp::testing` writes them as the Account page
 //! does, without its per-account limits; one flow mints its token through `POST /api/me/ai/tokens` itself). Monsters are the bundled SRD 5.2.1 ones. Runs on
@@ -496,15 +496,25 @@ async fn conformance(t: &Table) {
         .as_str()
         .unwrap()
         .contains("invalid_argument"));
+    // Part D's tools are registered with their own schemas and answer through its module.
     let (_, b) = call(r, &tok, "homebrew_list", json!({})).await;
-    assert_eq!(b["result"]["isError"], true);
+    assert_eq!(b["result"]["isError"], false, "{b}");
+    let (_, _, list) = rpc(r, &tok, &modern(1, "tools/list", json!({}))).await;
+    let create = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["name"] == "homebrew_create")
+        .cloned()
+        .unwrap_or_else(|| panic!("no homebrew_create: {list}"));
     assert!(
-        b["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("unavailable"),
-        "{b}"
+        create["inputSchema"]["properties"]["xml"].is_object(),
+        "{create}"
     );
+    assert!(create["inputSchema"]["required"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("requestId")));
 
     // The activity log has the calls by name and status, never their arguments.
     let rows = sqlx::query("SELECT detail FROM activity WHERE kind = 'ai_tool'")
@@ -762,7 +772,7 @@ async fn rows_now(db: &Db) -> Vec<i64> {
     out
 }
 
-/// D25: no tool reads or changes a live combat; the simulator's tools are placeholders that touch nothing.
+/// D25: no tool reads or changes a live combat; the simulator's tools run on copies and write nothing.
 async fn no_combat_tools(t: &Table) {
     let r = &t.router;
     let dm = testing::token(&t.state.db, &t.dm.id, ALL_SCOPES).await;
@@ -810,19 +820,30 @@ async fn no_combat_tools(t: &Table) {
         Value::Null,
     )
     .await;
-    for (tool, args) in [
-        ("sim_start", json!({ "encounterId": t.encounter })),
-        ("sim_start", json!({ "combatId": combat })),
+    // The simulator runs on a copy of the encounter while the combat is live, and writes nothing (D25, D26).
+    for (tool, args, fails) in [
+        ("sim_start", json!({ "encounterId": t.encounter }), false),
         (
             "sim_batch",
             json!({ "encounterId": t.encounter, "runs": 5 }),
+            false,
         ),
-        ("index_build", json!({})),
+        ("sim_start", json!({ "combatId": combat }), true),
+        ("sim_start", json!({ "encounterId": combat }), true),
     ] {
-        let (_, b) = call(r, &dm, tool, args).await;
-        assert_eq!(b["result"]["isError"], true, "{tool}: {b}");
-        assert!(b.to_string().contains("unavailable"), "{tool}: {b}");
+        let (_, b) = call(r, &dm, tool, args.clone()).await;
+        assert_eq!(b["result"]["isError"], fails, "{tool} {args}: {b}");
     }
+    // A player of the party can't simulate the DM's encounter.
+    let player = testing::token(&t.state.db, &t.player.id, ALL_SCOPES).await;
+    let (_, b) = call(
+        r,
+        &player,
+        "sim_start",
+        json!({ "encounterId": t.encounter }),
+    )
+    .await;
+    assert!(b.to_string().contains("not_found"), "{b}");
     assert_eq!(rows_now(&t.state.db).await, before);
     let (_, after_view) = send(
         r,
