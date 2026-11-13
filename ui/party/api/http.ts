@@ -17,6 +17,7 @@ import "./overrides/shares";
 import "./overrides/parties";
 import "./overrides/personality";
 import "./overrides/sourceRemoval";
+import "./overrides/combat";
 
 function fail(code: string, message: string): ApiError {
   return { code, message } as ApiError;

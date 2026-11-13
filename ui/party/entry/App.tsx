@@ -10,6 +10,7 @@ import { loadSession, updateUser } from "../api/session";
 import { AccountBar } from "../pages/AccountBar";
 import { AccountPage } from "../pages/AccountPage";
 import { AdminPage } from "../pages/AdminPage";
+import { CombatTracker } from "../pages/CombatTracker";
 import { JoinRoute, PartiesPage } from "../pages/PartiesPage";
 import { PartyCharacterView } from "../pages/PartyCharacterView";
 import { OfflinePage } from "../pages/OfflineBanner";
@@ -75,6 +76,8 @@ export function App() {
         <Route path="/join/:code" element={<JoinRoute />} />
         {/* The DM's read-only view of a member character (plan 3.5, 0.2.1). */}
         <Route path="/parties/:party/view/:owner/:character" element={<AppShell>{offline ? <OfflinePage /> : <PartyCharacterView />}</AppShell>} />
+        {/* The DM's live combat tracker (plan 4.4, 0.3.0); the Live chip in the top bar leads back to it. */}
+        <Route path="/combat/:id" element={<AppShell>{offline ? <OfflinePage /> : <CombatTracker />}</AppShell>} />
         {/* Notes read a folder on the device, which a server doesn't offer. */}
         <Route path="/notes" element={<Navigate to="/" replace />} />
         <Route path="*" element={<UpstreamApp />} />

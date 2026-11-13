@@ -1,0 +1,173 @@
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { APIRequestContext, Browser, Page, TestInfo } from "@playwright/test";
+import { ACCOUNTS, type AccountName } from "./accounts";
+import { expect, finding, measureOverflow, minTap, open, signedInShell, smallTargets, test } from "./fixtures";
+
+/**
+ * The DM's combat tracker (0.3.0, plan 4.4 and 4.4b): phone first at 384x832, landscape 832x384, an iPhone at 390x844
+ * and a desktop window. The layout specs run against the tracker's own mock server (`party.combatMock`, an SRD-only
+ * sample fight), so they need no combat routes on the test server. The two-account spec needs the real combat server
+ * and skips until the test server has it.
+ */
+
+const FIXTURES = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../e2e/fixtures");
+
+/** With PARTY_SHOTS=<folder>, a screenshot for looking at by eye. */
+async function shot(page: Page, testInfo: TestInfo, name: string) {
+  const dir = process.env.PARTY_SHOTS;
+  if (dir) await page.screenshot({ path: join(dir, `${testInfo.project.name}-combat-${name}.png`), fullPage: false });
+}
+
+const phoneProject = (testInfo: TestInfo) => testInfo.project.name !== "desktop";
+
+async function openMock(page: Page, testInfo: TestInfo) {
+  await page.addInitScript(() => { localStorage.setItem("party.combatMock", "1"); });
+  if (phoneProject(testInfo)) await open(page, "/combat/c1");
+  else {
+    await page.goto("/#/combat/c1");
+    await expect(page.locator("main").first()).toBeVisible({ timeout: 30_000 });
+  }
+  await signedInShell(page);
+  await expect(page.locator("[data-combatant]").first()).toBeVisible({ timeout: 30_000 });
+}
+
+/** Next turn: the thumb bar's on a phone in portrait, the header's otherwise. */
+function nextButton(page: Page) {
+  return page.locator(".cb-thumb:visible .btn, .cb-top-actions .cb-next:visible").first();
+}
+
+test.describe("The DM's combat tracker (0.3.0)", () => {
+  test("lays out the fight without sideways scrolling, with full-size controls where the DM taps", async ({ page, signIn }, testInfo) => {
+    await signIn("admin");
+    await openMock(page, testInfo);
+    await shot(page, testInfo, "setup");
+
+    // Typed table rolls for the creatures, then Start.
+    for (const [label, n] of [["Knight", 18], ["Adult Red Dragon", 12], ["Priest", 10], ["Cultist 1", 9], ["Cultist 2", 8], ["Mage", 5]] as const) {
+      const box = page.getByLabel(`${label} initiative`, { exact: true });
+      await box.fill(String(n));
+      await box.press("Enter");
+    }
+    await expect(page.getByText(/Everyone has an initiative|Waiting for Bram/)).toBeVisible();
+    await nextButton(page).click();
+    await expect(page.getByText("ROUND 1").first()).toBeVisible();
+    await expect(page.locator('[data-combatant="knight"]')).toHaveAttribute("aria-current", "true");
+    await shot(page, testInfo, "round1");
+
+    const o = await measureOverflow(page);
+    expect(o.page, "the page scrolls sideways").toBeLessThanOrEqual(0);
+    expect(o.scrollers, "containers that scroll sideways").toEqual([]);
+
+    if (phoneProject(testInfo)) {
+      const min = minTap(testInfo);
+      for (const area of [".cb-thumb", ".cb-hpc", ".cb-resources", ".cb-roster"]) {
+        if (!(await page.locator(area).first().isVisible())) continue;
+        const small = (await smallTargets(page, min, area)).map((t) => `${t.label} ${t.width}x${t.height}`);
+        expect(small, `controls under ${min} px in ${area}`).toEqual([]);
+      }
+      const rest = (await smallTargets(page, min, ".cb-page")).map((t) => `${t.label} ${t.width}x${t.height}`);
+      if (rest.length) finding(testInfo, `combat tracker: ${rest.length} smaller controls elsewhere: ${rest.slice(0, 6).join(", ")}`);
+    }
+  });
+
+  test("Next turn moves to the next combatant and, on a phone, brings its card into view (C4, C26)", async ({ page, signIn }, testInfo) => {
+    await signIn("admin");
+    await openMock(page, testInfo);
+    await page.getByRole("button", { name: "Roll initiatives" }).click();
+    await expect(page.locator('[data-combatant="dragon"] input')).not.toHaveValue("");
+    await nextButton(page).click();
+    await expect(page.getByText("ROUND 1").first()).toBeVisible();
+    const first = await page.locator('[data-combatant][aria-current="true"]').getAttribute("data-combatant");
+    await nextButton(page).click();
+    await expect(page.locator(`[data-combatant="${first}"]`)).not.toHaveAttribute("aria-current", "true");
+    const now = await page.locator('[data-combatant][aria-current="true"]').getAttribute("data-combatant");
+    const card = page.locator("#cb-card");
+    await expect(card).toBeVisible();
+    if (testInfo.project.name === "android-portrait" || testInfo.project.name === "iphone") {
+      // The card is on screen after the scroll, below the sticky resource panel.
+      await expect.poll(async () => {
+        const box = await card.boundingBox();
+        const vh = page.viewportSize()!.height;
+        return Boolean(box && box.y < vh * 0.7 && box.y + 40 > 0);
+      }, { message: `the current card (${now}) scrolled into view` }).toBe(true);
+      // The resource panel stays on top with its More toggle.
+      await expect(page.locator(".cb-resources .cb-more-toggle")).toBeVisible();
+      await page.locator(".cb-resources .cb-more-toggle").click();
+      await expect(page.getByText("Group limits (per round)")).toBeVisible();
+    }
+    await shot(page, testInfo, "next-turn");
+  });
+
+  test("damage typed or rolled, Use with its reason, and reveal (C6, C14, D20 b)", async ({ page, signIn }, testInfo) => {
+    await signIn("admin");
+    await openMock(page, testInfo);
+    await page.locator('[data-combatant="mage"] .cb-row-main').click();
+    const card = page.getByRole("region", { name: "Mage details" });
+    await card.getByLabel(/Damage or healing/).fill("2d6+3");
+    await card.getByRole("button", { name: "Damage", exact: true }).click();
+    await expect(card.getByText(/^\d+\/40 HP$/)).not.toHaveText("40/40 HP");
+    await card.getByRole("button", { name: "Reveal to players" }).click();
+    await expect(card.getByRole("button", { name: "Hide from players" })).toBeVisible();
+    const dagger = card.locator(".cb-ability", { hasText: "Dagger" });
+    await dagger.getByRole("button", { name: "Use" }).click();
+    await expect(dagger.getByText("Action spent")).toBeVisible();
+    await shot(page, testInfo, "card");
+  });
+});
+
+// ---- Two accounts against the real combat server (skips until it is there) ----
+
+async function login(request: APIRequestContext, who: AccountName) {
+  const r = await request.post("/api/auth/login", { data: { username: who, password: ACCOUNTS[who].password } });
+  expect(r.ok(), `sign in as ${who}`).toBeTruthy();
+  return (await r.json()) as { token: string; user: unknown };
+}
+
+async function api<T>(request: APIRequestContext, auth: string, method: string, path: string, data?: unknown): Promise<T> {
+  const r = await request.fetch(path, { method, headers: { authorization: `Bearer ${auth}` }, ...(data === undefined ? {} : { data }) });
+  expect(r.ok(), `${method} ${path}: ${r.status()} ${await r.text()}`).toBeTruthy();
+  const text = await r.text();
+  return (text ? JSON.parse(text) : null) as T;
+}
+
+async function phone(browser: Browser, testInfo: TestInfo, baseURL: string, session: { token: string; user: unknown }): Promise<Page> {
+  const { viewport, userAgent, deviceScaleFactor, isMobile, hasTouch } = testInfo.project.use;
+  const context = await browser.newContext({ baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch });
+  await context.addInitScript((s) => { localStorage.setItem("party.session", s); }, JSON.stringify({ baseUrl: "", ...session }));
+  return context.newPage();
+}
+
+test("two accounts: the DM reveals a creature and the player sees it within about two seconds", async ({ page, signIn, request, browser, baseURL }, testInfo) => {
+  test.skip(testInfo.project.name !== "android-portrait", "two phones at 384x832 only");
+  const dm = await login(request, "admin");
+  const player = await login(request, "player");
+  await api(request, dm.token, "POST", "/api/me/roles/dm", {});
+  const party = await api<{ id: string }>(request, dm.token, "POST", "/api/parties", { name: `Fight ${Math.random().toString(36).slice(2, 8)}` });
+  const probe = await request.fetch(`/api/parties/${party.id}/combat`, { headers: { authorization: `Bearer ${dm.token}` } });
+  const encounters = await request.fetch(`/api/parties/${party.id}/encounters`, { headers: { authorization: `Bearer ${dm.token}` } });
+  test.skip(probe.status() === 404 || encounters.status() === 404, "the test server has no combat or encounter routes yet (feat/combat-server, feat/encounters)");
+  const made = await api<{ code: string }>(request, dm.token, "POST", `/api/parties/${party.id}/invites`, { kind: "code", uses: 1 });
+  const hero = await api<{ summary: { id: string } }>(request, player.token, "POST", "/api/rpc/import_character", {
+    fileName: "d5-hero.dnd5e", contentBase64: readFileSync(join(FIXTURES, "d5-hero.dnd5e")).toString("base64"),
+  });
+  await api(request, player.token, "POST", "/api/join", { code: made.code, characterId: hero.summary.id });
+  const encounter = await api<{ id: string }>(request, dm.token, "POST", `/api/parties/${party.id}/encounters`, { name: "Goblins" });
+  const found = await api<{ results?: { id: string }[] }>(request, dm.token, "GET", "/api/bestiary/search?q=goblin").catch(() => ({ results: [] }));
+  test.skip(!found.results?.length, "no goblin in the test server's bestiary");
+  await api(request, dm.token, "POST", `/api/encounters/${encounter.id}/creatures`, { elementId: found.results![0]!.id, label: "Goblin 1", hidden: true });
+  const started = await api<{ id: string }>(request, dm.token, "POST", `/api/encounters/${encounter.id}/start`, { requestId: `rig-${Date.now()}` });
+
+  await signIn("admin");
+  await open(page, `/combat/${started.id}`);
+  const playerPage = await phone(browser, testInfo, baseURL!, player);
+  await playerPage.goto("/?mock=mobile#/play");
+  await expect(playerPage.getByText("Goblin 1")).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Reveal Goblin 1 to players/ }).click();
+  const t0 = Date.now();
+  await expect(playerPage.getByText(/Goblin/).first()).toBeVisible({ timeout: 2_500 });
+  expect(Date.now() - t0).toBeLessThan(2_500);
+  await playerPage.context().close();
+});
