@@ -89,7 +89,7 @@ export const defaultClientDeps = (report: ClientDeps["report"]): ClientDeps => (
 
 const messageOf = (e: unknown) => String((e as { message?: string } | null)?.message ?? e);
 const codeOf = (e: unknown) => (e as { code?: string } | null)?.code;
-const isConflict = (e: unknown) => codeOf(e) === "conflict" || codeOf(e) === "stale" || (e as { status?: number } | null)?.status === 409;
+const isConflict = (e: unknown) => !needsForce(e) && (codeOf(e) === "conflict" || codeOf(e) === "stale" || (e as { status?: number } | null)?.status === 409);
 export const CHANGED_ELSEWHERE = "Someone else changed this; updated.";
 
 export class CombatClient {
@@ -279,6 +279,8 @@ export class CombatClient {
           const rest = this.state.queue.filter((q) => q !== head);
           if (!this.state.view || next.seq >= this.state.view.seq) this.set({ view: next, queue: rest });
           else this.set({ queue: rest });
+          // A retried requestId answers the ORIGINAL view (replayed): fetch the current one.
+          if (next.replayed && rest.length === 0) void this.refreshNow();
         } catch (e) {
           if (isNetworkFailure(e)) {
             // The same requestId goes again: the server does the write at most once.

@@ -7,7 +7,7 @@ import type { CombatDeps } from "../../api/overrides/combat";
 import { sampleCombat } from "./fixtures";
 import { seededDie } from "../../../src/lib/dice";
 import { CombatRefusal, execute, exportCombat, importCombat, undo, type MockCombat } from "./mockEngine";
-import type { Combatant, Command, DmCombat } from "./types";
+import type { Combatant, Command, CompanionOffer, DmCombat } from "./types";
 
 export interface MockServer {
   combats: Map<string, MockCombat>;
@@ -28,6 +28,13 @@ export interface MockServer {
 
 const fail = (code: string, message: string) => ({ code, message });
 
+/** The sample PCs' sheet companions (the server reads them from the character files). */
+function offersFor(m: MockCombat): CompanionOffer[] {
+  const pc = m.view.state.combatants.find((c) => c.id === "pc-aria");
+  if (!pc || m.view.state.combatants.some((c) => c.owner_id === pc.id && c.label === "Wolf")) return [];
+  return [{ pc: pc.id, key: "wolf", name: "Wolf", hp: 11, ac: 13, initiative: 2 }];
+}
+
 /** The DM view of a mock combat, as the server sends it. */
 export function dmView(m: MockCombat): DmCombat {
   const v = m.view;
@@ -35,7 +42,7 @@ export function dmView(m: MockCombat): DmCombat {
   for (const [id, b] of Object.entries(v.statblocks)) creatures[id] = { encounterCreatureId: null, statBlock: b.data, name: b.name };
   return {
     id: v.id, partyId: v.partyId, encounter: v.encounterId ? { id: v.encounterId, name: "Sample fight", publicName: "A fight" } : null,
-    seq: v.seq, status: v.state.status, state: v.state, creatures, characters: {}, prompts: [],
+    seq: v.seq, status: v.state.status, state: v.state, creatures, characters: {}, prompts: [], offers: offersFor(m),
     undo: [...m.journal].reverse().map((j) => j.label),
   };
 }
@@ -162,10 +169,26 @@ export function mockCombatServer(seed?: MockCombat[], sharing?: MockSharing): Mo
               execute(m, { command: "add_combatant", combatant: c, roll_initiative: args.rollInitiative !== false });
               if (m.view.statblocks[from.id]) m.view.statblocks[id] = m.view.statblocks[from.id]!;
             }
+          } else if (action === "summon" && typeof args.companion === "string") {
+            const offer = offersFor(m).find((o) => o.key === args.companion);
+            if (!offer) throw fail("refused", "No such companion on that character.");
+            const { companion: _key, ...rest } = args;
+            void _key;
+            execute(m, { command: "summon", ...rest, combatant: {
+              id: `summon-${++made}`, kind: "creature", label: offer.name, public_name: offer.name, visible: true,
+              hp: { current: offer.hp, max: offer.hp, temp: 0 }, ac: offer.ac, initiative_bonus: offer.initiative,
+            } } as Command);
           } else {
+            const before = new Set(m.view.state.combatants.map((c) => c.id));
+            // The server mints a summon's id, whatever the client sent.
+            if (action === "summon" && args.combatant) args.combatant = { ...(args.combatant as Combatant), id: `summon-${++made}` };
             const tag = action === "prev_turn" ? "previous_turn" : action === "remove_creature" ? "remove_combatant"
               : action === "condition_add" ? "add_condition" : action === "condition_remove" ? "remove_condition" : action;
             execute(m, { command: tag, ...args } as Command);
+            // A copied summon fights with its source's stat block.
+            if (action === "summon" && typeof args.copyOf === "string" && m.view.statblocks[args.copyOf]) {
+              for (const c of m.view.state.combatants) if (!before.has(c.id)) m.view.statblocks[c.id] = m.view.statblocks[args.copyOf]!;
+            }
           }
           if (b.requestId) done.set(key, true);
           push(m.view.id);

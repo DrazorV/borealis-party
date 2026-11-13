@@ -47,16 +47,16 @@ export type RollMode = "normal" | "advantage" | "disadvantage";
 /** A d20 test (initiative, death save, a save): a typed table roll (D43), or rolled by the server (D21). */
 export type D20Input =
   | { kind: "typed"; total: number; natural?: number }
-  | { kind: "roll"; modifier?: number; mode?: RollMode; crit_range?: number };
+  | { kind: "app"; modifier?: number; mode?: RollMode; crit_range?: number };
 
 /** Damage, healing, recharge: a typed total, or dice the server rolls. */
 export type DiceInput =
   | { kind: "typed"; total: number }
-  | { kind: "roll"; notation: string; critical?: boolean; floor?: number };
+  | { kind: "app"; notation: string; critical?: boolean; floor?: number };
 
 /** A d20 roll the server made or took typed (`party_dice::D20Result`). */
 export interface D20Result {
-  source: "typed" | "rolled";
+  source: "typed" | "app";
   mode: RollMode;
   dice: number[];
   natural: number | null;
@@ -68,7 +68,7 @@ export interface D20Result {
 
 /** A dice roll (`party_dice::DiceResult`). */
 export interface DiceResult {
-  source?: "typed" | "rolled";
+  source?: "typed" | "app";
   notation?: string;
   total: number;
   breakdown?: string;

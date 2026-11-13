@@ -12,7 +12,7 @@ describe("shared combat pieces", () => {
     fireEvent.change(screen.getByLabelText("Initiative: typed result"), { target: { value: "17" } });
     fireEvent.click(screen.getByRole("button", { name: "Enter" }));
     fireEvent.click(screen.getByRole("button", { name: "Roll in app" }));
-    expect(got).toEqual([{ kind: "typed", total: 17 }, { kind: "roll", modifier: 2, mode: "normal" }]);
+    expect(got).toEqual([{ kind: "typed", total: 17 }, { kind: "app", modifier: 2, mode: "normal" }]);
   });
 
   it("RollInput for dice: totals in range, or notation the server rolls", () => {
@@ -26,7 +26,7 @@ describe("shared combat pieces", () => {
     fireEvent.change(box, { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: "Enter" }));
     fireEvent.click(screen.getByRole("button", { name: "Roll in app" }));
-    expect(got).toEqual([{ kind: "typed", total: 5 }, { kind: "roll", notation: "1d6" }]);
+    expect(got).toEqual([{ kind: "typed", total: 5 }, { kind: "app", notation: "1d6" }]);
   });
 
   it("the HP band follows the party card's rule (D6)", () => {

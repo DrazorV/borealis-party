@@ -313,3 +313,12 @@ describe("dmLiveCombats (the Live chip's source for the DM)", () => {
     expect(changed).toBe(1);
   });
 });
+
+describe("the final contract's codes", () => {
+  it("treats 409 undo_player as 'needs force', not as someone else's change", async () => {
+    const { needsForce } = await import("../../api/overrides/combat");
+    expect(needsForce({ code: "undo_player", message: "Undo the player's write?" })).toBe(true);
+    expect(needsForce({ code: "stale", message: "The combat changed." })).toBe(false);
+  });
+});
+
