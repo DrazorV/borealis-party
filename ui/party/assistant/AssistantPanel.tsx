@@ -63,7 +63,9 @@ const TOOL_LABELS: Record<string, string> = {
   homebrew_list: "Read your homebrew",
   homebrew_get: "Read a homebrew element",
   homebrew_validate: "Check a homebrew element",
-  homebrew_create: "Save a homebrew element",
+  homebrew_types: "Read the homebrew types",
+  homebrew_save: "Save a homebrew element",
+  homebrew_create: "Add a homebrew element",
   homebrew_update: "Change a homebrew element",
   homebrew_delete: "Delete a homebrew element",
   index_build: "Build a custom index",
@@ -162,6 +164,12 @@ function SimulationView({ result }: { result: SimResult }) {
 /** A built index offered as a zip (D47: never published): index_build's files, zipped here. */
 function downloadOf(name: string, result: unknown): { fileName: string; contentBase64: string } | null {
   if (name !== "index_build") return null;
+  // Part D sends the zip itself; the files alone are zipped here.
+  const zip = (result as { zip?: { fileName?: unknown; contentBase64?: unknown } } | null)?.zip;
+  if (zip && typeof zip.contentBase64 === "string") {
+    const fileName = typeof zip.fileName === "string" && zip.fileName.trim() ? zip.fileName.replace(/[\\/:*?"<>|]+/g, "_") : "custom-index.zip";
+    return { fileName, contentBase64: zip.contentBase64 };
+  }
   const files = indexFiles(result);
   if (files.length === 0) return null;
   const title = (result as { name?: unknown }).name;

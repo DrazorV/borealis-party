@@ -142,6 +142,18 @@ describe("the assistant panel", () => {
     click.mockRestore();
   });
 
+  it("offers part D's own zip when index_build sends one", async () => {
+    ai.results.index_build = { ok: true, result: { base: "https://example.com/brew", files: [{ path: "a.index", text: "<index/>" }], zip: { fileName: "brew-1.2.zip", contentBase64: "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==" } } };
+    ai.replies.push(reply("", [["index_build", { packId: "p", baseUrl: "https://example.com/brew" }]]), reply("Ready."));
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => "blob:x"), revokeObjectURL: vi.fn() }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    open(vi.fn(), vi.fn(), {}, "index");
+    await say("build it");
+    fireEvent.click(await screen.findByRole("button", { name: "Download brew-1.2.zip" }));
+    expect(click).toHaveBeenCalled();
+    click.mockRestore();
+  });
+
   it("opens in a page's own tool column when it gives a frame", async () => {
     render(
       <MemoryRouter>

@@ -257,6 +257,19 @@ static TOOLS: &[Tool] = &[
         schema: || object(&json!({ "xml": { "type": "string" } }), &["xml"]),
     },
     Tool {
+        name: "homebrew_save",
+        description: "Save a homebrew element (Aurora XML) in this account's own pack: changes the element when                       elementId is given, adds it otherwise.",
+        scope: "homebrew:write",
+        effect: Effect::Draft,
+        purposes: BREW,
+        schema: || {
+            object(
+                &json!({ "elementId": { "type": "string" }, "xml": { "type": "string" } }),
+                &["xml"],
+            )
+        },
+    },
+    Tool {
         name: "homebrew_update",
         description: "Change a homebrew element of this account's own pack, keeping its id.",
         scope: "homebrew:write",
@@ -426,7 +439,7 @@ pub async fn call(state: &AppState, user: &User, name: &str, args: &Value) -> Ap
                 .0
         }
         "sim_start" | "sim_auto" | "sim_report" | "sim_batch" => not_yet("Simulation")?,
-        "homebrew_validate" | "homebrew_create" | "homebrew_update" => {
+        "homebrew_validate" | "homebrew_create" | "homebrew_update" | "homebrew_save" => {
             not_yet("Homebrew authoring")?
         }
         "index_build" => not_yet("Building a custom index")?,
