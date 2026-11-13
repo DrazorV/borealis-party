@@ -295,3 +295,21 @@ describe("CombatClient", () => {
   });
 });
 
+
+describe("dmLiveCombats (the Live chip's source for the DM)", () => {
+  it("lists the DM's parties that have a live combat, with the tracker's address", async () => {
+    const real = combatDeps.fetch;
+    combatDeps.fetch = async (session, method, path, body) => {
+      if (path === "/api/parties") return { parties: [{ id: "p1", name: "The party", role: "dm" }, { id: "p2", name: "Other", role: "player" }] };
+      return real(session, method, path, body);
+    };
+    const { dmLiveCombats } = await import("../../api/overrides/combat");
+    expect(await dmLiveCombats.list()).toEqual([{ id: "c1", partyName: "The party" }]);
+    expect(dmLiveCombats.path("c1")).toBe("/combat/c1");
+    let changed = 0;
+    const stop = dmLiveCombats.watch(() => { changed++; });
+    server.notify("c1");
+    stop();
+    expect(changed).toBe(1);
+  });
+});

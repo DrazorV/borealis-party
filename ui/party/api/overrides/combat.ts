@@ -131,6 +131,25 @@ export function watchCombats(listener: (e: CombatEvent) => void, status: StreamS
   }, status);
 }
 
+/**
+ * The DM's own live combats, for the Live chip in the top chrome (feat/player-combat owns the chip; its
+ * `registerDmLiveCombats` takes this object): the parties this account runs that have a live combat, a watcher
+ * for combat starts, ends and changes, and the tracker's address.
+ */
+export const dmLiveCombats = {
+  list: async (): Promise<{ id: string; partyName?: string }[]> => {
+    const out = await call<{ parties: { id: string; name: string; role: string }[] }>("GET", "/api/parties").catch(() => ({ parties: [] }));
+    const mine = (out?.parties ?? []).filter((p) => p.role === "dm");
+    const live = await Promise.all(mine.map((p) => partyCombat(p.id).then((id) => (id ? { id, partyName: p.name } : null), () => null)));
+    return live.filter((c): c is { id: string; partyName: string } => c !== null);
+  },
+  watch: (onChange: () => void): (() => void) => combatDeps.events((e) => {
+    const p = (e.payload ?? {}) as Record<string, unknown>;
+    if (e.event === COMBAT_EVENT || e.event === RESYNC_EVENT || (e.event === "party://party" && p.kind === "combat")) onChange();
+  }, (again) => { if (again) onChange(); }),
+  path: combatPath,
+};
+
 /** A failure that means "no answer" (D44: queue and retry), not "the server refused". */
 export function isNetworkFailure(e: unknown): boolean {
   const code = (e as { code?: string } | null)?.code;
