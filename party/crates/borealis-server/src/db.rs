@@ -337,6 +337,85 @@ const MIGRATIONS: &[&[&str]] = &[
         )",
         "CREATE INDEX IF NOT EXISTS combat_requests_at ON combat_requests (created_at)",
     ],
+    // 7 (M-ai-auth, 0.3.1), after M-combat: personal API tokens and the OAuth server for AI apps (tokens.rs,
+    // oauth.rs). Every token, code, client secret and consent request id is kept only as a peppered hash; scopes are
+    // space-separated. A token never grants more than its account: the role checks run on every call.
+    &[
+        "CREATE TABLE IF NOT EXISTS api_tokens (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            token_hash TEXT NOT NULL,
+            hint TEXT NOT NULL,
+            scopes TEXT NOT NULL,
+            created_at BIGINT NOT NULL,
+            expires_at BIGINT NOT NULL,
+            last_used_at BIGINT
+        )",
+        "CREATE UNIQUE INDEX IF NOT EXISTS api_tokens_hash ON api_tokens (token_hash)",
+        "CREATE INDEX IF NOT EXISTS api_tokens_user ON api_tokens (user_id)",
+        // Apps registered by dynamic client registration (RFC 7591). No owner: anyone may register one.
+        "CREATE TABLE IF NOT EXISTS oauth_clients (
+            id TEXT PRIMARY KEY,
+            secret_hash TEXT,
+            name TEXT NOT NULL,
+            client_uri TEXT,
+            redirect_uris_json TEXT NOT NULL,
+            auth_method TEXT NOT NULL,
+            created_at BIGINT NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS oauth_clients_created ON oauth_clients (created_at)",
+        // An authorization request waiting on the consent screen (minutes only).
+        "CREATE TABLE IF NOT EXISTS oauth_requests (
+            id_hash TEXT PRIMARY KEY,
+            client_id TEXT NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
+            redirect_uri TEXT NOT NULL,
+            scopes TEXT NOT NULL,
+            state TEXT,
+            code_challenge TEXT NOT NULL,
+            resource TEXT NOT NULL,
+            created_at BIGINT NOT NULL,
+            expires_at BIGINT NOT NULL
+        )",
+        // An authorization code. grant_id is set when it is redeemed, so a second use revokes what it gave.
+        "CREATE TABLE IF NOT EXISTS oauth_codes (
+            code_hash TEXT PRIMARY KEY,
+            client_id TEXT NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            redirect_uri TEXT NOT NULL,
+            scopes TEXT NOT NULL,
+            code_challenge TEXT NOT NULL,
+            resource TEXT NOT NULL,
+            created_at BIGINT NOT NULL,
+            expires_at BIGINT NOT NULL,
+            used_at BIGINT,
+            grant_id TEXT
+        )",
+        // A connected app: one account's consent to one client. Its tokens go with it.
+        "CREATE TABLE IF NOT EXISTS oauth_grants (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            client_id TEXT NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
+            scopes TEXT NOT NULL,
+            resource TEXT NOT NULL,
+            created_at BIGINT NOT NULL,
+            last_used_at BIGINT
+        )",
+        "CREATE INDEX IF NOT EXISTS oauth_grants_user ON oauth_grants (user_id)",
+        "CREATE INDEX IF NOT EXISTS oauth_grants_client ON oauth_grants (client_id)",
+        // Access and refresh tokens. A refresh token is used once (rotation); a second use revokes the grant.
+        "CREATE TABLE IF NOT EXISTS oauth_tokens (
+            token_hash TEXT PRIMARY KEY,
+            grant_id TEXT NOT NULL REFERENCES oauth_grants(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            scopes TEXT NOT NULL,
+            created_at BIGINT NOT NULL,
+            expires_at BIGINT NOT NULL,
+            used_at BIGINT
+        )",
+        "CREATE INDEX IF NOT EXISTS oauth_tokens_grant ON oauth_tokens (grant_id)",
+        "CREATE INDEX IF NOT EXISTS oauth_tokens_expires ON oauth_tokens (expires_at)",
+    ],
 ];
 
 /// How many steps [`MIGRATIONS`] has: the schema version a database is at after [`Db::open`].
@@ -354,6 +433,7 @@ const MARKERS: &[(usize, &str)] = &[
     (4, "monster_meta"),
     (5, "encounters"),
     (6, "combats"),
+    (7, "api_tokens"),
 ];
 
 /// A table only the versions with groups had. A database that still has it opens like any other: the table is left

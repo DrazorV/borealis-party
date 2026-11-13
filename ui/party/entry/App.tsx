@@ -11,6 +11,7 @@ import { fetchMe } from "../api/party";
 import { loadSession, updateUser } from "../api/session";
 import { AccountBar } from "../pages/AccountBar";
 import { AccountPage } from "../pages/AccountPage";
+import { AiAppsConsent, CONSENT_PATH, keepConsentThroughSignIn } from "../pages/AiAppsConsent";
 import { AdminPage } from "../pages/AdminPage";
 import { CombatTracker } from "../pages/CombatTracker";
 import { JoinRoute, PartiesPage } from "../pages/PartiesPage";
@@ -38,6 +39,8 @@ unifyImports();
 // The Live chip also shows the DM's own live combat and opens its tracker (/combat/<id>). Registered here, not in
 // overrides/combat.ts, which would make an import cycle through api/http.
 registerDmLiveCombats(dmLiveCombats);
+// An AI app's consent link (#/oauth/consent/<id>) survives signing in first (0.3.1).
+keepConsentThroughSignIn();
 
 /** Upstream's app with the account bar above it and the account and admin pages in front of it. */
 export function App() {
@@ -74,6 +77,8 @@ export function App() {
       <AccountBar />
       <Routes>
         <Route path="/account" element={<AppShell>{offline ? <OfflinePage /> : <AccountPage />}</AppShell>} />
+        {/* An AI app asks to connect (OAuth consent, 0.3.1). */}
+        <Route path={`${CONSENT_PATH}/:id`} element={<AppShell>{offline ? <OfflinePage /> : <AiAppsConsent />}</AppShell>} />
         <Route path="/admin" element={admin ? <AppShell>{offline ? <OfflinePage /> : <AdminPage />}</AppShell> : <Navigate to="/" replace />} />
         {/* The separate Import section is gone: imports happen on Additional Content (0.2.1). */}
         <Route path={OLD_IMPORT_PATH} element={<Navigate to={IMPORT_PATH} replace />} />

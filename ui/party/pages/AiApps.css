@@ -1,0 +1,22 @@
+/* Account → AI apps & API tokens, and the OAuth consent screen (AiApps.tsx, AiAppsConsent.tsx). Phone first. */
+.ai-apps .ai-head { font-size: var(--fs-md, 1rem); margin: var(--sp-4) 0 var(--sp-1); }
+.ai-item { padding: var(--sp-2) 0; border-bottom: var(--border-w) solid var(--border); min-width: 0; }
+.ai-item .grow { flex: 1 1 10em; min-width: 0; overflow-wrap: anywhere; }
+.ai-chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-1); }
+.ai-chip { font-size: var(--fs-sm); padding: 0 var(--sp-2); border-radius: 999px; border: var(--border-w) solid var(--border); white-space: nowrap; }
+.ai-scopes { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.ai-scopes legend { padding: 0; margin-bottom: var(--sp-1); font-weight: 600; }
+.ai-scope { display: flex; gap: var(--sp-2); align-items: flex-start; cursor: pointer; }
+.ai-scope input { margin-top: 0.2em; flex: none; }
+.ai-scope-text { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.ai-scope-text code { font-size: var(--fs-sm); }
+.ai-secret, .ai-snippet { font-family: var(--font-mono, monospace); width: 100%; box-sizing: border-box; overflow-wrap: anywhere; }
+.ai-snippet { resize: vertical; white-space: pre; overflow-x: auto; }
+.ai-consent { max-width: 36rem; margin: 0 auto; }
+.ai-consent-app { font-size: var(--fs-lg, 1.1rem); overflow-wrap: anywhere; }
+.ai-consent-actions { justify-content: flex-end; }
+html.phone .ai-scope { min-height: var(--ph-hit); align-items: center; }
+html.phone .ai-scope input { width: 22px; height: 22px; margin-top: 0; }
+html.phone .ai-apps .party-line > .btn, html.phone .ai-apps .party-inline > .btn,
+html.phone .ai-consent-actions > .btn { min-height: var(--ph-hit); flex: 1 1 auto; justify-content: center; }
+html.phone .ai-apps .input, html.phone .ai-consent .input { font-size: 16px; }

@@ -7,6 +7,7 @@ import { changeEmail, changePassword, checkServer, sameAccountAt } from "../api/
 import { isLocalAddress, loadSession, normaliseAddress, setServerAddress, updateUser } from "../api/session";
 import { clearNotices, loadMirror, loadNotices } from "../sync/mirror";
 import { useSyncStatus } from "../sync/runner";
+import { AiAppsCard } from "./AiApps";
 import { DungeonMasterCard } from "./PartiesDm";
 import "./party.css";
 
@@ -113,6 +114,7 @@ export function AccountPage() {
         </form>
       </Card>
       <DungeonMasterCard />
+      <AiAppsCard />
       {isTauri() && user && <SyncNotes userId={user.id} />}
       {/* A browser got the page from the server itself, so only the apps have an address to change. */}
       {isTauri() && (

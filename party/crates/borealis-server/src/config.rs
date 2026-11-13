@@ -196,11 +196,17 @@ pub enum OnUpgrade {
 pub struct FeatureSettings {
     /// Parties (`parties.rs`).
     pub parties: bool,
+    /// AI apps: personal API tokens and the OAuth server (`tokens.rs`, `oauth.rs`). `BOREALIS__FEATURES__AI=false`
+    /// turns them off: their routes answer 404 and no token is accepted.
+    pub ai: bool,
 }
 
 impl Default for FeatureSettings {
     fn default() -> Self {
-        Self { parties: true }
+        Self {
+            parties: true,
+            ai: true,
+        }
     }
 }
 
