@@ -230,10 +230,8 @@ async fn srd_checks(dm: &Client) {
         .unwrap();
     assert_eq!(warrior["id"], "ID_SRD521_MONSTER_GOBLIN_WARRIOR");
     assert_eq!(warrior["kind"], "monster");
-    assert_eq!(
-        (warrior["cr"].as_str(), warrior["xp"].as_u64()),
-        (Some("1/4"), Some(50))
-    );
+    assert_eq!(warrior["cr"].as_str(), Some("1/4"));
+    assert!(warrior.get("xp").is_none(), "no XP anywhere (D16)");
     assert_eq!(
         (warrior["packId"].as_str(), warrior["ruleset"].as_str()),
         (Some("srd-5.2.1-monsters"), Some("dnd2024"))
@@ -346,7 +344,14 @@ async fn srd_checks(dm: &Client) {
     );
     let block: borealis_content::MonsterData =
         serde_json::from_value(detail["monster"].clone()).unwrap();
-    assert!(block.validate().is_empty(), "{:?}", block.validate());
+    // The block is sent without XP (D16); upstream's validation asks for it with a CR, and nothing else may fail.
+    let issues: Vec<_> = block
+        .validate()
+        .into_iter()
+        .filter(|i| !i.field.starts_with("xp"))
+        .collect();
+    assert!(issues.is_empty(), "{issues:?}");
+    assert!(block.xp.is_none() && block.xp_lair.is_none(), "no XP (D16)");
     assert_eq!(detail["meta"], Value::Null);
     assert_eq!(
         (detail["kind"].as_str(), detail["companion"].clone()),
@@ -488,7 +493,14 @@ async fn import_checks(dm: &Client, other: &Client, data: &Path) {
         Value::Null,
     )
     .await;
-    assert_eq!(hag["meta"]["covenCr"], json!({ "cr": "5", "xp": 1800 }));
+    assert_eq!(hag["meta"]["covenCr"], json!({ "cr": "5" }));
+    assert!(
+        hag["monster"].is_object()
+            && hag["monster"].get("xp").is_none()
+            && hag["monster"].get("xp_lair").is_none(),
+        "the stat block has no XP (D16): {}",
+        hag["monster"]
+    );
     assert_eq!(
         hag["meta"]["variants"],
         json!([{ "name": "Hag Coven", "text": "Hags gather in covens of three." }])
@@ -662,12 +674,7 @@ async fn companion_checks(dm: &Client) {
         (owl["cr"].as_str(), owl["crValue"].as_f64()),
         (Some("0"), Some(0.0))
     );
-    let zero = borealis_content::Cr::parse("0").unwrap().standard_xp();
-    assert_eq!(
-        owl["xp"].as_u64(),
-        Some(u64::from(zero)),
-        "the standard XP of its CR"
-    );
+    assert!(owl.get("xp").is_none(), "no XP anywhere (D16)");
     assert_eq!(
         (
             owl["ac"].as_u64(),
@@ -686,7 +693,7 @@ async fn companion_checks(dm: &Client) {
     );
     let pack_id = owl["packId"].as_str().unwrap().to_string();
     let pony = item("Pony");
-    for field in ["cr", "crValue", "xp", "ac", "hp", "hpFormula"] {
+    for field in ["cr", "crValue", "ac", "hp", "hpFormula"] {
         assert_eq!(pony[field], Value::Null, "nothing filled in: {field}");
     }
     assert_eq!(
@@ -827,13 +834,7 @@ fn details_are_read_from_a_creature() {
     }));
     assert_eq!(m.environments, ["forest", "hill"]);
     assert_eq!(m.page, Some(12));
-    assert_eq!(
-        m.coven_cr,
-        Some(bestiary::CovenCr {
-            cr: "1".into(),
-            xp: Some(200)
-        })
-    );
+    assert_eq!(m.coven_cr, Some(bestiary::CovenCr { cr: "1".into() }));
     let fly = &m.alt_speeds["fly"];
     assert_eq!(
         (fly[0].feet, fly[1].feet, fly[1].condition.as_str()),

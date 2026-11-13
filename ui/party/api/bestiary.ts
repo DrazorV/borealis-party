@@ -37,7 +37,7 @@ export interface Coverage {
 export type CreatureKind = "monster" | "companion";
 
 export interface MonsterSummary {
-  id: string; name: string; kind: CreatureKind; cr: string | null; crValue: number | null; xp: number | null;
+  id: string; name: string; kind: CreatureKind; cr: string | null; crValue: number | null;
   type: string | null; tags: string[]; size: string[]; ac: number | null; hp: number | null; hpFormula: string | null; source: string; packId: string;
   packRev: string; ruleset: string; legendary: boolean; mythic: boolean; lair: boolean; environments: string[];
   page: number | null;

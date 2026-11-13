@@ -100,11 +100,8 @@ pub struct Mythic {
 /// The challenge rating of a creature as part of a coven.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CovenCr {
-    /// As printed (`"12"`).
+    /// As printed (`"12"`). No XP: there is none anywhere in Borealis Party (the user's D16).
     pub cr: String,
-    /// Its standard XP, when it is a CR.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub xp: Option<u32>,
 }
 
 /// One more speed of a mode, under a condition (`40 ft. (in wolf form)`).
@@ -193,10 +190,7 @@ pub fn meta_of(raw: &Value) -> Meta {
     let coven_cr = raw
         .pointer("/cr/coven")
         .and_then(Value::as_str)
-        .map(|cr| CovenCr {
-            cr: cr.to_string(),
-            xp: Cr::parse(cr).map(Cr::standard_xp),
-        });
+        .map(|cr| CovenCr { cr: cr.to_string() });
     let mut alt_speeds = BTreeMap::new();
     if let Some(modes) = raw.pointer("/speed/alternate").and_then(Value::as_object) {
         for (mode, list) in modes {
@@ -745,8 +739,6 @@ pub struct Summary {
     pub cr: Option<String>,
     /// Its value (`0.25` for `1/4`).
     pub cr_value: Option<f64>,
-    /// XP.
-    pub xp: Option<u32>,
     /// Creature type, lowercase; `None` for a companion that names none.
     #[serde(rename = "type")]
     pub creature_type: Option<String>,
@@ -846,7 +838,6 @@ fn summary(el: &Element, m: &MonsterData, pack: &PackInfo) -> Summary {
         kind: KIND_MONSTER,
         cr: m.cr.map(Cr::as_text),
         cr_value: m.cr.map(Cr::as_f64),
-        xp: m.xp,
         creature_type: Some(m.creature_type.as_str().to_string()),
         tags: m.tags.clone(),
         size: m.size.iter().map(|s| s.as_str().to_string()).collect(),
@@ -922,8 +913,7 @@ fn companion_sizes(text: Option<&str>) -> Vec<String> {
         .collect()
 }
 
-/// An Aurora `Companion` element in the list: only what its setters print; anything missing stays `None`. Its XP
-/// is the standard XP of its CR (Aurora prints none).
+/// An Aurora `Companion` element in the list: only what its setters print; anything missing stays `None`.
 fn companion_summary(el: &Element, pack: &PackInfo) -> Summary {
     let cr = setter(el, "challenge").and_then(Cr::parse);
     let (creature_type, tags) = companion_type(setter(el, "type"));
@@ -934,7 +924,6 @@ fn companion_summary(el: &Element, pack: &PackInfo) -> Summary {
         kind: KIND_COMPANION,
         cr: cr.map(Cr::as_text),
         cr_value: cr.map(Cr::as_f64),
-        xp: cr.map(Cr::standard_xp),
         creature_type,
         tags,
         size: companion_sizes(setter(el, "size")),
@@ -1551,7 +1540,10 @@ pub async fn monster(state: &AppState, owner: &str, id: &str) -> ApiResult<Optio
                 if el.ty == COMPANION {
                     return Some((None, Some(companion_detail(el, &hub)), maps_to));
                 }
-                let m = MonsterData::from_element(el).ok()?;
+                let mut m = MonsterData::from_element(el).ok()?;
+                // No XP anywhere (the user's D16): the block is sent without it.
+                m.xp = None;
+                m.xp_lair = None;
                 Some((Some(m), None, maps_to))
             }))
         })

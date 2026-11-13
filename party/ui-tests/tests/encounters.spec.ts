@@ -58,8 +58,8 @@ async function shot(page: Page, testInfo: TestInfo, name: string) {
 /** Part A's bestiary search, answered in the browser with SRD monsters while the server has none. */
 async function bestiary(page: Page) {
   const items = [
-    { id: GOBLIN, name: "Goblin Warrior", cr: "1/4", xp: 50, type: "fey", size: ["small"], ac: 15, hp: 10, source: "SRD 5.2.1 Monsters", ruleset: "dnd2024", legendary: false },
-    { id: OWLBEAR, name: "Owlbear", cr: "3", xp: 700, type: "monstrosity", size: ["large"], ac: 13, hp: 59, source: "SRD 5.2.1 Monsters", ruleset: "dnd2024", legendary: false },
+    { id: GOBLIN, name: "Goblin Warrior", cr: "1/4", type: "fey", size: ["small"], ac: 15, hp: 10, source: "SRD 5.2.1 Monsters", ruleset: "dnd2024", legendary: false },
+    { id: OWLBEAR, name: "Owlbear", cr: "3", type: "monstrosity", size: ["large"], ac: 13, hp: 59, source: "SRD 5.2.1 Monsters", ruleset: "dnd2024", legendary: false },
   ];
   await page.route("**/api/bestiary/search", async (route) => {
     const q = (route.request().postDataJSON() ?? {}) as { text?: string; types?: string[] };

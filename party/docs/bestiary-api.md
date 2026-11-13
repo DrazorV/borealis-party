@@ -9,7 +9,7 @@ user's choice on 2026-11-13):
 - `companion`: Aurora `Companion` elements (familiars, beast companions, steeds): their setters (`ac`, `hp`, `speed`,
   the six scores, `type`, `size`, `alignment`, `challenge`, ...) and linked `Companion Trait` / `Companion Action` /
   `Companion Reaction` elements, read the way upstream's companion tab reads them. Only what is printed: a missing
-  field is `null`, never filled in. XP is the standard XP of the printed CR (Aurora prints none).
+  field is `null`, never filled in. There is no XP anywhere (the user's D16): the CR is a printed stat and a filter.
 
 Server code: `party/crates/borealis-server/src/bestiary.rs`. Every route needs a signed-in account and reads that
 account's own content only; another account's ids answer the same 404 as unknown ones.
@@ -81,7 +81,6 @@ Response:
       "kind": "monster",
       "cr": "1/4",
       "crValue": 0.25,
-      "xp": 50,
       "type": "fey",
       "tags": ["goblinoid"],
       "size": ["small"],
@@ -102,7 +101,7 @@ Response:
 }
 ```
 
-- `cr`, `crValue`, `xp` are `null` for a creature without a CR; `ac` / `hp` are `null` when printed as a note (IM12a)
+- `cr`, `crValue` are `null` for a creature without a CR; `ac` / `hp` are `null` when printed as a note (IM12a)
   or, for a companion, not printed; `hpFormula` `null` for fixed HP. `type` is `null` only for a companion that
   prints none; `size` is empty then too.
 - A companion's `ruleset` is its own, else its pack's (when the pack targets one), else `any`.
@@ -235,7 +234,7 @@ Monster element, these are kept, keyed by account, element id and pack revision:
 | `environments` | `environment` | `["forest", "hill"]` |
 | `page` | `page` | number |
 | `mythic` | `mythicHeader` + `mythic` | `{ "intro": "text", "actions": [{ "name", "text" }] }` (the mythic trait itself is already one of the stat block's traits) |
-| `covenCr` | `cr.coven` | `{ "cr": "…", "xp": n }` |
+| `covenCr` | `cr.coven` | `{ "cr": "…" }` |
 | `altSpeeds` | `speed.alternate` | `{ "walk": [{ "feet": 40, "condition": "…" }], "fly": […] }` |
 | `variants` | `variant` | `[{ "name", "text" }]` (sidebars, as text) |
 | `reactionIntro` | `reactionHeader` | text |
