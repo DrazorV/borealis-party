@@ -20,6 +20,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 mod admin;
 mod auth;
 mod backend;
+mod backup;
 mod bestiary;
 mod combat;
 mod config;
@@ -298,7 +299,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             other => format!("{other:?}"),
         }
     );
-    let db = Db::open(&location).await.map_err(|e| e.to_string())?;
+    let db = Db::connect(&location).await.map_err(|e| e.to_string())?;
+    // Before any table changes: a failed backup stops here, with the database as it was.
+    backup::upgrade_with_backup(
+        &db,
+        &location,
+        &settings.backup,
+        dir,
+        env!("CARGO_PKG_VERSION"),
+    )
+    .await?;
+    backup::set_dir(Settings::resolve(dir, &settings.backup.dir));
     let sqlite_file = Settings::resolve(dir, &settings.sqlite.path);
     if let Some(Command::MigrateSqlite { from }) = &args.command {
         if !matches!(location, db::Location::Postgres(_)) {

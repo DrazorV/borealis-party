@@ -115,6 +115,8 @@ export interface ServerStats {
   email: boolean;
   /** Share codes: counts and bytes only (absent on servers before 0.1.5). */
   shares?: ShareStats;
+  /** The automatic backup before upgrades: the newest one's time (seconds) and size (absent before 0.3.1). */
+  backup?: { last: { at: number; bytes: number } | null; count: number } | null;
 }
 
 export interface ShareStats {

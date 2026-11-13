@@ -410,6 +410,8 @@ pub async fn stats(State(state): State<AppState>, _: Admin) -> ApiResult<Json<Va
         "email": state.mailer.is_some(),
         // Counts and bytes only (D40).
         "shares": crate::shares::stats(&state.db, &state.workspaces).await?,
+        // The newest automatic backup's time and size, and how many are kept (backup.rs). No contents.
+        "backup": crate::backup::status(),
     })))
 }
 

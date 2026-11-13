@@ -102,6 +102,20 @@ tls = "starttls"
 # repository of 5etools data your group is entitled to use. None by default. The admin page's setting wins over this.
 # default_5etools_url = ""
 
+[backup]
+# Before a new version first starts, or whenever database steps are waiting, the server writes a backup of the
+# database here (pg_dump --format=custom for PostgreSQL, VACUUM INTO for SQLite) and only then updates the tables.
+# If the backup fails, the server stops without touching the database. Relative paths are inside this folder.
+# Copy the files somewhere off this host as well.
+dir = "backups"
+# Automatic backups kept; older ones are deleted (only files the server wrote itself). 0 keeps every one.
+keep = 10
+# "auto", or "skip" to start without a backup in an emergency (set BOREALIS__BACKUP__ON_UPGRADE=skip once).
+on_upgrade = "auto"
+# The folder holding pg_dump and pg_restore, when they are not on the PATH. Their major version must be at least
+# the PostgreSQL server's.
+# postgres_bin = "/usr/lib/postgresql/18/bin"
+
 [features]
 # Emergency switches, for this file only (no admin page toggles them). A feature switched off answers 404 on all its
 # routes and keeps its data; switch it back on and restart.
@@ -132,10 +146,48 @@ pub struct Settings {
     pub initial_admin: InitialAdmin,
     /// Imports (`import_source.rs`).
     pub import: ImportSettings,
+    /// The backup before an upgrade (`backup.rs`).
+    pub backup: BackupSettings,
     /// Emergency kill switches.
     pub features: FeatureSettings,
     /// Logging.
     pub log: LogSettings,
+}
+
+/// `[backup]`: the backup taken before the tables are updated (`backup.rs`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct BackupSettings {
+    /// The folder, relative to the config folder unless absolute.
+    pub dir: PathBuf,
+    /// Automatic backups kept; 0 keeps all.
+    pub keep: usize,
+    /// Whether to take one.
+    pub on_upgrade: OnUpgrade,
+    /// Where `pg_dump` and `pg_restore` are, when not on the PATH.
+    pub postgres_bin: Option<PathBuf>,
+}
+
+impl Default for BackupSettings {
+    fn default() -> Self {
+        Self {
+            dir: PathBuf::from("backups"),
+            keep: 10,
+            on_upgrade: OnUpgrade::Auto,
+            postgres_bin: None,
+        }
+    }
+}
+
+/// `backup.on_upgrade`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OnUpgrade {
+    /// Back up before an upgrade, and refuse to upgrade when that fails.
+    #[default]
+    Auto,
+    /// Upgrade without a backup (emergencies only; logged loudly).
+    Skip,
 }
 
 /// `[features]`: emergency kill switches, read once at start.
