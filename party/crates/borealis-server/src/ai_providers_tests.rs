@@ -777,15 +777,21 @@ async fn tools_flow(db: Db, data: &Path) {
     // Reads need no confirmation.
     let (status, out) = tool(&dm, "character_list", json!({ "args": {} })).await;
     assert_eq!(status, StatusCode::OK, "{out}");
-    assert_eq!(out["result"]["parties"][0]["name"], "Forest Five");
+    assert_eq!(
+        out["result"]["partiesYouRun"][0]["name"], "Forest Five",
+        "{out}"
+    );
     let (status, out) = tool(
         &dm,
         "bestiary_search",
-        json!({ "args": { "text": "wolf", "limit": 50 } }),
+        json!({ "args": { "text": "wolf", "limit": 5 } }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{out}");
-    assert!(out["result"]["limit"].as_u64().unwrap() <= 20);
+    assert!(
+        out["result"]["items"].as_array().unwrap().len() <= 5,
+        "{out}"
+    );
     assert!(
         !out.to_string().contains("\"xp\""),
         "no XP anywhere (D16): {out}"
@@ -886,10 +892,17 @@ async fn tools_flow(db: Db, data: &Path) {
         .unwrap()
         .iter()
         .any(|t| t["name"] == "sim_start" && t["effect"] == "read"));
-    // Auto-apply covers drafts.
+    // Auto-apply covers drafts. The same call id again is the same write: the registry answers the first result.
     let (_, out) = tool(&dm, "encounter_create", draft).await;
     assert_eq!(out["ok"], true, "{out}");
-    // The simulation, homebrew and index tools answer in words until parts B, D and E land.
+    assert_eq!(
+        out["result"]["id"],
+        json!(enc),
+        "a retried write is done once: {out}"
+    );
+    let (_, list) = dm.get(&format!("/api/parties/{party}/encounters")).await;
+    assert_eq!(list["encounters"].as_array().unwrap().len(), 1, "{list}");
+    // The simulation, homebrew and index tools answer in words until parts D and E land.
     for (name, args) in [
         ("sim_start", json!({ "encounter_id": enc, "seed": 1 })),
         ("homebrew_validate", json!({ "xml": "<elements/>" })),
@@ -899,7 +912,7 @@ async fn tools_flow(db: Db, data: &Path) {
         ),
     ] {
         let (_, out) = tool(&dm, name, json!({ "args": args })).await;
-        assert_eq!(out["error"]["code"], "not_available", "{name}: {out}");
+        assert_eq!(out["error"]["code"], "unavailable", "{name}: {out}");
     }
     // Each purpose offers its own tools.
     let (_, t) = dm.get("/api/ai/tools?purpose=homebrew").await;
@@ -1139,7 +1152,10 @@ async fn check_upgraded(location: &Location, data: &Path) {
     let (_, out) = dm
         .post("/api/ai/tools/character_list", json!({ "args": {} }))
         .await;
-    assert_eq!(out["result"]["parties"][0]["name"], "Before 0.3.1");
+    assert_eq!(
+        out["result"]["partiesYouRun"][0]["name"], "Before 0.3.1",
+        "{out}"
+    );
     // A database that says the step ran but has no ai_providers table (another numbering) gets it again.
     for table in ["ai_usage", "ai_providers"] {
         sqlx::query(&format!("DROP TABLE {table}"))

@@ -97,17 +97,16 @@ Turns are `{ role: "user", text }`, `{ role: "assistant", text, toolCalls: [{ id
 Refusal codes: `ai_consent_required`, `ai_keys_unavailable`, `ai_not_set_up`, `ai_device_mode`, `ai_key_unreadable`,
 `ai_budget`, `ai_rate_limited`, `ai_confirm_required` and `ai_provider_error`.
 
-## For part B (`party-tools`), part D (homebrew and index) and part E (simulation)
+## Tools: the shared registry
 
-`ai_tools.rs` is a stand-in with part B's tool names and scopes. It needs only:
-- `all()`: each tool's `name`, its `description` (never quoting anyone's content), its argument JSON Schema, its
-  `scope`, its `effect` (`Read` / `Draft`), and the purposes that offer it;
-- `call(state, user, name, args) -> ApiResult<Value>`: run it as the account.
-
-When `party-tools` lands, `call` becomes `Registry::call(&ServerTools, &Caller { account, token: None, scopes,
-via: Via::Assistant }, name, args)` on `crate::mcp::registry()` with `ServerTools::new(state, user)`. `ai_assistant.rs`
-and the panel don't change. `sim_start`, `sim_auto`, `sim_report`, `homebrew_validate`, `homebrew_create`,
-`homebrew_update` and `index_build` answer `not_available` until then. The panel zips `index_build`'s
-`{ files: [{ path, content | contentBase64 }] }` for download (`ui/party/assistant/zip.ts`). Part D's
-homebrew editor can open the panel with `<AssistantButton purpose="homebrew" />`
-(`ui/party/assistant/AssistantButton.tsx`).
+`ai_tools.rs` is a thin adapter over part B's `party-tools` registry, the same one `/api/mcp` uses
+(`crate::mcp::registry()`). Each call is `registry.call(&ServerTools::new(state, user), &Caller { account, token: None,
+scopes: SCOPES, via: Via::Assistant }, name, args)`. The registry checks the scope, the arguments, 60 calls a minute
+per account, the heavy-call limit and a write's `requestId` (the assistant sends `ai-` plus the model's call id, so a
+retried write is done once), and records each call in the account's activity with `via: assistant`. A write
+(`spec.write`) is a draft the person confirms; everything else is a read. Each tool's purposes come from its name
+(encounter: `encounter_*`, `character_*`, `sim_*`, and the bestiary; homebrew: `homebrew_*` and the bestiary; index:
+`index_build` and the homebrew reads). Part D's and the simulator's tools come in through `external_specs()`; until
+they merge, their placeholders answer `unavailable` in words. The panel zips `index_build`'s files (or uses its
+`zip`) for download (`ui/party/assistant/zip.ts`). Part D's homebrew editor can open the panel with
+`<AssistantButton purpose="homebrew" />`.
