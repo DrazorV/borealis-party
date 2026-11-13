@@ -167,7 +167,8 @@ test("against the real server: a second DM tab follows within 1 s, and the playe
   const party = await api<{ id: string }>(request, dm.token, "POST", "/api/parties", { name: `Fight ${Math.random().toString(36).slice(2, 8)}` });
   const probe = await request.fetch(`/api/parties/${party.id}/combat`, { headers: { authorization: `Bearer ${dm.token}` } });
   const encounters = await request.fetch(`/api/parties/${party.id}/encounters`, { headers: { authorization: `Bearer ${dm.token}` } });
-  test.skip(probe.status() === 404 || encounters.status() === 404, "the test server has no combat or encounter routes (feat/combat-server)");
+  test.skip(probe.status() === 404 || encounters.status() === 404,
+    `the test server has no combat or encounter routes (feat/combat-server): combat ${probe.status()}, encounters ${encounters.status()}`);
   const made = await api<{ code: string }>(request, dm.token, "POST", `/api/parties/${party.id}/invites`, { kind: "code", uses: 1 });
   const hero = await api<{ summary: { id: string } }>(request, player.token, "POST", "/api/rpc/import_character", {
     fileName: "d5-hero.dnd5e", contentBase64: readFileSync(join(FIXTURES, "d5-hero.dnd5e")).toString("base64"),
