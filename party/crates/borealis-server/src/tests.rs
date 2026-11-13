@@ -26,6 +26,8 @@ mod jobs_tests;
 
 #[path = "content_tools_tests.rs"]
 mod content_tools_tests;
+#[path = "index_subs_tests.rs"]
+mod index_subs_tests;
 #[path = "live_tests.rs"]
 mod live_tests;
 #[path = "parties_tests.rs"]
