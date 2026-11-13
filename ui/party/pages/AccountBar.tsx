@@ -12,6 +12,7 @@ import { DesktopUpdate } from "./DesktopUpdate";
 import { OfflineBanner } from "./OfflineBanner";
 import { useSignOut } from "./SignOut";
 import { IMPORT_PATH } from "../import/door";
+import { LiveChip, YourTurnBanner } from "../combat/player/LiveChip";
 
 /**
  * A host element placed in upstream's page, in front of the element `before` selects, for as long as that element
@@ -170,6 +171,8 @@ export function AccountBar() {
           <div className={compact ? "party-bar party-bar-compact" : "party-bar"}>
             <span className="muted party-bar-name">{session.user.username}</span>
             <span className="spacer" />
+            {/* A live combat (plan D10, 4.4): on a phone too, beside the Sync chip. */}
+            <LiveChip />
             {chip && <SyncChip phone={compact} />}
             {!compact && (
               <>
@@ -181,6 +184,7 @@ export function AccountBar() {
               </>
             )}
           </div>
+          <YourTurnBanner />
           <OfflineBanner />
           <DesktopUpdate />
           {/* The Start page (the character list) in a browser: the app for this system. */}

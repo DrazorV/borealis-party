@@ -20,6 +20,8 @@ const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   // A NavLink the shell marks "not current" stays so (entry/shellRouter.tsx): one selected START sub-tab.
   "src/components/shell/Chrome.tsx": { "react-router": local("./entry/shellRouter.tsx") },
   "src/components/shell/MobileChrome.tsx": { "react-router": local("./entry/shellRouter.tsx") },
+  // The Play tab gains its Combat sub-tab while the open character's party has a live combat (combat/player/playTabs.tsx).
+  "src/pages/play/PlayPage.tsx": { "../../components": local("./combat/player/playTabs.tsx") },
   // Additional Content is the one import page: the Import section above upstream's packs (content/WithImport.tsx).
   "src/pages/content/ContentPage.tsx": { "./PacksTab": local("./content/WithImport.tsx") },
   // Installed packs by origin, with Remove all on each group (content/PackGroups.tsx).

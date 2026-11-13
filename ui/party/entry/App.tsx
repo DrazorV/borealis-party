@@ -4,6 +4,7 @@ import { App as UpstreamApp } from "../../src/App";
 import { AppShell } from "../../src/components/shell/AppShell";
 import { isTauri } from "../../src/lib/tauri";
 import { isOffline } from "../api/connectivity";
+import { startCombatWatch } from "../combat/player/store";
 import { watchOpened } from "../api/overrides/opened";
 import { fetchMe } from "../api/party";
 import { loadSession, updateUser } from "../api/session";
@@ -59,6 +60,8 @@ export function App() {
   useEffect(() => (offline ? undefined : startSync()), [offline]);
   // A browser's open character follows a device's edit the server took (the apps hear it in their sync's events).
   useEffect(() => (isTauri() ? undefined : followReplaced()), []);
+  // The player's live combats (plan 4.4): the Play tab's Combat sub-tab, the Live chip and "Your turn" follow them.
+  useEffect(() => (offline ? undefined : startCombatWatch()), [offline]);
   return (
     <>
       <AccountBar />

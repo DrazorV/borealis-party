@@ -1,0 +1,92 @@
+/*
+ * Combat (plan 4.4, 0.3.0): the shared pieces (health band, condition chips, roll-or-type, stat block) and the
+ * player's Combat sub-tab, the Live chip and the "Your turn" banner. Upstream's tokens, so it reads as the Aurora look
+ * extended. Phone first (384 px wide): everything wraps, nothing widens the page.
+ */
+
+/* Shared */
+.combat-band { display: inline-flex; flex: none; }
+.combat-conditions { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-1); min-width: 0; }
+.combat-conditions > li { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
+.combat-condition-left { font-variant-numeric: tabular-nums; opacity: 0.8; }
+.combat-condition-remove { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 0 var(--sp-1); min-width: 28px; min-height: 28px; }
+.combat-roll { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.combat-roll-buttons, .combat-roll-typed { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.combat-roll-typed .field-label { flex: 1 0 100%; }
+.combat-roll-typed .input { width: 6.5em; font-size: 16px; font-variant-numeric: tabular-nums; }
+.combat-sb { display: flex; flex-direction: column; gap: var(--sp-1); overflow-wrap: anywhere; }
+.combat-sb p { margin: 0; }
+.combat-sb-kind { opacity: 0.85; }
+.combat-sb-abilities { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-1); margin: var(--sp-2) 0; text-align: center; }
+.combat-sb-abilities > div { border: var(--border-w) solid var(--border); border-radius: var(--radius); padding: var(--sp-1); }
+.combat-sb-abilities dt { font-size: var(--fs-sm); font-weight: 700; letter-spacing: 0.04em; }
+.combat-sb-abilities dd { margin: 0; font-variant-numeric: tabular-nums; }
+.combat-sb-section h3 { margin: var(--sp-3) 0 var(--sp-1); font-size: var(--fs-md, 1rem); border-bottom: var(--border-w) solid var(--accent, var(--border)); }
+.combat-sb-section p { margin: 0 0 var(--sp-1); }
+@media (min-width: 640px) { .combat-sb-abilities { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+
+/* The player's Combat sub-tab */
+.combat-pane { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3); max-width: 760px; min-width: 0; }
+.combat-pane .card { padding: var(--sp-3); min-width: 0; }
+.combat-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
+.combat-head .spacer { flex: 1 1 auto; }
+.combat-round { font-weight: 700; font-variant-numeric: tabular-nums; text-transform: uppercase; letter-spacing: 0.04em; }
+.combat-party { overflow-wrap: anywhere; min-width: 0; }
+.combat-h { margin: 0 0 var(--sp-2); font-size: var(--fs-md, 1rem); }
+.combat-now { display: flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: var(--border-w) solid var(--border);
+  border-left: 4px solid var(--accent, var(--border)); border-radius: var(--radius); background: var(--surface-2, var(--surface)); min-width: 0; }
+.combat-now-label { font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.75; }
+.combat-now-label:empty { display: none; }
+.combat-now-name { font-size: 1.25rem; overflow-wrap: anywhere; min-width: 0; }
+.combat-now.yours { border-left-color: var(--warning, #b8860b); background: color-mix(in srgb, var(--warning, #b8860b) 18%, var(--surface, transparent)); }
+.combat-now.yours .combat-now-name { font-size: 1.5rem; }
+.combat-prompt { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 2px solid var(--warning, #b8860b); border-radius: var(--radius);
+  background: var(--surface-2, var(--surface)); min-width: 0; }
+.combat-prompt-q { margin: 0; font-weight: 700; font-size: 1.125rem; overflow-wrap: anywhere; }
+.combat-prompt-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.combat-me-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
+.combat-me-name { overflow-wrap: anywhere; min-width: 0; }
+.combat-me-hp { display: inline-flex; align-items: baseline; gap: 0.2em; font-variant-numeric: tabular-nums; }
+.combat-me-hp-now { font-size: 2rem; font-weight: 700; }
+.combat-me-temp { margin-left: var(--sp-2); color: var(--info, var(--accent, inherit)); font-weight: 600; }
+.combat-hp-bar { height: 6px; margin: var(--sp-2) 0; border-radius: 3px; background: var(--surface-2, var(--border)); overflow: hidden; }
+.combat-hp-bar > span { display: block; height: 100%; background: var(--success, var(--accent, #4a6fa5)); transition: width 0.3s ease; }
+.combat-hp-bar > span.bloodied { background: var(--warning, #b8860b); }
+.combat-hp-bar > span.down { background: var(--danger, #b22222); }
+.combat-me-conc { margin: 0 0 var(--sp-2); }
+.combat-death { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); padding-top: var(--sp-2); border-top: var(--border-w) solid var(--border); }
+.combat-death-pips { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.combat-death-state { margin: 0; font-weight: 700; }
+.combat-pips { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.combat-pips-label { font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.75; margin-right: var(--sp-1); }
+.combat-pip { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border); }
+.combat-pip.success.on { background: var(--success, #2e7d32); border-color: var(--success, #2e7d32); }
+.combat-pip.danger.on { background: var(--danger, #b22222); border-color: var(--danger, #b22222); }
+.combat-order { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.combat-row { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2); border: var(--border-w) solid var(--border); border-radius: var(--radius);
+  min-height: 48px; min-width: 0; }
+.combat-row.acting { border-color: var(--accent, var(--border)); border-left-width: 4px; background: var(--surface-2, var(--surface)); }
+.combat-row.mine .combat-row-name { font-weight: 700; }
+.combat-row.dead { opacity: 0.55; }
+.combat-init { flex: none; width: 2.25em; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
+.combat-row-main { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.combat-row-name { overflow-wrap: anywhere; }
+.combat-row-owner { font-size: var(--fs-sm); }
+.combat-row-side { flex: none; display: flex; align-items: center; gap: var(--sp-1); }
+.combat-log ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.combat-log li { overflow-wrap: anywhere; }
+.combat-offline { display: inline-flex; flex: none; }
+
+/* The Live chip and the "Your turn" banner (top chrome) */
+.combat-live-chip { display: inline-flex; align-items: center; gap: 0.4em; }
+.combat-live-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: combat-pulse 1.6s ease-in-out infinite; }
+@keyframes combat-pulse { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .combat-live-dot { animation: none; } }
+.combat-your-turn { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 48px; padding: var(--sp-2) var(--sp-3); border: 0;
+  border-bottom: 2px solid var(--warning, #b8860b); background: color-mix(in srgb, var(--warning, #b8860b) 22%, var(--surface, #fff)); color: inherit;
+  font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.combat-your-turn > span:not(.combat-your-turn-go) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.combat-your-turn-go { margin-left: auto; flex: none; text-decoration: underline; }
+html.phone .combat-pane .btn, html.phone .combat-your-turn { min-height: var(--ph-hit, 48px); }
+html.phone .combat-prompt-actions > .btn, html.phone .combat-roll-buttons > .btn { flex: 1 1 auto; justify-content: center; }
+html.phone .combat-row-side .btn { min-width: var(--ph-hit, 48px); }
