@@ -329,13 +329,14 @@ async function main() {
   const routed = await until("the 5etools import", async () => /smoke-homebrew\.json/.test(await smoke("text()")), 20000).catch(() => false);
   check("the .json goes to the 5etools-format import", !!routed);
   await screenshot("07-json-routed");
-  // The Import screen's 5etools card: the default source and the account's own, side by side.
+  // The Import screen's 5etools card: the account's own source, and the server's default only when its admin set one
+  // (this throwaway server sets none).
   const sources = await until("the 5etools sources on the Import screen", async () => {
     const s = await page(`[...document.querySelectorAll(".party-import-source h3")].map((h) => h.textContent.trim())`);
-    return s.length === 2 ? s : null;
+    return s.length ? s : null;
   }, 15000).catch(() => []);
-  check("the Import screen offers the default 5etools data and an own source",
-    sources.join("|") === "Default 5etools data|My own 5etools source", sources.join(" | "));
+  check("the Import screen offers an own 5etools source (and no default the server didn't set)",
+    sources.join("|") === "My own 5etools source", sources.join(" | "));
 
   // 5. A .borealis made by the server from the imported character: Android hands it over with the other files
   //    (`take_opened_files`, no bundle queue without device-link), so it opens upstream's Open bundle window, through
