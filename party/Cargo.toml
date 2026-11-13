@@ -7,6 +7,8 @@ resolver = "2"
 members = [
   "crates/borealis-server",
   "crates/party-encounter",
+  "crates/party-dice",
+  "crates/party-combat",
   "crates/tauri",
   "crates/tauri-macros",
   "crates/tauri-build",
