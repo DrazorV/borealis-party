@@ -33,6 +33,7 @@ mod import_source;
 mod index_subs;
 mod jobs;
 mod mail;
+mod mcp;
 mod migrate;
 mod net_guard;
 mod oauth;
@@ -47,6 +48,7 @@ mod sync;
 #[cfg(test)]
 mod tests;
 mod tokens;
+mod tools_backend;
 mod workspaces;
 
 use auth::{RateLimiter, Status};
@@ -164,6 +166,7 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
         .merge(bestiary::routes())
         .merge(tokens::routes())
         .merge(oauth::routes())
+        .merge(mcp::routes())
         .route("/api/{*rest}", any(no_such_route))
         .layer(DefaultBodyLimit::max(max_upload))
         .with_state(state)
@@ -175,7 +178,14 @@ fn app(state: AppState, web_dir: &std::path::Path, max_upload: usize) -> Router 
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
-        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            HeaderName::from_static("mcp-protocol-version"),
+            HeaderName::from_static("mcp-method"),
+            HeaderName::from_static("mcp-name"),
+        ])
+        .expose_headers([header::WWW_AUTHENTICATE]);
     api_routes(state, max_upload)
         .fallback_service(web)
         .layer(cors)

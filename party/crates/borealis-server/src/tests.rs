@@ -40,6 +40,8 @@ mod encounters_tests;
 mod index_subs_tests;
 #[path = "live_tests.rs"]
 mod live_tests;
+#[path = "mcp_tests.rs"]
+mod mcp_tests;
 #[path = "parties_tests.rs"]
 mod parties_tests;
 #[path = "shares_tests.rs"]

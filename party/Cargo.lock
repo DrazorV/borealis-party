@@ -882,6 +882,7 @@ dependencies = [
  "lettre",
  "party-combat",
  "party-encounter",
+ "party-tools",
  "rand 0.9.5",
  "serde",
  "serde_json",
@@ -3647,6 +3648,24 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "party-mcp-bridge"
+version = "0.3.0"
+dependencies = [
+ "reqwest",
+ "serde_json",
+]
+
+[[package]]
+name = "party-tools"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
 ]
 
 [[package]]

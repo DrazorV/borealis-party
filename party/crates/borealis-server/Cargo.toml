@@ -27,6 +27,8 @@ borealis-import-5etools = { path = "../../../crates/borealis-import-5etools" }
 party-encounter = { path = "../party-encounter" }
 # The combat engine (combat.rs): pure state, commands and the seeded die.
 party-combat = { path = "../party-combat" }
+# The AI tool registry, the dry-run simulator and the MCP envelope (mcp.rs, tools_backend.rs).
+party-tools = { path = "../party-tools" }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "fs", "set-header"] }
 tokio = { version = "1", features = ["full"] }

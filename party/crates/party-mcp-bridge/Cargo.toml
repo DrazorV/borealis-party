@@ -1,0 +1,20 @@
+[package]
+name = "party-mcp-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+description = "borealis-party-mcp: a stdio MCP bridge to a Borealis Party server's /api/mcp, for clients without remote MCP"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "borealis-party-mcp"
+path = "src/main.rs"
+
+[dependencies]
+# The same client features upstream's app uses (already in the lock).
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
+serde_json = "1"
