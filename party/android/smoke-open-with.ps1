@@ -6,7 +6,8 @@
 # starts a throwaway party server in WSL (SQLite in a new /tmp folder; never the production server), installs the APK
 # fresh, signs in through the app, and opens a .dnd5e, an Aurora .xml, a 5etools .json and a .borealis with the app
 # the way the Files app does. It checks the "Import <file> into smoke?" dialog and what each import did on the server,
-# then stops the server, removes its folder and the pushed files, clears the app's data and resets the screen size.
+# and opens the character's sheet preview at Android font sizes 1.0 and 1.15 (no text past a section or the footer,
+# text on its ruled lines). Then it stops the server, removes its folder and the pushed files, clears the app's data and resets the screen size.
 # Screenshots and results.json: target/party-android-smoke. Exit code 0 when every check passed.
 #
 # Needs: the Android SDK (ANDROID_HOME, or the default %LOCALAPPDATA%\Android\Sdk), Node 22 or later, WSL with a

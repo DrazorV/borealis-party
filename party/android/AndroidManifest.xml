@@ -22,5 +22,10 @@
                 <data android:mimeType="application/json" />
             </intent-filter>
         </activity>
+        <!-- Keeps the web view's text at 100 % whatever Android's font size is (java/app/borealis/party/FixedTextZoom.kt). -->
+        <provider
+            android:name="app.borealis.party.PartyStartup"
+            android:authorities="${applicationId}.party-startup"
+            android:exported="false" />
     </application>
 </manifest>

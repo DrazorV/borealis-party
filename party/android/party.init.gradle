@@ -1,6 +1,6 @@
 // Applied with `gradlew --init-script`, so upstream's Android project stays as it is.
 // Gives the party app its own identity, allows plain HTTP for servers on a home network, and adds the files it opens
-// (AndroidManifest.xml here).
+// (AndroidManifest.xml here), and keeps the web view's text size fixed (java/: FixedTextZoom.kt).
 def here = buildscript.sourceFile.parentFile
 
 allprojects { project ->
@@ -11,6 +11,7 @@ allprojects { project ->
         ["debug", "release"].each { type ->
             def set = project.android.sourceSets.getByName(type)
             set.res.srcDir(new File(here, "res"))
+            set.java.srcDir(new File(here, "java"))
             set.manifest.srcFile(new File(here, "AndroidManifest.xml"))
         }
         project.androidComponents.onVariants(project.androidComponents.selector().all()) { variant ->
