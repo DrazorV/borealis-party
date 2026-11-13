@@ -125,9 +125,10 @@ Build them with `Combatant::creature(id, label, hp, ac, init_bonus)` or
   - by default a controlled creature acts right after its owner, at the owner's initiative. Several follow in the
     order they were summoned (the DM can `swap_tie` two of them), and nesting works (a summon's summon);
   - `set_initiative_mode own`, with a roll in the app or typed, gives it its own place;
-  - a creature summoned by a PC is controlled by that PC's player and is always visible;
-  - a DM creature's pet has its own `visible` flag. It starts as its owner is (or as `visible` says), and
-    revealing an owner never reveals its pets;
+  - a creature summoned by a PC is controlled by that PC's player and is always visible (accepted by the user,
+    2026-11-13);
+  - a DM creature's pet has its own `visible` flag. It starts as its owner is (or as `visible` says; accepted by
+    the user, 2026-11-13), and revealing an owner never reveals its pets;
   - when an owner goes down or is dismissed, the DM gets an `owner_defeated` event for each of its creatures:
     keep, dismiss or own initiative. Nothing changes on its own, so a kept creature goes on acting in its dead
     owner's slot;
@@ -198,14 +199,16 @@ Build them with `Combatant::creature(id, label, hp, ac, init_bonus)` or
   - `waiting {round}`, `not_started`, `ended`.
 - `is_visible(&state, id, viewer)`: hidden or revealed, nothing in between (D20 b).
 - `player_view_of(&state, id)`: everything players may see of a revealed creature or a PC, as JSON. Revealed means
-  the full stat block: exact HP, conditions, effects, concentration, resources and legendary actions left.
+  the full stat block: exact HP, conditions, effects, concentration, resources, and the text of its abilities,
+  legendary actions included.
+  - **Legendary counts are DM only** (user, 2026-11-13): players never see live legendary-action counts, pool state
+    or Legendary Resistance counts, even for revealed creatures.
   - It leaves out `label`, `notes`, `tiebreak`, effect ids and follow-ups. It also leaves out every reference to a
     hidden combatant: a hidden effect source and that effect's duration (it counts the source's turns), and a
     hidden owner or link.
   - Part D narrows it per viewer where D6 says so: other players' PCs show a health band only.
-- **Known side channel:** when a legendary pool is shared between a revealed and a hidden creature, players see the
-  pool's count change when the hidden one uses it. A DM who wants that hidden should not share pools across
-  visibility.
+- **Shared-pool side channel: closed.** Because the counts are DM only, a hidden creature using a pool it shares with
+  a revealed one changes nothing players can see (tested in `a_hidden_pool_member_leaves_no_trace`).
 
 ### Export (D45)
 - `export_json(&combat)` writes `{format: "borealis-party-combat", schema_version: 1, state, log}`. It is DM only.

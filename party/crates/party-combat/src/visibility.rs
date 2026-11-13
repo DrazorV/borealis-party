@@ -1,7 +1,7 @@
 //! What each kind of viewer may see: the visible turn order and the turn pointer (D5). Part D's projection
 //! (`view_for`) builds on these; it must not read hidden combatants any other way.
 
-use crate::derive::{conditions, pool_of, turn_order};
+use crate::derive::{conditions, turn_order};
 use crate::model::{CombatState, CombatantId, Controller, Status};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -99,8 +99,9 @@ pub fn turn_pointer(state: &CombatState, viewer: ViewerKind) -> TurnPointer {
 }
 
 /// Everything players may see of one combatant, or `None` when it is hidden from them. A revealed creature shows
-/// its full stat block (D20 b): exact HP, conditions, effects, concentration, resources and legendary actions left.
-/// DM-only data is left out: the DM label, notes, tie-break, effect ids, follow-ups, and any reference to a hidden
+/// its full stat block (D20 b): exact HP, conditions, effects, concentration, resources, and its abilities' text,
+/// legendary actions included. DM-only data is left out: legendary-action and Legendary Resistance counts (never
+/// shown to players), the DM label, notes, tie-break, effect ids, follow-ups, and any reference to a hidden
 /// combatant (an effect's hidden source and its duration, which counts that source's turns; a hidden owner or
 /// link). Part D's projection may narrow it further per viewer (D6: other players' PCs show a health band only).
 #[must_use]
@@ -119,6 +120,8 @@ pub fn player_view_of(state: &CombatState, id: &CombatantId) -> Option<Value> {
         "ever_revealed",
         "visible",
         "removed",
+        // Legendary counts are DM only (user, 2026-11-13): a pool shared with a hidden creature would show its uses.
+        "legendary_resistance",
     ] {
         o.remove(dm_only);
     }
@@ -160,12 +163,6 @@ pub fn player_view_of(state: &CombatState, id: &CombatantId) -> Option<Value> {
         "conditions".into(),
         serde_json::to_value(conditions(state, id)).ok()?,
     );
-    if let Some((_, pool)) = pool_of(state, id) {
-        o.insert(
-            "legendary_actions".into(),
-            serde_json::json!({"remaining": pool.remaining, "max": pool.max}),
-        );
-    }
     Some(v)
 }
 

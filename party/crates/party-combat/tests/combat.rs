@@ -492,7 +492,7 @@ fn hidden_creatures_change_nothing_players_see() {
 }
 
 /// D20 b: a revealed creature shows its full stat block, so an exact HP change (inside a band) or a legendary
-/// action spent is a player event; DM-only fields still aren't.
+/// action spent is not: legendary counts are DM only (user, 2026-11-13). DM-only fields aren't shown either.
 #[test]
 fn revealed_means_the_full_stat_block() {
     let mut combat = Combat::new(Edition::Srd521, 1);
@@ -529,16 +529,37 @@ fn revealed_means_the_full_stat_block() {
             slot: None,
         },
     );
-    assert_eq!(ev.players, vec![PlayerEvent::Changed { id: id("d") }]);
+    // Legendary counts are DM only: spending one is no player event.
+    assert!(ev.players.is_empty(), "{:?}", ev.players);
+    dm(
+        &mut combat,
+        Command::AdjustLegendaryResistance {
+            id: id("d"),
+            delta: -1,
+        },
+    );
     let view = player_view_of(&combat.state, &id("d")).unwrap();
     assert_eq!(view["hp"]["current"], 255);
-    assert_eq!(
-        view["legendary_actions"],
-        serde_json::json!({"remaining": 2, "max": 3})
-    );
-    for dm_only in ["label", "notes", "tiebreak"] {
+    for dm_only in [
+        "label",
+        "notes",
+        "tiebreak",
+        "legendary_actions",
+        "legendary_resistance",
+    ] {
         assert!(view.get(dm_only).is_none(), "{dm_only} in {view}");
     }
+    // The legendary actions' text is still there.
+    let names: Vec<&str> = view["abilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["name"].as_str().unwrap())
+        .collect();
+    assert!(
+        names.contains(&"Tail Attack") && names.contains(&"Wing Attack"),
+        "{names:?}"
+    );
     let ev = dm(
         &mut combat,
         Command::SetNotes {
@@ -547,4 +568,79 @@ fn revealed_means_the_full_stat_block() {
         },
     );
     assert!(ev.players.is_empty());
+}
+
+/// The shared-pool side channel is closed: a hidden pool member using the pool changes nothing players can see.
+#[test]
+fn a_hidden_pool_member_leaves_no_trace() {
+    let mut combat = Combat::new(Edition::Srd521, 1);
+    add(&mut combat, adult_red_dragon("seen"));
+    add(&mut combat, adult_red_dragon("hidden"));
+    add(&mut combat, wizard_pc("w"));
+    for (k, v) in [("seen", 18), ("w", 12), ("hidden", 6)] {
+        init(&mut combat, k, v);
+    }
+    let pool = LegendaryPool {
+        max: 3,
+        remaining: 3,
+        members: vec![id("hidden"), id("seen")],
+    };
+    dm(
+        &mut combat,
+        Command::SetLegendaryPool {
+            pool: "pair".into(),
+            value: pool,
+        },
+    );
+    dm(&mut combat, Command::Reveal { id: id("seen") });
+    dm(&mut combat, Command::Start);
+    dm(&mut combat, Command::NextTurn); // the wizard's turn
+    let snapshot = |combat: &Combat| {
+        let views: Vec<_> = combat
+            .state
+            .combatants
+            .iter()
+            .map(|c| player_view_of(&combat.state, &c.id))
+            .collect();
+        serde_json::to_string(&(
+            views,
+            visible_order(&combat.state, ViewerKind::Player),
+            turn_pointer(&combat.state, ViewerKind::Player),
+        ))
+        .unwrap()
+    };
+    let before = snapshot(&combat);
+    for cmd in [
+        Command::UseAbility {
+            id: id("hidden"),
+            ability: "wing".into(),
+            slot: None,
+        },
+        Command::UseAbility {
+            id: id("hidden"),
+            ability: "tail".into(),
+            slot: None,
+        },
+        Command::AdjustLegendaryResistance {
+            id: id("hidden"),
+            delta: -1,
+        },
+        Command::AdjustLegendary {
+            pool: "pair".into(),
+            delta: 3,
+        },
+    ] {
+        let ev = dm(&mut combat, cmd.clone());
+        assert!(ev.players.is_empty(), "{cmd:?} -> {:?}", ev.players);
+        assert_eq!(
+            snapshot(&combat),
+            before,
+            "{cmd:?} changed what players see"
+        );
+    }
+    // The hidden member's turn refills the pool: no trace either.
+    let ev = dm(&mut combat, Command::NextTurn);
+    assert_eq!(current(&combat), "hidden");
+    assert!(ev.players.is_empty(), "{:?}", ev.players);
+    assert_eq!(snapshot(&combat), before);
 }
