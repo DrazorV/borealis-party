@@ -53,6 +53,10 @@ export interface WireCombatant {
   hp?: { current: number; max: number };
   ac?: number;
   statBlock?: StatBlock | null;
+  /** The engine's `player_view_of` (snake_case) for my own PC and for revealed creatures. */
+  view?: { owner_id?: string | null; hp?: { current: number; max: number; temp?: number }; ac?: number | null } & Record<string, unknown>;
+  /** An earlier draft's owner field. */
+  ownerId?: string | null;
 }
 
 export interface WirePrompt {
@@ -66,6 +70,12 @@ export interface WirePrompt {
 
 export interface WireMine {
   id: string;
+  /** My PC (`character`) or a creature it controls (`creature`). */
+  kind?: "character" | "creature";
+  /** C1: not in this fight. */
+  absent?: boolean;
+  /** My latest roll results, newest first (D21). */
+  rolls?: { id: string; name: string; total: number; natural?: number | null; source?: string; breakdown?: string }[];
   /** The PC's character (asked of the server; matched by party and name until it sends it). */
   characterId?: string | null;
   hp?: { current: number; max: number; temp: number };
@@ -119,8 +129,15 @@ export interface PlayerCombatant {
   concentration?: string | null;
   /** Revealed creatures only (D20 b). */
   statBlock?: StatBlock | null;
-  hp?: { current: number; max: number } | null;
+  /** Revealed creatures, and my own controlled creatures (theirs lives in the combat). */
+  hp?: { current: number; max: number; temp?: number } | null;
   ac?: number | null;
+  /** A controlled creature's owner (a combatant id): it acts right after it unless it has its own initiative. */
+  ownerId?: string | null;
+  /** In the visible turn order (my PC isn't before its initiative is in). */
+  inOrder: boolean;
+  /** My own: the latest roll, as words. */
+  lastRoll?: string | null;
 }
 
 /** Something the server asks of the signed-in player for their own PC. */
@@ -185,20 +202,35 @@ export function fromWire(w: WireProjection, ctx: WireContext = {}): PlayerCombat
   const minePcs = (w.order ?? []).filter((o) => o.mine || mineById.has(o.id));
   // Which character each own PC is: the server's, else the party's only one of this account's characters.
   const onlyCharacter = (ctx.myCharacters ?? []).length === 1 && minePcs.length === 1 ? ctx.myCharacters![0]! : null;
-  const combatants = (w.order ?? []).map((o): PlayerCombatant => {
+  const row = (o: WireCombatant, inOrder: boolean): PlayerCombatant => {
     const m = mineById.get(o.id);
     const mine = Boolean(o.mine || m);
+    const roll = m?.rolls?.[0];
     return {
-      id: o.id, kind: o.kind, name: o.name, mine,
-      ...(mine ? { characterId: m?.characterId ?? onlyCharacter } : {}),
+      id: o.id, kind: o.kind, name: o.name, mine, inOrder,
+      ...(mine && o.kind === "character" ? { characterId: m?.characterId ?? onlyCharacter } : {}),
       initiative: o.initiative ?? null,
       band: o.band ?? null,
       conditions: conditions(o),
       ...life(m?.life ?? o.life),
       concentration: m?.concentration ?? o.concentration ?? null,
-      ...(o.kind === "creature" ? { statBlock: o.statBlock ?? null, hp: o.hp ?? null, ac: o.ac ?? null } : {}),
+      ownerId: o.view?.owner_id ?? o.ownerId ?? null,
+      ...(o.kind === "creature" ? {
+        statBlock: o.statBlock ?? null,
+        hp: m?.hp ?? o.view?.hp ?? o.hp ?? null,
+        ac: o.view?.ac ?? o.ac ?? null,
+      } : {}),
+      ...(roll ? { lastRoll: `${roll.name} ${roll.total}${roll.breakdown ? ` (${roll.breakdown})` : ""}` } : {}),
     };
-  });
+  };
+  const inOrder = new Set((w.order ?? []).map((o) => o.id));
+  const combatants = [
+    ...(w.order ?? []).map((o) => row(o, true)),
+    // Mine that aren't in the order yet (no initiative): the PC before it rolls, or an absent one.
+    ...(w.me ?? []).filter((m) => !inOrder.has(m.id)).map((m) => row({
+      id: m.id, kind: m.kind ?? "character", name: "", mine: true, initiative: null, conditions: [], life: m.life, concentration: m.concentration,
+    }, false)),
+  ];
   const prompts: CombatPrompt[] = (w.me ?? []).flatMap((m) => [
     ...(m.prompts ?? []).map((p): CombatPrompt => {
       if (p.kind === "heal") return { id: p.id, kind: "heal", combatant: m.id, amount: p.amount };
@@ -319,7 +351,8 @@ export interface OpenCharacter { id: string; name?: string | null }
  * while the server doesn't say which character a PC is), else the first.
  */
 export function myCombatant(c: Pick<PlayerCombat, "combatants">, open?: OpenCharacter | string | null): PlayerCombatant | null {
-  const mine = c.combatants.filter((x) => x.mine);
+  // The player's PCs only; their summons and pets are theirs too, but no sheet is open for them.
+  const mine = c.combatants.filter((x) => x.mine && x.kind === "character");
   if (!open) return mine[0] ?? null;
   const { id, name } = typeof open === "string" ? { id: open, name: null } : open;
   return mine.find((x) => x.characterId === id) ?? (name ? mine.find((x) => !x.characterId && x.name === name) : undefined) ?? null;

@@ -54,6 +54,15 @@ export function projection(partyId: string, order: WireCombatant[], me: WireMine
 
 /** What an in-app roll comes to here: 10 plus the modifier. */
 const rolled = (r: D20Input) => (r.kind === "typed" ? r.total : 10 + r.modifier);
+const amountOf = (a: { kind: string; total?: number }) => (a.kind === "typed" ? a.total! : 4);
+
+/** One of my controlled creatures, as the server sends it: a row in the order and an entry in `me`. */
+export function myCreature(id: string, name: string, owner: string, hp: number, extra: Partial<WireCombatant> = {}): { row: WireCombatant; mine: WireMine } {
+  return {
+    row: { id, kind: "creature", name, mine: true, band: "unhurt", life: { state: "alive" }, conditions: [], exhaustion: 0, view: { owner_id: owner, hp: { current: hp, max: hp, temp: 0 }, ac: 12 }, ...extra },
+    mine: { id, kind: "creature", hp: { current: hp, max: hp, temp: 0 }, life: { state: "alive" }, concentration: null, concentrationChecks: [], prompts: [] },
+  };
+}
 
 export function fakeCombatServer(parties: FakeCombatServer["parties"]): FakeCombatServer {
   const listeners = new Set<{ onEvent: (e: ServerEvent) => void; onOpen: (again: boolean) => void }>();
@@ -89,14 +98,82 @@ export function fakeCombatServer(parties: FakeCombatServer["parties"]): FakeComb
         const entry = find(decodeURIComponent(m[1]!));
         if (!entry?.[1]) throw fail("not_found", NOT_FOUND);
         const [party, c] = entry;
-        const { requestId, args } = (body ?? {}) as { requestId?: string; args?: { id?: string; roll?: D20Input; promptId?: string; applied?: boolean } };
+        const { requestId, args } = (body ?? {}) as { requestId?: string; args?: {
+          id?: string; target?: string; roll?: D20Input & { d20?: D20Input }; promptId?: string; applied?: boolean; owner?: string; label?: string;
+          parts?: { amount: { kind: string; total?: number } }[]; amount?: number | { kind: string; total?: number }; condition?: string;
+          effect?: { target: string; conditions?: string[] }; combatant?: { public_name?: string; label: string; hp?: { current: number; max: number }; ac?: number | null };
+        } };
         if (!requestId || !args) throw fail("not_found", NOT_FOUND);
         if (server.refuseNext) { const no = server.refuseNext; server.refuseNext = null; throw fail(no.code, no.message); }
         if (server.done.has(requestId)) return { ...clone(c), replayed: true };
         server.done.add(requestId);
         const own = c.me.find((x) => x.id === args.id);
         const row = c.order.find((x) => x.id === args.id);
+        // My own controlled creature, the one a creature command names.
+        const creatureId = args.target ?? args.effect?.target ?? args.id;
+        const pet = c.me.find((x) => x.id === creatureId && x.kind === "creature");
+        const petRow = c.order.find((x) => x.id === creatureId);
+        const needPet = () => { if (!pet || !petRow) throw fail("not_found", NOT_FOUND); };
+        const hpOf = () => pet!.hp!;
+        const sync = () => { petRow!.view = { ...petRow!.view, hp: { ...hpOf() } }; };
         switch (m[2]) {
+          case "summon": {
+            const owner = c.me.find((x) => x.id === args.owner && (x.kind ?? "character") === "character");
+            if (!owner || !args.combatant) throw fail("not_found", NOT_FOUND);
+            const id = `s-${c.order.length + c.me.length}`;
+            const b = args.combatant;
+            const made = myCreature(id, b.public_name || b.label, owner.id, b.hp?.max ?? 0, { view: { owner_id: owner.id, hp: { current: b.hp?.current ?? 0, max: b.hp?.max ?? 0, temp: 0 }, ac: b.ac ?? null } });
+            // Right after its owner and the creatures already following it.
+            let at = c.order.findIndex((x) => x.id === owner.id);
+            while (at >= 0 && c.order[at + 1]?.view?.owner_id === owner.id) at++;
+            c.order.splice(at < 0 ? c.order.length : at + 1, 0, made.row);
+            c.me.push(made.mine);
+            break;
+          }
+          case "dismiss":
+            needPet();
+            c.order = c.order.filter((x) => x.id !== creatureId);
+            c.me = c.me.filter((x) => x.id !== creatureId);
+            break;
+          case "damage": {
+            needPet();
+            let n = (args.parts ?? []).reduce((t, p) => t + amountOf(p.amount), 0);
+            const hp = hpOf();
+            const fromTemp = Math.min(hp.temp, n);
+            hp.temp -= fromTemp; n -= fromTemp;
+            hp.current = Math.max(0, hp.current - n);
+            sync();
+            break;
+          }
+          case "heal": {
+            needPet();
+            const hp = hpOf();
+            hp.current = Math.min(hp.max, hp.current + amountOf(args.amount as { kind: string; total?: number }));
+            sync();
+            break;
+          }
+          case "grant_temp_hp": {
+            needPet();
+            const hp = hpOf();
+            hp.temp = Math.max(hp.temp, Number(args.amount));
+            sync();
+            break;
+          }
+          case "add_condition":
+            needPet();
+            petRow!.conditions = [...(petRow!.conditions ?? []), ...(args.effect?.conditions ?? [])];
+            break;
+          case "remove_condition":
+            needPet();
+            petRow!.conditions = (petRow!.conditions ?? []).filter((x) => (typeof x === "string" ? x : x.name) !== args.condition);
+            break;
+          case "roll": {
+            const who = c.me.find((x) => x.id === args.id);
+            if (!who) throw fail("not_found", NOT_FOUND);
+            const total = rolled(args.roll!.d20!);
+            who.rolls = [{ id: `r${(who.rolls ?? []).length}`, name: args.label ?? "Roll", total, source: args.roll!.d20!.kind, breakdown: `${total}` }, ...(who.rolls ?? [])].slice(0, 10);
+            break;
+          }
           case "set_initiative":
             if (!own || !row) throw fail("not_found", NOT_FOUND);
             row.initiative = rolled(args.roll!);

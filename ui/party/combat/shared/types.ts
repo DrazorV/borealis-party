@@ -6,7 +6,12 @@
  */
 export type D20Input =
   | { kind: "typed"; total: number; natural?: number }
-  | { kind: "roll"; modifier: number; mode?: "normal" | "advantage" | "disadvantage" };
+  | { kind: "app"; modifier: number; mode?: "normal" | "advantage" | "disadvantage" };
+
+/** Damage, healing or recharge dice the same way (`party-dice` `DiceInput`). */
+export type DiceInput =
+  | { kind: "typed"; total: number }
+  | { kind: "app"; notation: string; critical?: boolean };
 
 /** A creature's printed stat block: upstream's `MonsterData` (docs/monster-model.md), as far as the combat views read it. */
 export interface StatBlock {

@@ -8,7 +8,7 @@ export const MIN_TOTAL = -20;
 
 /**
  * Every roll can be made in the app OR typed from the table's dice (D21, D43). "Roll in app" asks the server's roller
- * (`{kind: "roll"}`); "Type my table roll" opens a number field and sends `{kind: "typed", total}`. A typed result is
+ * (`{kind: "app"}`); "Type my table roll" opens a number field and sends `{kind: "typed", total}`. A typed result is
  * the player's own dice and always wins. Shared by the player's Combat sub-tab and the DM tracker.
  */
 export function RollOrType({ label, modifier = 0, onRoll, busy, rollLabel = "Roll in app", typeLabel = "Type my table roll" }: {
@@ -35,7 +35,7 @@ export function RollOrType({ label, modifier = 0, onRoll, busy, rollLabel = "Rol
     <div className="combat-roll" role="group" aria-label={label}>
       {!typing ? (
         <div className="combat-roll-buttons">
-          <Button variant="primary" disabled={busy} onClick={() => void onRoll({ kind: "roll", modifier, mode: "normal" })}>{rollLabel}</Button>
+          <Button variant="primary" disabled={busy} onClick={() => void onRoll({ kind: "app", modifier, mode: "normal" })}>{rollLabel}</Button>
           <Button disabled={busy} onClick={() => setTyping(true)}>{typeLabel}</Button>
         </div>
       ) : (

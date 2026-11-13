@@ -6,7 +6,7 @@ import { App as UpstreamApp } from "../../../src/App";
 import { AppProviders } from "../../../src/AppProviders";
 import { MockApi } from "../../../src/api/mock";
 import { saveSession } from "../../api/session";
-import { creature, fakeCombatServer, mine, pc, projection, type FakeCombatServer } from "../../test/combatServer";
+import { creature, fakeCombatServer, mine, myCreature, pc, projection, type FakeCombatServer } from "../../test/combatServer";
 import { memoryStorage } from "../../test/memoryStorage";
 import { combatPlayerDeps, diffEvents, fromWire, resetCombatPlayer, type WireMine, type WireProjection } from "./api";
 
@@ -294,7 +294,7 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     const prompt = await screen.findByRole("alertdialog", { name: "Roll initiative" });
     await user.click(within(prompt).getByRole("button", { name: "Roll in app" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog", { name: "Roll initiative" })).toBeNull());
-    expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "roll", modifier: init, mode: "normal" } } });
+    expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "app", modifier: init, mode: "normal" } } });
   });
 
   it("death saves: the pips, a typed save and an in-app one, then stable", async () => {
@@ -315,7 +315,7 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "typed", total: 12 } } });
     await user.click(within(screen.getByRole("group", { name: "Death saves" })).getByRole("button", { name: "Roll in app" }));
     await waitFor(() => expect(screen.getByText("Stable")).toBeTruthy());
-    expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "roll", modifier: 0, mode: "normal" } } });
+    expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "app", modifier: 0, mode: "normal" } } });
     expect(within(screen.getByRole("group", { name: "Death saves" })).queryByRole("button", { name: "Roll in app" })).toBeNull();
   });
 
@@ -581,5 +581,180 @@ describe("the DM's own live combat", () => {
     list = [];
     await act(async () => { changed(); await Promise.resolve(); });
     await waitFor(() => expect(screen.queryByRole("button", { name: /^Live$/ })).toBeNull());
+  });
+});
+
+describe("summons and pets (controlled creatures)", () => {
+  /** My PC with a wolf following it, and another player's hawk following theirs. */
+  function withPets(extra: Partial<WireProjection> = {}): WireProjection {
+    const w = liveWith(extra);
+    const wolf = myCreature("wolf1", "Wolf", "me1", 11);
+    const hawk = creature("hawk1", "Hawk", { mine: false, band: "unhurt", view: { owner_id: "ally1" } });
+    w.order.splice(2, 0, wolf.row);
+    w.order.push(hawk);
+    w.me.push(wolf.mine);
+    return w;
+  }
+
+  it("follow their owner in the turn order; other players' are there but not mine to play", async () => {
+    server.combats.set("p1", withPets());
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    const rows = within(within(pane).getByRole("list", { name: "Turn order" })).getAllByRole("listitem").filter((li) => li.classList.contains("combat-row"));
+    expect(rows.map((r) => r.querySelector(".combat-row-name")!.textContent)).toEqual(["Goblin is acting now", "Seraphine (you)", "Wolf (yours)", "Bram", "Hawk"]);
+    expect(rows[2]!.classList.contains("follows")).toBe(true);
+    expect(within(rows[2]!).getByText("with Seraphine")).toBeTruthy();
+    expect(within(rows[4]!).getByText("with Bram")).toBeTruthy();
+    // Only my wolf gets controls.
+    const mineList = within(pane).getByRole("region", { name: "Your creatures" });
+    expect(within(mineList).getByRole("button", { name: "Damage Wolf" })).toBeTruthy();
+    expect(within(pane).queryByRole("button", { name: "Damage Hawk" })).toBeNull();
+    expect(within(mineList).getByRole("status", { name: "Wolf hit points: 11 of 11" })).toBeTruthy();
+  });
+
+  it("their turn is the player's turn too", async () => {
+    server.combats.set("p1", withPets());
+    await start();
+    renderPlay("/equipment");
+    await screen.findByRole("button", { name: /Live/ });
+    act(() => server.change("p1", (c) => ({ ...c, turn: { kind: "combatant", id: "wolf1", round: 2 } })));
+    expect(await screen.findByRole("button", { name: /Your turn · Wolf/ })).toBeTruthy();
+    expect(buzz).toHaveBeenCalledTimes(1);
+    await userEvent.setup().click(screen.getByRole("button", { name: /Your turn · Wolf/ }));
+    const pane = await screen.findByTestId("combat-pane");
+    expect(pane.querySelector(".combat-now.yours")!.textContent).toContain("Your turn: Wolf");
+  });
+
+  it("the player hurts, heals and gives temp HP to their own creature, straight to the combat (no Apply prompt)", async () => {
+    const user = userEvent.setup();
+    server.combats.set("p1", withPets());
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    const card = within(within(pane).getByRole("region", { name: "Your creatures" }).querySelector(".combat-creature") as HTMLElement);
+    await user.type(card.getByLabelText("Wolf amount"), "4");
+    await user.click(card.getByRole("button", { name: "Damage Wolf" }));
+    await waitFor(() => expect(card.getByRole("status", { name: "Wolf hit points: 7 of 11" })).toBeTruthy());
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/damage",
+      body: { args: { target: "wolf1", parts: [{ amount: { kind: "typed", total: 4 }, damage_type: null }], magical: false, apply_qualified: false, critical_hit: false } } });
+    expect(screen.queryByRole("alertdialog", { name: /Take/ })).toBeNull();
+    await user.type(card.getByLabelText("Wolf amount"), "2");
+    await user.click(card.getByRole("button", { name: "Heal Wolf" }));
+    await waitFor(() => expect(card.getByRole("status", { name: "Wolf hit points: 9 of 11" })).toBeTruthy());
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/heal", body: { args: { target: "wolf1", amount: { kind: "typed", total: 2 } } } });
+    await user.type(card.getByLabelText("Wolf amount"), "3");
+    await user.click(card.getByRole("button", { name: "Temporary hit points for Wolf" }));
+    await waitFor(() => expect(card.getByRole("status", { name: "Wolf hit points: 9 of 11, 3 temporary" })).toBeTruthy());
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/grant_temp_hp", body: { args: { id: "wolf1", amount: 3 } } });
+  });
+
+  it("conditions on, conditions off, a roll, and dismiss after an app dialog", async () => {
+    const user = userEvent.setup();
+    server.combats.set("p1", withPets());
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    const region = within(pane).getByRole("region", { name: "Your creatures" });
+    await user.selectOptions(within(region).getByRole("combobox", { name: "Add a condition to Wolf" }), "prone");
+    const chips = () => within(region).queryByRole("list", { name: "Wolf conditions" });
+    await waitFor(() => expect(chips()?.textContent).toContain("Prone"));
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/add_condition", body: { args: { effect: { name: "Prone", target: "wolf1", conditions: ["prone"] } } } });
+    await user.click(within(region).getByRole("button", { name: "Remove prone" }));
+    await waitFor(() => expect(chips()).toBeNull());
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/remove_condition", body: { args: { target: "wolf1", condition: "prone" } } });
+    await user.click(within(region).getByRole("button", { name: "Type my table roll" }));
+    await user.type(within(region).getByLabelText("Wolf d20 total"), "13");
+    await user.click(within(region).getByRole("button", { name: "Send" }));
+    expect(await within(region).findByText("Last roll: d20 13 (13)")).toBeTruthy();
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/roll", body: { args: { id: "wolf1", label: "d20", roll: { d20: { kind: "typed", total: 13 } } } } });
+    await user.click(within(region).getByRole("button", { name: "Dismiss Wolf" }));
+    const ask = await screen.findByRole("dialog", { name: /Dismiss Wolf\?/ });
+    await user.click(within(ask).getByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(within(pane).queryByText("Wolf (yours)")).toBeNull());
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/dismiss", body: { args: { id: "wolf1" } } });
+  });
+
+  it("Summon: a quick stat block, linked to the player's PC, right after it", async () => {
+    const user = userEvent.setup();
+    server.combats.set("p1", liveWith());
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    await user.click(within(pane).getByRole("button", { name: "Summon…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Summon" });
+    expect(within(dialog).getByRole("button", { name: "Summon" }).hasAttribute("disabled")).toBe(true);
+    await user.type(within(dialog).getByLabelText("Name"), "Spirit Bear");
+    await user.type(within(dialog).getByLabelText("Hit points"), "15");
+    await user.type(within(dialog).getByLabelText("Armor class"), "13");
+    await user.click(within(dialog).getByRole("button", { name: "Summon" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Summon" })).toBeNull());
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/summon", body: { args: {
+      owner: "me1", combatant: { kind: "creature", label: "Spirit Bear", public_name: "Spirit Bear", hp: { current: 15, max: 15, temp: 0 }, ac: 13 } } } });
+    const names = within(within(pane).getByRole("list", { name: "Turn order" })).getAllByRole("listitem")
+      .filter((li) => li.classList.contains("combat-row")).map((r) => r.querySelector(".combat-row-name")!.textContent);
+    expect(names.indexOf("Spirit Bear (yours)")).toBe(names.indexOf("Seraphine (you)") + 1);
+  });
+
+  it("Summon with its own initiative, typed from the table", async () => {
+    const user = userEvent.setup();
+    server.combats.set("p1", liveWith());
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    await user.click(within(pane).getByRole("button", { name: "Summon…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Summon" });
+    await user.type(within(dialog).getByLabelText("Name"), "Imp");
+    await user.type(within(dialog).getByLabelText("Hit points"), "10");
+    await user.click(within(dialog).getByRole("checkbox", { name: /Its own initiative/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Summon, type its roll" }));
+    await user.type(within(dialog).getByLabelText("Its initiative total"), "18");
+    await user.click(within(dialog).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Summon" })).toBeNull());
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/summon", body: { args: { owner: "me1", initiative: { kind: "typed", total: 18 } } } });
+  });
+});
+
+describe("the character's companions at the start of a fight", () => {
+  it("are offered as optional summons, and come in after the PC", async () => {
+    const user = userEvent.setup();
+    api = new MockApi({ aiChunkDelayMs: 1, rng: () => 0.5, sampleCompanions: true });
+    api.presetSettings({ showImportNotice: false });
+    hero = await seeded("Brannoc");
+    const snap = await api.getSnapshot({ characterId: hero });
+    const grip = snap.companions[0]!;
+    server = fakeCombatServer([{ id: "p1", name: "The Company", myCharacters: [hero] }]);
+    combatPlayerDeps.fetch = server.fetch;
+    combatPlayerDeps.events = server.listen;
+    const w = liveWith({ status: "setup", turn: { kind: "not_started" } });
+    w.order[1] = { ...w.order[1]!, name: snap.name };
+    server.combats.set("p1", w);
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    const offer = within(pane).getByRole("group", { name: "Bring your companions" });
+    const names = snap.companions.map((k) => k.name);
+    expect(offer.querySelector(".combat-prompt-q")!.textContent).toBe(`Bring ${names.slice(0, -1).join(", ")} and ${names.at(-1)} into the fight?`);
+    await user.click(within(offer).getByRole("button", { name: `Bring ${grip.name}` }));
+    // Brought: it's no longer offered; the others still are (each is optional).
+    await waitFor(() => expect(within(offer).queryByRole("button", { name: `Bring ${grip.name}` })).toBeNull());
+    expect(within(offer).getByRole("button", { name: `Bring ${names[1]}` })).toBeTruthy();
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/summon", body: { args: {
+      owner: "me1", combatant: { label: grip.name, hp: { current: grip.hp, max: grip.hp }, ac: grip.armorClass } } } });
+    const rowNames = [...pane.querySelectorAll(".combat-row-name")].map((e) => e.textContent);
+    expect(rowNames).toContain(`${grip.name} (yours)`);
+  });
+});
+
+describe("before the PC's initiative is in", () => {
+  it("the PC is in `me` only, and the sub-tab still shows with the initiative prompt", async () => {
+    const w = liveWith({ status: "setup", turn: { kind: "not_started" } });
+    w.order = w.order.filter((o) => o.id !== "me1");
+    server.combats.set("p1", w);
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    expect(within(pane).getByRole("alertdialog", { name: "Roll initiative" })).toBeTruthy();
+    expect(within(within(pane).getByRole("list", { name: "Turn order" })).queryByText(/\(you\)/)).toBeNull();
   });
 });

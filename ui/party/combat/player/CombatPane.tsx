@@ -13,6 +13,7 @@ import { ConditionChips } from "../shared/ConditionChips";
 import { HealthBand } from "../shared/HealthBand";
 import { RollOrType } from "../shared/RollOrType";
 import { StatBlockView } from "../shared/StatBlockView";
+import { Creatures } from "./Creatures";
 import { deviceDeps, playerWrite, useCombatStore } from "./store";
 import "../shared/combat.css";
 
@@ -27,7 +28,10 @@ function nowText(c: PlayerCombat, me: PlayerCombatant | null): string {
     case "combatant": {
       const id = c.pointer.id;
       if (me && id === me.id) return "Your turn";
-      return c.combatants.find((x) => x.id === id)?.name ?? "Someone";
+      const who = c.combatants.find((x) => x.id === id);
+      // One of my summons or pets: it's mine to play too.
+      if (who?.mine) return `Your turn: ${who.name}`;
+      return who?.name ?? "Someone";
     }
     case "enemy_turn": return "Enemy turn";
     case "waiting": return "Waiting for the DM";
@@ -208,22 +212,25 @@ function Initiative({ combat, me, modifier }: { combat: PlayerCombat; me: Player
 
 function Order({ combat, onStatBlock }: { combat: PlayerCombat; onStatBlock: (c: PlayerCombatant) => void }) {
   const acting = actingId(combat);
+  const names = new Map(combat.combatants.map((c) => [c.id, c.name || "you"]));
   return (
     <ol className="combat-order" aria-label="Turn order">
-      {combat.combatants.map((c) => {
+      {combat.combatants.filter((c) => c.inOrder).map((c) => {
         const now = c.id === acting;
+        const follows = c.ownerId && names.has(c.ownerId) && c.initiative == null;
         return (
-          <li key={c.id} className={`combat-row${now ? " acting" : ""}${c.mine ? " mine" : ""}${c.life === "dead" ? " dead" : ""}`}
+          <li key={c.id} className={`combat-row${now ? " acting" : ""}${c.mine ? " mine" : ""}${c.life === "dead" ? " dead" : ""}${follows ? " follows" : ""}`}
             aria-current={now ? "true" : undefined}>
             {/* Creatures' initiative isn't sent to players (combat-api.md): their place in the order says it. */}
             {c.kind === "creature" ? <span className="combat-init" aria-hidden="true" />
               : <span className="combat-init" aria-label={c.initiative == null ? "No initiative yet" : `Initiative ${c.initiative}`}>{c.initiative ?? "–"}</span>}
             <span className="combat-row-main">
               <span className="combat-row-name">
-                {c.name}{c.mine && <span className="muted"> (you)</span>}
+                {c.name}{c.mine && <span className="muted">{c.kind === "character" ? " (you)" : " (yours)"}</span>}
                 {c.concentration && !c.mine && <span className="muted combat-row-owner"> · concentrating</span>}
                 {now && <span className="sr-only"> is acting now</span>}
               </span>
+              {c.ownerId && names.has(c.ownerId) && <span className="muted combat-row-owner">with {names.get(c.ownerId)}</span>}
               <ConditionChips conditions={c.conditions} label={`${c.name} conditions`} />
             </span>
             <span className="combat-row-side">
@@ -256,7 +263,8 @@ function Log({ combat }: { combat: PlayerCombat }) {
 export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSnapshot }) {
   const me = myCombatant(combat, { id: s.id, name: s.name });
   const [sheet, setSheet] = useState<PlayerCombatant | null>(null);
-  const yours = me != null && actingId(combat) === me.id;
+  const acting = actingId(combat);
+  const yours = acting != null && combat.combatants.some((x) => x.mine && x.id === acting);
   const round = combat.pointer.kind === "combatant" || combat.pointer.kind === "enemy_turn" || combat.pointer.kind === "waiting" ? combat.pointer.round : combat.round;
   const conSave = s.abilities.save.con?.bonus ?? 0;
   return (
@@ -276,6 +284,7 @@ export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSn
         <PromptCard key={p.id} combat={combat} prompt={p} me={me} modifier={conSave} />
       ))}
       {me && <Me combat={combat} me={me} s={s} />}
+      {me && <Creatures combat={combat} me={me} s={s} />}
       <section className="card combat-order-card" aria-label="Initiative">
         <h2 className="combat-h">Turn order</h2>
         <Order combat={combat} onStatBlock={setSheet} />

@@ -99,3 +99,23 @@ html.phone .party-title-live .combat-live-chip { min-height: 40px; padding: 0 va
 }
 html.phone .combat-prompt-actions > .btn, html.phone .combat-roll-buttons > .btn { flex: 1 1 auto; justify-content: center; }
 html.phone .combat-row-side .btn { min-width: var(--ph-hit, 48px); }
+
+/* The player's controlled creatures (summons, pets, companions) */
+.combat-row.follows { margin-left: var(--sp-4); border-left-style: dashed; }
+.combat-row.follows.acting { border-left-style: solid; }
+.combat-creatures { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.combat-creature-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.combat-creature { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.combat-creature-hp-now { font-size: 1.5rem; font-weight: 700; }
+.combat-creature-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
+.combat-creature-row > .field-label { flex: 1 0 100%; }
+.combat-amount { width: 6em; font-size: 16px; font-variant-numeric: tabular-nums; }
+.combat-creature-row select.input { flex: 1 1 10em; min-width: 0; font-size: 16px; }
+.combat-last-roll { margin: 0; overflow-wrap: anywhere; }
+.combat-summon { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.combat-summon .input { font-size: 16px; }
+.combat-check { display: flex; align-items: center; gap: var(--sp-2); min-height: 44px; }
+html.phone .combat-creature-row > .btn, html.phone .combat-creature-row select.input { min-height: var(--ph-hit, 48px); }
+/* Upstream's phone inputs are full width; an amount box is a few digits beside its buttons. */
+.combat-creature-row input.input.combat-amount, html.phone .combat-creature-row input.input.combat-amount { flex: 0 0 6.5em; width: 6.5em; min-width: 0; }
+.combat-creature-row > .field-label { flex: 0 0 auto; }

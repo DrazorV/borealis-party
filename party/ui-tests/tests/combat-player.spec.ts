@@ -90,11 +90,26 @@ async function serveCombat(page: Page, state: { combat: Combat | null }) {
   await page.route(/\/api\/combats\/[^/]+\/[a-z_]+$/, async (route: Route) => {
     const c = state.combat!;
     const action = /\/([a-z_]+)$/.exec(route.request().url())![1];
-    const { args } = route.request().postDataJSON() as { requestId: string; args: { id?: string; roll?: { kind: string; total?: number; modifier?: number }; promptId?: string } };
+    const { args } = route.request().postDataJSON() as { requestId: string; args: {
+      id?: string; target?: string; owner?: string; roll?: { kind: string; total?: number; modifier?: number }; promptId?: string;
+      parts?: { amount: { total: number } }[]; combatant?: { public_name: string; hp: { current: number; max: number }; ac: number | null };
+    } };
     const row = c.order.find((x) => x.id === args.id);
     const own = c.me.find((x) => x.id === args.id);
     const total = args.roll?.kind === "typed" ? args.roll.total! : 10 + (args.roll?.modifier ?? 0);
     if (action === "set_initiative" && row) row.initiative = total;
+    if (action === "summon" && args.combatant) {
+      const id = `s${c.order.length}`;
+      const hp = { ...args.combatant.hp, temp: 0 };
+      const at = c.order.findIndex((x) => x.id === args.owner);
+      c.order.splice(at + 1, 0, { id, kind: "creature", name: args.combatant.public_name, mine: true, band: "unhurt", life: { state: "alive" }, conditions: [], exhaustion: 0,
+        view: { owner_id: args.owner, hp, ac: args.combatant.ac } });
+      c.me.push({ id, hp, life: { state: "alive" }, concentration: null, concentrationChecks: [], prompts: [], kind: "creature" } as Mine);
+    }
+    if (action === "damage") {
+      const pet = c.me.find((x) => x.id === args.target);
+      if (pet) pet.hp = { ...pet.hp, current: Math.max(0, pet.hp.current - (args.parts?.[0]?.amount.total ?? 0)) };
+    }
     if (action === "resolve_prompt") for (const m of c.me) m.prompts = m.prompts.filter((p) => p.id !== args.promptId);
     if (action === "death_save" && own && typeof own.life === "object") {
       const s = (own.life as { dying: { successes: number; failures: number } }).dying;
@@ -240,6 +255,50 @@ test.describe("The player's Combat sub-tab (0.3.0)", () => {
       await expect(saves.getByRole("img", { name: "Failures: 2 of 3" })).toBeVisible();
       await saves.getByRole("button", { name: "Roll in app" }).tap();
       await expect(saves.getByRole("img", { name: "Successes: 2 of 3" })).toBeVisible();
+    } finally {
+      await api(request, dm.token, "DELETE", `/api/parties/${party.id}`).catch(() => undefined);
+    }
+  });
+
+  test("summon: a quick stat block follows the PC in the turn order, and the player hurts it", async ({ page, signIn, request }, testInfo) => {
+    const dm = await login(request, "admin");
+    const player = await login(request, "player");
+    await api(request, dm.token, "POST", "/api/me/roles/dm", {});
+    const party = await api<{ id: string }>(request, dm.token, "POST", "/api/parties", { name: `Summons ${Math.random().toString(36).slice(2, 8)}` });
+    const made = await api<{ code: string }>(request, dm.token, "POST", `/api/parties/${party.id}/invites`, { kind: "code", uses: 1 });
+    const hero = await newCharacter(request, player.token);
+    await api(request, player.token, "POST", "/api/join", { code: made.code, characterId: hero.id });
+    const combat = projection(party.id, hero);
+    combat.status = "active";
+    combat.turn = { kind: "combatant", id: "cr1", round: 2 };
+    combat.order[1]!.initiative = 12;
+    const state = { combat: combat as Combat | null };
+    await serveCombat(page, state);
+    try {
+      await signIn("player");
+      await open(page, "/characters");
+      await page.getByRole("button", { name: /^Live$/ }).tap({ timeout: 15_000 });
+      const pane = page.getByTestId("combat-pane");
+      await pane.getByRole("button", { name: "Summon…" }).tap();
+      const dialog = page.getByRole("dialog", { name: "Summon" });
+      await settled(dialog);
+      await dialog.getByLabel("Name").fill("Spirit Bear");
+      await dialog.getByLabel("Hit points").fill("15");
+      await dialog.getByLabel("Armor class").fill("13");
+      const o1 = await measureOverflow(page);
+      expect(o1.page, "the page scrolls sideways").toBeLessThanOrEqual(0);
+      await shot(page, testInfo, "summon-dialog");
+      await dialog.getByRole("button", { name: "Summon", exact: true }).tap();
+      await expect(dialog).toHaveCount(0);
+      const rows = pane.getByRole("list", { name: "Turn order" }).locator(".combat-row .combat-row-name");
+      await expect(rows).toHaveText([/^Goblin Boss/, `${hero.name} (you)`, "Spirit Bear (yours)", "Bram the Steadfast"]);
+      const card = pane.getByRole("region", { name: "Your creatures" }).getByRole("listitem", { name: "Spirit Bear" });
+      await card.getByLabel("Spirit Bear amount").fill("4");
+      await card.getByRole("button", { name: "Damage Spirit Bear" }).tap();
+      await expect(card.getByRole("status", { name: "Spirit Bear hit points: 11 of 15" })).toBeVisible();
+      await card.scrollIntoViewIfNeeded();
+      await fits(page, testInfo, ".combat-pane");
+      await shot(page, testInfo, "summon-card");
     } finally {
       await api(request, dm.token, "DELETE", `/api/parties/${party.id}`).catch(() => undefined);
     }

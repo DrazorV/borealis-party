@@ -480,14 +480,15 @@ async function playerCombat(token) {
     await api(token, "load_character", { characterId: hero.id });
     await rest(token, "POST", `/api/parties/${party.id}/members`, { characterId: hero.id });
     const combat = {
-      id: "smoke-combat", partyId: party.id, seq: 1, status: "active", round: 2, pointer: { kind: "combatant", id: "cr1", round: 2 },
-      combatants: [
+      id: "smoke-combat", partyId: party.id, pseq: 1, status: "active", turn: { kind: "combatant", id: "cr1", round: 2 },
+      encounter: { id: "e1", publicName: "Smoke ambush" },
+      order: [
         { id: "cr1", kind: "creature", name: "Goblin", mine: false, initiative: 16, band: "bloodied", conditions: [{ name: "prone" }],
           statBlock: { size: ["small"], creature_type: "humanoid", ac: [{ value: 15 }], hp: { average: 7, formula: "2d6" }, actions: [{ name: "Scimitar", text: "Melee Weapon Attack: +4 to hit." }] } },
-        { id: "me", kind: "character", name: hero.name, mine: true, characterId: hero.id, initiative: 12, conditions: [], life: "alive" },
+        { id: "me", kind: "character", name: hero.name, mine: true, initiative: 12, conditions: [], life: { state: "alive" } },
       ],
-      prompts: [{ id: "pr1", kind: "damage", combatant: "me", amount: 2, damageType: "slashing" }],
-      log: [{ round: 1, text: "The Goblin appears.", at: Math.floor(Date.now() / 1000) }],
+      me: [{ id: "me", kind: "character", characterId: hero.id, hp: { current: 10, max: 10, temp: 0 }, life: { state: "alive" }, concentrationChecks: [],
+        prompts: [{ id: "pr1", kind: "damage", amount: 2, parts: [{ amount: 2, damage_type: "slashing" }], criticalHit: false }] }],
     };
     const shim = `(() => {
       const state = ${JSON.stringify(combat)};
@@ -497,12 +498,25 @@ async function playerCombat(token) {
       const json = (v) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
       window.fetch = (input, init) => {
         const url = String(typeof input === "string" ? input : input.url);
-        if (/\/api\/parties\/[^/]+\/combat$/.test(url)) return Promise.resolve(json({ combat: state }));
-        const m = /\/api\/combats\/[^/]+\/([a-z_]+)$/.exec(url);
+        // No regular expressions here: this is a template literal, where a backslash would be lost.
+        const path = url.replace(/^[a-z]+:[/][/][^/]+/, "").split("?")[0];
+        const parts = path.split("/");
+        if (parts[1] === "api" && parts[2] === "parties" && parts[4] === "combat" && parts.length === 5) return Promise.resolve(json({ combat: state.id }));
+        if (parts[1] === "api" && parts[2] === "combats" && parts.length === 4) return Promise.resolve(json(state));
+        const m = parts[1] === "api" && parts[2] === "combats" && parts.length === 5 ? [path, parts[4]] : null;
         if (m) {
           const body = JSON.parse((init && init.body) || "{}");
-          if (m[1] === "answer_prompt") state.prompts = state.prompts.filter((p) => p.id !== body.prompt);
-          state.seq += 1;
+          const args = body.args || {};
+          if (m[1] === "resolve_prompt") for (const me of state.me) me.prompts = (me.prompts || []).filter((p) => p.id !== args.promptId);
+          if (m[1] === "summon" && args.combatant) {
+            const id = "smoke-s" + state.order.length;
+            const hp = { current: args.combatant.hp.current, max: args.combatant.hp.max, temp: 0 };
+            const at = state.order.findIndex((x) => x.id === args.owner);
+            state.order.splice(at + 1, 0, { id, kind: "creature", name: args.combatant.public_name, mine: true, band: "unhurt", life: { state: "alive" },
+              conditions: [], exhaustion: 0, view: { owner_id: args.owner, hp, ac: args.combatant.ac } });
+            state.me.push({ id, kind: "creature", hp, life: { state: "alive" }, concentrationChecks: [], prompts: [] });
+          }
+          state.pseq += 1;
           return Promise.resolve(json(state));
         }
         return real(input, init);
@@ -536,6 +550,21 @@ async function playerCombat(token) {
     }, 15000, 500).catch(() => null);
     check("Apply takes the damage on the player's own character (D7 a)", after === Math.max(0, before - 2), `${before} -> ${after}`);
     await screenshot("13-combat-applied");
+
+    // A summon: a quick stat block, right after the PC in the turn order.
+    await smoke("click('Summon…')");
+    await until("the Summon dialog", () => page(`!!document.querySelector("#summon-name")`), 10000);
+    await smoke(`fill("#summon-name", "Spirit Wolf")`);
+    await smoke(`fill("#summon-hp", "11")`);
+    await smoke("clickIn('A quick stat block', 'Summon')");
+    const order = `[...document.querySelectorAll('[data-testid="combat-pane"] .combat-row .combat-row-name')].map((e) => e.textContent)`;
+    const summoned = await until("the summon in the turn order", async () => {
+      const names = await page(order);
+      const at = names.findIndex((n) => n.startsWith("Spirit Wolf"));
+      return at > 0 && names[at - 1].includes("(you)") ? names : null;
+    }, 15000, 500).catch(() => null);
+    check("Summon puts the creature right after the PC in the turn order", !!summoned, summoned ? summoned.join(" | ") : JSON.stringify(await page(order).catch(() => [])));
+    await screenshot("13b-combat-summon");
 
     // Background and back: what changed meanwhile (no event reached the app) shows when it returns.
     await page(`(() => { const s = window.__smokeCombat; s.pseq += 5; s.turn = { kind: "combatant", id: "me", round: 4 }; return true; })()`);

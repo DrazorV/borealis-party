@@ -15,6 +15,8 @@ import { expect, measureOverflow, test } from "./fixtures";
 const FIXTURES = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../e2e/fixtures");
 const CHARACTER = readFileSync(join(FIXTURES, "d5-hero.dnd5e")).toString("base64");
 const LIVE_MS = 2_500;
+/** "Constant updating": a DM change the player can see shows on the phone within a second, with no reload. */
+const QUICK_MS = 1_000;
 /** What only the DM knows about the hidden creature; none of it may reach the player. */
 const HIDDEN_LABEL = "Ambusher-DM-ONLY";
 const HIDDEN_PUBLIC = "Lurker";
@@ -120,6 +122,28 @@ test.describe("The player's Combat sub-tab with the combat server (0.3.0)", () =
         testInfo.annotations.push({ type: "live", description: `reveal shown in ${Date.now() - t0} ms` });
         expect(await page.content()).not.toContain(HIDDEN_LABEL);
         await expect(pane.getByRole("region", { name: "What happened" })).toContainText(`${HIDDEN_PUBLIC} appears.`);
+
+        // A DM change the player can see: on the phone within a second, with no reload.
+        const loads = (await page.evaluate(() => performance.getEntriesByType("navigation").length));
+        const t1 = Date.now();
+        await api(request, dm.token, "POST", `/api/combats/${started.id}/add_condition`, { requestId: rid(), args: { effect: { name: "Prone", target: hidden.id, conditions: ["prone"] } } });
+        await expect(order.locator(".combat-row").filter({ hasText: HIDDEN_PUBLIC }).getByText("Prone")).toBeVisible({ timeout: QUICK_MS });
+        testInfo.annotations.push({ type: "live", description: `DM condition shown in ${Date.now() - t1} ms` });
+        expect(await page.evaluate(() => performance.getEntriesByType("navigation").length), "no reload").toBe(loads);
+
+        // The player summons a creature; it follows the PC, and the DM sees it in the combat.
+        await pane.getByRole("button", { name: "Summon…" }).tap();
+        const dialog = page.getByRole("dialog", { name: "Summon" });
+        await dialog.getByLabel("Name").fill("Spirit Wolf");
+        await dialog.getByLabel("Hit points").fill("11");
+        await dialog.getByRole("button", { name: "Summon", exact: true }).tap();
+        await expect(dialog).toHaveCount(0);
+        const names = order.locator(".combat-row .combat-row-name");
+        await expect(names.filter({ hasText: "Spirit Wolf (yours)" })).toHaveCount(1);
+        const all = await names.allTextContents();
+        expect(all.findIndex((n) => n.startsWith("Spirit Wolf")), "right after the PC").toBe(all.findIndex((n) => n.includes("(you)")) + 1);
+        const dmView = await api<DmView>(request, dm.token, "GET", `/api/combats/${started.id}`);
+        expect(dmView.state.combatants.some((c) => c.kind === "creature" && c.visible)).toBeTruthy();
 
         // The DM hits the PC: the player applies it to their own character.
         const before = (await api<{ play: { hitPoints: { current: number } } }>(request, player.token, "POST", "/api/rpc/get_snapshot", { characterId: hero })).play.hitPoints.current;
