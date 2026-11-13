@@ -155,6 +155,8 @@ async fn forward(
     }
     let mut check = tokio::time::interval(SESSION_CHECK);
     check.tick().await;
+    let mut ping = tokio::time::interval(crate::hub::PING_EVERY);
+    ping.tick().await;
     loop {
         let event = tokio::select! {
             biased;
@@ -169,6 +171,7 @@ async fn forward(
                 Err(broadcast::error::RecvError::Lagged(_)) => resync(&state, &party),
                 Err(broadcast::error::RecvError::Closed) => break,
             },
+            _ = ping.tick() => data(crate::hub::PING_EVENT, &json!({})),
             _ = check.tick() => match state.db.session_user(&session).await {
                 Ok(Some(_)) | Err(_) => continue,
                 Ok(None) => break,

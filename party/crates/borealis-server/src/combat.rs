@@ -24,7 +24,7 @@ use axum::Json;
 use borealis_content::MonsterData;
 use party_combat::combat::{Author, JournalEntry};
 use party_combat::party_dice::{self, DieRoller, SeededDie};
-use party_combat::visibility::player_view_of;
+use party_combat::visibility::{is_visible, player_view_of};
 use party_combat::{
     apply, derive, export_json, import_json, turn_pointer, visible_order, Ability, AbilityKind,
     Actor, Boundary, Combat, CombatError, CombatState, Combatant, CombatantId, Command, Controller,
@@ -40,7 +40,7 @@ use sqlx::{AnyConnection, Row};
 use crate::auth::User;
 use crate::db::{now, Db};
 use crate::error::ApiError;
-use crate::hub::{Card, COMBAT_EVENT};
+use crate::hub::{Card, CardCache, COMBAT_EVENT};
 use crate::AppState;
 
 /// Writes one account may make a minute, over all its combats.
@@ -80,6 +80,8 @@ enum Fail {
     Refused(String),
     /// A refusal about a player's own PC, with a fixed message.
     Player(StatusCode, &'static str),
+    /// A refusal with its own code, for the client to act on.
+    Coded(StatusCode, &'static str, String),
     /// The write raced another one: try again.
     Retry,
 }
@@ -124,6 +126,9 @@ impl IntoResponse for Fail {
                 } else {
                     "conflict"
                 };
+                (status, Json(json!({ "code": code, "message": message }))).into_response()
+            }
+            Self::Coded(status, code, message) => {
                 (status, Json(json!({ "code": code, "message": message }))).into_response()
             }
             Self::Retry => {
@@ -386,7 +391,7 @@ async fn load(conn: &mut AnyConnection, id: &str) -> Res<Option<Loaded>> {
 }
 
 /// Who a combatant id is.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct Member {
     /// `creature` or `character`.
     pub kind: String,
@@ -395,11 +400,15 @@ pub(crate) struct Member {
     pub character: Option<String>,
     /// The stat block a creature fights with (overrides applied).
     pub block: Option<Value>,
+    /// The element's name (a creature's; DM only).
+    pub name: Option<String>,
+    /// Where a creature came from: `encounter`, `copy`, `element`, `companion:<key>` or `summon`.
+    pub origin: Option<String>,
 }
 
 async fn roster(conn: &mut AnyConnection, combat: &str) -> Res<BTreeMap<String, Member>> {
     let rows = sqlx::query(
-        "SELECT id, kind, encounter_creature_id, owner_id, character_id, statblock_json
+        "SELECT id, kind, encounter_creature_id, owner_id, character_id, statblock_json, name, origin
          FROM combatants WHERE combat_id = $1",
     )
     .bind(combat)
@@ -419,6 +428,8 @@ async fn roster(conn: &mut AnyConnection, combat: &str) -> Res<BTreeMap<String, 
                     .map(|b| serde_json::from_str(&b))
                     .transpose()
                     .map_err(internal)?,
+                name: row.try_get(6)?,
+                origin: row.try_get(7)?,
             },
         );
     }
@@ -432,8 +443,9 @@ async fn insert_member(
     m: &Member,
 ) -> sqlx::Result<()> {
     sqlx::query(
-        "INSERT INTO combatants (combat_id, id, kind, encounter_creature_id, owner_id, character_id, statblock_json, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        "INSERT INTO combatants (combat_id, id, kind, encounter_creature_id, owner_id, character_id, statblock_json,
+            name, origin, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
     )
     .bind(combat)
     .bind(id)
@@ -442,6 +454,8 @@ async fn insert_member(
     .bind(m.owner.clone())
     .bind(m.character.clone())
     .bind(m.block.as_ref().map(Value::to_string))
+    .bind(m.name.clone())
+    .bind(m.origin.clone())
     .bind(now())
     .execute(&mut *conn)
     .await?;
@@ -482,6 +496,52 @@ async fn open_prompts(conn: &mut AnyConnection, combat: &str) -> Res<Vec<Prompt>
             })
         })
         .collect()
+}
+
+/// Each PC's sheet companions that aren't in the fight yet (from the roster cards, which the owner's play keeps
+/// current; no workspace is opened).
+fn offers_of(
+    state: &CombatState,
+    roster: &BTreeMap<String, Member>,
+    cards: &CardCache,
+) -> Vec<Value> {
+    let mut out = Vec::new();
+    for (cid, m) in roster {
+        let (Some(owner), Some(character)) = (&m.owner, &m.character) else {
+            continue;
+        };
+        if m.kind != "character"
+            || state
+                .combatant(&CombatantId::new(cid.clone()))
+                .is_none_or(|c| c.removed)
+        {
+            continue;
+        }
+        let Some(card) = cards.get(owner, character) else {
+            continue;
+        };
+        for comp in card.companions {
+            let origin = format!("companion:{cid}:{}", comp.key);
+            let summoned = roster.iter().any(|(id, r)| {
+                r.origin.as_deref() == Some(origin.as_str())
+                    && state
+                        .combatant(&CombatantId::new(id.clone()))
+                        .is_some_and(|c| !c.removed)
+            });
+            if !summoned {
+                out.push(json!({
+                    "pc": cid,
+                    "key": comp.key,
+                    "name": comp.name,
+                    "hp": comp.hp,
+                    "ac": comp.ac,
+                    "initiative": comp.initiative,
+                    "elementId": comp.element_id,
+                }));
+            }
+        }
+    }
+    out
 }
 
 /// Roll results players see for their own PCs and creatures: the newest [`ROLLS_KEPT`] per combatant.
@@ -545,11 +605,14 @@ pub(crate) struct Snapshot {
     pub prompts: Vec<Prompt>,
     /// The latest roll results for players' PCs and their creatures (D21), newest first.
     pub rolls: Vec<Prompt>,
+    /// Companions on the PCs' sheets not yet in the fight: `{ pc, key, name, hp, ac, initiative, elementId }`.
+    pub offers: Vec<Value>,
     pub encounter: Option<EncounterInfo>,
 }
 
-async fn snapshot(conn: &mut AnyConnection, combat: Loaded) -> Res<Snapshot> {
+async fn snapshot(conn: &mut AnyConnection, combat: Loaded, cards: &CardCache) -> Res<Snapshot> {
     let roster = roster(conn, &combat.id).await?;
+    let offers = offers_of(&combat.state, &roster, cards);
     let prompts = open_prompts(conn, &combat.id).await?;
     let rolls = recent_rolls(conn, &combat.id).await?;
     let encounter = encounter_info(conn, combat.encounter.as_deref()).await?;
@@ -558,6 +621,7 @@ async fn snapshot(conn: &mut AnyConnection, combat: Loaded) -> Res<Snapshot> {
         roster,
         prompts,
         rolls,
+        offers,
         encounter,
     })
 }
@@ -667,6 +731,13 @@ fn player_view(snap: &Snapshot, account: &str, characters: &BTreeSet<String>) ->
             if c.is_character() {
                 entry["initiative"] = json!(c.initiative);
             }
+            if let Some(owner) = c
+                .owner_id
+                .as_ref()
+                .filter(|o| is_visible(s, o, ViewerKind::Player))
+            {
+                entry["ownerId"] = json!(owner.0);
+            }
             // D6: another player's PC is a band, never its numbers. Everything else seen is in full (D20 b).
             if own || !c.is_character() {
                 if let Some(Value::Object(mut v)) = player_view_of(s, &c.id) {
@@ -693,6 +764,15 @@ fn player_view(snap: &Snapshot, account: &str, characters: &BTreeSet<String>) ->
             json!({
                 "id": c.id.0,
                 "kind": if c.is_character() { "character" } else { "creature" },
+                "characterId": if c.is_character() {
+                    snap.roster.get(&c.id.0).and_then(|m| m.character.clone())
+                } else {
+                    None
+                },
+                "offers": snap.offers.iter()
+                    .filter(|o| o["pc"] == c.id.0.as_str())
+                    .map(|o| json!({ "key": o["key"], "name": o["name"], "hp": o["hp"], "ac": o["ac"], "initiative": o["initiative"] }))
+                    .collect::<Vec<_>>(),
                 "hp": { "current": c.hp.current, "max": c.hp.max, "temp": c.hp.temp },
                 "life": c.life,
                 "absent": c.absent,
@@ -745,7 +825,12 @@ fn dm_view(
         } else {
             creatures.insert(
                 id.clone(),
-                json!({ "encounterCreatureId": m.encounter_creature, "statBlock": m.block }),
+                json!({
+                    "encounterCreatureId": m.encounter_creature,
+                    "statBlock": m.block,
+                    "name": m.name,
+                    "origin": m.origin.as_deref().map(|o| o.split(':').next().unwrap_or(o)),
+                }),
             );
         }
     }
@@ -760,6 +845,7 @@ fn dm_view(
         "creatures": creatures,
         "characters": characters,
         "prompts": snap.prompts.iter().map(|p| prompt_json(p, true)).collect::<Vec<_>>(),
+        "offers": snap.offers,
         "undo": undo,
         "startedAt": snap.combat.started_at,
         "endedAt": snap.combat.ended_at,
@@ -878,7 +964,7 @@ async fn view_now(state: &AppState, user: &User, combat: &str) -> Res<Value> {
         Some(Role::Dm) => {
             let undo = undo_labels(&mut conn, combat).await?;
             let members = members_of(&mut conn, &party).await?;
-            let snap = snapshot(&mut conn, loaded).await?;
+            let snap = snapshot(&mut conn, loaded, &state.hub.cards).await?;
             let hub = Arc::clone(&state.hub);
             let online = move |u: &str| hub.online(u);
             Ok(view_for(
@@ -893,7 +979,7 @@ async fn view_now(state: &AppState, user: &User, combat: &str) -> Res<Value> {
         Some(Role::Player) => {
             let characters = my_characters(&mut conn, &user.id, &party).await?;
             let pseq = pseq_of(&mut conn, combat, &user.id).await?;
-            let snap = snapshot(&mut conn, loaded).await?;
+            let snap = snapshot(&mut conn, loaded, &state.hub.cards).await?;
             let mut view = view_for(
                 &Viewer::Player {
                     account: &user.id,
@@ -968,6 +1054,8 @@ struct Write {
     op: Op,
     /// The PC a player acts on (checked again in the transaction).
     own: Option<String>,
+    /// Who a summoned creature is (its stat block, name and origin), when the command is a summon.
+    summoned: Option<Member>,
 }
 
 /// What a write did.
@@ -1001,6 +1089,9 @@ fn author_str(a: Author) -> &'static str {
 /// An engine refusal, as the writer may see it. Players get a fixed message about their own PC, or the 404.
 fn refusal(writer: Writer, e: &CombatError) -> Fail {
     if writer != Writer::Player {
+        if matches!(e, CombatError::UndoWouldRevertPlayer) {
+            return Fail::Coded(StatusCode::CONFLICT, "undo_player", e.to_string());
+        }
         return Fail::Refused(e.to_string());
     }
     match e {
@@ -1211,16 +1302,12 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
             let mut die = c.die;
             let o = apply(&c.state, &actor, cmd, &mut die).map_err(|e| refusal(w.writer, &e))?;
             if let Command::Summon { combatant, .. } = cmd.as_ref() {
-                out.new_members.push((
-                    combatant.id.0.clone(),
-                    Member {
-                        kind: "creature".into(),
-                        encounter_creature: None,
-                        owner: None,
-                        character: None,
-                        block: None,
-                    },
-                ));
+                let member = w.summoned.clone().unwrap_or_else(|| Member {
+                    kind: "creature".into(),
+                    origin: Some("summon".into()),
+                    ..Member::default()
+                });
+                out.new_members.push((combatant.id.0.clone(), member));
             }
             out.state = o.state;
             out.die = die;
@@ -1283,7 +1370,8 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
             roll,
             hidden,
         } => {
-            let (base_member, label, public, visible) = match source {
+            // A fresh template at full HP: a copy of a creature in this fight, or of an encounter creature.
+            let (base_member, template) = match source {
                 AddSource::Copy(id) => {
                     let m = roster_now
                         .get(id)
@@ -1294,10 +1382,36 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
                     let x = c
                         .state
                         .combatant(&CombatantId::new(id.clone()))
+                        .filter(|x| !x.is_character())
                         .ok_or_else(|| {
                             ApiError::Invalid("There is no such creature in this combat.".into())
                         })?;
-                    (m.clone(), x.label.clone(), x.public_name.clone(), x.visible)
+                    let mut t = creature_of(
+                        "template",
+                        &x.label,
+                        &x.public_name,
+                        &Fighter {
+                            block: m.block.clone().unwrap_or(Value::Null),
+                            data: m
+                                .block
+                                .as_ref()
+                                .and_then(|b| serde_json::from_value(b.clone()).ok()),
+                            name: m.name.clone().unwrap_or_default(),
+                            ac: x.ac,
+                            average: x.hp.max.max(1),
+                            formula: None,
+                        },
+                        x.hp.max.max(1),
+                    );
+                    t.ac = x.ac;
+                    t.initiative_bonus = x.initiative_bonus;
+                    t.visible = x.visible;
+                    t.owner_id.clone_from(&x.owner_id);
+                    t.controller = x.controller.clone();
+                    t.initiative_mode = x.initiative_mode;
+                    let mut member = m.clone();
+                    member.origin = Some("copy".into());
+                    (member, t)
                 }
                 AddSource::Encounter(id) => {
                     let enc = c
@@ -1305,7 +1419,8 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
                         .clone()
                         .ok_or_else(|| ApiError::Invalid("This combat has no encounter.".into()))?;
                     let row = sqlx::query(
-                        "SELECT dm_label, public_name, statblock_json, overrides_json, visibility
+                        "SELECT dm_label, public_name, statblock_json, overrides_json, visibility, owner_creature_id,
+                            init_mode
                          FROM encounter_creatures WHERE id = $1 AND encounter_id = $2",
                     )
                     .bind(id)
@@ -1315,44 +1430,60 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
                     .ok_or_else(|| {
                         ApiError::Invalid("There is no such creature in the encounter.".into())
                     })?;
-                    let block = fighting_block(
-                        &row.try_get::<String, _>(2)?,
-                        &row.try_get::<String, _>(3)?,
-                    )?;
+                    let f =
+                        fighter_of(&row.try_get::<String, _>(2)?, &row.try_get::<String, _>(3)?)?;
+                    let label: String = row.try_get(0)?;
+                    let public: String = row.try_get(1)?;
                     let visibility: String = row.try_get(4)?;
+                    let owner: Option<String> = row.try_get(5)?;
+                    let mode: String = row.try_get(6)?;
+                    let mut t = creature_of("template", &label, &public, &f, f.average);
+                    t.visible = visibility != "hidden";
+                    // Its owner: the first combatant made from the owning encounter creature, if it's in the fight.
+                    if let Some(owner) = owner {
+                        t.owner_id = roster_now
+                            .iter()
+                            .find(|(cid, m)| {
+                                m.encounter_creature.as_deref() == Some(owner.as_str())
+                                    && c.state
+                                        .combatant(&CombatantId::new((*cid).clone()))
+                                        .is_some_and(|x| !x.removed)
+                            })
+                            .map(|(cid, _)| CombatantId::new(cid.clone()));
+                        if t.owner_id.is_some() {
+                            t.initiative_mode =
+                                serde_json::from_value(json!(mode)).unwrap_or_default();
+                        }
+                    }
                     (
                         Member {
                             kind: "creature".into(),
                             encounter_creature: Some(id.clone()),
-                            owner: None,
-                            character: None,
-                            block: Some(block),
+                            block: Some(f.block.clone()),
+                            name: Some(f.name.clone()),
+                            origin: Some("encounter".into()),
+                            ..Member::default()
                         },
-                        row.try_get(0)?,
-                        row.try_get(1)?,
-                        visibility != "hidden",
+                        t,
                     )
                 }
             };
-            let data: Option<MonsterData> = base_member
-                .block
-                .as_ref()
-                .and_then(|b| serde_json::from_value(b.clone()).ok());
-            let visible = hidden.map_or(visible, |h| !h);
+            let visible = hidden.map_or(template.visible, |h| !h);
             let mut st = c.state.clone();
             let mut die = c.die;
             let taken: BTreeSet<String> = st.combatants.iter().map(|x| x.label.clone()).collect();
             let mut n = 2;
             for _ in 0..*count {
-                let mut name = format!("{label} {n}");
+                let mut name = format!("{} {n}", template.label);
                 while taken.contains(&name) {
                     n += 1;
-                    name = format!("{label} {n}");
+                    name = format!("{} {n}", template.label);
                 }
                 n += 1;
                 let id = new_id();
-                let hp = data.as_ref().map_or(1, average_hp);
-                let mut x = build_creature(&id, &name, &public, data.as_ref(), hp);
+                let mut x = template.clone();
+                x.id = CombatantId::new(id.clone());
+                x.label = name;
                 x.visible = visible;
                 x.ever_revealed = visible;
                 let cmd = Command::AddCombatant {
@@ -1625,7 +1756,7 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
         ended_at: if ended { Some(at) } else { c.ended_at },
         ..c
     };
-    let snap = snapshot(&mut tx, after).await?;
+    let snap = snapshot(&mut tx, after, &state.hub.cards).await?;
     let tell = refresh_views(&mut tx, &snap).await?;
     let dm = dm_id(&mut tx, &party).await?;
     tx.commit().await?;
@@ -1711,6 +1842,7 @@ pub(crate) async fn card_changed(state: &AppState, party: &str, owner: &str, cha
         expect: None,
         op: Op::Sync { id, hp },
         own: None,
+        summoned: None,
     };
     let _lock = combat_lock(&combat).await;
     match run_write(state, &combat, &w).await {
@@ -1730,32 +1862,68 @@ fn card_hp(card: &Card) -> Option<Hp> {
 
 // Building combatants from stat blocks.
 
-/// The stat block a creature fights with: the snapshot's block with the encounter's overrides applied, without XP
-/// (D16) and without the snapshot's name and source, which are the DM's. A monster's is a `MonsterData` (snake_case),
-/// a companion's its `CompanionDetail` (camelCase, D17 b). A plain `MonsterData` (an older copy) is read as it is.
-fn fighting_block(statblock: &str, overrides: &str) -> Res<Value> {
+/// A creature as its encounter copy has it: the block it fights with (overrides applied, no XP), its typed
+/// `MonsterData` when it is a monster, its name (the DM's), and its HP and AC.
+pub(crate) struct Fighter {
+    pub block: Value,
+    pub data: Option<MonsterData>,
+    pub name: String,
+    pub ac: Option<i32>,
+    pub average: i32,
+    pub formula: Option<String>,
+}
+
+/// The fighter of an encounter creature's copy (`statblock_json`) with its overrides.
+fn fighter_of(statblock: &str, overrides: &str) -> Res<Fighter> {
     let overrides: party_encounter::overrides::Overrides =
         serde_json::from_str(overrides).unwrap_or_default();
-    if let Ok(snapshot) = serde_json::from_str::<party_encounter::creature::Snapshot>(statblock) {
-        return Ok(snapshot.block(&overrides));
-    }
-    let data: MonsterData =
+    let snap: party_encounter::creature::Snapshot =
         serde_json::from_str(statblock).map_err(|e| internal(format!("a stat block: {e}")))?;
-    serde_json::to_value(overrides.apply(&data)).map_err(|e| internal(e).into())
+    Ok(fighter_from_snapshot(&snap, &overrides))
 }
 
-fn average_hp(d: &MonsterData) -> i32 {
-    d.hp.as_ref()
-        .map_or(1, |h| i32::try_from(h.average).unwrap_or(1))
-        .max(1)
+fn fighter_from_snapshot(
+    snap: &party_encounter::creature::Snapshot,
+    overrides: &party_encounter::overrides::Overrides,
+) -> Fighter {
+    let formula = overrides
+        .hp
+        .as_ref()
+        .and_then(|h| h.value.formula.clone())
+        .or_else(|| snap.printed().hp.and_then(|h| h.formula));
+    Fighter {
+        block: snap.block(overrides),
+        data: snap.data.as_ref().map(|d| overrides.apply(d)),
+        name: snap.name.clone(),
+        ac: snap.ac(overrides).and_then(|a| i32::try_from(a).ok()),
+        average: i32::try_from(snap.average_hp(overrides))
+            .unwrap_or(1)
+            .max(1),
+        formula,
+    }
 }
 
-fn rolled_hp(d: &MonsterData, die: &mut dyn DieRoller) -> Option<i32> {
-    let formula = d.hp.as_ref()?.formula.as_ref()?;
-    let expr = party_dice::try_parse_notation(formula)?;
+fn rolled_hp(formula: Option<&str>, die: &mut dyn DieRoller) -> Option<i32> {
+    let expr = party_dice::try_parse_notation(formula?)?;
     party_dice::roll_expr(&expr, die, &party_dice::RollOptions::default())
         .ok()
         .map(|r| r.total.max(1))
+}
+
+/// A creature combatant for a fighter: its block's numbers and abilities, the AC it prints (none for a thin
+/// companion block), and `hp`.
+fn creature_of(id: &str, label: &str, public: &str, f: &Fighter, hp: i32) -> Combatant {
+    let mut c = build_creature(id, label, public, f.data.as_ref(), hp);
+    if f.data.is_none() {
+        c.ac = f.ac;
+        c.initiative_bonus = f
+            .block
+            .get("initiative")
+            .and_then(Value::as_i64)
+            .and_then(|n| i32::try_from(n).ok())
+            .unwrap_or(0);
+    }
+    c
 }
 
 fn slug(text: &str) -> String {
@@ -2011,7 +2179,7 @@ async fn insert_combat(state: &AppState, user: &User, new: NewCombat) -> Res<Str
     let loaded = load(&mut tx, &id)
         .await?
         .ok_or_else(|| internal("the new combat is gone"))?;
-    let snap = snapshot(&mut tx, loaded).await?;
+    let snap = snapshot(&mut tx, loaded, &state.hub.cards).await?;
     refresh_views(&mut tx, &snap).await?;
     tx.commit().await?;
     set_live(&new.party, true);
@@ -2085,49 +2253,68 @@ async fn start_inner(state: &AppState, user: &User, encounter: &str, body: &[u8]
     let mut members = Vec::new();
     let mut by_creature: HashMap<String, String> = HashMap::new();
     let rows = sqlx::query(
-        "SELECT id, dm_label, public_name, statblock_json, overrides_json, hp_mode, hp_max, visibility
+        "SELECT id, dm_label, public_name, statblock_json, overrides_json, hp_mode, hp_max, visibility,
+            owner_creature_id, init_mode
          FROM encounter_creatures WHERE encounter_id = $1 ORDER BY sort, id",
     )
     .bind(encounter)
     .fetch_all(&mut *conn)
     .await?;
+    // Owners before the creatures they control: the engine refuses an owner that isn't in the fight yet.
+    let mut rows: Vec<_> = rows.into_iter().collect();
+    rows.sort_by_key(|r| r.try_get::<Option<String>, _>(8).ok().flatten().is_some());
     for row in rows {
         let ec: String = row.try_get(0)?;
         let label: String = row.try_get(1)?;
         let public: String = row.try_get(2)?;
-        let block = fighting_block(&row.try_get::<String, _>(3)?, &row.try_get::<String, _>(4)?)?;
+        let f = fighter_of(&row.try_get::<String, _>(3)?, &row.try_get::<String, _>(4)?)?;
         let own_mode: String = row.try_get(5)?;
         let fixed: Option<i64> = row.try_get(6)?;
         let visibility: String = row.try_get(7)?;
-        let data: Option<MonsterData> = serde_json::from_value(block.clone()).ok();
+        let owner: Option<String> = row.try_get(8)?;
+        let init_mode: String = row.try_get(9)?;
         let hp = match (own_mode.as_str(), fixed) {
             ("fixed", Some(n)) => i32::try_from(n).unwrap_or(1).max(1),
-            _ if hp_mode == "rolled" => data
-                .as_ref()
-                .and_then(|d| rolled_hp(d, &mut die))
-                .unwrap_or_else(|| data.as_ref().map_or(1, average_hp)),
-            _ => data.as_ref().map_or(1, average_hp),
+            _ if hp_mode == "rolled" => {
+                rolled_hp(f.formula.as_deref(), &mut die).unwrap_or(f.average)
+            }
+            _ => f.average,
         };
         let id = new_id();
-        let mut c = build_creature(&id, &label, &public, data.as_ref(), hp);
+        let mut c = creature_of(&id, &label, &public, &f, hp);
         let visible = visibility != "hidden";
         c.visible = visible;
         c.ever_revealed = visible;
-        c.tiebreak = st.next_tiebreak;
-        st.next_tiebreak += 1;
-        if let Some(pool) = legendary_pool(&id, data.as_ref()) {
+        if let Some(owner_id) = owner.as_ref().and_then(|o| by_creature.get(o)) {
+            c.owner_id = Some(CombatantId::new(owner_id.clone()));
+            c.initiative_mode = serde_json::from_value(json!(init_mode)).unwrap_or_default();
+        }
+        let cmd = Command::AddCombatant {
+            combatant: Box::new(c),
+            roll_initiative: false,
+        };
+        match apply(&st, &Actor::System, &cmd, &mut die) {
+            Ok(o) => st = o.state,
+            Err(e) => {
+                return Err(ApiError::Invalid(format!(
+                    "A creature of the encounter can't join the fight: {e}"
+                ))
+                .into())
+            }
+        }
+        if let Some(pool) = legendary_pool(&id, f.data.as_ref()) {
             st.legendary_pools.insert(id.clone(), pool);
         }
-        st.combatants.push(c);
         by_creature.insert(ec.clone(), id.clone());
         members.push((
             id,
             Member {
                 kind: "creature".into(),
                 encounter_creature: Some(ec),
-                owner: None,
-                character: None,
-                block: Some(block),
+                block: Some(f.block),
+                name: Some(f.name),
+                origin: Some("encounter".into()),
+                ..Member::default()
             },
         ));
     }
@@ -2163,9 +2350,13 @@ async fn start_inner(state: &AppState, user: &User, encounter: &str, body: &[u8]
             c.life = Life::Alive;
         }
         c.speed.walk = u32::try_from(stats.speed).unwrap_or(30);
-        c.tiebreak = st.next_tiebreak;
-        st.next_tiebreak += 1;
-        st.combatants.push(c);
+        let cmd = Command::AddCombatant {
+            combatant: Box::new(c),
+            roll_initiative: false,
+        };
+        st = apply(&st, &Actor::System, &cmd, &mut die)
+            .map_err(|e| internal(format!("a PC: {e}")))?
+            .state;
         members.push((
             id,
             Member {
@@ -2174,6 +2365,7 @@ async fn start_inner(state: &AppState, user: &User, encounter: &str, body: &[u8]
                 owner: Some(owner),
                 character: Some(character),
                 block: None,
+                ..Member::default()
             },
         ));
     }
@@ -2535,6 +2727,7 @@ async fn act_inner(
         Some(Value::Object(m)) => m.clone(),
         Some(_) => return Err(bad("args must be an object.")),
     };
+    let mut summoned = None;
     let (op, own) = match action {
         "undo" => (
             Op::Undo {
@@ -2607,11 +2800,15 @@ async fn act_inner(
             }
             let mut cmd = args.clone();
             cmd.insert("command".into(), json!(tag));
-            // A summoned creature gets a random id from the server, whatever the client sent.
+            // A summoned creature is built by the server, with a random id, whatever the client sent.
             if tag == "summon" {
-                if let Some(Value::Object(c)) = cmd.get_mut("combatant") {
-                    c.insert("id".into(), json!(new_id()));
+                let (combatant, member) =
+                    summon_combatant(state, user, combat, &args, player).await?;
+                cmd.insert("combatant".into(), combatant);
+                for key in ["companion", "elementId", "copyOf", "name", "publicName"] {
+                    cmd.remove(key);
                 }
+                summoned = Some(member);
             }
             let command: Command = serde_json::from_value(Value::Object(cmd)).map_err(|e| {
                 if player {
@@ -2630,17 +2827,189 @@ async fn act_inner(
         expect,
         op,
         own,
+        summoned,
     };
     let done = {
         let _lock = combat_lock(combat).await;
         run_write(state, combat, &w).await?
     };
-    announce(state, combat, &done).await;
-    let mut view = view_now(state, user, combat).await?;
     if done.replayed {
+        // The answer the first try got (D44: a retry never applies twice and sees what the write did).
+        let kept: Option<String> = sqlx::query(
+            "SELECT response_json FROM combat_requests WHERE scope = $1 AND account_id = $2 AND request_id = $3",
+        )
+        .bind(combat)
+        .bind(&user.id)
+        .bind(&w.request)
+        .fetch_optional(state.db.pool())
+        .await?
+        .and_then(|r| r.try_get::<Option<String>, _>(0).ok().flatten());
+        let mut view = match kept.and_then(|k| serde_json::from_str::<Value>(&k).ok()) {
+            Some(v) => v,
+            None => view_now(state, user, combat).await?,
+        };
         view["replayed"] = json!(true);
+        return Ok(view);
     }
+    announce(state, combat, &done).await;
+    let view = view_now(state, user, combat).await?;
+    sqlx::query(
+        "UPDATE combat_requests SET response_json = $1 WHERE scope = $2 AND account_id = $3 AND request_id = $4",
+    )
+    .bind(view.to_string())
+    .bind(combat)
+    .bind(&user.id)
+    .bind(&w.request)
+    .execute(state.db.pool())
+    .await?;
     Ok(view)
+}
+
+/// The combatant a `summon` brings in, built by the server with a random id, and who it is:
+/// - `{ owner, companion: <key> }`: a companion on the owning PC's sheet (from its roster card);
+/// - `{ owner, elementId }`: a Monster or Aurora Companion element of the caller's own content;
+/// - `{ owner, copyOf }` (DM): a fresh copy of a creature in this fight;
+/// - `{ owner, combatant }`: an engine-shaped block as the client typed it.
+#[allow(clippy::too_many_lines)]
+async fn summon_combatant(
+    state: &AppState,
+    user: &User,
+    combat: &str,
+    args: &Map<String, Value>,
+    player: bool,
+) -> Res<(Value, Member)> {
+    let bad = |message: &str| -> Fail {
+        if player {
+            Fail::Api(not_found())
+        } else {
+            Fail::Api(ApiError::Invalid(message.to_string()))
+        }
+    };
+    let owner = args
+        .get("owner")
+        .and_then(Value::as_str)
+        .filter(|o| id_ok(o))
+        .ok_or_else(|| bad("Send the owner."))?
+        .to_string();
+    let id = new_id();
+    let text = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_str)
+            .map(|t| t.trim().chars().take(80).collect::<String>())
+            .filter(|t| !t.is_empty())
+    };
+    if let Some(key) = args.get("companion").and_then(Value::as_str) {
+        let mut conn = state.db.pool().acquire().await?;
+        let roster = roster(&mut conn, combat).await?;
+        drop(conn);
+        let pc = roster
+            .get(&owner)
+            .filter(|m| m.kind == "character")
+            .ok_or_else(|| bad("Companions belong to a character."))?;
+        let card = state
+            .hub
+            .cards
+            .get(
+                pc.owner.as_deref().unwrap_or_default(),
+                pc.character.as_deref().unwrap_or_default(),
+            )
+            .ok_or_else(|| bad("That character has no such companion."))?;
+        let comp = card
+            .companions
+            .iter()
+            .find(|c| c.key == key)
+            .ok_or_else(|| bad("That character has no such companion."))?;
+        let mut x = Combatant::creature(&id, &comp.name, comp.hp.max(0), comp.ac, comp.initiative);
+        x.public_name.clone_from(&comp.name);
+        x.speed.walk = u32::try_from(comp.speed).unwrap_or(0);
+        let member = Member {
+            kind: "creature".into(),
+            block: serde_json::to_value(comp).ok(),
+            name: Some(comp.name.clone()),
+            origin: Some(format!("companion:{owner}:{key}")),
+            ..Member::default()
+        };
+        return Ok((serde_json::to_value(x).map_err(internal)?, member));
+    }
+    if let Some(element) = args.get("elementId").and_then(Value::as_str) {
+        let _job = job(&user.id).await?;
+        let found = crate::encounters::copy_creature(state, &user.id, element)
+            .await
+            .map_err(|e| {
+                if player {
+                    Fail::Api(not_found())
+                } else {
+                    Fail::Api(e)
+                }
+            })?;
+        let (snap, _pack) = found.ok_or_else(|| bad("That creature isn't in your content."))?;
+        let f = fighter_from_snapshot(&snap, &party_encounter::overrides::Overrides::default());
+        let label = text("name").unwrap_or_else(|| f.name.clone());
+        let public = text("publicName").unwrap_or_else(|| label.clone());
+        let x = creature_of(&id, &label, &public, &f, f.average);
+        let member = Member {
+            kind: "creature".into(),
+            block: Some(f.block.clone()),
+            name: Some(f.name.clone()),
+            origin: Some("element".into()),
+            ..Member::default()
+        };
+        return Ok((serde_json::to_value(x).map_err(internal)?, member));
+    }
+    if let Some(source) = args.get("copyOf").and_then(Value::as_str) {
+        if player {
+            return Err(not_found().into());
+        }
+        let mut conn = state.db.pool().acquire().await?;
+        let roster = roster(&mut conn, combat).await?;
+        let loaded = load(&mut conn, combat).await?.ok_or_else(not_found)?;
+        drop(conn);
+        let m = roster
+            .get(source)
+            .filter(|m| m.kind == "creature")
+            .ok_or_else(|| bad("There is no such creature in this combat."))?;
+        let x = loaded
+            .state
+            .combatant(&CombatantId::new(source))
+            .ok_or_else(|| bad("There is no such creature in this combat."))?;
+        let f = Fighter {
+            block: m.block.clone().unwrap_or(Value::Null),
+            data: m
+                .block
+                .as_ref()
+                .and_then(|b| serde_json::from_value(b.clone()).ok()),
+            name: m.name.clone().unwrap_or_default(),
+            ac: x.ac,
+            average: x.hp.max.max(1),
+            formula: None,
+        };
+        let label = text("name").unwrap_or_else(|| x.label.clone());
+        let mut y = creature_of(&id, &label, &x.public_name, &f, x.hp.max.max(1));
+        y.ac = x.ac;
+        y.initiative_bonus = x.initiative_bonus;
+        let mut member = m.clone();
+        member.origin = Some("copy".into());
+        return Ok((serde_json::to_value(y).map_err(internal)?, member));
+    }
+    let Some(Value::Object(mut block)) = args.get("combatant").cloned() else {
+        return Err(bad(
+            "Send a companion, an elementId, copyOf or a combatant.",
+        ));
+    };
+    block.insert("id".into(), json!(id));
+    let name = block
+        .get("label")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    Ok((
+        Value::Object(block),
+        Member {
+            kind: "creature".into(),
+            name,
+            origin: Some("summon".into()),
+            ..Member::default()
+        },
+    ))
 }
 
 /// The export (D45): the engine's file plus who each combatant is, for the DM.
@@ -2692,7 +3061,7 @@ async fn export(state: &AppState, user: &User, combat: &str) -> Res<Value> {
         } else {
             creatures.insert(
                 id,
-                json!({ "encounterCreatureId": m.encounter_creature, "statBlock": m.block }),
+                json!({ "encounterCreatureId": m.encounter_creature, "statBlock": m.block, "name": m.name, "origin": m.origin }),
             );
         }
     }
@@ -2817,6 +3186,7 @@ async fn import_inner(state: &AppState, user: &User, party: &str, body: &[u8]) -
                     owner: Some(owner),
                     character,
                     block: None,
+                    ..Member::default()
                 },
             ));
         } else {
@@ -2832,6 +3202,19 @@ async fn import_inner(state: &AppState, user: &User, party: &str, body: &[u8]) -
                         .and_then(|i| i.get("statBlock"))
                         .filter(|b| b.is_object())
                         .cloned(),
+                    name: info
+                        .and_then(|i| i.get("name"))
+                        .and_then(Value::as_str)
+                        .map(|n| n.chars().take(200).collect()),
+                    // A companion's origin names the PC's old id; the import keeps only its kind.
+                    origin: info
+                        .and_then(|i| i.get("origin"))
+                        .and_then(Value::as_str)
+                        .and_then(|o| o.split(':').next())
+                        .filter(|o| {
+                            ["encounter", "copy", "element", "companion", "summon"].contains(o)
+                        })
+                        .map(str::to_string),
                 },
             ));
         }
@@ -2876,6 +3259,7 @@ pub(crate) async fn test_write_damage(
         expect: None,
         op: Op::Engine(Box::new(command)),
         own: None,
+        summoned: None,
     };
     match run_write(state, combat, &w).await {
         Ok(done) => Ok(done.seq),
