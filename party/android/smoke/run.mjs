@@ -5,9 +5,11 @@
 // file opened with Borealis Party the way the Files app does it (an ACTION_VIEW of a content:// URI). For each one it
 // checks the app dialog "Import <file> into smoke?" and what the import did on the server. The page is driven over
 // the WebView's DevTools socket (debug APKs only). Screenshots go to the output folder.
+// It also opens the imported character's sheet preview at Android font sizes 1.0 and 1.15 (sheetPreview below).
 //
 // node party/android/smoke/run.mjs --apk <path> [--out <folder>] [--port 18799] [--avd BalanceLab_Tablet]
-//   [--server-bin <WSL path>] [--keep] [--no-wide]
+//   [--server-bin <WSL path>] [--keep] [--no-wide] [--sheet-only] [--max-minutes 20]
+// --sheet-only: sign in, import the character and check its sheet preview (step 7), nothing else.
 // Exit code 0 when every check passed.
 
 import { spawn, spawnSync } from "node:child_process";
@@ -32,6 +34,9 @@ const port = Number(args.port ?? 18799);
 const avd = args.avd ?? "BalanceLab_Tablet";
 const out = resolve(args.out ?? join(repo, "target", "party-android-smoke"));
 const apk = args.apk ? resolve(args.apk) : null;
+const sheetOnly = args["sheet-only"] === "true";
+// The whole run stops after this many minutes (default 20), so a stalled emulator never holds it for hours.
+const maxMinutes = Number(args["max-minutes"] ?? 20);
 const serverBin = args["server-bin"] ?? process.env.BOREALIS_SERVER_WSL_BIN ?? "";
 const devtoolsPort = 9333;
 const password = randomBytes(12).toString("base64url");
@@ -49,13 +54,19 @@ function check(name, ok, detail = "") {
   return ok;
 }
 
+/** One command, at most `opts.timeoutMs` (2 min by default): a stuck adb or WSL call fails the run instead of hanging it. */
 function run(cmd, argv, opts = {}) {
-  const r = spawnSync(cmd, argv, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, ...opts });
-  if (r.error) throw r.error;
+  const { timeoutMs = 120000, ...rest } = opts;
+  const r = spawnSync(cmd, argv, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: timeoutMs, killSignal: "SIGKILL", ...rest });
+  if (r.error?.code === "ETIMEDOUT") {
+    if (opts.allowFail) return "";
+    throw new Error(`${cmd} ${argv.join(" ")}: no answer in ${timeoutMs / 1000} s`);
+  }
+  if (r.error) { if (opts.allowFail) return ""; throw r.error; }
   if (r.status !== 0 && !opts.allowFail) throw new Error(`${cmd} ${argv.join(" ")} failed (${r.status}): ${r.stderr || r.stdout}`);
   return (r.stdout ?? "").trim();
 }
-const adb = (...a) => run(adbPath, a);
+const adb = (...a) => run(adbPath, a, { timeoutMs: a[0] === "install" || a[0] === "wait-for-device" ? 300000 : 120000 });
 const adbShell = (cmd) => run(adbPath, ["shell", cmd]);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(what, test, timeoutMs = 30000, every = 500) {
@@ -281,7 +292,7 @@ async function main() {
   // Upstream's first-start notices, if any, are closed so they don't cover the import dialogs.
   for (const label of ["Close", "Dismiss", "OK", "Got it"]) await smoke(`click(${JSON.stringify(label)}, true)`).catch(() => false);
   await screenshot("02-signed-in");
-  await phoneLayout();
+  if (!sheetOnly) await phoneLayout();
 
   const characters = async () => (await api(token, "list_characters")).map((c) => c.name);
   const packs = async () => (await api(token, "list_packs")).map((p) => p.name ?? p.id);
@@ -298,6 +309,7 @@ async function main() {
   check(".dnd5e imported into the account", !!added, added ? added.join(", ") : "nothing on the server");
   await sleep(1500);
   await screenshot("04-character-imported");
+  if (sheetOnly) { await sheetPreview(token); return; }
 
   // 2. The same file again, and Cancel: nothing changes.
   const count = (await characters()).length;
@@ -387,6 +399,9 @@ async function main() {
   adbShell(`am start -n ${ACTIVITY}`);
   await sleep(2000);
   await partyLive(token);
+
+  // 7. The sheet preview at Android font sizes 1.0 and 1.15 (last: it restarts the app).
+  await sheetPreview(token);
 }
 
 /** Any other route of the server's API, as the host sees it. */
@@ -437,6 +452,109 @@ async function partyLive(token) {
   } finally {
     await rest(token, "DELETE", `/api/parties/${party.id}`).catch(() => null);
     await page(`location.hash = "#/characters"`).catch(() => null);
+  }
+}
+
+/** Runs in the sheet preview frame: what the page-footer and ruled-line checks need. */
+const SHEET_PROBE = `(() => {
+  const problems = [];
+  const pages = [...document.querySelectorAll(".page")];
+  const name = (el) => (el.className || el.tagName) + ' "' + (el.textContent || "").trim().slice(0, 24) + '"';
+  pages.forEach((p, i) => {
+    const foot = p.querySelector(".foot");
+    if (!foot) return;
+    const limit = foot.getBoundingClientRect().top;
+    for (const el of p.querySelectorAll(".content *")) {
+      if (el.closest("svg")) continue;
+      const b = el.getBoundingClientRect();
+      if (b.height && b.bottom > limit + 0.5) { problems.push("page " + (i + 1) + ": " + name(el) + " runs into the footer"); break; }
+    }
+    for (const sec of p.querySelectorAll(".sec:not(.more-spells)")) {
+      if (sec.scrollHeight > sec.clientHeight + 1) problems.push("page " + (i + 1) + ": " + name(sec) + " is shorter than its text");
+    }
+  });
+  const lined = document.querySelector(".lined");
+  return { pages: pages.length, problems, linePx: lined ? parseFloat(getComputedStyle(lined).lineHeight) : null,
+    fontPx: parseFloat(getComputedStyle(document.body).fontSize) };
+})()`;
+
+/** Evaluates `expression` inside the sheet preview iframe (sandboxed, so only DevTools can look in). */
+async function inPreview(expression) {
+  const tree = await cdp("Page.getFrameTree");
+  const frames = [];
+  const walk = (n) => { frames.push(n.frame); (n.childFrames ?? []).forEach(walk); };
+  walk(tree.frameTree);
+  const frame = frames.find((f) => f.parentId && /about:srcdoc/.test(f.url));
+  if (!frame) return null;
+  const world = await cdp("Page.createIsolatedWorld", { frameId: frame.id, worldName: "smoke-sheet" });
+  const r = await cdp("Runtime.evaluate", { expression, contextId: world.executionContextId, returnByValue: true });
+  if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
+  return r.result.value;
+}
+
+/**
+ * The sheet preview at Android font sizes 1.0 and 1.15. The app's web view keeps its text at 100 %
+ * (party/android/java/app/borealis/party/FixedTextZoom.kt): before, the font size scaled the sheet's text and line
+ * heights but not its ruled lines and boxes, so rows left their lines and page 1's lists ran past the page footer. The
+ * ruled lines are 11 pt apart (14.67 CSS px before the preview's scale), so the text's line height must be exactly that.
+ */
+async function sheetPreview(token) {
+  const hero = (await api(token, "list_characters")).find((c) => c.name === "Test Hero");
+  if (!check("the imported character is on the server for the sheet", !!hero)) return;
+  // Long story text, with Organisation, Allies and Notes after it (fix/sheet-overflow: it must not run over them).
+  const story = "I kept a careful list of every promise I made and every one I broke, and I read it aloud whenever the night was quiet enough to hear myself think.";
+  await api(token, "load_character", { characterId: hero.id });
+  await api(token, "update_details", { characterId: hero.id, patch: {
+    backstory: Array(8).fill(story).join("\n\n"), organization: "The wardens of the northern lighthouse.",
+    allies: `${story} ${story}`, notesLeft: `${story} ${story}`,
+  } });
+  await api(token, "save_character", { characterId: hero.id });
+  await api(token, "close_character", { characterId: hero.id, discard: false });
+  const original = adbShell("settings get system font_scale");
+  try {
+    for (const scale of ["1.0", "1.15"]) {
+      adbShell(`settings put system font_scale ${scale}`);
+      adbShell(`am force-stop ${PACKAGE}`);
+      adbShell(`am start -W -n ${ACTIVITY}`);
+      await until("the app after the font size change", async () => {
+        try { await connectPage(); return await page("!!localStorage.getItem('party.session') && document.readyState === 'complete'"); } catch { return false; }
+      }, 60000, 2000);
+      await sleep(2500);
+      for (const label of ["Close", "Dismiss", "OK", "Got it"]) await smoke(`click(${JSON.stringify(label)}, true)`).catch(() => false);
+      const zoom = await page(`(() => { const d = document.createElement("div"); d.style.cssText = "font-size:10px;position:absolute"; d.textContent = "x"; document.body.append(d); const px = parseFloat(getComputedStyle(d).fontSize); d.remove(); return px; })()`);
+      await page(`location.hash = "#/characters"`);
+      const opened = await until(`${hero.name} opened`, async () => {
+        const state = await page(`(() => {
+          const open = [...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === ${JSON.stringify(`Open ${hero.name}`)});
+          if (open) { open.click(); return "open"; }
+          const tile = document.querySelector('[data-testid="character-tile-${hero.id}"]');
+          if (tile) tile.click();
+          return tile ? "tile" : "none";
+        })()`);
+        return state === "open";
+      }, 30000, 1000).catch(() => false);
+      await sleep(2500);
+      await page(`location.hash = "#/sheet?preview=1"`);
+      const found = await until("the sheet preview", async () => {
+        const r = await inPreview(SHEET_PROBE).catch(() => null);
+        return r && r.pages > 0 ? r : null;
+      }, 60000, 1500).catch(() => null);
+      await sleep(1000);
+      await screenshot(`04b-sheet-preview-font-${scale}`);
+      await inPreview(`(() => { const p = document.querySelectorAll(".page")[1]; if (p) p.scrollIntoView(); return true; })()`).catch(() => null);
+      await sleep(800);
+      await screenshot(`04c-sheet-preview-page-2-font-${scale}`);
+      log(`      font_scale ${scale}: page text 10px -> ${zoom}px; preview ${JSON.stringify(found)}`);
+      check(`font size ${scale}: the app's text is not scaled by Android's font size`, zoom === 10, `${zoom}px`);
+      check(`font size ${scale}: the sheet preview opens`, !!opened && !!found, found ? `${found.pages} pages` : "no preview");
+      if (found) {
+        check(`font size ${scale}: the sheet's text sits on its 11 pt ruled lines`, Math.abs(found.linePx - 44 / 3) < 0.05, `line height ${found.linePx}px`);
+        check(`font size ${scale}: no sheet text runs over a section or the page footer`, found.problems.length === 0, found.problems.join(" | "));
+      }
+      await smoke("click('Close', true)").catch(() => false);
+    }
+  } finally {
+    adbShell(`settings put system font_scale ${original && original !== "null" ? original : "1.0"}`);
   }
 }
 
@@ -506,13 +624,18 @@ async function phoneLayout() {
 }
 
 let failed = false;
+let limit;
 try {
-  await main();
+  await Promise.race([
+    main(),
+    new Promise((_, reject) => { limit = setTimeout(() => reject(new Error(`stopped after the ${maxMinutes} min limit (--max-minutes)`)), maxMinutes * 60000); }),
+  ]);
 } catch (e) {
   failed = true;
   check("the run finished", false, String(e?.message ?? e));
   try { await screenshot("99-failure"); } catch { /* no page */ }
 } finally {
+  clearTimeout(limit);
   ws?.close();
   if (!args.keep) {
     stopServer();

@@ -38,6 +38,18 @@ ui/src/pages/builder/MissingContentAction.tsx branch:feat/leave-missing-unselect
 ui/src/pages/characters/MissingContentList.tsx branch:feat/leave-missing-unselected
 ui/src/test/i37-missing-content-list.test.tsx branch:feat/leave-missing-unselected
 
+# Sheet preview: long text no longer runs over the next section or the footer
+crates/borealis-sheet/src/html_sheet.rs https://github.com/TeamBorealis/borealis/pull/46
+crates/borealis-sheet/src/html_sheet_css.rs https://github.com/TeamBorealis/borealis/pull/46
+crates/borealis-sheet/src/html_sheet_tests.rs https://github.com/TeamBorealis/borealis/pull/46
+e2e/fixtures/sheet-preview/2014-a4-story.html https://github.com/TeamBorealis/borealis/pull/46
+e2e/fixtures/sheet-preview/2014-a4.html https://github.com/TeamBorealis/borealis/pull/46
+e2e/fixtures/sheet-preview/2014-letter-long.html https://github.com/TeamBorealis/borealis/pull/46
+e2e/fixtures/sheet-preview/2014-letter.html https://github.com/TeamBorealis/borealis/pull/46
+e2e/fixtures/sheet-preview/2024-a4-long.html https://github.com/TeamBorealis/borealis/pull/46
+e2e/fixtures/sheet-preview/2024-a4-story.html https://github.com/TeamBorealis/borealis/pull/46
+e2e/tests/b145-sheet-preview-fit.e2e.ts https://github.com/TeamBorealis/borealis/pull/46
+
 # Planned, not opened (plan item I7/I10): an optional host guard in src-tauri/src/content_index.rs (`https_client`),
 # so the HTTPS client checks the address it actually connects to (after its own lookup and after every redirect)
 # and the refusal reaches the Indexes tab in words. The party server checks before fetching (net_guard.rs) and relies
