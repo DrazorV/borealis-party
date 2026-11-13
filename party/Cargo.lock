@@ -3644,6 +3644,7 @@ name = "party-encounter"
 version = "0.3.0"
 dependencies = [
  "borealis-content",
+ "party-combat",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
