@@ -11,6 +11,7 @@ import {
   setterValue, updateElement, validateElement, withSetter, xmlToForm,
   type ElementForm, type ElementInput, type FieldSpec, type Report, type RuleForm, type TypeSpec,
 } from "../api/homebrew";
+import { AssistantButton } from "../assistant/AssistantButton";
 import { elementPath, packPath } from "./HomebrewPage";
 import "./party.css";
 import "./homebrew.css";
@@ -360,6 +361,8 @@ export function HomebrewEditor() {
             <Button disabled={busy} onClick={() => void check()}>Check</Button>
             <Button variant="primary" disabled={busy} onClick={() => void save()}>{busy ? "Working…" : "Save"}</Button>
             {elementId && <Button variant="danger" disabled={busy} onClick={() => void remove()}>Delete</Button>}
+            {/* The user's own AI drafts and checks homebrew with the same engine (Account, Your AI). */}
+            <AssistantButton purpose="homebrew" />
           </div>
           {report && <ReportView report={report} />}
         </Card>
