@@ -515,6 +515,15 @@ async fn conformance(t: &Table) {
         .as_array()
         .unwrap()
         .contains(&json!("requestId")));
+    // A refused element comes back with the engine's report as details, so the model can fix it and retry.
+    let bad =
+        json!({ "requestId": request_id(), "xml": "<element type=\"Spell\" id=\"\"></element>" });
+    let (_, b) = call(r, &tok, "homebrew_create", bad).await;
+    assert_eq!(b["result"]["isError"], true, "{b}");
+    let err: Value =
+        serde_json::from_str(b["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(err["code"], "invalid_homebrew", "{err}");
+    assert!(err["details"]["report"].is_object(), "no report: {err}");
 
     // The activity log has the calls by name and status, never their arguments.
     let rows = sqlx::query("SELECT detail FROM activity WHERE kind = 'ai_tool'")

@@ -28,8 +28,15 @@ pub enum ToolError {
     Busy,
     /// Not available on this server (not built yet, or switched off).
     Unavailable(String),
-    /// The server refused it with its own code (the combat engine's `refused`, a `conflict`, ...).
+    /// The server refused it with its own code (a `conflict`, the simulator's `busy`, ...).
     Refused { code: String, message: String },
+    /// The same, with the data a model needs to fix the call and retry (a validation report, say). `details` is
+    /// game data and goes to the model as data.
+    RefusedWith {
+        code: String,
+        message: String,
+        details: Value,
+    },
     /// Something went wrong on the server; logged there, never shown.
     Internal,
 }
@@ -46,7 +53,7 @@ impl ToolError {
             Self::RateLimited => "too_many_requests",
             Self::Busy => "busy",
             Self::Unavailable(_) => "unavailable",
-            Self::Refused { code, .. } => code,
+            Self::Refused { code, .. } | Self::RefusedWith { code, .. } => code,
             Self::Internal => "internal",
         }
     }
@@ -57,10 +64,14 @@ impl ToolError {
         self.code()
     }
 
-    /// `{code, message}` for the model.
+    /// `{code, message}` for the model, and `details` when the refusal has them.
     #[must_use]
     pub fn to_value(&self) -> Value {
-        json!({ "code": self.code(), "message": self.to_string() })
+        let mut v = json!({ "code": self.code(), "message": self.to_string() });
+        if let Self::RefusedWith { details, .. } = self {
+            v["details"] = details.clone();
+        }
+        v
     }
 }
 
@@ -74,7 +85,9 @@ impl fmt::Display for ToolError {
             Self::RateLimited => f.write_str("Too many calls. Wait a minute and try again."),
             Self::Busy => f.write_str("Another long call of this account is running. Try again."),
             Self::Unavailable(m) => f.write_str(m),
-            Self::Refused { message, .. } => f.write_str(message),
+            Self::Refused { message, .. } | Self::RefusedWith { message, .. } => {
+                f.write_str(message)
+            }
             Self::Internal => f.write_str("Something went wrong on the server."),
         }
     }

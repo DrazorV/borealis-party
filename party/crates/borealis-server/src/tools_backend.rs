@@ -65,18 +65,39 @@ pub(crate) fn from_api(e: ApiError) -> ToolError {
             tracing::error!("tools: internal error: {detail}");
             ToolError::Internal
         }
-        ApiError::Command(v) => match v.get("code").and_then(Value::as_str) {
-            Some("not_found") => ToolError::NotFound,
-            code => ToolError::Refused {
-                code: code.unwrap_or("refused").to_string(),
-                message: v
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("The server refused it.")
-                    .to_string(),
-            },
-        },
+        ApiError::Command(v) => command_error(v),
     }
+}
+
+/// A command's refusal `{code, message, ...}`: everything besides code and message (a validation report, the
+/// element as sent) goes to the model as `details`, so it can fix the call and retry.
+fn command_error(v: Value) -> ToolError {
+    let code = v
+        .get("code")
+        .and_then(Value::as_str)
+        .unwrap_or("refused")
+        .to_string();
+    if code == "not_found" {
+        return ToolError::NotFound;
+    }
+    let message = v
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("The server refused it.")
+        .to_string();
+    let mut details = v;
+    if let Some(map) = details.as_object_mut() {
+        map.remove("code");
+        map.remove("message");
+        if !map.is_empty() {
+            return ToolError::RefusedWith {
+                code,
+                message,
+                details,
+            };
+        }
+    }
+    ToolError::Refused { code, message }
 }
 
 fn json_of(r: ApiResult<Json<Value>>) -> Result<Value, ToolError> {
@@ -278,23 +299,7 @@ async fn external(
     }
     crate::homebrew::call_tool(state, user, tool, Value::Object(args))
         .await
-        .map_err(homebrew_error)
-}
-
-/// Part D's errors. A refused save keeps its whole `{code, report, xml}`, so the model sees the engine's report and
-/// can fix the element; everything else maps as for the API's own handlers.
-fn homebrew_error(e: ApiError) -> ToolError {
-    match e {
-        ApiError::Command(v)
-            if v.get("code").and_then(Value::as_str) == Some("invalid_homebrew") =>
-        {
-            ToolError::Refused {
-                code: "invalid_homebrew".into(),
-                message: v.to_string(),
-            }
-        }
-        other => from_api(other),
-    }
+        .map_err(from_api)
 }
 
 /// The specs of [`external`]'s tools, as their modules define them (replacing the registry's placeholders):
