@@ -2,8 +2,8 @@ import { useLocation, useNavigate } from "react-router";
 import "../shared/combat.css";
 import { Button } from "../../../src/components/Button";
 import { useCharacter } from "../../../src/state/CharacterContext";
-import { myCombatant, type PlayerCombat } from "./api";
-import { myTurn, useCombatStore } from "./store";
+import { actingId, myCombatant, type PlayerCombat } from "./api";
+import { contextFor, myTurn, useCombatStore } from "./store";
 import { selectCombatTab, useCombatTabSelected } from "./tabState";
 
 export const PLAY_ROUTE = "/play";
@@ -13,7 +13,9 @@ export function useOpenCombat(): (combat: PlayerCombat, characterId?: string | n
   const nav = useNavigate();
   const { snapshot, open } = useCharacter();
   return async (combat, characterId) => {
-    const id = characterId ?? (snapshot && myCombatant(combat, snapshot.id) ? snapshot.id : myCombatant(combat)?.characterId);
+    // The open character when it's in this fight; else the PC's character (or the party's only one of this account's).
+    const id = characterId ?? (snapshot && myCombatant(combat, { id: snapshot.id, name: snapshot.name }) ? snapshot.id
+      : myCombatant(combat)?.characterId ?? contextFor(combat.partyId).myCharacters?.[0]);
     if (id && snapshot?.id !== id) await open(id);
     selectCombatTab();
     void nav(PLAY_ROUTE);
@@ -49,7 +51,7 @@ export function YourTurnBanner() {
   const onCombat = useCombatTabSelected() && pathname === PLAY_ROUTE;
   const turn = myTurn(store);
   if (!turn || onCombat) return null;
-  const me = turn.combat.combatants.find((x) => x.mine && x.characterId === turn.characterId);
+  const me = turn.combat.combatants.find((x) => x.mine && x.id === actingId(turn.combat));
   return (
     <button type="button" className="combat-your-turn" onClick={() => void openCombat(turn.combat, turn.characterId)}>
       <strong>Your turn</strong>{me && <span> · {me.name}</span>}<span className="combat-your-turn-go">Open combat</span>

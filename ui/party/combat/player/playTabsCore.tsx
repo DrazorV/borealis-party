@@ -16,7 +16,7 @@ const PLAY = "play";
 
 function useLive() {
   const { snapshot } = useCharacter();
-  const combat = useCombatFor(snapshot?.id);
+  const combat = useCombatFor(snapshot ? { id: snapshot.id, name: snapshot.name } : null);
   const selected = useCombatTabSelected();
   return { snapshot, combat, showing: Boolean(combat && selected) };
 }

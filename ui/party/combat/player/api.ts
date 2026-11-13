@@ -1,21 +1,22 @@
 import { serverFetch, type ServerEvent } from "../../api/http";
 import { liveEvents } from "../../api/liveEvents";
 import { loadSession, type ServerSession } from "../../api/session";
-import type { D20Input, StatBlock } from "../shared/types";
 import type { HealthBand } from "../../api/overrides/parties";
+import type { D20Input, StatBlock } from "../shared/types";
 
 /**
- * The player's side of a live combat (plan 4.4, 0.3.0 part F): the server's PLAYER projection of a party's combat and
- * the few writes a player may make for their own character (initiative, death saves, concentration, and answering
- * the DM's "Take 7 slashing?" prompt). The server builds the projection (`view_for`), so hidden creatures, their
- * turns and anything about them never reach this module: there is nothing here to filter (plan 3.5, D5).
+ * The player's side of a live combat (plan 4.4, 0.3.0 part F), as party/docs/combat-api.md describes it: the server's
+ * PLAYER projection of a party's combat (`view_for`) and the few writes a player may make for their own PC
+ * (initiative, death saves, concentration saves, and resolving the DM's "Take 7 slashing?" prompt). The server builds
+ * the projection, so hidden creatures, their turns and anything about them never reach this module: there is nothing
+ * here to filter (plan 3.5, D5). `fromWire` turns the projection into the view model the Combat sub-tab draws.
  *
  * Every call goes through {@link combatPlayerDeps}, so tests answer them from a fake server (../../test/combatServer.ts).
  */
 
 export type { D20Input, StatBlock } from "../shared/types";
 
-/** Whose turn players see (D5): while hidden creatures act, the pointer stays on the last visible turn. */
+/** Whose turn players see (D5): while hidden creatures act, it stays on the last visible turn. */
 export type TurnPointer =
   | { kind: "combatant"; id: string; round: number }
   | { kind: "enemy_turn"; round: number }
@@ -23,11 +24,69 @@ export type TurnPointer =
   | { kind: "not_started" }
   | { kind: "ended" };
 
+// ---- the wire (combat-api.md "The projection") -------------------------------------------------------------------
+
+/** A death-save state: `alive`, `stable`, `dead`, or dying with its saves so far. */
+export type WireLife = "alive" | "stable" | "dead" | { dying: { successes: number; failures: number } };
+
+export interface WireCombatant {
+  id: string;
+  kind: "creature" | "character";
+  name: string;
+  mine?: boolean;
+  /** PCs only: creatures' initiative is never sent. */
+  initiative?: number | null;
+  band?: HealthBand | null;
+  life?: WireLife;
+  /** Condition names; objects with turns left are taken too. */
+  conditions?: (string | { name: string; remaining?: number | null; text?: string | null })[];
+  exhaustion?: number;
+  concentration?: string | null;
+  /** Revealed creatures (D20 b). */
+  hp?: { current: number; max: number };
+  ac?: number;
+  statBlock?: StatBlock | null;
+}
+
+export interface WirePrompt {
+  id: string;
+  kind: "damage" | "heal";
+  amount: number;
+  parts?: { amount: number; damage_type?: string | null }[];
+  criticalHit?: boolean;
+  at?: number;
+}
+
+export interface WireMine {
+  id: string;
+  /** The PC's character (asked of the server; matched by party and name until it sends it). */
+  characterId?: string | null;
+  hp?: { current: number; max: number; temp: number };
+  life?: WireLife;
+  concentration?: string | null;
+  concentrationChecks?: { dc: number }[];
+  prompts?: WirePrompt[];
+}
+
+export interface WireProjection {
+  id: string;
+  partyId: string;
+  encounter?: { id: string; publicName?: string | null } | null;
+  status: "setup" | "active" | "ended";
+  pseq: number;
+  turn: TurnPointer;
+  showEnemyTurn?: boolean;
+  order: WireCombatant[];
+  me: WireMine[];
+}
+
+// ---- the view model -------------------------------------------------------------------------------------------------
+
 export interface CombatCondition {
   name: string;
   /** Turns left, when it has a turn count. */
   remaining?: number | null;
-  /** The SRD condition text, when the server sends it. */
+  /** The rules text, when the server sends it. */
   text?: string | null;
 }
 
@@ -39,49 +98,48 @@ export interface PlayerCombatant {
   kind: "creature" | "character";
   /** The PC's name, or the creature's public name. */
   name: string;
-  /** The signed-in account's own PC. */
+  /** One of the signed-in account's own PCs. */
   mine: boolean;
-  /** PCs: the character's id in its owner's folder. */
+  /** Own PCs: the character's id in the player's folder, when known. */
   characterId?: string | null;
-  /** PCs: the player's account name. */
-  ownerName?: string | null;
   initiative: number | null;
-  /** Allies (and revealed creatures, when the server sends it): Unhurt / Bloodied / Down (D6, combat only). */
+  /** Unhurt / Bloodied / Down (D6, combat only). */
   band?: HealthBand | null;
   conditions: CombatCondition[];
   life?: Life;
-  /** Own PC only. */
+  /** Own PCs only. */
   deathSaves?: { successes: number; failures: number } | null;
-  /** Own PC (and what the server shows of others): the spell or effect held. */
   concentration?: string | null;
   /** Revealed creatures only (D20 b). */
   statBlock?: StatBlock | null;
+  hp?: { current: number; max: number } | null;
+  ac?: number | null;
 }
 
 /** Something the server asks of the signed-in player for their own PC. */
 export type CombatPrompt =
   /** The DM hit the PC (D7 a): the player applies it to their own character, or not. */
-  | { id: string; kind: "damage"; combatant: string; amount: number; damageType?: string | null; text?: string | null }
-  | { id: string; kind: "heal"; combatant: string; amount: number; text?: string | null }
-  /** The PC took damage while concentrating. */
-  | { id: string; kind: "concentration"; combatant: string; dc: number }
-  /** The PC is dying and it is their turn. */
-  | { id: string; kind: "death_save"; combatant: string };
+  | { id: string; kind: "damage"; combatant: string; amount: number; damageType?: string | null; critical?: boolean }
+  | { id: string; kind: "heal"; combatant: string; amount: number }
+  /** The PC took damage while concentrating: a save is waiting. */
+  | { id: string; kind: "concentration"; combatant: string; dc: number };
 
-/** A revealed event, as players may see it (D32: revealed events only). */
+/** A line of the revealed-events log, built on this device from what the player saw change (D32: revealed only). */
 export interface CombatLogEntry {
   round: number;
   text: string;
-  /** Seconds since the epoch on the wire; milliseconds here. */
+  /** ms */
   at: number;
 }
 
-/** A live combat as the server projects it for the signed-in player. */
+/** A live combat as the Combat sub-tab draws it. */
 export interface PlayerCombat {
   id: string;
   partyId: string;
   partyName?: string;
-  /** Moves on with every change players can see. */
+  /** The encounter's public name. */
+  title?: string | null;
+  /** This player's own sequence: moves on with every change they can see. */
   seq: number;
   status: "setup" | "active" | "ended";
   round: number;
@@ -92,10 +150,69 @@ export interface PlayerCombat {
   log: CombatLogEntry[];
 }
 
+/** What `fromWire` knows besides the projection: the party's own characters of this account. */
+export interface WireContext {
+  partyName?: string;
+  /** The account's characters in this party. */
+  myCharacters?: string[];
+}
+
+const life = (l: WireLife | undefined): { life?: Life; deathSaves?: { successes: number; failures: number } | null } => {
+  if (!l) return {};
+  if (typeof l === "string") return { life: l };
+  return { life: "dying", deathSaves: { ...l.dying } };
+};
+
+const conditions = (c: WireCombatant): CombatCondition[] => [
+  ...(c.conditions ?? []).map((x) => (typeof x === "string" ? { name: x } : { name: x.name, remaining: x.remaining ?? null, text: x.text ?? null })),
+  ...(c.exhaustion && c.exhaustion > 0 ? [{ name: `exhaustion ${c.exhaustion}` }] : []),
+];
+
+const roundOf = (t: TurnPointer) => ("round" in t ? t.round : 0);
+
+/** The projection as the Combat sub-tab draws it. */
+export function fromWire(w: WireProjection, ctx: WireContext = {}): PlayerCombat {
+  const mineById = new Map((w.me ?? []).map((m) => [m.id, m]));
+  const minePcs = (w.order ?? []).filter((o) => o.mine || mineById.has(o.id));
+  // Which character each own PC is: the server's, else the party's only one of this account's characters.
+  const onlyCharacter = (ctx.myCharacters ?? []).length === 1 && minePcs.length === 1 ? ctx.myCharacters![0]! : null;
+  const combatants = (w.order ?? []).map((o): PlayerCombatant => {
+    const m = mineById.get(o.id);
+    const mine = Boolean(o.mine || m);
+    return {
+      id: o.id, kind: o.kind, name: o.name, mine,
+      ...(mine ? { characterId: m?.characterId ?? onlyCharacter } : {}),
+      initiative: o.initiative ?? null,
+      band: o.band ?? null,
+      conditions: conditions(o),
+      ...life(m?.life ?? o.life),
+      concentration: m?.concentration ?? o.concentration ?? null,
+      ...(o.kind === "creature" ? { statBlock: o.statBlock ?? null, hp: o.hp ?? null, ac: o.ac ?? null } : {}),
+    };
+  });
+  const prompts: CombatPrompt[] = (w.me ?? []).flatMap((m) => [
+    ...(m.prompts ?? []).map((p): CombatPrompt => {
+      if (p.kind === "heal") return { id: p.id, kind: "heal", combatant: m.id, amount: p.amount };
+      const types = [...new Set((p.parts ?? []).map((x) => x.damage_type).filter((t): t is string => Boolean(t)))];
+      return { id: p.id, kind: "damage", combatant: m.id, amount: p.amount, damageType: types.length ? types.join(" and ") : null, critical: Boolean(p.criticalHit) };
+    }),
+    ...(m.concentrationChecks ?? []).slice(0, 1).map((c): CombatPrompt => ({ id: `concentration-${m.id}`, kind: "concentration", combatant: m.id, dc: c.dc })),
+  ]);
+  return {
+    id: w.id, partyId: w.partyId, partyName: ctx.partyName, title: w.encounter?.publicName ?? null,
+    seq: w.pseq ?? 0, status: w.status, round: roundOf(w.turn), pointer: w.turn ?? { kind: "not_started" },
+    combatants, prompts, log: [],
+  };
+}
+
+// ---- calls ----------------------------------------------------------------------------------------------------------
+
 export interface CombatPlayerDeps {
   fetch: (session: Pick<ServerSession, "baseUrl" | "token">, method: string, path: string, body?: unknown) => Promise<unknown>;
   /** The account's event stream: events, and opens (`again` after a drop). Answers a stop. */
   events: (onEvent: (e: ServerEvent) => void, onOpen: (again: boolean) => void) => () => void;
+  /** One id per user action (combat-api.md "Writes"). */
+  requestId: () => string;
 }
 
 const DEFAULT_DEPS: CombatPlayerDeps = {
@@ -103,6 +220,9 @@ const DEFAULT_DEPS: CombatPlayerDeps = {
   events: (onEvent, onOpen) => {
     const session = loadSession();
     return session ? liveEvents(session, onEvent, { onOpen }) : () => {};
+  },
+  requestId: () => {
+    try { return crypto.randomUUID(); } catch { return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`; }
   },
 };
 
@@ -122,41 +242,38 @@ function call<T>(method: string, path: string, body?: unknown): Promise<T> {
 const seg = (id: string) => encodeURIComponent(id);
 const notFound = (e: unknown) => (e as { code?: string } | null)?.code === "not_found";
 
-const fromWire = (c: PlayerCombat): PlayerCombat => ({
-  ...c,
-  combatants: c.combatants ?? [],
-  prompts: c.prompts ?? [],
-  log: (c.log ?? []).map((l) => ({ ...l, at: l.at * 1000 })),
-});
-
 /** The party's live combat as the signed-in player sees it, or null when there is none (or it's not theirs to see). */
-export async function liveCombat(partyId: string): Promise<PlayerCombat | null> {
+export async function liveCombat(partyId: string, ctx: WireContext = {}): Promise<PlayerCombat | null> {
   try {
-    const out = await call<{ combat: PlayerCombat | null }>("GET", `/api/parties/${seg(partyId)}/combat`);
-    return out.combat ? fromWire(out.combat) : null;
+    const found = await call<{ combat: string | null }>("GET", `/api/parties/${seg(partyId)}/combat`);
+    if (!found.combat) return null;
+    const view = await call<WireProjection>("GET", `/api/combats/${seg(found.combat)}`);
+    return fromWire(view, ctx);
   } catch (e) {
     if (notFound(e)) return null;
     throw e;
   }
 }
 
-/** Player writes answer the new projection. `combatant` must be the player's own PC; the server checks. */
-const act = (combat: string, action: string, body: Record<string, unknown>) =>
-  call<PlayerCombat>("POST", `/api/combats/${seg(combat)}/${action}`, body).then(fromWire);
+/** A player write; it answers the new projection. `id` must be the player's own PC; the server checks. */
+const act = (combat: string, action: string, args: Record<string, unknown>, ctx?: WireContext) =>
+  call<WireProjection>("POST", `/api/combats/${seg(combat)}/${action}`, { requestId: combatPlayerDeps.requestId(), args })
+    .then((w) => fromWire(w, ctx));
 
-export const setInitiative = (combat: string, combatant: string, roll: D20Input) => act(combat, "set_initiative", { id: combatant, roll });
-export const deathSave = (combat: string, combatant: string, roll: D20Input) => act(combat, "death_save", { id: combatant, roll });
-export const resolveConcentration = (combat: string, combatant: string, roll: D20Input) => act(combat, "resolve_concentration", { id: combatant, roll });
-/** The damage or healing prompt was applied to the player's own character (by them), or declined. */
-export const answerPrompt = (combat: string, prompt: string, applied: boolean) =>
-  act(combat, "answer_prompt", { prompt, answer: applied ? "applied" : "declined" });
+export const setInitiative = (combat: string, combatant: string, roll: D20Input, ctx?: WireContext) => act(combat, "set_initiative", { id: combatant, roll }, ctx);
+export const deathSave = (combat: string, combatant: string, roll: D20Input, ctx?: WireContext) => act(combat, "death_save", { id: combatant, roll }, ctx);
+export const resolveConcentration = (combat: string, combatant: string, roll: D20Input, ctx?: WireContext) =>
+  act(combat, "resolve_concentration", { id: combatant, roll }, ctx);
+/** The damage or healing prompt was applied to the player's own character (by them), with its HP after, or dismissed. */
+export const resolvePrompt = (combat: string, promptId: string, applied: boolean, hp?: { current: number; max: number; temp: number }, ctx?: WireContext) =>
+  act(combat, "resolve_prompt", { promptId, applied, ...(hp ? { hp } : {}) }, ctx);
 
 const COMBAT_EVENT = "party://combat";
 const PARTY_EVENT = "party://party";
 const RESYNC_EVENT = "party://resync";
 
 export type CombatEvent =
-  /** A party's combat changed (started, moved on, ended): fetch it again. */
+  /** A party's combat changed as this player sees it, or started or ended: fetch it again. */
   | { type: "combat"; party: string; seq: number }
   /** A party changed some other way (members joined or left): its combat may have too. */
   | { type: "party"; party: string }
@@ -164,18 +281,15 @@ export type CombatEvent =
   | { type: "resync" };
 
 /** Combat events, as they come; a reopened stream counts as a resync. Answers a stop. */
-export function watchCombats(listener: (e: CombatEvent) => void, onOpen?: () => void): () => void {
+export function watchCombats(listener: (e: CombatEvent) => void): () => void {
   return combatPlayerDeps.events((e) => {
     const p = (e.payload ?? {}) as Record<string, unknown>;
-    if (e.event === COMBAT_EVENT && typeof p.party === "string") listener({ type: "combat", party: p.party, seq: Number(p.seq ?? 0) });
+    if (e.event === COMBAT_EVENT && typeof p.party === "string") listener({ type: "combat", party: p.party, seq: Number(p.pseq ?? 0) });
+    // A combat starting or ending (kind "combat") carries the party's own sequence, not the combat's: always refetch.
     else if (e.event === PARTY_EVENT && typeof p.party === "string") {
-      const kind = String(p.kind ?? "");
-      listener(kind.startsWith("combat") ? { type: "combat", party: p.party, seq: Number(p.seq ?? 0) } : { type: "party", party: p.party });
+      listener(String(p.kind ?? "") === "combat" ? { type: "combat", party: p.party, seq: 0 } : { type: "party", party: p.party });
     } else if (e.event === RESYNC_EVENT) listener({ type: "resync" });
-  }, (again) => {
-    onOpen?.();
-    if (again) listener({ type: "resync" });
-  });
+  }, (again) => { if (again) listener({ type: "resync" }); });
 }
 
 /** Whose turn it is, as a combatant id, or null (waiting, an enemy turn, not started, ended). */
@@ -183,7 +297,46 @@ export function actingId(c: Pick<PlayerCombat, "pointer">): string | null {
   return c.pointer.kind === "combatant" ? c.pointer.id : null;
 }
 
-/** The signed-in player's PC in this combat (the one for `characterId`, when given). */
-export function myCombatant(c: Pick<PlayerCombat, "combatants">, characterId?: string | null): PlayerCombatant | null {
-  return c.combatants.find((x) => x.mine && (!characterId || x.characterId === characterId)) ?? null;
+/** Which character a session's open sheet is, for finding its PC. */
+export interface OpenCharacter { id: string; name?: string | null }
+
+/**
+ * The signed-in player's PC in this combat: the one for the open character when given (by its id, else by its name
+ * while the server doesn't say which character a PC is), else the first.
+ */
+export function myCombatant(c: Pick<PlayerCombat, "combatants">, open?: OpenCharacter | string | null): PlayerCombatant | null {
+  const mine = c.combatants.filter((x) => x.mine);
+  if (!open) return mine[0] ?? null;
+  const { id, name } = typeof open === "string" ? { id: open, name: null } : open;
+  return mine.find((x) => x.characterId === id) ?? (name ? mine.find((x) => !x.characterId && x.name === name) : undefined) ?? null;
+}
+
+const titleCase = (s: string) => s.replace(/(^|\s)\S/g, (m) => m.toUpperCase());
+const BAND_WORD: Record<HealthBand, string> = { unhurt: "unhurt", bloodied: "bloodied", down: "down" };
+
+/**
+ * What changed between two projections the player saw, as log lines (D32 a: players see revealed events only, and the
+ * projection holds nothing else). Turn moves aren't logged; the header says whose turn it is.
+ */
+export function diffEvents(before: PlayerCombat | null, after: PlayerCombat, at: number): CombatLogEntry[] {
+  const round = after.round;
+  const line = (text: string): CombatLogEntry => ({ round, text, at });
+  if (!before) return [line(after.status === "setup" ? "The DM started a combat: roll initiative." : "The combat is on.")];
+  const out: CombatLogEntry[] = [];
+  if (before.status === "setup" && after.status === "active") out.push(line("The fight begins."));
+  if (after.round > before.round && before.round > 0) out.push(line(`Round ${after.round}.`));
+  const old = new Map(before.combatants.map((c) => [c.id, c]));
+  const now = new Map(after.combatants.map((c) => [c.id, c]));
+  for (const c of after.combatants) {
+    const was = old.get(c.id);
+    if (!was) { out.push(line(c.kind === "creature" ? `${c.name} appears.` : `${c.name} joins the fight.`)); continue; }
+    if (c.band && was.band && c.band !== was.band) out.push(line(`${c.name} is ${BAND_WORD[c.band]}.`));
+    if (c.life !== was.life && c.life && c.life !== "alive") out.push(line(`${c.name} is ${c.life}.`));
+    const had = new Set(was.conditions.map((x) => x.name));
+    const has = new Set(c.conditions.map((x) => x.name));
+    for (const n of has) if (!had.has(n)) out.push(line(`${c.name}: ${titleCase(n)}.`));
+    for (const n of had) if (!has.has(n)) out.push(line(`${c.name}: no longer ${titleCase(n)}.`));
+  }
+  for (const c of before.combatants) if (!now.has(c.id)) out.push(line(`${c.name} is gone.`));
+  return out;
 }

@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from "react";
 import { holdReload } from "../../api/connectivity";
 import {
-  actingId, combatPlayerDeps, liveCombat, myCombatant, watchCombats, type PlayerCombat,
+  actingId, combatPlayerDeps, diffEvents, liveCombat, myCombatant, watchCombats,
+  type CombatLogEntry, type OpenCharacter, type PlayerCombat, type WireContext,
 } from "./api";
 import { loadSession } from "../../api/session";
 
@@ -70,8 +71,19 @@ export const YOUR_TURN_BUZZ = [200, 100, 200];
 const isLive = (c: PlayerCombat) => c.status !== "ended" && c.pointer.kind !== "ended";
 const isNetwork = (e: unknown) => (e as { code?: string } | null)?.code === "network";
 
+/** How many revealed-event lines are kept per combat. */
+export const LOG_KEEP = 30;
+
 /** Parties with one of the account's characters in them: theirs to play in. */
-let parties = new Map<string, string>();
+let parties = new Map<string, { name: string; myCharacters: string[] }>();
+/** The revealed-events log of each party's combat, built from what changed (api.ts diffEvents). */
+const logs = new Map<string, { combat: string; lines: CombatLogEntry[] }>();
+
+/** What turns a party's projection into the view model (its name, the account's characters in it). */
+export function contextFor(partyId: string): WireContext {
+  const p = parties.get(partyId);
+  return p ? { partyName: p.name, myCharacters: p.myCharacters } : {};
+}
 const lastSeq = new Map<string, number>();
 /** The turn each party's combat was on last time, to buzz once when it becomes the player's. */
 const lastActing = new Map<string, string | null>();
@@ -80,7 +92,8 @@ async function listParties(): Promise<void> {
   const session = loadSession();
   if (!session) return;
   const out = await combatPlayerDeps.fetch(session, "GET", "/api/parties") as { parties?: { id: string; name: string; myCharacters?: string[] }[] };
-  parties = new Map((out.parties ?? []).filter((p) => (p.myCharacters ?? []).length > 0).map((p) => [p.id, p.name]));
+  parties = new Map((out.parties ?? []).filter((p) => (p.myCharacters ?? []).length > 0)
+    .map((p) => [p.id, { name: p.name, myCharacters: p.myCharacters ?? [] }]));
 }
 
 function wentOffline(): void {
@@ -89,7 +102,17 @@ function wentOffline(): void {
 
 function put(partyId: string, combat: PlayerCombat | null): void {
   const others = state.combats.filter((c) => c.partyId !== partyId);
-  const keep = combat && isLive(combat) && myCombatant(combat) ? [{ ...combat, partyName: combat.partyName ?? parties.get(partyId) }] : [];
+  const before = state.combats.find((c) => c.partyId === partyId) ?? null;
+  let keep: PlayerCombat[] = [];
+  if (combat && isLive(combat) && myCombatant(combat)) {
+    const kept = logs.get(partyId);
+    const lines = kept && kept.combat === combat.id ? kept.lines : [];
+    const added = before && before.id === combat.id ? diffEvents(before, combat, deviceDeps.now())
+      : lines.length === 0 ? diffEvents(null, combat, deviceDeps.now()) : [];
+    const log = [...lines, ...combat.log, ...added].slice(-LOG_KEEP);
+    logs.set(partyId, { combat: combat.id, lines: log });
+    keep = [{ ...combat, partyName: combat.partyName ?? parties.get(partyId)?.name, log }];
+  } else logs.delete(partyId);
   if (combat) lastSeq.set(partyId, combat.seq);
   else lastSeq.delete(partyId);
   const was = lastActing.get(partyId) ?? null;
@@ -102,7 +125,7 @@ function put(partyId: string, combat: PlayerCombat | null): void {
 /** Ask one party for its combat again. A network failure keeps what's shown (D44). */
 async function refresh(partyId: string): Promise<void> {
   try {
-    put(partyId, await liveCombat(partyId));
+    put(partyId, await liveCombat(partyId, contextFor(partyId)));
   } catch (e) {
     if (isNetwork(e)) wentOffline();
     // Any other refusal: the party is gone or no longer this account's; its combat goes too.
@@ -162,6 +185,7 @@ export function resetCombatStore(): void {
   parties = new Map();
   lastSeq.clear();
   lastActing.clear();
+  logs.clear();
   state = EMPTY;
   release();
   subscribers.forEach((s) => s());
@@ -200,14 +224,14 @@ if (typeof document !== "undefined") {
   });
 }
 
-/** The live combat that has this character in it, or null. */
-export function combatFor(store: CombatStore, characterId: string | null | undefined): PlayerCombat | null {
-  if (!characterId) return null;
-  return store.combats.find((c) => myCombatant(c, characterId)) ?? null;
+/** The live combat that has this (open) character in it, or null. */
+export function combatFor(store: CombatStore, open: OpenCharacter | null | undefined): PlayerCombat | null {
+  if (!open) return null;
+  return store.combats.find((c) => myCombatant(c, open)) ?? null;
 }
 
-export function useCombatFor(characterId: string | null | undefined): PlayerCombat | null {
-  return combatFor(useCombatStore(), characterId);
+export function useCombatFor(open: OpenCharacter | null | undefined): PlayerCombat | null {
+  return combatFor(useCombatStore(), open);
 }
 
 /** The first live combat where it's one of the player's characters' turn, or null. */

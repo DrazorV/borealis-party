@@ -400,6 +400,7 @@ async function main() {
   adbShell(`am start -n ${ACTIVITY}`);
   await sleep(2000);
   await partyLive(token);
+  await playerCombat(token);
 
   // 7. The sheet preview at Android font sizes 1.0 and 1.15 (last: it restarts the app).
   await sheetPreview(token);
@@ -453,6 +454,86 @@ async function partyLive(token) {
   } finally {
     await rest(token, "DELETE", `/api/parties/${party.id}`).catch(() => null);
     await page(`location.hash = "#/characters"`).catch(() => null);
+  }
+}
+
+/**
+ * The player's Combat sub-tab in the real app (0.3.0 part F): while the account's party has a live combat, the Live
+ * chip shows in the top chrome, opens the Play tab's Combat sub-tab, and the DM's "Take 2 slashing?" prompt applied
+ * there takes the damage on the player's own character on the server (D7 a). Until the combat server is in this tree,
+ * the server's PLAYER projection is answered inside the WebView (a fetch wrapper put in before the page loads), so
+ * what is checked is the app side: the tab injection, the chrome, the app's own fetch and the player's own command.
+ */
+async function playerCombat(token) {
+  const hero = (await api(token, "list_characters"))[0];
+  if (!hero) { check("the Combat sub-tab (needs the imported character)", false, "no character"); return; }
+  await rest(token, "POST", "/api/me/roles/dm", {});
+  const party = await rest(token, "POST", "/api/parties", { name: "Smoke Fight" });
+  let script = null;
+  try {
+    await api(token, "load_character", { characterId: hero.id });
+    await rest(token, "POST", `/api/parties/${party.id}/members`, { characterId: hero.id });
+    const combat = {
+      id: "smoke-combat", partyId: party.id, seq: 1, status: "active", round: 2, pointer: { kind: "combatant", id: "cr1", round: 2 },
+      combatants: [
+        { id: "cr1", kind: "creature", name: "Goblin", mine: false, initiative: 16, band: "bloodied", conditions: [{ name: "prone" }],
+          statBlock: { size: ["small"], creature_type: "humanoid", ac: [{ value: 15 }], hp: { average: 7, formula: "2d6" }, actions: [{ name: "Scimitar", text: "Melee Weapon Attack: +4 to hit." }] } },
+        { id: "me", kind: "character", name: hero.name, mine: true, characterId: hero.id, initiative: 12, conditions: [], life: "alive" },
+      ],
+      prompts: [{ id: "pr1", kind: "damage", combatant: "me", amount: 2, damageType: "slashing" }],
+      log: [{ round: 1, text: "The Goblin appears.", at: Math.floor(Date.now() / 1000) }],
+    };
+    const shim = `(() => {
+      const state = ${JSON.stringify(combat)};
+      const real = window.fetch.bind(window);
+      const json = (v) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
+      window.fetch = (input, init) => {
+        const url = String(typeof input === "string" ? input : input.url);
+        if (/\/api\/parties\/[^/]+\/combat$/.test(url)) return Promise.resolve(json({ combat: state }));
+        const m = /\/api\/combats\/[^/]+\/([a-z_]+)$/.exec(url);
+        if (m) {
+          const body = JSON.parse((init && init.body) || "{}");
+          if (m[1] === "answer_prompt") state.prompts = state.prompts.filter((p) => p.id !== body.prompt);
+          state.seq += 1;
+          return Promise.resolve(json(state));
+        }
+        return real(input, init);
+      };
+    })()`;
+    await connectPage().catch(() => null);
+    script = (await cdp("Page.addScriptToEvaluateOnNewDocument", { source: shim })).identifier;
+    await page(`location.hash = "#/characters"`);
+    await cdp("Page.reload", {});
+    await sleep(3000);
+    await connectPage().catch(() => null);
+    const chip = await until("the Live chip", () => page(`!!document.querySelector(".combat-live-chip")`), 30000).catch(() => false);
+    check("a live combat shows the Live chip in the app's top chrome", !!chip);
+    if (!chip) return;
+    await screenshot("11-combat-live-chip");
+    await page(`document.querySelector(".combat-live-chip").click(), true`);
+    const pane = await until("the Combat sub-tab", () => page(`!!document.querySelector('[data-testid="combat-pane"]') && [...document.querySelectorAll('[role="tab"]')].some((t) => t.innerText.trim() === "Combat" && t.getAttribute("aria-selected") === "true")`), 30000).catch(() => false);
+    check("the Live chip opens the Play tab's Combat sub-tab", !!pane);
+    if (!pane) return;
+    const shown = await page(`(() => { const t = document.querySelector('[data-testid="combat-pane"]').innerText; return ["Round 2", "Goblin", "Take 2 slashing damage?"].filter((w) => !t.includes(w)); })()`);
+    check("the sub-tab shows the round, the turn order and the damage prompt", shown.length === 0, shown.length ? `missing ${shown.join(", ")}` : "");
+    const sideways = await page(`document.documentElement.scrollWidth - innerWidth`);
+    check("the Combat sub-tab fits the phone's width", sideways <= 0, `${sideways} px too wide`);
+    await screenshot("12-combat-pane");
+    const before = (await api(token, "get_snapshot", { characterId: hero.id })).play.hitPoints.current;
+    await smoke("clickIn('Take 2 slashing', 'Apply')");
+    const after = await until("the damage on the server", async () => {
+      const hp = (await api(token, "get_snapshot", { characterId: hero.id })).play.hitPoints.current;
+      return hp !== before ? hp : null;
+    }, 15000, 500).catch(() => null);
+    check("Apply takes the damage on the player's own character (D7 a)", after === Math.max(0, before - 2), `${before} -> ${after}`);
+    await screenshot("13-combat-applied");
+  } finally {
+    if (script) await cdp("Page.removeScriptToEvaluateOnNewDocument", { identifier: script }).catch(() => null);
+    await rest(token, "DELETE", `/api/parties/${party.id}`).catch(() => null);
+    await page(`location.hash = "#/characters"`).catch(() => null);
+    await cdp("Page.reload", {}).catch(() => null);
+    await sleep(3000);
+    await connectPage().catch(() => null);
   }
 }
 

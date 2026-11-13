@@ -5,7 +5,7 @@ import { Alert, Chip } from "../../../src/components/Card";
 import { Modal } from "../../../src/components/Modal";
 import { useConnectivity } from "../../api/connectivity";
 import {
-  actingId, answerPrompt, deathSave, myCombatant, resolveConcentration, setInitiative,
+  actingId, deathSave, myCombatant, resolveConcentration, resolvePrompt, setInitiative,
   type CombatPrompt, type D20Input, type PlayerCombat, type PlayerCombatant,
 } from "./api";
 import { usePlayMutate } from "../../../src/pages/play/playQueue";
@@ -13,7 +13,7 @@ import { ConditionChips } from "../shared/ConditionChips";
 import { HealthBand } from "../shared/HealthBand";
 import { RollOrType } from "../shared/RollOrType";
 import { StatBlockView } from "../shared/StatBlockView";
-import { adopt, deviceDeps, useCombatStore } from "./store";
+import { adopt, contextFor, deviceDeps, useCombatStore } from "./store";
 import "../shared/combat.css";
 
 /** How many revealed events the log shows. */
@@ -68,24 +68,30 @@ function PromptCard({ combat, prompt, me, modifier }: { combat: PlayerCombat; pr
     setError(null);
     try { await work(); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
+  const ctx = contextFor(combat.partyId);
   const answer = (applied: boolean) => go(async () => {
+    let hp: { current: number; max: number; temp: number } | undefined;
     if (applied && prompt.kind === "damage") {
       const done = await run((api, id) => api.takeDamage({ characterId: id, amount: prompt.amount }));
       if (!done) throw new Error("Your character didn't take the damage. Try again.");
+      hp = done.play.hitPoints;
     }
     if (applied && prompt.kind === "heal") {
       const done = await run((api, id) => api.regainHitPoints({ characterId: id, amount: prompt.amount }));
       if (!done) throw new Error("Your character didn't regain the hit points. Try again.");
+      hp = done.play.hitPoints;
     }
-    adopt(await answerPrompt(combat.id, prompt.id, applied));
+    // The sheet's HP after it, so the server needn't wait for the roster card (combat-api.md "resolve_prompt").
+    adopt(await resolvePrompt(combat.id, prompt.id, applied, hp && { current: hp.current, max: hp.max, temp: hp.temp }, ctx));
   });
-  const roll = (input: D20Input) => go(async () => adopt(await resolveConcentration(combat.id, me.id, input)));
+  const roll = (input: D20Input) => go(async () => adopt(await resolveConcentration(combat.id, me.id, input, ctx)));
   if (prompt.kind === "damage" || prompt.kind === "heal") {
-    const what = prompt.kind === "damage" ? `Take ${prompt.amount}${prompt.damageType ? ` ${prompt.damageType}` : ""} damage?` : `Regain ${prompt.amount} hit points?`;
+    const what = prompt.kind === "damage"
+      ? `Take ${prompt.amount}${prompt.damageType ? ` ${prompt.damageType}` : ""} damage${prompt.critical ? " (critical hit)" : ""}?`
+      : `Regain ${prompt.amount} hit points?`;
     return (
       <section className="combat-prompt" role="alertdialog" aria-label={what}>
         <p className="combat-prompt-q">{what}</p>
-        {prompt.text && <p className="muted">{prompt.text}</p>}
         <div className="combat-prompt-actions">
           <Button variant="primary" disabled={busy} onClick={() => void answer(true)}>Apply</Button>
           <Button disabled={busy} onClick={() => void answer(false)}>Not now</Button>
@@ -125,7 +131,7 @@ function Me({ combat, me, s }: { combat: PlayerCombat; me: PlayerCombatant; s: C
   const save = async (input: D20Input) => {
     setBusy(true);
     setError(null);
-    try { adopt(await deathSave(combat.id, me.id, input)); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+    try { adopt(await deathSave(combat.id, me.id, input, contextFor(combat.partyId))); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
   const share = hp.max > 0 ? Math.max(0, Math.min(1, hp.current / hp.max)) : 0;
   const tone = hp.current <= 0 ? "down" : hp.current * 2 <= hp.max ? "bloodied" : "";
@@ -164,7 +170,7 @@ function Initiative({ combat, me, modifier }: { combat: PlayerCombat; me: Player
   const roll = async (input: D20Input) => {
     setBusy(true);
     setError(null);
-    try { adopt(await setInitiative(combat.id, me.id, input)); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+    try { adopt(await setInitiative(combat.id, me.id, input, contextFor(combat.partyId))); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
   return (
     <section className="combat-prompt" role="alertdialog" aria-label="Roll initiative">
@@ -184,13 +190,15 @@ function Order({ combat, onStatBlock }: { combat: PlayerCombat; onStatBlock: (c:
         return (
           <li key={c.id} className={`combat-row${now ? " acting" : ""}${c.mine ? " mine" : ""}${c.life === "dead" ? " dead" : ""}`}
             aria-current={now ? "true" : undefined}>
-            <span className="combat-init" aria-label={c.initiative == null ? "No initiative yet" : `Initiative ${c.initiative}`}>{c.initiative ?? "–"}</span>
+            {/* Creatures' initiative isn't sent to players (combat-api.md): their place in the order says it. */}
+            {c.kind === "creature" ? <span className="combat-init" aria-hidden="true" />
+              : <span className="combat-init" aria-label={c.initiative == null ? "No initiative yet" : `Initiative ${c.initiative}`}>{c.initiative ?? "–"}</span>}
             <span className="combat-row-main">
               <span className="combat-row-name">
                 {c.name}{c.mine && <span className="muted"> (you)</span>}
+                {c.concentration && !c.mine && <span className="muted combat-row-owner"> · concentrating</span>}
                 {now && <span className="sr-only"> is acting now</span>}
               </span>
-              {c.kind === "character" && !c.mine && c.ownerName && <span className="muted combat-row-owner">{c.ownerName}</span>}
               <ConditionChips conditions={c.conditions} label={`${c.name} conditions`} />
             </span>
             <span className="combat-row-side">
@@ -221,7 +229,7 @@ function Log({ combat }: { combat: PlayerCombat }) {
 
 /** The Play tab's Combat sub-tab (plan 4.4 "Player combat view"): phone first, the player's projection only. */
 export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSnapshot }) {
-  const me = myCombatant(combat, s.id);
+  const me = myCombatant(combat, { id: s.id, name: s.name });
   const [sheet, setSheet] = useState<PlayerCombatant | null>(null);
   const yours = me != null && actingId(combat) === me.id;
   const round = combat.pointer.kind === "combatant" || combat.pointer.kind === "enemy_turn" || combat.pointer.kind === "waiting" ? combat.pointer.round : combat.round;
@@ -230,7 +238,7 @@ export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSn
     <div className="combat-pane" data-testid="combat-pane">
       <div className="combat-head">
         <span className="combat-round" aria-label={`Round ${round}`}>{round > 0 ? `Round ${round}` : "Setup"}</span>
-        {combat.partyName && <span className="muted combat-party">{combat.partyName}</span>}
+        {(combat.title || combat.partyName) && <span className="muted combat-party">{combat.title ?? combat.partyName}</span>}
         <span className="spacer" />
         <Offline />
       </div>
@@ -250,6 +258,11 @@ export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSn
       <Log combat={combat} />
       {sheet?.statBlock && (
         <Modal title={sheet.name} onClose={() => setSheet(null)}>
+          {(sheet.hp || sheet.ac != null) && (
+            <p className="combat-sb-now">
+              {sheet.hp && <Chip tone="info">HP {sheet.hp.current} / {sheet.hp.max}</Chip>} {sheet.ac != null && <Chip>AC {sheet.ac}</Chip>}
+            </p>
+          )}
           <StatBlockView name={sheet.name} block={sheet.statBlock} />
         </Modal>
       )}
