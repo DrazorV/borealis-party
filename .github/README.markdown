@@ -111,7 +111,6 @@ your option. Borealis's copyright and notices are kept unchanged ([NOTICE](/NOTI
 
 Borealis Party is a hobby project. If it brings your table together, you can buy me a coffee:
 
-<!-- TODO: Buy Me a Coffee link not known yet; replace BMC_LINK with the user's https://www.buymeacoffee.com/<name> -->
-<a href="BMC_LINK"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="45"></a>
+<a href="https://buymeacoffee.com/drazorv"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="45"></a>
 
 And please support **[Borealis](https://github.com/TeamBorealis/borealis)** too: without it, none of this would exist.
