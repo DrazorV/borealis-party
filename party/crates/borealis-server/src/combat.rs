@@ -283,6 +283,17 @@ async fn combat_lock(id: &str) -> tokio::sync::OwnedMutexGuard<()> {
 // Checks of what clients send.
 
 /// The server's ids are UUIDs; anything else is the same 404 as an id nobody has.
+/// A job slot for the encounter simulation (`simulate.rs`): the same per-account and server-wide limits as combat
+/// work. `None` when the account already runs its share.
+pub(crate) async fn job_slot(
+    account: &str,
+) -> Option<(
+    tokio::sync::OwnedSemaphorePermit,
+    tokio::sync::OwnedSemaphorePermit,
+)> {
+    job(account).await.ok()
+}
+
 fn id_ok(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }

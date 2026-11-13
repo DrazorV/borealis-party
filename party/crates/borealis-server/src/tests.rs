@@ -40,6 +40,8 @@ mod live_tests;
 mod parties_tests;
 #[path = "shares_tests.rs"]
 mod shares_tests;
+#[path = "simulate_tests.rs"]
+mod simulate_tests;
 
 const PASSWORD: &str = "correct horse battery";
 

@@ -324,15 +324,25 @@ impl Sim {
             }
         }
         fingerprints.insert("party-sim".into(), env!("CARGO_PKG_VERSION").into());
+        // Rules name encounter creatures; here they name the copy's combatants.
         for r in &setup.rules {
-            state = apply(
+            let mut r = r.clone();
+            r.linked = r.linked.and_then(|l| by_source.get(&l.0).cloned());
+            for f in &mut r.flags {
+                if let party_combat::RuleTarget::Combatant(id) = &f.target {
+                    if let Some(to) = by_source.get(&id.0) {
+                        f.target = party_combat::RuleTarget::Combatant(to.clone());
+                    }
+                }
+            }
+            if let Ok(o) = apply(
                 &state,
                 &Actor::System,
-                &Command::SetRule { rule: r.clone() },
+                &Command::SetRule { rule: r },
                 &mut die,
-            )
-            .map_err(|e| format!("a rule: {e}"))?
-            .state;
+            ) {
+                state = o.state;
+            }
         }
         for e in &setup.start_effects {
             let mut e = e.clone();
