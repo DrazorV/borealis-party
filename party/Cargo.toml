@@ -9,6 +9,8 @@ members = [
   "crates/party-encounter",
   "crates/party-dice",
   "crates/party-combat",
+  "crates/party-tools",
+  "crates/party-mcp-bridge",
   "crates/tauri",
   "crates/tauri-macros",
   "crates/tauri-build",
