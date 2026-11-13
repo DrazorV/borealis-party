@@ -151,8 +151,7 @@ fn five_etools_corpus() {
                 Tier::Partial => partial += 1,
                 _ => ruling += 1,
             }
-            if d
-                .mech
+            if d.mech
                 .on_land
                 .iter()
                 .any(|p| matches!(p, Primitive::Damage { .. }))

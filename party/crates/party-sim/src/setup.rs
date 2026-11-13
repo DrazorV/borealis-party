@@ -551,6 +551,8 @@ pub fn pc_combatant(id: &str, pc: &PcInput, hp_mode: PcHp) -> (Combatant, Vec<St
             uses: None,
             group_limit: None,
             requires_effect: None,
+            spell: None,
+            mech: None,
         });
         keys.push(key);
     }
@@ -568,6 +570,8 @@ pub fn pc_combatant(id: &str, pc: &PcInput, hp_mode: PcHp) -> (Combatant, Vec<St
             uses: None,
             group_limit: None,
             requires_effect: None,
+            spell: None,
+            mech: None,
         });
         keys.push(key);
     }
@@ -597,6 +601,8 @@ pub fn pc_combatant(id: &str, pc: &PcInput, hp_mode: PcHp) -> (Combatant, Vec<St
             uses: Some(key.clone()),
             group_limit: None,
             requires_effect: None,
+            spell: None,
+            mech: None,
         });
         keys.push(key);
     }

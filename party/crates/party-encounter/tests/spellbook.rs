@@ -479,3 +479,99 @@ fn override_spells_through_overrides() {
     let drop: OverridesForm = serde_json::from_value(json!({ "spells": null })).unwrap();
     assert_eq!(o.edit(drop, &Printed::default()).unwrap().spells, None);
 }
+
+fn find(dir: &str, id: &str) -> MonsterData {
+    monsters(dir)
+        .into_iter()
+        .find(|(i, _)| i == id)
+        .map(|(_, d)| d)
+        .unwrap_or_else(|| panic!("{id}"))
+}
+
+#[test]
+fn spell_abilities_are_linked_with_their_definitions() {
+    use party_combat::spell::{MechOrigin, SpellFrequency};
+    use party_combat::AbilityKind;
+    let mage = build_creature(
+        "m",
+        "Mage",
+        "Humanoid",
+        Some(&find("srd-5.1-monsters", "ID_SRD51_MONSTER_MAGE")),
+        40,
+    );
+    let stats = mage.stats.as_ref().unwrap();
+    assert_eq!(stats.creature_type.as_deref(), Some("humanoid"));
+    assert_eq!(stats.modifier(party_combat::AbilityName::Int), 3);
+    assert_eq!(mage.casting.len(), 1);
+    assert_eq!(mage.casting[0].dc, Some(14));
+    assert_eq!(mage.casting[0].caster_level, Some(9));
+    let by_name = |n: &str| mage.abilities.iter().find(|a| a.name == n).unwrap();
+    let armor = by_name("mage armor");
+    let link = armor.spell.as_ref().unwrap();
+    assert_eq!(link.key.as_deref(), Some("ID_PHB_SPELL_MAGE_ARMOR"));
+    assert_eq!((link.level, link.frequency), (1, SpellFrequency::Slot));
+    let spec = armor.mech.as_ref().unwrap();
+    assert_eq!(
+        spec.origin,
+        MechOrigin::Srd {
+            key: "ID_PHB_SPELL_MAGE_ARMOR".into(),
+            rev: 1
+        }
+    );
+    assert_eq!(
+        (spec.dc, spec.attack, spec.modifier, spec.cantrip_tier),
+        (Some(14), Some(6), 3, 2)
+    );
+    assert_eq!(by_name("shield").kind, AbilityKind::Reaction);
+    assert_eq!(
+        by_name("fire bolt").spell.as_ref().unwrap().frequency,
+        SpellFrequency::AtWill
+    );
+    // The printed features keep their order ahead of the spells (the sim relies on it).
+    assert_eq!(mage.abilities[0].name, "Spellcasting");
+
+    // 2024: "included in AC" is baked in; per-day spells spend their pool.
+    let mage = build_creature(
+        "m",
+        "Mage",
+        "Humanoid",
+        Some(&find("srd-5.2.1-monsters", "ID_SRD521_MONSTER_MAGE")),
+        81,
+    );
+    let armor = mage
+        .abilities
+        .iter()
+        .find(|a| a.name == "Mage Armor")
+        .unwrap();
+    assert!(armor.spell.as_ref().unwrap().baked_in);
+    assert!(armor.mech.as_ref().unwrap().baked_in);
+    let daily = mage
+        .abilities
+        .iter()
+        .find(|a| {
+            a.spell
+                .as_ref()
+                .is_some_and(|l| l.frequency == SpellFrequency::PerDay)
+        })
+        .unwrap();
+    assert!(mage.resources.contains_key(daily.uses.as_ref().unwrap()));
+}
+
+/// The curated coverage promise: every spell on an SRD monster stat block, in both editions, links to its SRD
+/// element and has a curated definition.
+#[test]
+fn every_srd_monster_spell_is_curated() {
+    let mut missing = Vec::new();
+    for dir in ["srd-5.1-monsters", "srd-5.2.1-monsters"] {
+        for (id, data) in monsters(dir) {
+            let c = build_creature("c", "x", "x", Some(&data), 10);
+            for a in c.abilities.iter().filter(|a| a.spell.is_some()) {
+                let link = a.spell.as_ref().unwrap();
+                if link.key.is_none() || a.mech.is_none() {
+                    missing.push(format!("{id}: {}", a.name));
+                }
+            }
+        }
+    }
+    assert!(missing.is_empty(), "{missing:#?}");
+}

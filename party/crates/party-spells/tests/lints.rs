@@ -146,7 +146,10 @@ fn tables_check_against_the_srd() {
                 problems.push(format!("{tag}: level {} in the SRD", s.level));
             }
             if s.concentration != m.concentration {
-                problems.push(format!("{tag}: concentration {} in the SRD", s.concentration));
+                problems.push(format!(
+                    "{tag}: concentration {} in the SRD",
+                    s.concentration
+                ));
             }
             if fingerprint(&s.description) != row.srd_text_sha {
                 problems.push(format!("{tag}: the SRD text changed; re-review the row"));
@@ -165,7 +168,10 @@ fn tables_check_against_the_srd() {
             }
             match spells.get(&u.id) {
                 Some(s) if s.name == u.name && s.level == u.level => {}
-                _ => problems.push(format!("{}: uncurated {} doesn't match the SRD", t.srd, u.id)),
+                _ => problems.push(format!(
+                    "{}: uncurated {} doesn't match the SRD",
+                    t.srd, u.id
+                )),
             }
         }
         for id in spells.keys() {

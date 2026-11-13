@@ -326,9 +326,9 @@ pub fn from_5etools(key: &str, edition: Edition, spell: &Value) -> Draft {
                 .and_then(cantrip_formula)
                 .or_else(|| first(&["damage"]).and_then(|d| dice_formula(&d)))
         } else {
-            first(&["damage"]).and_then(|d| dice_formula(&d)).map(|base| {
-                upcast(&base, scaled(&["scaledamage"]).as_deref()).unwrap_or(base)
-            })
+            first(&["damage"])
+                .and_then(|d| dice_formula(&d))
+                .map(|base| upcast(&base, scaled(&["scaledamage"]).as_deref()).unwrap_or(base))
         };
         if level > 0 && scaled(&["scaledamage"]).is_none() {
             checks.push(Check::Dice);
@@ -370,7 +370,9 @@ pub fn from_5etools(key: &str, edition: Edition, spell: &Value) -> Draft {
     let heal_dice = || {
         first(&["dice", "damage"])
             .and_then(|d| dice_formula(&d))
-            .map(|base| upcast(&base, scaled(&["scaledice", "scaledamage"]).as_deref()).unwrap_or(base))
+            .map(|base| {
+                upcast(&base, scaled(&["scaledice", "scaledamage"]).as_deref()).unwrap_or(base)
+            })
             .and_then(|d| Formula::parse(&d).ok())
     };
     if has("HL") {

@@ -95,18 +95,23 @@ pub fn curated(key: &str) -> Option<&'static SpellMech> {
     by_key().get(key).copied()
 }
 
+/// (is 2024, normalized name) → (id, level); Edition isn't Ord.
+type NameIndex = BTreeMap<(bool, String), (&'static str, u8)>;
+
 /// An SRD spell of an edition by name (case and punctuation ignored): its element id and level, curated or not.
 #[must_use]
 pub fn srd_spell(name: &str, edition: Edition) -> Option<(&'static str, u8)> {
-    // keyed by (is 2024, normalized name): Edition isn't Ord
-    static INDEX: OnceLock<BTreeMap<(bool, String), (&'static str, u8)>> = OnceLock::new();
+    static INDEX: OnceLock<NameIndex> = OnceLock::new();
     let index = INDEX.get_or_init(|| {
         let mut m = BTreeMap::new();
         for e in [Edition::Srd51, Edition::Srd521] {
             let t = table(e);
             for r in &t.rows {
                 m.insert(
-                    (e == Edition::Srd521, crate::canonical::normalize(&r.mech.name)),
+                    (
+                        e == Edition::Srd521,
+                        crate::canonical::normalize(&r.mech.name),
+                    ),
                     (r.mech.key.as_str(), r.mech.level),
                 );
             }
@@ -120,7 +125,10 @@ pub fn srd_spell(name: &str, edition: Edition) -> Option<(&'static str, u8)> {
         m
     });
     index
-        .get(&(edition == Edition::Srd521, crate::canonical::normalize(name)))
+        .get(&(
+            edition == Edition::Srd521,
+            crate::canonical::normalize(name),
+        ))
         .copied()
 }
 

@@ -990,11 +990,11 @@ pub fn seed_overrides(
     let Some(spells) = overrides.spells.as_ref().filter(|s| !s.is_empty()) else {
         return;
     };
-    let books = match data {
-        Some(d) => of_monster(d, None, Some(spells)),
-        None => vec![spells.book()],
+    let (books, edition) = match data {
+        Some(d) => (of_monster(d, None, Some(spells)), edition_of(d)),
+        None => (vec![spells.book()], party_combat::Edition::Srd51),
     };
-    seed(c, &books);
+    equip(c, &books, edition);
 }
 
 /// One book spell linked to an installed spell element.
@@ -1037,4 +1037,145 @@ pub fn link(
         }
     }
     out
+}
+
+/// The engine's ability name of a short ability key (`int`).
+fn ability_name(short: &str) -> Option<party_combat::AbilityName> {
+    serde_json::from_value(Value::String(short.to_string())).ok()
+}
+
+/// The combat numbers of a monster block (0.3.2): ability modifiers and save bonuses, Magic Resistance, the creature
+/// type, and what its printed AC comes from.
+#[must_use]
+pub fn stats_of(d: &MonsterData) -> party_combat::CombatStats {
+    use borealis_content::monster::Ability as A;
+    let order = [A::Str, A::Dex, A::Con, A::Int, A::Wis, A::Cha];
+    party_combat::CombatStats {
+        mods: order.map(|a| d.abilities.modifier(a)),
+        saves: order.map(|a| d.save_bonus(a)),
+        magic_resistance: d
+            .traits
+            .iter()
+            .any(|t| t.name.to_lowercase().starts_with("magic resistance")),
+        creature_type: Some(d.creature_type.as_str().to_string()),
+        armor: d.ac.first().and_then(|a| a.source.clone()),
+    }
+}
+
+/// The edition of a monster block.
+#[must_use]
+pub fn edition_of(d: &MonsterData) -> party_combat::Edition {
+    match d.ruleset {
+        borealis_content::Ruleset::Dnd2024 => party_combat::Edition::Srd521,
+        _ => party_combat::Edition::Srd51,
+    }
+}
+
+/// The SRD element a book spell names: the block's id, else the bundled SRD spell of that name in the creature's
+/// edition. The server relinks through the account's own catalog ([`link`]) when it has one.
+fn srd_link(s: &BookSpell, edition: party_combat::Edition) -> Option<(String, u8)> {
+    if let Some(id) = &s.id {
+        let level = party_spells::data::curated(id)
+            .map(|m| m.level)
+            .or_else(|| {
+                party_spells::data::srd_spell(&s.name, edition)
+                    .filter(|(i, _)| i == id)
+                    .map(|(_, l)| l)
+            });
+        return Some((id.clone(), level.unwrap_or(0)));
+    }
+    party_spells::data::srd_spell(&s.name, edition).map(|(id, l)| (id.to_string(), l))
+}
+
+/// Give a combatant its spellcasting from `books` (0.3.2): slots and per-day pools ([`seed`]), one [`Casting`] per
+/// book, and one ability per spell, linked to its spell element (`spell`) and carrying the curated SRD definition as
+/// its cast template (`mech`) when there is one. Spells already on the combatant (same book position) are not added
+/// twice.
+///
+/// [`Casting`]: party_combat::Casting
+pub fn equip(c: &mut Combatant, books: &[Spellbook], edition: party_combat::Edition) {
+    use party_combat::spell::{
+        cantrip_tier, CastSpec, CastTime, MechOrigin, SpellFrequency, SpellLink,
+    };
+    use party_combat::{Ability, AbilityKind, Casting};
+    seed(c, books);
+    let mut keys: std::collections::BTreeSet<String> =
+        c.abilities.iter().map(|a| a.key.clone()).collect();
+    for (bi, b) in books.iter().enumerate() {
+        let ability = b.ability.as_deref().and_then(ability_name);
+        if let Some(ab) = ability {
+            let casting = Casting {
+                ability: ab,
+                dc: b.save_dc.map(u32::from),
+                attack: b.attack_bonus,
+                caster_level: b.caster_level,
+                cantrip_tier: b.caster_level.map(cantrip_tier),
+            };
+            if !c.casting.contains(&casting) {
+                c.casting.push(casting);
+            }
+        }
+        let modifier = match (ability, &c.stats) {
+            (Some(ab), Some(st)) => st.modifier(ab),
+            _ => 0,
+        };
+        for (li, l) in b.lists.iter().enumerate() {
+            for (si, s) in l.spells.iter().enumerate() {
+                let marker = format!("b{bi}_l{li}_s{si}");
+                let key = format!("spell_{marker}");
+                if !keys.insert(key.clone()) {
+                    continue;
+                }
+                let link = srd_link(s, edition);
+                let level = link.as_ref().map_or_else(
+                    || match l.frequency {
+                        Frequency::Slots { level, .. } => level,
+                        _ => 0,
+                    },
+                    |(_, lv)| *lv,
+                );
+                let curated = link
+                    .as_ref()
+                    .and_then(|(id, _)| party_spells::data::curated(id));
+                let kind = match curated.map(|m| m.cast) {
+                    Some(CastTime::Bonus) => AbilityKind::BonusAction,
+                    Some(CastTime::Reaction) => AbilityKind::Reaction,
+                    _ => AbilityKind::Action,
+                };
+                let mut a = Ability::new(key.clone(), s.name.clone(), kind);
+                a.text = s.note.clone().unwrap_or_default();
+                let frequency = match l.frequency {
+                    Frequency::AtWill => SpellFrequency::AtWill,
+                    Frequency::PerDay { each, .. } => {
+                        a.uses = Some(pool_key(bi, li, each.then_some(si)));
+                        SpellFrequency::PerDay
+                    }
+                    Frequency::Slots { .. } => SpellFrequency::Slot,
+                };
+                a.spell = Some(SpellLink {
+                    key: link.as_ref().map(|(id, _)| id.clone()),
+                    level,
+                    frequency,
+                    fixed_slot: s.fixed_level,
+                    baked_in: s.baked_in,
+                });
+                a.mech = curated.map(|m| {
+                    Box::new(CastSpec {
+                        v: party_combat::spell::MECH_VERSION,
+                        origin: MechOrigin::Srd {
+                            key: m.key.clone(),
+                            rev: m.rev,
+                        },
+                        mech: m.clone(),
+                        dc: b.save_dc.map(u32::from),
+                        attack: b.attack_bonus,
+                        modifier,
+                        cantrip_tier: b.caster_level.map_or(1, cantrip_tier),
+                        baked_in: s.baked_in,
+                    })
+                });
+                c.abilities.push(a);
+            }
+        }
+    }
 }
