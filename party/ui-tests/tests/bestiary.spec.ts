@@ -9,12 +9,16 @@ test("the Bestiary section shows the SRD bestiaries as complete", async ({ page,
   await open(page, "/content");
   await signedInShell(page);
 
+  // The sources are folded under the section's summary line.
+  const show = page.getByRole("region", { name: "Bestiary" }).getByRole("button", { name: /^Show sources \(/ });
+  await show.scrollIntoViewIfNeeded();
+  await show.tap();
   const list = page.getByRole("list", { name: "Bestiary by source" });
   await list.scrollIntoViewIfNeeded();
   const srd = list.getByRole("listitem", { name: "SRD 5.2.1 Monsters" });
   await expect(srd).toContainText("Complete", { timeout: 30_000 });
-  await expect(srd).toContainText("330 of 330 creatures");
-  await expect(list.getByRole("listitem", { name: "SRD 5.1 Monsters" })).toContainText("317 of 317 creatures");
+  await expect(srd).toContainText("330 creatures");
+  await expect(list.getByRole("listitem", { name: "SRD 5.1 Monsters" })).toContainText("317 creatures");
 
   const toggle = srd.getByRole("button", { name: /SRD 5\.2\.1 Monsters/ });
   const box = (await toggle.boundingBox())!;
@@ -22,6 +26,7 @@ test("the Bestiary section shows the SRD bestiaries as complete", async ({ page,
   await toggle.tap();
   await expect(srd.getByRole("group", { name: "By challenge rating" })).toBeVisible();
   await expect(srd.getByRole("group", { name: "By creature type" })).toBeVisible();
+  await expect(srd).toContainText("330 of 330 creatures");
 
   const o = await measureOverflow(page);
   expect(o.page, "the page scrolls sideways").toBeLessThanOrEqual(0);

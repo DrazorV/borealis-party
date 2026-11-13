@@ -194,7 +194,10 @@ test.describe("Import section: 5etools sources", () => {
 
     // The card now lists where the packs came from, with an Update for that source.
     await expect(card(page).getByRole("button", { name: "Update from Default 5etools data" })).toBeVisible();
-    await expect(card(page).getByText("2 packs: SRD Sample, More")).toBeVisible();
+    // One line with the pack count; the packs are folded under Show packs.
+    await expect(card(page).getByText("5etools-format data · 2 packs")).toBeVisible();
+    await card(page).getByRole("button", { name: "Show packs" }).click();
+    await expect(card(page).getByRole("list", { name: "Packs" })).toHaveText(/SRD Sample\s*More/);
     await expectPhoneLayout(page, testInfo);
   });
 

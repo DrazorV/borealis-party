@@ -313,14 +313,23 @@ describe("5etools data: my own source", () => {
 });
 
 describe("5etools data: imported from", () => {
+  beforeEach(() => { vi.stubGlobal("localStorage", memoryStorage()); });
+  const known = (title: string) => screen.getByText(title, { selector: ".party-import-known-text > strong" }).closest("li")!;
+
   it("lists each source with its packs, and Update uses that source", async () => {
     state.urls = [
-      { url: DEFAULT_URL, packs: ["PHB", "MM"], sources: [], revision: "abc", lastChecked: null, lastImported: null, problem: null },
+      { url: DEFAULT_URL, packs: ["5etools-format: Sample Lore", "5etools-format: Sample Beasts"], sources: [], revision: "abc", lastChecked: null, lastImported: "2026-11-01T10:00:00Z", problem: null },
       { url: "https://mirror.example.com/data/", packs: ["Brew"], sources: [], revision: "def", lastChecked: null, lastImported: null, problem: "GitHub said no." },
     ] as never;
     render(<Page />);
     await settle();
-    expect(screen.getByText("2 packs: PHB, MM")).toBeTruthy();
+    // One line per source; the packs are folded, named without their format.
+    expect(screen.getAllByText(/^5etools-format data · 2 packs · updated /)).toHaveLength(1);
+    expect(screen.queryByRole("list", { name: "Packs" })).toBeNull();
+    const show = within(known("Default 5etools data")).getByRole("button", { name: "Show packs" });
+    expect(show.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(show);
+    expect(within(screen.getByRole("list", { name: "Packs" })).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["Sample Lore", "Sample Beasts"]);
     expect(screen.getByText("GitHub said no.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Update from https://mirror.example.com/data/" }));
     await settle();

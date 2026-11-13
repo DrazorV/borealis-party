@@ -31,7 +31,11 @@ const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     "./FiveToolsTab": local("./content/WithFiveTools.tsx"),
   },
   // Installed packs by origin, with Remove all on each group (content/PackGroups.tsx).
-  "src/pages/content/PacksTab.tsx": { "./PackGroups": local("./content/PackGroups.tsx") },
+  // Grouped on desktops too, each group folded to its count (content/packsPlatform.ts).
+  "src/pages/content/PacksTab.tsx": {
+    "./PackGroups": local("./content/PackGroups.tsx"),
+    "../../state/platform": local("./content/packsPlatform.ts"),
+  },
   "src/pages/settings/ApplicationSettings.tsx": {
     "./settingsTabs": local("./settings/settingsTabs.ts"),
     "./BorealisTabs": local("./settings/BorealisTabs.tsx"),
