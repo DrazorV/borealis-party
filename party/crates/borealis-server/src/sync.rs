@@ -89,7 +89,7 @@ fn key_arg(args: &Map<String, Value>) -> ApiResult<String> {
 }
 
 /// The account's own characters folder. The server never lets it point elsewhere; this makes sure.
-fn characters_dir(backend: &Backend) -> ApiResult<PathBuf> {
+pub(crate) fn characters_dir(backend: &Backend) -> ApiResult<PathBuf> {
     let dir = backend.characters_dir();
     if dir.starts_with(&backend.paths.data) {
         Ok(dir)

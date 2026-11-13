@@ -301,8 +301,7 @@ impl Workspaces {
         }
     }
 
-    /// Tests: the account's open workspace, if any, without opening it.
-    #[cfg(test)]
+    /// The account's open workspace, if any, without opening it (party cards are read from it only when it is).
     pub fn loaded_now(&self, account: &str) -> Option<Arc<Workspace>> {
         let open = self.open.lock().ok()?;
         open.get(account)

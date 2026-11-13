@@ -698,7 +698,7 @@ pub async fn login(
     }
 }
 
-fn bearer(headers: &HeaderMap) -> Option<&str> {
+pub(crate) fn bearer(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(header::AUTHORIZATION)?
         .to_str()
@@ -709,7 +709,10 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
 /// `POST /api/auth/logout`.
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<()> {
     if let Some(token) = bearer(&headers) {
-        state.db.delete_session(&token_hash(token)).await?;
+        let hash = token_hash(token);
+        state.db.delete_session(&hash).await?;
+        // Its event streams end now, not when they next check.
+        state.hub.close_session(&hash);
     }
     Ok(())
 }
@@ -768,10 +771,9 @@ pub async fn change_password(
     let hash = hash_password(&form.password).await?;
     state.db.set_password(&user.id, Some(&hash), false).await?;
     if let Some(token) = bearer(&headers) {
-        state
-            .db
-            .delete_other_sessions(&user.id, &token_hash(token))
-            .await?;
+        let hash = token_hash(token);
+        state.db.delete_other_sessions(&user.id, &hash).await?;
+        state.hub.close_sessions_except(&user.id, &hash);
     }
     record(&state, Activity::new("password_changed").by(&user)).await;
     Ok(Json(User {

@@ -24,6 +24,8 @@ mod sync_tests;
 #[path = "jobs_tests.rs"]
 mod jobs_tests;
 
+#[path = "live_tests.rs"]
+mod live_tests;
 #[path = "parties_tests.rs"]
 mod parties_tests;
 #[path = "shares_tests.rs"]
@@ -71,9 +73,16 @@ fn router_on(data: PathBuf, db: Db) -> Router {
 }
 
 fn router_with(data: PathBuf, db: Db, setup: Setup) -> Router {
+    let max_upload = setup.max_upload;
+    router_of(state_with(data, db, setup), max_upload)
+}
+
+/// The state a test server runs on, for tests that look inside it.
+fn state_with(data: PathBuf, db: Db, setup: Setup) -> AppState {
     let content = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../content");
     let mailer = setup.mailer.map(|m| m as Arc<dyn Mailer>);
-    let state = AppState {
+    let cards = data.join("party-cards");
+    AppState {
         db,
         workspaces: Arc::new(Workspaces::new(data, content)),
         config: Arc::new(Config {
@@ -90,8 +99,13 @@ fn router_with(data: PathBuf, db: Db, setup: Setup) -> Router {
         mailer,
         accounts: Arc::new(tokio::sync::Mutex::new(())),
         started: std::time::Instant::now(),
-    };
-    api_routes(state, setup.max_upload).layer(MockConnectInfo(std::net::SocketAddr::from((
+        hub: Arc::new(crate::hub::PartyHub::new(cards)),
+    }
+}
+
+/// The routes over `state`, as a client on 127.0.0.1 reaches them.
+fn router_of(state: AppState, max_upload: usize) -> Router {
+    api_routes(state, max_upload).layer(MockConnectInfo(std::net::SocketAddr::from((
         [127, 0, 0, 1],
         9,
     ))))

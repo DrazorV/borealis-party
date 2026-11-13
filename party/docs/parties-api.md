@@ -1,4 +1,4 @@
-# Parties API (Borealis Party 0.2.0)
+# Parties API (Borealis Party 0.2.1)
 
 The server side of parties: `party/crates/borealis-server/src/parties.rs`. A party is rows in the database only.
 Characters never leave their owner's folder (`data/users/<owner>/characters/`), and nobody but the owner writes them.
@@ -51,23 +51,48 @@ An outsider never gets 403 for a party: always 404.
 }
 ```
 
-**Member** (a roster card; 0.2.0 reads the owner's saved file, never a live session)
+**Member** (a roster card, always made by one projection, `card_view_for` in `hub.rs`)
+
+What you see depends on who you are (plan 3.5, decision D6):
+
+| Field | DM of the party | Owner | Another member |
+|---|---|---|---|
+| `characterId`, `ownerName`, `mine`, `dmCharacter`, `joinedAt`, `build` (always null) | yes | yes | yes |
+| `name`, `level`, `classes`, `ruleset`, `state` | yes | yes | yes |
+| `ownerId` | yes | yes | no |
+| `online` (the owner has the app open) | yes | no | no |
+| `stats`, `readAt` | yes | yes | no |
+| `band` | no | no | yes |
 
 ```json
 {
   "characterId": "c_0123456789abcdef0123456789abcdef",
   "ownerName": "alice",
-  "ownerId": "8a1e…",            // only when you are the DM of the party, or it's your own character; else absent
-  "mine": false,                 // your own character
-  "dmCharacter": false,          // owned by the party's DM
+  "ownerId": "8a1e…",
+  "online": true,
+  "mine": false,
+  "dmCharacter": false,
   "name": "Mira",                // null when the file can't be read
   "level": 3,                    // null when the file can't be read
+  "classes": [{ "name": "Fighter", "level": 3 }],   // main class first; [] until the card was read with content
   "ruleset": "dnd2024",          // null when the file can't be read
-  "build": null,                 // class/species label: always null in 0.2.0, filled from the card cache in 0.2.1
   "state": "ok",                 // "ok" | "unreadable" (file there but not readable) | "missing" (file gone)
+  "stats": {                     // null until the owner plays it or the DM views it (then kept on the server)
+    "hp": 17, "hpMax": 28, "tempHp": 0,
+    "armorClass": 16, "initiative": 2, "speed": 30, "passivePerception": 13,
+    "spellDcs": [{ "class": "Wizard", "dc": 14 }],
+    "exhaustion": 0, "concentration": "Bless", "inspiration": false
+  },
+  "readAt": 1762970000,          // when `stats` were read, seconds
+  "band": "bloodied",            // another member only: "unhurt" | "bloodied" (at or under half) | "down" | null
+  "build": null,
   "joinedAt": 1762970000
 }
 ```
+
+A card is read again from the owner's open session after every command that changes the character (damage, healing,
+rests, spell slots, concentration, exhaustion, levels, gear …), so the DM's roster is live. It is kept in memory and
+in `<data>/party-cards/`, outside every account's folder; nothing is written into the character.
 
 **DmInvite** (what the DM sees of an invite they made)
 
@@ -85,7 +110,7 @@ An outsider never gets 403 for a party: always 404.
 A username invite shows exactly the same whether that account exists or not, and whether the invitee declined it.
 Invites that are used up or expired are not listed.
 
-**Offer** (DM view: a player offered this character for the party)
+**Offer** (DM view: a player offered this character for the party; the DM's projection of what its saved file says)
 
 ```json
 {
@@ -180,14 +205,44 @@ invite expires). An invalid code changes nothing, and sign-up never fails over i
 `/api/join/preview`. A DM's invite never counts as approval. Web link: `https://<server>/join#<code>` (fragment, so the
 code never reaches a server log).
 
-## Not in 0.2.0
+## The DM's read-only view (0.2.1)
 
-- The live roster and party events on `/api/events` (0.2.1). Refetch after your own actions and on focus.
-- The DM's read-only sheet view `POST /api/parties/{id}/members/{owner}/{character}/view/{snapshot|sheet}` (0.2.1).
-- `build`, AC, HP and the other card fields (0.2.1).
+`POST /api/parties/{party}/members/{owner}/{character}/view/snapshot` (body ignored) → `{ snapshot, card, pseq }`
+
+- The DM of the party only; everyone else, the owner and other members included, gets the usual 404.
+- `owner` and `character` must name a member row; they are taken from that row, and nothing else in the request is
+  used.
+- `snapshot` is upstream's `CharacterSnapshot` as the owner has it now (their open session, or the saved file) without
+  `displayPath`, `dirty`, `vaultNote`, `group` and `favorite`. Nothing is opened as a session and nothing is written.
+- At most 2 views under way per DM (429 `too_many`), and at most 4 offline players' workspaces opened per DM in
+  10 minutes (429).
+- Not offered yet: `view/sheet` (the printable HTML sheet needs upstream's sheet code to run without a session).
+
+## Live updates on `GET /api/events` (0.2.1)
+
+Party events come on the account's existing event stream (no second connection), as
+`data: {"event": "<name>", "payload": {…}}` with an `id:` line. They are invalidations only: refetch your own view.
+
+| Event | Payload | Meaning |
+|---|---|---|
+| `party://party` | `{ party, pseq, kind, id }` | A party's view changed. `kind`: `party` (name or ruleset), `roster`, `card` (`id` = the character), and for the DM only `invites`, `offers` |
+| `party://mine` | `{ kind }` | Your own list changed: `parties` (you joined, left, were removed, a party was deleted) or `invites` |
+| `party://resync` | `{}` | Events may have been missed: refetch everything shown |
+
+- **Two audiences per party,** each with its own `pseq`: the DM's, and the players'. The players' only moves when what
+  players see changes (a member joins or leaves, a rename, a name, class, level or health band), never for an invite,
+  an offer or damage that keeps the same band. `GET /api/parties/{id}` and `…/roster` answer with your audience's
+  `pseq`; ignore an event whose `pseq` isn't newer.
+- **Who hears** is read from the database when the event is sent: a removed member or a deleted party's players hear
+  nothing more of it (they get one `party://mine`).
+- **Ids** count per account. Reopen with `GET /api/events?after=<last id>`: a resync comes first when you missed
+  anything. A stream that falls behind gets a resync instead of a silent drop.
+- **Revocation:** signing out ends that session's streams; a new password ends the other sessions'; an admin's sign-out,
+  password reset, disabling or deleting the account ends all of its streams. Streams also re-check their session every
+  60 s. `X-Accel-Buffering: no` is sent so proxies don't hold events back.
 
 ## Kill switch
 
 Server config only (no admin page switch, D40): `[features] parties = false` in `config.toml`, or
 `BOREALIS__FEATURES__PARTIES=false`, then restart. Every route above then answers 404 `not_found`, as an unknown
-route does, and the data stays. The UI should treat 404 from `GET /api/parties` as "parties are off on this server".
+route does, no party event is sent and no card is read, and the data stays. The UI should treat 404 from `GET /api/parties` as "parties are off on this server".

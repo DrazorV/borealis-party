@@ -81,6 +81,7 @@ async fn every_route_is_still_registered() {
         mailer: None,
         accounts: Arc::new(tokio::sync::Mutex::new(())),
         started: std::time::Instant::now(),
+        hub: Arc::new(crate::hub::PartyHub::new(dir.path().join("party-cards"))),
     };
     let router = api_routes(state, 1024 * 1024).layer(MockConnectInfo(std::net::SocketAddr::from(
         ([127, 0, 0, 1], 9),

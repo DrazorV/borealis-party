@@ -238,6 +238,7 @@ pub async fn set_status(
     }
     if form.status != Status::Active {
         state.db.delete_sessions_of(&id).await?;
+        state.hub.close_user(&id);
     }
     record(
         &state,
@@ -313,6 +314,7 @@ pub async fn reset_password(
     };
     state.db.set_password(&id, hash.as_deref(), true).await?;
     state.db.delete_sessions_of(&id).await?;
+    state.hub.close_user(&id);
     let detail = if temporary.is_some() {
         "temporary password set"
     } else {
@@ -337,6 +339,7 @@ pub async fn sign_out_everywhere(
 ) -> ApiResult<Json<Value>> {
     let before = target(&state, &id).await?;
     let ended = state.db.delete_sessions_of(&id).await?;
+    state.hub.close_user(&id);
     record(
         &state,
         Activity::new("signed_out_everywhere")
@@ -366,9 +369,13 @@ pub async fn delete_account(
     if only_admin {
         return Err(last_admin());
     }
+    // Its parties' players hear of it (ids only, read before the rows go with the account).
+    let departing = crate::parties::before_account_delete(&state, &id).await?;
     if !state.db.delete_user(&id).await? {
         return Err(last_admin());
     }
+    state.hub.close_user(&id);
+    crate::parties::after_account_delete(&state, &id, departing).await;
     record(
         &state,
         Activity::new("account_deleted")

@@ -23,6 +23,7 @@ mod backend;
 mod config;
 mod db;
 mod error;
+mod hub;
 mod jobs;
 mod mail;
 mod migrate;
@@ -112,6 +113,8 @@ pub struct AppState {
     accounts: Arc<tokio::sync::Mutex<()>>,
     /// When the server started.
     started: std::time::Instant,
+    /// Live party events and roster cards ([`hub`]).
+    hub: Arc<hub::PartyHub>,
 }
 
 async fn server_info(
@@ -386,6 +389,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let data = Settings::resolve(dir, &settings.paths.data);
     std::fs::create_dir_all(&data)?;
+    let cards = data.join("party-cards");
     let workspaces = Arc::new(Workspaces::new(data, content));
     tokio::spawn(Arc::clone(&workspaces).evict_loop());
     tokio::spawn(shares::sweep_loop(db.clone(), Arc::clone(&workspaces)));
@@ -405,6 +409,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         mailer,
         accounts: Arc::new(tokio::sync::Mutex::new(())),
         started: std::time::Instant::now(),
+        hub: Arc::new(hub::PartyHub::new(cards)),
     };
     let router = app(
         state,
