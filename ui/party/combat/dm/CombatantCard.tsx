@@ -12,7 +12,7 @@ import { byId, conditionsOf, effectiveAc, effectiveInitiative, effectiveSpeed, i
 import { EffectsList } from "./EffectsList";
 import { HpControls } from "./HpControls";
 import { initiativeText, quickRef, saveBonus } from "./statRef";
-import type { Combatant, Command, CombatState, StatBlock } from "./types";
+import type { Combatant, Command, CombatState, CompanionOffer, StatBlock } from "./types";
 
 const signed = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
 /** A new combatant's id (the server may give it a random UUID of its own). */
@@ -22,8 +22,8 @@ const newId = () => (globalThis.crypto?.randomUUID?.() ?? `s-${Date.now().toStri
  * The selected combatant (C6–C19): title with reveal/hide, AC and speed with effect-derived values, the quick
  * reference from its stat block, HP, concentration with the pending CON save, conditions, effects and its abilities.
  */
-export function CombatantCard({ state, c, block, blockName, send, disabled }: {
-  state: CombatState; c: Combatant; block: StatBlock | undefined; blockName?: string; send: (cmd: Command) => void; disabled: boolean;
+export function CombatantCard({ state, c, block, blockName, offers, send, disabled }: {
+  state: CombatState; c: Combatant; block: StatBlock | undefined; blockName?: string; offers?: CompanionOffer[]; send: (cmd: Command) => void; disabled: boolean;
 }) {
   const confirm = useConfirm();
   const phone = usePhone();
@@ -62,8 +62,11 @@ export function CombatantCard({ state, c, block, blockName, send, disabled }: {
     if (r === "confirm") send({ command: "dismiss", id: c.id });
   };
   const summon = (r: SummonChoice) => {
-    const from = r.copyOf ? byId(state, r.copyOf) : undefined;
-    const base: Combatant = from ? structuredClone(from) : {
+    const initiative = r.initiative === "" ? {} : { initiative: r.initiative === "roll" ? { kind: "app" as const, modifier: r.initBonus } : { kind: "typed" as const, total: r.initiative } };
+    // The server builds sheet companions and copies itself, with their stat blocks; a quick block is sent whole.
+    if (r.companion) { send({ command: "summon", owner: c.id, companion: r.companion, visible: r.visible, ...initiative }); return; }
+    if (r.copyOf) { send({ command: "summon", owner: c.id, copyOf: r.copyOf, visible: r.visible, ...initiative }); return; }
+    const base: Combatant = {
       id: "", kind: "creature", label: r.name, public_name: r.name, visible: r.visible, hp: { current: r.hp, max: r.hp, temp: 0 },
       ac: r.ac, initiative_bonus: r.initBonus, speed: { walk: r.walk }, zero_hp: "dies", life: { state: "alive" },
     };
@@ -72,10 +75,7 @@ export function CombatantCard({ state, c, block, blockName, send, disabled }: {
       linked_to: undefined, owner_id: undefined, concentration: undefined, pending_concentration: [],
       hp: { current: r.hp, max: r.hp, temp: 0 }, life: { state: "alive" },
     };
-    send({
-      command: "summon", owner: c.id, combatant: made, visible: r.visible,
-      ...(r.initiative === "" ? {} : { initiative: r.initiative === "roll" ? { kind: "app" as const, modifier: r.initBonus } : { kind: "typed" as const, total: r.initiative } }),
-    });
+    send({ command: "summon", owner: c.id, combatant: made, visible: r.visible, ...initiative });
   };
   return (
     <section className="cb-panel cb-card" aria-label={`${c.label} details`} id="cb-card">
@@ -185,6 +185,7 @@ export function CombatantCard({ state, c, block, blockName, send, disabled }: {
           {c.initiative == null && <RollInput kind="d20" label="Initiative (if the player can't)" modifier={c.initiative_bonus ?? 0} disabled={disabled} onSubmit={(roll) => send({ command: "set_initiative", id: c.id, roll })} />}</div>
         : <AbilityTabs state={state} c={c} block={block} send={send} disabled={disabled} />}
       {dialog === "summon" && <SummonDialog owner={c} creatures={state.combatants.filter((x) => !isCharacter(x) && !x.removed && x.hp.max > 0)}
+        offers={(offers ?? []).filter((o) => o.pc === c.id)}
         onDone={(r) => { setDialog(null); if (r) summon(r); }} />}
       {dialog === "rename" && <TextDialog title={`Rename ${c.label}`} label="Your label (players don't see it)" initial={c.label} confirm="Rename"
         onDone={(v) => { setDialog(null); if (v && v !== c.label) send({ command: "rename", id: c.id, label: v }); }} />}

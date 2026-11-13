@@ -276,7 +276,8 @@ export type Command =
   | { command: "set_rule_active"; id: string; active: boolean }
   | { command: "remove_rule"; id: string }
   | { command: "set_group_limit"; group: string; per_round: number }
-  | { command: "summon"; owner: string; combatant: Combatant; initiative?: D20Input; visible?: boolean }
+  | ({ command: "summon"; owner: string; initiative?: D20Input; visible?: boolean }
+      & ({ combatant: Combatant } | { copyOf: string } | { companion: string } | { elementId: string }))
   | { command: "dismiss"; id: string }
   | { command: "set_initiative_mode"; id: string; mode: "after_owner" | "own"; roll?: D20Input };
 
@@ -403,12 +404,24 @@ export interface DmCombat {
   characters?: Record<string, { ownerId: string; characterId: string; member: boolean; online?: boolean }>;
   /** Open damage and heal prompts. */
   prompts?: PlayerPrompt[];
+  /** Each PC's sheet companions not yet in the fight, for Summon. */
+  offers?: CompanionOffer[];
   /** What undo would revert, newest first (the engine's labels). */
   undo: string[];
   startedAt?: number;
   endedAt?: number | null;
   /** A retried requestId: the write had already been done. */
   replayed?: boolean;
+}
+
+/** A companion on a PC's character sheet that can join the fight (`summon {owner, companion: key}`). */
+export interface CompanionOffer {
+  pc: string;
+  key: string;
+  name: string;
+  hp: number;
+  ac: number;
+  initiative: number;
 }
 
 /** One row of the DM log (`GET /api/combats/{id}/log`). */

@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Button } from "../../../src/components/Button";
 import { Dialog } from "../../../src/components/controls/Dialog";
 import { CONDITIONS, conditionWord, type Condition } from "./common";
-import type { Combatant, Duration, EffectSpec, Modifier } from "./types";
+import type { Combatant, CompanionOffer, Duration, EffectSpec, Modifier } from "./types";
 
 /** A one-field app dialog (rename, set HP, concentration): never `window.prompt`. */
 export function TextDialog({ title, label, initial = "", numeric, allowEmpty, onDone, confirm = "OK", note }: {
@@ -228,6 +228,8 @@ export function AddCreatureDialog({ creatures, onDone }: {
 export interface SummonChoice {
   /** A copy of a creature already in the fight, by id, or null for the typed quick block. */
   copyOf: string | null;
+  /** A companion from the owner's character sheet (an offer's key): the server builds it. */
+  companion?: string;
   name: string;
   hp: number;
   ac: number;
@@ -244,9 +246,11 @@ export interface SummonChoice {
  * owner unless given its own initiative (typed or rolled in the app). A PC's summon is its player's and always
  * visible; a creature's is the DM's and starts as hidden as its owner unless revealed here.
  */
-export function SummonDialog({ owner, creatures, onDone }: {
+export function SummonDialog({ owner, creatures, offers = [], onDone }: {
   owner: Combatant;
   creatures: Combatant[];
+  /** The owner's sheet companions not yet in the fight. */
+  offers?: CompanionOffer[];
   onDone: (r: SummonChoice | null) => void;
 }) {
   const [copyOf, setCopyOf] = useState<string>("");
@@ -259,13 +263,16 @@ export function SummonDialog({ owner, creatures, onDone }: {
   const [typedInit, setTypedInit] = useState("");
   const [visible, setVisible] = useState(owner.visible);
   const player = owner.kind === "character" || owner.controller?.kind === "player";
-  const from = creatures.find((c) => c.id === copyOf);
+  const offer = offers.find((o) => `companion:${o.key}` === copyOf);
+  const from = offer ? undefined : creatures.find((c) => c.id === copyOf);
   const num = (t: string) => (t.trim() !== "" && Number.isInteger(Number(t)) ? Number(t) : null);
-  const ok = from ? true : name.trim() !== "" && (num(hp) ?? 0) > 0 && num(ac) != null && (mode !== "typed" || num(typedInit) != null);
+  const ok = from || offer ? (mode !== "typed" || num(typedInit) != null) : name.trim() !== "" && (num(hp) ?? 0) > 0 && num(ac) != null && (mode !== "typed" || num(typedInit) != null);
   const done = () => onDone({
     copyOf: from?.id ?? null,
-    name: name.trim() || (from ? from.label.replace(/\s*\d+$/, "") : ""),
-    hp: from ? from.hp.max : num(hp)!, ac: from ? from.ac : num(ac)!, initBonus: from ? (from.initiative_bonus ?? 0) : (num(init) ?? 0),
+    ...(offer ? { companion: offer.key } : {}),
+    name: name.trim() || (offer ? offer.name : from ? from.label.replace(/\s*\d+$/, "") : ""),
+    hp: offer ? offer.hp : from ? from.hp.max : num(hp)!, ac: offer ? offer.ac : from ? from.ac : num(ac)!,
+    initBonus: offer ? offer.initiative : from ? (from.initiative_bonus ?? 0) : (num(init) ?? 0),
     walk: from ? (from.speed?.walk ?? 30) : (num(walk) ?? 30),
     initiative: mode === "after" ? "" : mode === "roll" ? "roll" : num(typedInit)!,
     visible: player ? true : visible,
@@ -277,11 +284,12 @@ export function SummonDialog({ owner, creatures, onDone }: {
         <label className="cb-field"><span>Stat block</span>
           <select className="input" value={copyOf} onChange={(e) => setCopyOf(e.target.value)}>
             <option value="">A quick block (type it below)</option>
+            {offers.map((o) => <option key={o.key} value={`companion:${o.key}`}>From {owner.label}'s sheet: {o.name} ({o.hp} HP, AC {o.ac})</option>)}
             {creatures.map((c) => <option key={c.id} value={c.id}>A copy of {c.label} ({c.hp.max} HP, AC {c.ac})</option>)}
           </select>
         </label>
         <label className="cb-field"><span>Name</span><input className="input" value={name} placeholder={from ? from.label : "Wolf"} onChange={(e) => setName(e.target.value)} /></label>
-        {!from && (
+        {!from && !offer && (
           <div className="cb-frow">
             <label className="cb-field cb-narrow"><span>HP</span><input className="input" inputMode="numeric" value={hp} onChange={(e) => setHp(e.target.value)} /></label>
             <label className="cb-field cb-narrow"><span>AC</span><input className="input" inputMode="numeric" value={ac} onChange={(e) => setAc(e.target.value)} /></label>

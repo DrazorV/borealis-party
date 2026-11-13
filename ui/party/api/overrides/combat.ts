@@ -158,7 +158,7 @@ export function isNetworkFailure(e: unknown): boolean {
 
 /** The engine refused because the last write was a player's: undo needs `force`. */
 export const needsForce = (e: unknown): boolean =>
-  /player's/i.test(String((e as { message?: string } | null)?.message ?? ""));
+  (e as { code?: string } | null)?.code === "undo_player" || /player's/i.test(String((e as { message?: string } | null)?.message ?? ""));
 
 override("combat", () => {
   // Nothing of upstream's commands changes: combat has its own routes. The module registers so http.ts lists it

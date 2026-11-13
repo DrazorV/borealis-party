@@ -325,15 +325,24 @@ class Run {
       case "remove_rule": { s.rules = s.rules.filter((r) => r.id !== cmd.id); return; }
       case "summon": {
         const owner = this.c(cmd.owner);
-        if (cmd.combatant.kind === "character") refuse("A player character can't be summoned.");
+        let base: Combatant;
+        if ("combatant" in cmd) base = clone(cmd.combatant);
+        else if ("copyOf" in cmd) {
+          const from = this.c(cmd.copyOf);
+          const n = s.combatants.filter((x) => x.label.replace(/\s*\d+$/, "") === from.label.replace(/\s*\d+$/, "")).length + 1;
+          base = { ...clone(from), label: `${from.label.replace(/\s*\d+$/, "")} ${n}`, hp: { current: from.hp.max, max: from.hp.max, temp: 0 }, concentration: undefined, pending_concentration: [] };
+          base.public_name = base.label;
+        } else return refuse("The server builds companions and bestiary creatures.");
+        if (base.kind === "character") refuse("A player character can't be summoned.");
+        if (!("combatant" in cmd)) base.id = `summon-${(s.next_tiebreak ?? 0) + 1}-${s.combatants.length}`;
+        if (byId(s, base.id)) refuse(`Combatant ${base.id} already exists.`);
         const controller = owner.kind === "character" ? { kind: "player" as const, pc: owner.id } : (owner.controller ?? { kind: "dm" as const });
         const c: Combatant = {
-          ...clone(cmd.combatant), owner_id: owner.id, controller, hp_authority: "engine", initiative: null, linked_to: undefined,
+          ...base, owner_id: owner.id, controller, hp_authority: "engine", initiative: null, linked_to: undefined,
           visible: controller.kind === "player" ? true : (cmd.visible ?? owner.visible), initiative_mode: cmd.initiative ? "own" : "after_owner",
           economy: { action: false, bonus_action: false, reaction: false }, life: { state: "alive" },
         };
         c.ever_revealed = c.visible;
-        if (byId(s, c.id)) refuse(`Combatant ${c.id} already exists.`);
         c.tiebreak = s.next_tiebreak ?? 0;
         s.next_tiebreak = c.tiebreak + 1;
         s.combatants.push(c);
