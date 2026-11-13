@@ -29,6 +29,9 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use tauri::Manager;
 
+use party_combat::spell::{cantrip_tier, CastSpec, MechOrigin, SpellLink, SpellMech};
+use party_combat::{Combatant, Edition};
+
 use crate::auth::User;
 use crate::db::now;
 use crate::error::{ApiError, ApiResult};
@@ -515,16 +518,49 @@ fn key_ok(key: &str) -> bool {
     !key.trim().is_empty() && key.len() <= MAX_KEY && !key.chars().any(char::is_control)
 }
 
-/// The effect schema a def must fit. S1's `party_combat::spell` is the source of truth; until a def is compiled
-/// against it, a def is any JSON object of at most [`MAX_DEF`] bytes with a numeric `v`.
-fn check_def(def: &Value) -> ApiResult<i64> {
-    let Some(obj) = def.as_object() else {
+/// The engine's edition of a ruleset (`dnd2014` -> 2014); `None` for `any`.
+#[must_use]
+pub fn edition_of(ruleset: &str) -> Option<Edition> {
+    match ruleset {
+        "dnd2014" => Some(Edition::Srd51),
+        "dnd2024" => Some(Edition::Srd521),
+        _ => None,
+    }
+}
+
+/// The ruleset of an engine edition.
+#[must_use]
+pub fn ruleset_of(edition: Edition) -> &'static str {
+    match edition {
+        Edition::Srd51 => "dnd2014",
+        Edition::Srd521 => "dnd2024",
+    }
+}
+
+/// A def as sent: the engine's closed [`SpellMech`] (no scripting), for this spell key and an edition that fits the
+/// row's ruleset. Its `key` is the row's. Answers the stored JSON and its schema version.
+fn check_def(def: &Value, key: &str, ruleset: &str) -> ApiResult<(Value, i64)> {
+    if !def.is_object() {
         return Err(invalid("An effect definition is a JSON object."));
-    };
+    }
     if def.to_string().len() > MAX_DEF {
         return Err(invalid("That effect definition is too large."));
     }
-    Ok(obj.get("v").and_then(Value::as_i64).unwrap_or(1).max(1))
+    let mut mech: SpellMech = serde_json::from_value(def.clone())
+        .map_err(|e| invalid(format!("That effect definition doesn't fit: {e}")))?;
+    if mech.v != party_combat::spell::MECH_VERSION {
+        return Err(invalid("That effect definition is of another version."));
+    }
+    if let Some(edition) = edition_of(ruleset) {
+        if mech.edition != edition {
+            return Err(invalid("That effect definition is for the other edition."));
+        }
+    }
+    mech.key = key.to_string();
+    Ok((
+        serde_json::to_value(&mech).map_err(|e| invalid(e.to_string()))?,
+        i64::from(mech.v),
+    ))
 }
 
 /// A row as sent, checked: the kind's fields present, everything in its limits.
@@ -551,7 +587,9 @@ fn check_row(row: &mut MechRow) -> ApiResult<()> {
     match row.kind.as_str() {
         KIND_DEF => {
             row.alias_name.clear();
-            row.schema_v = check_def(&row.def)?;
+            let (def, v) = check_def(&row.def, &row.spell_key, &row.ruleset)?;
+            row.def = def;
+            row.schema_v = v;
         }
         KIND_LINK => {
             row.alias_name.clear();
@@ -849,6 +887,86 @@ pub async fn mechanics_for(
         }
     }
     Ok(out)
+}
+
+/// A spell compiled for one caster (`caster`'s first spellcasting block: DC, attack, modifier and cantrip tier),
+/// from the account's mechanics for the combat's edition. With no mechanics: `fallback` when the stat block entry
+/// has its own, else a ruling built from the installed spell (it spends the slot and takes concentration from the
+/// element's `isConcentration`, never from its text). `None` when the spell isn't installed and has no entry.
+///
+/// # Errors
+/// The workspace's and the database's; a stored definition that no longer fits.
+pub async fn compile(
+    state: &AppState,
+    owner: &str,
+    edition: Edition,
+    key: &str,
+    caster: &Combatant,
+    link: Option<&SpellLink>,
+    fallback: Option<&CastSpec>,
+) -> ApiResult<Option<CastSpec>> {
+    let rs = ruleset_of(edition);
+    let got = mechanics_for(state, owner, rs, &[key.to_string()]).await?;
+    let casting = caster.casting.first();
+    let modifier = match (casting, caster.stats.as_ref()) {
+        (Some(c), Some(stats)) => stats.modifier(c.ability),
+        _ => 0,
+    };
+    let tier = casting
+        .and_then(|c| {
+            c.cantrip_tier
+                .or_else(|| c.caster_level.map(cantrip_tier))
+        })
+        .unwrap_or(1);
+    let mut spec = if let Some(r) = got.get(key) {
+        let mut mech: SpellMech = serde_json::from_value(r.def.clone())
+            .map_err(|e| invalid(format!("The saved effect of this spell no longer fits: {e}")))?;
+        mech.key = key.to_string();
+        mech.edition = edition;
+        let rev = u32::try_from(r.rev).unwrap_or(u32::MAX);
+        let origin = if r.origin == "srd" {
+            MechOrigin::Srd {
+                key: r.from_key.clone(),
+                rev,
+            }
+        } else {
+            MechOrigin::Def {
+                id: r.from_key.clone(),
+                rev,
+            }
+        };
+        CastSpec {
+            v: party_combat::spell::MECH_VERSION,
+            origin,
+            mech,
+            dc: None,
+            attack: None,
+            modifier: 0,
+            cantrip_tier: 1,
+            baked_in: false,
+        }
+    } else if let Some(f) = fallback {
+        f.clone()
+    } else {
+        match canonical(state, owner, key, Some(rs)).await? {
+            Some(spell) => CastSpec::ruling(
+                key,
+                &spell.name,
+                edition,
+                spell.level.or(link.map(|l| l.level)).unwrap_or(0),
+                spell.concentration,
+            ),
+            None => return Ok(None),
+        }
+    };
+    if let Some(c) = casting {
+        spec.dc = c.dc.or(spec.dc);
+        spec.attack = c.attack.or(spec.attack);
+    }
+    spec.modifier = modifier;
+    spec.cantrip_tier = tier;
+    spec.baked_in = link.is_some_and(|l| l.baked_in);
+    Ok(Some(spec))
 }
 
 /// A suggested effect for a spell the account hasn't defined: S2's drafter over the user's own installed copy (its

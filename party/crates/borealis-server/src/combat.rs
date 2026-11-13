@@ -27,7 +27,7 @@ use party_combat::visibility::{is_visible, player_view_of};
 use party_combat::{
     apply, derive, export_json, import_json, turn_pointer, visible_order, Actor, Boundary, Combat,
     CombatError, CombatState, Combatant, CombatantId, Command, Controller, DamageTaken, DmEvent,
-    Duration, Edition, EffectSpec, EncounterRule, Hp, Life, Modifier, PlayerEvent, RuleFlag,
+    DmEventKind, Duration, Edition, EffectSpec, EncounterRule, Hp, Life, Modifier, PlayerEvent, RuleFlag,
     RuleTarget, ViewerKind, UNDO_LIMIT,
 };
 use serde::Deserialize;
@@ -846,6 +846,15 @@ fn player_view(snap: &Snapshot, account: &str, characters: &BTreeSet<String>) ->
         "showEnemyTurn": s.settings.show_enemy_turn,
         "order": order,
         "me": me,
+        // Saves this player's PCs are asked for (0.3.2): only their own rows, the caster anonymized while hidden.
+        "casts": party_combat::visibility::player_casts(s, account)
+            .into_iter()
+            .filter(|row| {
+                row.get("target")
+                    .and_then(Value::as_str)
+                    .is_none_or(|t| my_pc(&CombatantId::new(t)))
+            })
+            .collect::<Vec<_>>(),
     })
 }
 
@@ -1055,6 +1064,10 @@ enum Op {
         count: u32,
         roll: bool,
         hidden: Option<bool>,
+        /// "Controlled by <caster>" (a conjured creature): its owner in this fight.
+        controlled_by: Option<String>,
+        /// Dismiss it when its owner's current concentration ends.
+        bind: bool,
     },
     /// C8.
     Undo { force: bool },
@@ -1116,6 +1129,9 @@ struct Done {
     nothing: bool,
     tell: Vec<(String, i64)>,
     dm: Option<String>,
+    /// What the DM's answer shows at once (0.3.2): a summon spell's options (the toast with [Add creature]) and a
+    /// ruling's question.
+    notices: Vec<Value>,
 }
 
 fn author(w: Writer) -> Author {
@@ -1417,6 +1433,8 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
             count,
             roll,
             hidden,
+            controlled_by,
+            bind,
         } => {
             // A fresh template at full HP: a copy of a creature in this fight, or of an encounter creature.
             let (base_member, template) = match source {
@@ -1516,6 +1534,38 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
                     )
                 }
             };
+            let mut template = template;
+            if let Some(owner) = controlled_by {
+                let o = c
+                    .state
+                    .combatant(&CombatantId::new(owner.clone()))
+                    .filter(|o| !o.removed)
+                    .ok_or_else(|| {
+                        ApiError::Invalid("There is no such combatant in this combat.".into())
+                    })?;
+                template.owner_id = Some(o.id.clone());
+                // A PC's creature is its player's; anyone else's is the DM's.
+                template.controller = if o.is_character() {
+                    Controller::Player { pc: o.id.clone() }
+                } else {
+                    o.controller.clone()
+                };
+            }
+            if *bind {
+                let owner = template
+                    .owner_id
+                    .as_ref()
+                    .and_then(|o| c.state.combatant(o))
+                    .ok_or_else(|| {
+                        ApiError::Invalid("Only a controlled creature can be bound.".into())
+                    })?;
+                if owner.concentration.is_none() {
+                    return Err(Fail::Refused(format!(
+                        "{} isn't concentrating on anything.",
+                        owner.label
+                    )));
+                }
+            }
             let visible = hidden.map_or(template.visible, |h| !h);
             let mut st = c.state.clone();
             let mut die = c.die;
@@ -1542,6 +1592,16 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
                 st = o.state;
                 out.dm.extend(o.events.dm);
                 out.players.extend(o.events.players);
+                if *bind {
+                    let cmd = Command::BindToConcentration {
+                        id: CombatantId::new(id.clone()),
+                    };
+                    let o =
+                        apply(&st, &actor, &cmd, &mut die).map_err(|e| refusal(w.writer, &e))?;
+                    st = o.state;
+                    out.dm.extend(o.events.dm);
+                    out.players.extend(o.events.players);
+                }
                 out.new_members.push((id, base_member.clone()));
             }
             out.state = st;
@@ -1810,6 +1870,20 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
     let tell = refresh_views(&mut tx, &snap).await?;
     let dm = dm_id(&mut tx, &party).await?;
     tx.commit().await?;
+    let notices = if w.writer == Writer::Player {
+        Vec::new()
+    } else {
+        out.dm
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.kind,
+                    DmEventKind::SummonOptions { .. } | DmEventKind::RulingNeeded { .. }
+                )
+            })
+            .filter_map(|e| serde_json::to_value(e).ok())
+            .collect()
+    };
     Ok(Done {
         party,
         seq,
@@ -1818,6 +1892,7 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
         nothing: false,
         tell,
         dm,
+        notices,
     })
 }
 
@@ -2292,6 +2367,8 @@ async fn start_inner(state: &AppState, user: &User, encounter: &str, body: &[u8]
             }
         }
     }
+    // Precast spells (0.3.2), with their real effect and their slot spent.
+    st = precast(state, &mut conn, &user.id, encounter, &by_creature, st, &mut die).await?;
     if let Ok(rows) = sqlx::query(
         "SELECT id, name, text, creature_id, ends_when, active, flags_json FROM encounter_rules
          WHERE encounter_id = $1 ORDER BY sort, id",
@@ -2523,7 +2600,21 @@ pub async fn log(
 const NOT_OFFERED: [&str; 2] = ["add_combatant", "sync_player_hp"];
 /// The server's own actions only the DM may take. What else a player may do is the engine's call (their PC and the
 /// creatures it controls), checked again by the server for membership.
-const DM_ACTIONS: [&str; 5] = ["undo", "end", "add_creature", "remove_creature", "export"];
+const DM_ACTIONS: [&str; 12] = [
+    "undo",
+    "end",
+    "add_creature",
+    "remove_creature",
+    "export",
+    // Spells and stat block actions (0.3.2): the DM's. A player answers only their own PC's row (resolve_cast_row).
+    "cast_spell",
+    "apply_cast",
+    "cancel_cast",
+    "apply_zone",
+    "perform_statblock",
+    "standard_action",
+    "bind_to_concentration",
+];
 
 fn engine_tag(action: &str) -> &str {
     match action {
@@ -2661,6 +2752,19 @@ async fn act_inner(
                         .and_then(Value::as_bool)
                         .unwrap_or(true),
                     hidden: args.get("hidden").and_then(Value::as_bool),
+                    controlled_by: match args.get("controlledBy") {
+                        None | Some(Value::Null) => None,
+                        Some(v) => Some(
+                            v.as_str()
+                                .filter(|id| id_ok(id))
+                                .ok_or_else(|| bad("controlledBy is a combatant id."))?
+                                .to_string(),
+                        ),
+                    },
+                    bind: args
+                        .get("bindConcentration")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
                 },
                 None,
             )
@@ -2691,6 +2795,22 @@ async fn act_inner(
                 },
                 None,
             )
+        }
+        "cast_spell" => {
+            let command = cast_command(state, user, combat, &args).await?;
+            (Op::Engine(Box::new(command)), None)
+        }
+        "apply_zone" | "perform_statblock" => {
+            // Cast ids are the server's, random, so a player can't count casts from them.
+            let mut cmd = args.clone();
+            cmd.insert("command".into(), json!(action));
+            cmd.insert(
+                (if action == "apply_zone" { "id" } else { "cast_id" }).into(),
+                json!(new_id()),
+            );
+            let command: Command = serde_json::from_value(Value::Object(cmd))
+                .map_err(|e| Fail::Api(ApiError::Invalid(format!("Not a valid {action}: {e}"))))?;
+            (Op::Engine(Box::new(command)), None)
         }
         _ => {
             let tag = engine_tag(action);
@@ -2751,7 +2871,10 @@ async fn act_inner(
         return Ok(view);
     }
     announce(state, combat, &done).await;
-    let view = view_now(state, user, combat).await?;
+    let mut view = view_now(state, user, combat).await?;
+    if !done.notices.is_empty() && !player {
+        view["notices"] = json!(done.notices);
+    }
     sqlx::query(
         "UPDATE combat_requests SET response_json = $1 WHERE scope = $2 AND account_id = $3 AND request_id = $4",
     )
@@ -2762,6 +2885,180 @@ async fn act_inner(
     .execute(state.db.pool())
     .await?;
     Ok(view)
+}
+
+/// A DM's `cast_spell`, made whole by the server: a random cast id, never `precast` (only combat start casts before
+/// the fight), and the definition compiled on the server from the DM's own mechanics for this caster (the stat block
+/// entry's own spec, or a ruling, when there are none). `spellKey` names the spell when the caster has no entry for
+/// it; a DM's own `spec` (an ad hoc effect) is used as sent, after the engine's closed schema reads it. Economy,
+/// slots, targets and the edition rules are the engine's checks when it applies the command (`force` overrides
+/// them, never a missing slot).
+async fn cast_command(
+    state: &AppState,
+    user: &User,
+    combat: &str,
+    args: &Map<String, Value>,
+) -> Res<Command> {
+    let bad = |m: &str| Fail::Api(ApiError::Invalid(m.to_string()));
+    let st = {
+        let mut conn = state.db.pool().acquire().await?;
+        load(&mut conn, combat)
+            .await?
+            .ok_or_else(|| Fail::Api(not_found()))?
+            .state
+    };
+    let caster_id = args
+        .get("caster")
+        .and_then(Value::as_str)
+        .ok_or_else(|| bad("Send the caster."))?;
+    let caster = st
+        .combatant(&CombatantId::new(caster_id))
+        .filter(|c| !c.removed)
+        .ok_or_else(|| bad("There is no such caster in this combat."))?;
+    let ability = match args.get("ability") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let key = v.as_str().ok_or_else(|| bad("ability is a key."))?;
+            Some(
+                caster
+                    .abilities
+                    .iter()
+                    .find(|a| a.key == key)
+                    .ok_or_else(|| bad("The caster has no such ability."))?,
+            )
+        }
+    };
+    let link = ability.and_then(|a| a.spell.as_ref());
+    let key = match args.get("spellKey") {
+        None | Some(Value::Null) => link.and_then(|l| l.key.clone()),
+        Some(v) => Some(
+            v.as_str()
+                .filter(|k| !k.is_empty() && k.len() <= 200)
+                .ok_or_else(|| bad("spellKey is a spell id."))?
+                .to_string(),
+        ),
+    };
+    let mut cmd = args.clone();
+    cmd.remove("spellKey");
+    cmd.remove("precast");
+    cmd.insert("command".into(), json!("cast_spell"));
+    cmd.insert("id".into(), json!(new_id()));
+    let sent_spec = cmd.get("spec").is_some_and(|v| !v.is_null());
+    if !sent_spec {
+        let fallback = ability.and_then(|a| a.mech.as_deref());
+        let spec = match &key {
+            Some(key) => {
+                crate::spells::compile(state, &user.id, st.edition, key, caster, link, fallback)
+                    .await?
+            }
+            None => None,
+        };
+        match spec {
+            Some(spec) => {
+                cmd.insert(
+                    "spec".into(),
+                    serde_json::to_value(&spec).map_err(internal)?,
+                );
+            }
+            None if fallback.is_some() => {}
+            None => {
+                return Err(bad(
+                    "That spell isn't in your content, and the caster has no entry for it.",
+                ))
+            }
+        }
+    }
+    serde_json::from_value(Value::Object(cmd))
+        .map_err(|e| Fail::Api(ApiError::Invalid(format!("Not a valid cast_spell: {e}"))))
+}
+
+/// Cast an encounter's precast spells (`encounter_casts`) into a combat being set up: each with its real effect,
+/// compiled from the DM's mechanics like a live cast, spending its slot (the engine's `precast`: no economy or
+/// edition rules). A precast that can't be cast (a missing slot, a spell gone from the content) is skipped and logged.
+async fn precast(
+    state: &AppState,
+    conn: &mut AnyConnection,
+    dm: &str,
+    encounter: &str,
+    by_creature: &HashMap<String, String>,
+    st: CombatState,
+    die: &mut SeededDie,
+) -> Res<CombatState> {
+    let rows = sqlx::query(
+        "SELECT caster_creature_id, spell_key, slot_level, targets_json, choices_json
+         FROM encounter_casts WHERE encounter_id = $1 ORDER BY sort, id",
+    )
+    .bind(encounter)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut st = st;
+    for row in rows {
+        let Some(caster_id) = row
+            .try_get::<String, _>(0)
+            .ok()
+            .and_then(|c| by_creature.get(&c).cloned())
+        else {
+            continue;
+        };
+        let key: String = row.try_get(1)?;
+        let slot = row
+            .try_get::<Option<i64>, _>(2)?
+            .and_then(|l| u8::try_from(l).ok());
+        let targets: Vec<String> =
+            serde_json::from_str::<Vec<String>>(&row.try_get::<String, _>(3)?)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|t| {
+                    if t == "self" {
+                        Some(caster_id.clone())
+                    } else {
+                        by_creature.get(&t).cloned()
+                    }
+                })
+                .collect();
+        let choices: Value =
+            serde_json::from_str(&row.try_get::<String, _>(4)?).unwrap_or_else(|_| json!({}));
+        let Some(caster) = st.combatant(&CombatantId::new(caster_id.clone())).cloned() else {
+            continue;
+        };
+        let ability = caster
+            .abilities
+            .iter()
+            .find(|a| a.spell.as_ref().and_then(|l| l.key.as_deref()) == Some(key.as_str()));
+        let spec = crate::spells::compile(
+            state,
+            dm,
+            st.edition,
+            &key,
+            &caster,
+            ability.and_then(|a| a.spell.as_ref()),
+            ability.and_then(|a| a.mech.as_deref()),
+        )
+        .await?;
+        let cmd = json!({
+            "command": "cast_spell",
+            "id": new_id(),
+            "caster": caster_id,
+            "ability": ability.map(|a| a.key.clone()),
+            "spec": spec,
+            "slot": slot,
+            "targets": targets,
+            "choices": choices,
+            "precast": true,
+        });
+        let cmd: Command = match serde_json::from_value(cmd) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!("combat: a precast spell of {encounter} doesn't fit: {e}");
+                continue;
+            }
+        };
+        match apply(&st, &Actor::System, &cmd, die) {
+            Ok(o) => st = o.state,
+            Err(e) => tracing::warn!("combat: a precast spell of {encounter} wasn't cast: {e}"),
+        }
+    }
+    Ok(st)
 }
 
 /// The combatant a `summon` brings in, built by the server with a random id, and who it is:

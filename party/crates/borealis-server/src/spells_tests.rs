@@ -20,6 +20,17 @@ const FIREBALL_2024: &str = "ID_2024_SPELL_FIREBALL";
 const DELAYED_2024: &str = "ID_2024_SPELL_DELAYED_BLAST_FIREBALL";
 const GOBLIN: &str = "ID_SRD521_MONSTER_GOBLIN_WARRIOR";
 
+/// S1's fixture definitions: `[2014, 2024]` of one spell.
+fn fixture(name: &str, edition: usize) -> Value {
+    let text = match name {
+        "fireball" => include_str!("../../party-combat/fixtures/spells/fireball.json"),
+        "mage-armor" => include_str!("../../party-combat/fixtures/spells/mage-armor.json"),
+        "hold-person" => include_str!("../../party-combat/fixtures/spells/hold-person.json"),
+        _ => unreachable!(),
+    };
+    serde_json::from_str::<Value>(text).unwrap()[edition].clone()
+}
+
 async fn ok(client: &Client, method: &str, path: &str, body: Value) -> Value {
     let (status, out) = call(client, method, path, body).await;
     assert_eq!(status, StatusCode::OK, "{method} {path}: {out}");
@@ -225,8 +236,7 @@ fn def_row(key: &str, ruleset: &str, def: Value) -> Value {
 
 /// Defs, links and aliases; what combat would use.
 async fn mechanics_checks(state: &crate::AppState, dm: &Client, other: &Client) {
-    let fireball = json!({ "v": 1, "delivery": { "save": { "ability": "dex", "success": "half" } },
-                           "onLand": [{ "damage": { "dice": "8d6+(slot_above)d6", "type": "fire" } }] });
+    let fireball = fixture("fireball", 1);
     let saved = ok(
         dm,
         "PUT",
@@ -277,7 +287,7 @@ async fn mechanics_checks(state: &crate::AppState, dm: &Client, other: &Client) 
     .unwrap();
     assert_eq!(got[FIREBALL_2024].origin, "def");
     assert_eq!(got[FIREBALL_2024].rev, 2);
-    assert_eq!(got[FIREBALL_2024].def, fireball);
+    assert_eq!(got[FIREBALL_2024].def, fireball, "stored as the engine reads it");
     assert_eq!(got[DELAYED_2024].origin, "link");
     assert_eq!(got[DELAYED_2024].from_key, FIREBALL_2024);
     assert!(
@@ -302,7 +312,7 @@ async fn mechanics_checks(state: &crate::AppState, dm: &Client, other: &Client) 
         dm,
         "PUT",
         "/api/spell-mechanics",
-        def_row(DELAYED_2024, "dnd2024", json!({ "v": 1, "notes": ["own"] })),
+        def_row(DELAYED_2024, "dnd2024", fixture("hold-person", 1)),
     )
     .await;
     let rows = ok(dm, "GET", "/api/spell-mechanics", Value::Null).await;
@@ -353,6 +363,13 @@ async fn mechanics_checks(state: &crate::AppState, dm: &Client, other: &Client) 
         json!({ "kind": "def", "spellKey": FIREBALL_2024, "ruleset": "dnd2024", "def": {}, "extra": 1 }),
         json!({ "kind": "def", "spellKey": FIREBALL_2024, "ruleset": "dnd2024",
                 "def": { "big": "x".repeat(70 * 1024) } }),
+        // Not the engine's schema: no scripting, no unknown fields, no wrong edition or version.
+        json!({ "kind": "def", "spellKey": FIREBALL_2024, "ruleset": "dnd2024", "def": { "v": 1 } }),
+        def_row(FIREBALL_2024, "dnd2024", { let mut d = fixture("fireball", 1); d["script"] = json!("x"); d }),
+        def_row(FIREBALL_2024, "dnd2024", fixture("fireball", 0)),
+        def_row(FIREBALL_2024, "dnd2024", { let mut d = fixture("fireball", 1); d["v"] = json!(2); d }),
+        def_row(FIREBALL_2024, "dnd2024", { let mut d = fixture("fireball", 1);
+            d["on_land"][0]["dice"] = json!("8d6+system()"); d }),
     ] {
         let (status, out) = call(dm, "PUT", "/api/spell-mechanics", bad.clone()).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}: {out}");
@@ -391,7 +408,7 @@ async fn file_checks(dm: &Client, other: &Client) {
         other,
         "PUT",
         "/api/spell-mechanics",
-        def_row(FIREBALL_2014, "dnd2014", json!({ "v": 1 })),
+        def_row(FIREBALL_2014, "dnd2014", fixture("fireball", 0)),
     )
     .await;
     let out = ok(other, "POST", "/api/spell-mechanics/import", file.clone()).await;
@@ -584,7 +601,7 @@ async fn check_upgraded(location: &Location, data: &Path, enc: &str, creature: &
         &dm,
         "PUT",
         "/api/spell-mechanics",
-        def_row(FIREBALL_2024, "dnd2024", json!({ "v": 1 })),
+        def_row(FIREBALL_2024, "dnd2024", fixture("fireball", 1)),
     )
     .await;
     // Precast rows go with their encounter and creature.
@@ -646,7 +663,7 @@ async fn spells_arrive_on_a_0_3_1_database() {
         &dm,
         "PUT",
         "/api/spell-mechanics",
-        def_row(FIREBALL_2024, "dnd2024", json!({ "v": 1 })),
+        def_row(FIREBALL_2024, "dnd2024", fixture("fireball", 1)),
     )
     .await;
     db.pool().close().await;
