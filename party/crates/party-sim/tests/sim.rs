@@ -423,3 +423,78 @@ fn print_a_fight() {
     }
     println!("{}", serde_json::to_string_pretty(&report(&sim)).unwrap());
 }
+
+#[test]
+fn legendary_creatures_act_between_turns() {
+    let mut setup = ogre_setup(13, "none");
+    setup.creatures = vec![creature(
+        "ec-dragon",
+        "Adult Red Dragon",
+        "dnd2024",
+        "Adult Red Dragon",
+    )];
+    let mut seen_legendary = false;
+    for seed in 0..6 {
+        setup.seed = seed;
+        let mut sim = Sim::new(&setup).unwrap();
+        assert!(
+            sim.state.legendary_pools.contains_key("c5"),
+            "a pool for the dragon"
+        );
+        let _ = sim.advance();
+        let r = report(&sim);
+        let dragon = &r.creatures[0];
+        let legendary: Vec<&String> = dragon
+            .abilities_used
+            .keys()
+            .filter(|k| {
+                sim.sheets[&CombatantId::new("c5")]
+                    .actions
+                    .iter()
+                    .any(|a| &a.name == *k && a.kind == party_combat::AbilityKind::Legendary)
+            })
+            .collect();
+        seen_legendary |= !legendary.is_empty();
+        assert_d16(&serde_json::to_value(&r).unwrap());
+    }
+    assert!(
+        seen_legendary,
+        "legendary actions were taken in other creatures' turns"
+    );
+}
+
+#[test]
+fn cards_stay_small() {
+    let mut sim = Sim::new(&ogre_setup(8, "foes")).unwrap();
+    let card = first_foe_card(&mut sim);
+    let full = card.to_string().len();
+    let small = party_sim::oracle::user_message(&card, Profile::Small).len();
+    eprintln!("card: {full} bytes, small-profile message: {small} bytes");
+    assert!(small < full);
+    assert!(small < 6000, "about 1.5k tokens at most: {small}");
+}
+
+#[test]
+fn each_legendary_creature_has_its_own_pool() {
+    let mut setup = ogre_setup(2, "none");
+    let a = creature("ec-a", "Adult Red Dragon", "dnd2024", "Red A");
+    let mut b = creature("ec-b", "Adult Red Dragon", "dnd2024", "Red B");
+    b.snapshot
+        .data
+        .as_mut()
+        .unwrap()
+        .legendary
+        .as_mut()
+        .unwrap()
+        .per_round = Some(2);
+    setup.creatures = vec![a, b];
+    let mut sim = Sim::new(&setup).unwrap();
+    let pools = &sim.state.legendary_pools;
+    assert_eq!(pools.len(), 2, "one pool per creature, never shared");
+    assert_eq!((pools["c5"].max, pools["c5"].members.len()), (3, 1));
+    assert_eq!((pools["c6"].max, pools["c6"].members.len()), (2, 1));
+    let _ = sim.advance();
+    for (k, p) in &sim.state.legendary_pools {
+        assert!(p.remaining <= p.max, "{k}");
+    }
+}

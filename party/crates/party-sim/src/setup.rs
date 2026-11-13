@@ -1,5 +1,5 @@
 //! Inputs of a simulation and how they become its combat: the encounter's creature copies (snapshot, overrides,
-//! label), the party's characters (a small serde mirror of upstream's character snapshot, or the roster card when
+//! label), the party's characters (a small serde subset of upstream's character snapshot, or the roster card when
 //! the sheet can't be read), the encounter's start effects and rules, and the options.
 
 use std::collections::BTreeMap;

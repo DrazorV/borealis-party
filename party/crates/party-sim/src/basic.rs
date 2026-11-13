@@ -146,7 +146,7 @@ fn evaluate(sim: &Sim, actor: &CombatantId, opt: &Opt) -> Option<Pick> {
     for t in &candidates {
         let (ev, targets) = match &a.def {
             Def::Attack(x) => (attack_ev(sim, actor, t, x), vec![t.0.clone()]),
-            Def::Multiattack { steps } => {
+            Def::Multiattack { steps, .. } => {
                 let mut ev = 0;
                 for st in steps {
                     match sim.action_by_key(actor, &st.key).map(|d| &d.def) {
@@ -380,7 +380,7 @@ fn approach(sim: &Sim, actor: &CombatantId, options: &[Opt], p: &Pick) -> Option
     let a = sim.sheets.get(actor)?.actions.get(opt.action?)?;
     let x = match &a.def {
         Def::Attack(x) => x,
-        Def::Multiattack { steps } => match steps
+        Def::Multiattack { steps, .. } => match steps
             .first()
             .and_then(|s| sim.action_by_key(actor, &s.key))
             .map(|d| &d.def)
@@ -404,7 +404,7 @@ fn approach(sim: &Sim, actor: &CombatantId, options: &[Opt], p: &Pick) -> Option
             Def::Attack(mx) if mx.melee => {
                 Some(parts_avg2(&mx.parts) * i32::try_from(mx.count).unwrap_or(1))
             }
-            Def::Multiattack { steps } => Some(
+            Def::Multiattack { steps, .. } => Some(
                 steps
                     .iter()
                     .filter_map(|s| match sim.action_by_key(actor, &s.key).map(|d| &d.def) {

@@ -1421,6 +1421,23 @@ impl Sim {
                 self.count_use(actor, &a);
                 if let Some((r, src)) = adj {
                     self.run_adjudicated(actor, &src, r, targets);
+                } else if matches!(a.def, Def::Multiattack { moves: true, .. })
+                    && matches!(self.window, Window::Legendary { .. })
+                {
+                    // A legendary action that moves: a turn of its own for the move, then back.
+                    let steps = self.legendary_steps(actor);
+                    let turn = std::mem::replace(
+                        &mut self.turn,
+                        TurnState {
+                            actor: Some(actor.clone()),
+                            steps_left: steps,
+                            disengaged: false,
+                            decisions: 0,
+                        },
+                    );
+                    let def = a.def.clone();
+                    self.run_def(actor, &a, &def, targets);
+                    self.turn = turn;
                 } else {
                     let def = a.def.clone();
                     self.run_def(actor, &a, &def, targets);
@@ -1458,7 +1475,7 @@ impl Sim {
                     }
                 }
             }
-            Def::Multiattack { steps } => {
+            Def::Multiattack { steps, .. } => {
                 let mut k = 0;
                 for st in steps {
                     let Some(step) = self.action_by_key(actor, &st.key).cloned() else {

@@ -163,9 +163,16 @@ pub struct SpellDef {
 pub enum Def {
     Attack(AttackDef),
     Save(SaveDef),
-    Multiattack { steps: Vec<Step> },
+    Multiattack {
+        steps: Vec<Step>,
+        /// It moves first (a legendary Pounce: up to half its speed).
+        #[serde(default)]
+        moves: bool,
+    },
     Spell(SpellDef),
-    Heal { dice: String },
+    Heal {
+        dice: String,
+    },
     Text,
 }
 
@@ -731,14 +738,27 @@ pub fn creature_sheet(c: &Combatant, data: Option<&MonsterData>) -> SimSheet {
         .map(|a| (a.key.clone(), a.name.clone()))
         .collect();
     for a in &mut defs {
-        if a.kind == AbilityKind::Action
-            && a.def == Def::Text
-            && a.name.to_lowercase().starts_with("multiattack")
-        {
-            if let Some(steps) = parse_multiattack(&a.text, &attacks) {
-                a.def = Def::Multiattack { steps };
-                a.coverage = Coverage::Automated;
-            }
+        let multi =
+            a.kind == AbilityKind::Action && a.name.to_lowercase().starts_with("multiattack");
+        // Legendary actions that make another action's attack ("makes one Rend attack", "makes a tail attack").
+        let legendary = a.kind == AbilityKind::Legendary;
+        if a.def != Def::Text || !(multi || legendary) {
+            continue;
+        }
+        let text = if legendary {
+            a.text
+                .replace("makes a ", "makes one ")
+                .replace("makes an ", "makes one ")
+        } else {
+            a.text.clone()
+        };
+        if let Some(steps) = parse_multiattack(&text, &attacks) {
+            let lower = a.text.to_lowercase();
+            a.def = Def::Multiattack {
+                steps,
+                moves: legendary && (lower.contains("moves up to") || lower.contains("move up to")),
+            };
+            a.coverage = Coverage::Automated;
         }
     }
     sheet.actions = defs;
@@ -815,7 +835,7 @@ fn attacks_per_action(features: &[String]) -> u32 {
     n
 }
 
-/// The sheet of a PC from its snapshot mirror. `keys` are the engine ability keys the setup gave its rows.
+/// The sheet of a PC from its snapshot subset. `keys` are the engine ability keys the setup gave its rows.
 #[must_use]
 pub fn pc_sheet(pc: &PcInput, keys: &[String], edition: party_combat::Edition) -> SimSheet {
     let mut sheet = SimSheet {

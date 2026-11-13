@@ -133,7 +133,7 @@ pub fn summary(sim: &Sim, a: &ActionDef) -> String {
                 s.ability.as_str().to_uppercase()
             )
         }
-        Def::Multiattack { steps } => steps
+        Def::Multiattack { steps, .. } => steps
             .iter()
             .map(|st| {
                 let name = sim
@@ -217,7 +217,7 @@ impl Sim {
                     let t = self.attack_targets(actor, x, &enemies);
                     (OptKind::Attack, t, x.count)
                 }
-                Def::Multiattack { steps } => {
+                Def::Multiattack { steps, .. } => {
                     let mut t: Vec<CombatantId> = Vec::new();
                     let mut n = 0;
                     for st in steps {
@@ -343,6 +343,29 @@ impl Sim {
         out
     }
 
+    /// Steps a legendary action that moves may take now (half its speed), else 0.
+    #[must_use]
+    pub fn legendary_steps(&self, actor: &CombatantId) -> i32 {
+        if !matches!(self.window, Window::Legendary { .. }) {
+            return 0;
+        }
+        let moves = self.sheets.get(actor).is_some_and(|s| {
+            s.actions.iter().any(|a| {
+                a.kind == AbilityKind::Legendary
+                    && matches!(a.def, Def::Multiattack { moves: true, .. })
+            })
+        });
+        let speed = self
+            .state
+            .combatant(actor)
+            .map_or(0, |c| derive::effective_speed(&self.state, c).walk);
+        if moves {
+            crate::space::budget(speed / 2)
+        } else {
+            0
+        }
+    }
+
     fn reach_bonus(&self, actor: &CombatantId) -> u32 {
         // Movement this turn brings a ranged effect closer.
         u32::try_from(self.turn.steps_left.max(0)).unwrap_or(0)
@@ -361,7 +384,7 @@ impl Sim {
         let steps_left = if self.turn.actor.as_ref() == Some(actor) {
             self.turn.steps_left
         } else {
-            0
+            self.legendary_steps(actor)
         };
         enemies
             .iter()
@@ -387,7 +410,7 @@ impl Sim {
     ) -> Option<String> {
         let x = match &a.def {
             Def::Attack(x) => x,
-            Def::Multiattack { steps } => match steps
+            Def::Multiattack { steps, .. } => match steps
                 .first()
                 .and_then(|s| self.sheet_of_key(a, &s.key))
                 .map(|d| &d.def)

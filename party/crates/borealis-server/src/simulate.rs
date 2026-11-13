@@ -410,10 +410,19 @@ pub trait Decider: Send + Sync {
     fn model(&self) -> String;
     /// A local model (Ollama, LM Studio on loopback or the LAN): 8 s timeouts and the small profile.
     fn is_local(&self) -> bool;
+    /// The profile the account chose (Your AI), if any; otherwise it follows the model's name.
+    fn profile(&self) -> Option<Profile> {
+        None
+    }
 }
 
 /// Where part C's provider plugs in: the account's own model, if it set one up and opted in.
-pub type DeciderSource = fn(&AppState, &User) -> Option<Arc<dyn Decider>>;
+pub type DeciderSource = fn(
+    AppState,
+    User,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = Option<Arc<dyn Decider>>> + Send>,
+>;
 
 static DECIDERS: LazyLock<Mutex<Option<DeciderSource>>> = LazyLock::new(|| Mutex::new(None));
 
@@ -980,7 +989,11 @@ async fn auto(state: &AppState, user: &User, a: AutoArgs) -> SimResult<Value> {
 /// of the session's fight (so the session is never locked while the model thinks) and puts it back when done.
 async fn assistant(state: &AppState, user: &User, s: Shared, step: u32) -> SimResult<Value> {
     let source = DECIDERS.lock().ok().and_then(|d| *d);
-    let Some(decider) = source.and_then(|f| f(state, user)) else {
+    let decider = match source {
+        Some(f) => f(state.clone(), user.clone()).await,
+        None => None,
+    };
+    let Some(decider) = decider else {
         return Err(SimError::Unavailable(
             "Set up your own AI model (Account, Your AI) and opt in to use it here.".into(),
         ));
@@ -998,7 +1011,9 @@ async fn assistant(state: &AppState, user: &User, s: Shared, step: u32) -> SimRe
             let card = next_card(&mut g.sim);
             return Ok(json!({ "stale": true, "step": g.sim.step, "card": card }));
         }
-        let profile = Profile::for_model(&decider.model(), decider.is_local());
+        let profile = decider
+            .profile()
+            .unwrap_or_else(|| Profile::for_model(&decider.model(), decider.is_local()));
         let run = Arc::new(Mutex::new(AssistantRun {
             state: "running",
             model: decider.model(),
