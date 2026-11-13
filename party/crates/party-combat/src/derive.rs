@@ -3,8 +3,8 @@
 
 use crate::error::Unavailable;
 use crate::model::{
-    Ability, AbilityKind, CombatState, Combatant, CombatantId, Condition, Edition, Modifier,
-    RuleTarget, Speeds,
+    Ability, AbilityKind, CombatState, Combatant, CombatantId, Condition, Edition, InitiativeMode,
+    Modifier, RuleTarget, Speeds,
 };
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
@@ -15,26 +15,64 @@ pub fn link_active(state: &CombatState, c: &Combatant) -> bool {
     c.linked_to
         .as_ref()
         .and_then(|l| state.combatant(l))
-        .is_some_and(|l| !l.removed && !l.absent && l.life.is_alive() && l.initiative.is_some())
+        .is_some_and(|l| {
+            !l.removed && !l.absent && l.life.is_alive() && effective_initiative(state, l).is_some()
+        })
 }
 
-/// The initiative a combatant acts on: its leader's while linked, else its own.
+/// Whom a combatant acts right after, if anyone:
+/// - its C3 link (a mount after its rider) while that link is active;
+/// - otherwise its owner, for a controlled creature in `after_owner` mode whose owner is in the fight. A defeated
+///   or dismissed owner still leads: the DM decides what happens next (`owner_defeated`).
+#[must_use]
+pub fn leader<'a>(state: &'a CombatState, c: &Combatant) -> Option<&'a Combatant> {
+    leader_at(state, c, 0)
+}
+
+fn leader_at<'a>(state: &'a CombatState, c: &Combatant, depth: usize) -> Option<&'a Combatant> {
+    if depth > state.combatants.len() {
+        return None;
+    }
+    if let Some(l) = c.linked_to.as_ref().and_then(|l| state.combatant(l)) {
+        if !l.removed
+            && !l.absent
+            && l.life.is_alive()
+            && initiative_at(state, l, depth + 1).is_some()
+        {
+            return Some(l);
+        }
+    }
+    if c.initiative_mode == InitiativeMode::AfterOwner {
+        if let Some(o) = c.owner_id.as_ref().and_then(|o| state.combatant(o)) {
+            if !o.absent && initiative_at(state, o, depth + 1).is_some() {
+                return Some(o);
+            }
+        }
+    }
+    None
+}
+
+/// The initiative a combatant acts on: its leader's while it follows one, else its own.
 #[must_use]
 pub fn effective_initiative(state: &CombatState, c: &Combatant) -> Option<i32> {
-    if link_active(state, c) {
-        let leader = state.combatant(c.linked_to.as_ref()?)?;
-        return effective_initiative(state, leader);
+    initiative_at(state, c, 0)
+}
+
+fn initiative_at(state: &CombatState, c: &Combatant, depth: usize) -> Option<i32> {
+    match leader_at(state, c, depth) {
+        Some(l) => initiative_at(state, l, depth + 1),
+        None => c.initiative,
     }
-    c.initiative
 }
 
 /// Everyone with an initiative, removed and absent ones included, in turn order. The turn flow steps through this
-/// list, so a removed or defeated active combatant keeps its place and never restarts the round (C4).
+/// list, so a removed or defeated active combatant keeps its place and never restarts the round (C4). Followers
+/// come right after their leader, in the order they were added (their `tiebreak`), nested to any depth.
 pub(crate) fn anchor_order(state: &CombatState) -> Vec<CombatantId> {
     let mut roots: Vec<&Combatant> = state
         .combatants
         .iter()
-        .filter(|c| c.initiative.is_some() && !link_active(state, c))
+        .filter(|c| c.initiative.is_some() && leader(state, c).is_none())
         .collect();
     roots.sort_by_key(|c| {
         (
@@ -63,7 +101,7 @@ fn push_with_followers(
     let mut followers: Vec<&Combatant> = state
         .combatants
         .iter()
-        .filter(|f| f.linked_to.as_ref() == Some(&c.id) && link_active(state, f))
+        .filter(|f| leader(state, f).is_some_and(|l| l.id == c.id))
         .collect();
     followers.sort_by_key(|f| f.tiebreak);
     for f in followers {
@@ -115,14 +153,14 @@ pub fn incapacitated(state: &CombatState, id: &CombatantId) -> bool {
 /// AC: the base, effect modifiers and the best cover (C13).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcBreakdown {
-    /// The stat block's AC.
-    pub base: i32,
+    /// The stat block's AC (`None` when unknown).
+    pub base: Option<i32>,
     /// The sum of effect modifiers.
     pub effects: i32,
     /// The best cover's bonus.
     pub cover: i32,
-    /// The total.
-    pub total: i32,
+    /// The total (`None` when the base is unknown).
+    pub total: Option<i32>,
 }
 
 /// The effective AC of a combatant.
@@ -152,7 +190,7 @@ pub fn effective_ac(state: &CombatState, c: &Combatant) -> AcBreakdown {
         base: c.ac,
         effects,
         cover,
-        total: c.ac + effects + cover,
+        total: c.ac.map(|ac| ac + effects + cover),
     }
 }
 

@@ -301,7 +301,7 @@ fn source_turn_duration_and_follow_up() {
     );
     assert_eq!(
         derive::effective_ac(&combat.state, c(&combat, "k")).total,
-        20
+        Some(20)
     );
     assert_eq!(
         derive::effective_speed(&combat.state, c(&combat, "k")).walk,
@@ -408,7 +408,7 @@ fn a_repeated_save_is_raised_at_the_turn_end_and_ends_on_success() {
         &mut combat,
         Command::ResolveEffectSave {
             effect: e,
-            roll: D20Input::roll(0, Default::default()),
+            roll: D20Input::app(0, Default::default()),
         },
         &[13],
     );
@@ -446,7 +446,7 @@ fn mounted_cover_ends_when_the_mount_drops() {
     let ac = derive::effective_ac(&combat.state, c(&combat, "k"));
     assert_eq!(
         (ac.base, ac.effects, ac.cover, ac.total),
-        (18, 2, 5, 25),
+        (Some(18), 2, 5, Some(25)),
         "covers don't stack"
     );
     dm(&mut combat, hit("h", 50, None));

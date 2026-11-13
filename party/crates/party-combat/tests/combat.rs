@@ -224,7 +224,7 @@ fn same_seed_same_commands_same_result() {
         dm(&mut combat, Command::Start);
         for _ in 0..4 {
             let parts = vec![DamagePart {
-                amount: party_dice::DiceInput::roll("2d6+3"),
+                amount: party_dice::DiceInput::app("2d6+3"),
                 damage_type: Some(DamageType::Fire),
             }];
             let target = combat.state.current.clone().unwrap();
@@ -489,4 +489,62 @@ fn hidden_creatures_change_nothing_players_see() {
         visible_order(&with_hidden.state, ViewerKind::Player).len(),
         2
     );
+}
+
+/// D20 b: a revealed creature shows its full stat block, so an exact HP change (inside a band) or a legendary
+/// action spent is a player event; DM-only fields still aren't.
+#[test]
+fn revealed_means_the_full_stat_block() {
+    let mut combat = Combat::new(Edition::Srd521, 1);
+    add(&mut combat, adult_red_dragon("d"));
+    add(&mut combat, wizard_pc("w"));
+    init(&mut combat, "d", 15);
+    init(&mut combat, "w", 10);
+    let pool = LegendaryPool {
+        max: 3,
+        remaining: 3,
+        members: vec![id("d")],
+    };
+    dm(
+        &mut combat,
+        Command::SetLegendaryPool {
+            pool: "d".into(),
+            value: pool,
+        },
+    );
+    dm(&mut combat, Command::Reveal { id: id("d") });
+    dm(&mut combat, Command::Start);
+    let ev = dm(&mut combat, hit("d", 1, Some(DamageType::Cold)));
+    assert_eq!(
+        ev.players,
+        vec![PlayerEvent::Changed { id: id("d") }],
+        "256 -> 255 is still unhurt"
+    );
+    dm(&mut combat, Command::NextTurn);
+    let ev = dm(
+        &mut combat,
+        Command::UseAbility {
+            id: id("d"),
+            ability: "tail".into(),
+            slot: None,
+        },
+    );
+    assert_eq!(ev.players, vec![PlayerEvent::Changed { id: id("d") }]);
+    let view = player_view_of(&combat.state, &id("d")).unwrap();
+    assert_eq!(view["hp"]["current"], 255);
+    assert_eq!(
+        view["legendary_actions"],
+        serde_json::json!({"remaining": 2, "max": 3})
+    );
+    for dm_only in ["label", "notes", "tiebreak"] {
+        assert!(view.get(dm_only).is_none(), "{dm_only} in {view}");
+    }
+    let ev = dm(
+        &mut combat,
+        Command::SetNotes {
+            id: id("d"),
+            notes: "flees at 50".into(),
+        },
+    );
+    assert!(ev.players.is_empty());
 }

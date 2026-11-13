@@ -169,7 +169,7 @@ fn typed_pc_initiative_with_its_natural_die() {
         &mut combat,
         Command::SetInitiative {
             id: id("w"),
-            roll: D20Input::roll(3, RollMode::Disadvantage),
+            roll: D20Input::app(3, RollMode::Disadvantage),
         },
         &[12, 6],
     );

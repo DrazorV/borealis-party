@@ -120,7 +120,7 @@ fn roll_expr_sums_and_writes_breakdown() {
         r.terms.iter().map(|t| t.rolls.clone()).collect::<Vec<_>>(),
         vec![vec![3, 4], vec![2], vec![]]
     );
-    assert_eq!(r.source, RollSource::Rolled);
+    assert_eq!(r.source, RollSource::App);
 
     let r = roll_expr(
         &parse_notation("1d4-1").unwrap(),
@@ -276,25 +276,25 @@ fn typed_d20_never_touches_the_die() {
 
 #[test]
 fn rolled_d20_input_uses_the_die() {
-    let r = resolve_d20(&D20Input::roll(3, RollMode::Advantage), &mut seq(&[4, 11])).unwrap();
+    let r = resolve_d20(&D20Input::app(3, RollMode::Advantage), &mut seq(&[4, 11])).unwrap();
     assert_eq!(r.total, 14);
-    assert_eq!(r.source, RollSource::Rolled);
+    assert_eq!(r.source, RollSource::App);
 }
 
 #[test]
 fn typed_and_rolled_dice_input() {
     let r = resolve_dice(&DiceInput::typed(12), &mut seq(&[])).unwrap();
     assert_eq!((r.total, r.source), (12, RollSource::Typed));
-    let r = resolve_dice(&DiceInput::roll("1d8+3"), &mut seq(&[5])).unwrap();
+    let r = resolve_dice(&DiceInput::app("1d8+3"), &mut seq(&[5])).unwrap();
     assert_eq!(r.total, 8);
-    let crit = DiceInput::Roll {
+    let crit = DiceInput::App {
         notation: "1d8+3".into(),
         critical: true,
         floor: None,
     };
     let r = resolve_dice(&crit, &mut seq(&[5, 3])).unwrap();
     assert_eq!(r.breakdown, "2d8 [5, 3] +3 = 11, critical");
-    assert!(resolve_dice(&DiceInput::roll("nope"), &mut seq(&[])).is_err());
+    assert!(resolve_dice(&DiceInput::app("nope"), &mut seq(&[])).is_err());
 }
 
 #[test]
@@ -302,10 +302,10 @@ fn inputs_serialize_with_a_kind_tag() {
     let json = serde_json::to_string(&D20Input::typed_natural(15, 12)).unwrap();
     assert_eq!(json, r#"{"kind":"typed","total":15,"natural":12}"#);
     let back: D20Input =
-        serde_json::from_str(r#"{"kind":"roll","modifier":2,"mode":"advantage"}"#).unwrap();
+        serde_json::from_str(r#"{"kind":"app","modifier":2,"mode":"advantage"}"#).unwrap();
     assert_eq!(
         back,
-        D20Input::Roll {
+        D20Input::App {
             modifier: 2,
             mode: RollMode::Advantage,
             crit_range: None

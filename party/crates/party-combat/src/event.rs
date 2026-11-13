@@ -3,7 +3,7 @@
 use crate::damage::DamageResult;
 use crate::model::{CombatantId, DamageType, EffectId};
 use crate::visibility::TurnPointer;
-use party_dice::{D20Result, DiceResult};
+use party_dice::{D20Result, DiceResult, RollSource};
 use serde::{Deserialize, Serialize};
 
 /// What happened, for the DM. Every DM event goes to the DM-only log (D32). It may name hidden creatures, so it
@@ -188,6 +188,44 @@ pub enum DmEventKind {
         /// Active now.
         active: bool,
     },
+    /// A roll was made with [`crate::Command::Roll`].
+    Rolled {
+        /// What it was.
+        label: String,
+        /// The result.
+        result: RollOutcome,
+    },
+    /// An attack roll against the target's effective AC.
+    Attack {
+        /// The target.
+        target: CombatantId,
+        /// The roll.
+        roll: D20Result,
+        /// The target's effective AC (`None` when unknown).
+        target_ac: Option<i32>,
+        /// Hit (`None` when the AC is unknown: the DM decides).
+        hit: Option<bool>,
+        /// A critical hit.
+        critical: bool,
+    },
+    /// HP rolled from a formula.
+    HpRolled {
+        /// The roll.
+        roll: DiceResult,
+    },
+    /// A controlled creature was added.
+    Summoned {
+        /// Its owner.
+        owner: CombatantId,
+    },
+    /// A controlled creature was dismissed.
+    Dismissed,
+    /// A controlled creature's owner went down. The DM chooses: keep it after the owner, dismiss it, or give it its
+    /// own initiative. Nothing changes automatically. DM only.
+    OwnerDefeated {
+        /// The owner.
+        owner: CombatantId,
+    },
     /// The last change was undone.
     Undone {
         /// The undone command's label.
@@ -264,7 +302,32 @@ pub enum PlayerEvent {
         /// The owner's account.
         owner: String,
     },
-    /// The PC's turn started ("Your turn" and a vibration).
+    /// The result of a roll for the player's own PC or creature (in the app or typed): initiative, a death save, a
+    /// save, an attack, a recharge, HP or any other roll. Sent to that player only.
+    RollResult {
+        /// The PC or creature.
+        id: CombatantId,
+        /// The player's account.
+        owner: String,
+        /// What it was ("Initiative", "Death save", "Longsword").
+        label: String,
+        /// The total.
+        total: i32,
+        /// The natural d20, for d20 tests.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        natural: Option<u32>,
+        /// Rolled in the app or typed.
+        source: RollSource,
+        /// `d20 [14] +5 = 19`.
+        breakdown: String,
+        /// For an attack: hit or miss (`None` when unknown).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hit: Option<bool>,
+        /// A critical hit.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        critical: bool,
+    },
+    /// The turn of the player's PC, or of a creature it controls, started ("Your turn" and a vibration).
     YourTurn {
         /// The PC.
         id: CombatantId,
@@ -290,4 +353,14 @@ pub struct Events {
     pub dm: Vec<DmEvent>,
     /// For players.
     pub players: Vec<PlayerEvent>,
+}
+
+/// The result of [`crate::Command::Roll`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RollOutcome {
+    /// A d20 test.
+    D20(D20Result),
+    /// A dice expression.
+    Dice(DiceResult),
 }

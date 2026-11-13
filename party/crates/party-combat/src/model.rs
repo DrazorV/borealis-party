@@ -522,6 +522,31 @@ pub struct ConcentrationCheck {
     pub damage: i32,
 }
 
+/// Who gives a combatant its orders.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Controller {
+    /// The DM (creatures, villains' pets and summons).
+    #[default]
+    Dm,
+    /// The player of this PC (the PC's summons, pets and companions). PCs control themselves through their owner
+    /// account.
+    Player {
+        /// The controlling PC.
+        pc: CombatantId,
+    },
+}
+
+/// Where a controlled creature acts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InitiativeMode {
+    /// Right after its owner, at the owner's initiative (several in a stable sub-order).
+    #[default]
+    AfterOwner,
+    /// On its own initiative.
+    Own,
+}
 /// One combatant: a creature or a PC.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Combatant {
@@ -533,8 +558,10 @@ pub struct Combatant {
     /// The DM's label ("Goblin 3"). DM only.
     pub label: String,
     /// The name players see once revealed. For PCs, the character name.
+    #[serde(default)]
     pub public_name: String,
-    /// Players can see it. PCs are always visible.
+    /// Players can see it. PCs and the creatures they control are always visible.
+    #[serde(default)]
     pub visible: bool,
     /// It was visible at some point (a hide after reveal warns the DM).
     #[serde(default)]
@@ -565,8 +592,19 @@ pub struct Combatant {
     /// Surprised at the start of combat (2014: no turn in round 1; 2024: initiative with disadvantage).
     #[serde(default)]
     pub surprised: bool,
+    /// The combatant that controls this one (a summon, pet, familiar or companion of a PC or a villain). It acts
+    /// right after its owner unless `initiative_mode` is `own`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_id: Option<CombatantId>,
+    /// Who gives its orders: the DM, or the player of a PC.
+    #[serde(default)]
+    pub controller: Controller,
+    /// For a controlled creature: right after its owner (the default), or on its own initiative.
+    #[serde(default)]
+    pub initiative_mode: InitiativeMode,
 
-    /// Hit points (a mirror of the character file for PCs).
+    /// Hit points (a mirror of the character file for PCs). A max of 0 means unknown (a thin stat block).
+    #[serde(default)]
     pub hp: Hp,
     /// Who writes HP.
     #[serde(default)]
@@ -577,8 +615,9 @@ pub struct Combatant {
     /// Alive, dying, stable or dead.
     #[serde(default)]
     pub life: Life,
-    /// Base armor class.
-    pub ac: i32,
+    /// Base armor class; `None` when the stat block doesn't give one (a thin Companion block, D17).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ac: Option<i32>,
     /// Base speeds.
     #[serde(default)]
     pub speed: Speeds,
@@ -653,7 +692,10 @@ impl Combatant {
             hp_authority: HpAuthority::Engine,
             zero_hp: ZeroHpRule::Dies,
             life: Life::Alive,
-            ac,
+            ac: Some(ac),
+            owner_id: None,
+            controller: Controller::Dm,
+            initiative_mode: InitiativeMode::AfterOwner,
             speed: Speeds {
                 walk: 30,
                 ..Speeds::default()
@@ -968,29 +1010,16 @@ pub struct GroupLimit {
 }
 
 /// Combat settings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Settings {
     /// Show players an "Enemy turn" slot while hidden creatures act (D5 opt-in; it tells them hidden creatures
     /// exist).
     #[serde(default)]
     pub show_enemy_turn: bool,
-    /// Roll creatures' recharges at the start of their turns with the server's die (D21). When off, the turn
-    /// start reminds the DM and the DM types the d6 (D43).
-    #[serde(default = "yes")]
+    /// Opt-in: roll creatures' recharges at the start of their turns with the server's die. Off by default (D21: the DM
+    /// chooses per roll): the turn start reminds the DM, who rolls in the app or types the d6.
+    #[serde(default)]
     pub auto_recharge: bool,
-}
-
-fn yes() -> bool {
-    true
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            show_enemy_turn: false,
-            auto_recharge: true,
-        }
-    }
 }
 
 /// Setup, running or ended.

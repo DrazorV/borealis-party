@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 pub enum Actor {
     /// The party's DM.
     Dm,
-    /// A player, by account id. Players may only issue [`Command::player_allowed`] commands for their own PC.
+    /// A player, by account id: only for their own PC and the creatures it controls (see
+    /// [`crate::engine::player_may`]).
     Player {
         /// The account.
         account: String,
@@ -434,10 +435,77 @@ pub enum Command {
         /// Uses per round; 0 removes the limit.
         per_round: u32,
     },
+
+    // --- Rolls (D21: in the app or typed, for everyone) ---
+    /// A roll to log and show: an ability check, a save, a skill, anything without a rule of its own. In the app or
+    /// typed. Players may roll for their own PC and the creatures it controls.
+    Roll {
+        /// Who rolls.
+        id: CombatantId,
+        /// What it is ("Dexterity save", "Perception").
+        label: String,
+        /// A d20 test or a dice expression.
+        roll: RollInput,
+    },
+    /// An attack roll against a target's effective AC: a natural 20 always hits, a natural 1 always misses. Damage
+    /// follows as its own `damage` command. Players may attack with their own PC or its creatures, at a target
+    /// they can see.
+    Attack {
+        /// Who attacks.
+        attacker: CombatantId,
+        /// The target.
+        target: CombatantId,
+        /// What it is ("Longsword").
+        #[serde(default)]
+        label: String,
+        /// The attack roll.
+        roll: D20Input,
+    },
+    /// Rolls (or types) a creature's HP from its formula (D22): max and current HP become the result (at least 1).
+    RollHp {
+        /// Who.
+        id: CombatantId,
+        /// The formula in the app, or a typed total.
+        roll: DiceInput,
+    },
+
+    // --- Controlled creatures: summons, pets, companions ---
+    /// Adds a creature controlled by `owner`. A PC's creature is controlled by that PC's player and is always
+    /// visible; any other owner's is the DM's, and is visible only if `visible` says so (when absent: the owner's
+    /// current visibility). With `initiative` it acts on its own roll; without, right after its owner.
+    Summon {
+        /// The owner: a PC, a creature, or another controlled creature.
+        owner: CombatantId,
+        /// The creature, built from a stat block snapshot (a Monster or a Companion element) or typed by hand.
+        combatant: Box<Combatant>,
+        /// Its own initiative (in the app or typed). Absent: it acts right after its owner.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        initiative: Option<D20Input>,
+        /// For a DM creature: visible to players. Absent: as its owner is now.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        visible: Option<bool>,
+    },
+    /// Dismisses a controlled creature (kept as a tombstone; undo brings it back).
+    Dismiss {
+        /// Who.
+        id: CombatantId,
+    },
+    /// Switches a controlled creature between "right after its owner" and its own initiative (with a roll in the
+    /// app or typed, when it has none yet).
+    SetInitiativeMode {
+        /// Who.
+        id: CombatantId,
+        /// The mode.
+        mode: crate::model::InitiativeMode,
+        /// An initiative for `own`, if it has none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        roll: Option<D20Input>,
+    },
 }
 
 impl Command {
-    /// The commands a player may issue, for their own PC only (the server also checks membership).
+    /// Command kinds a player may ever issue. Whether a given one is allowed also depends on whose combatant it is
+    /// about: see [`crate::engine::player_may`].
     #[must_use]
     pub fn player_allowed(&self) -> bool {
         matches!(
@@ -447,20 +515,30 @@ impl Command {
                 | Command::SetConcentration { .. }
                 | Command::EndConcentration { .. }
                 | Command::ResolveConcentration { .. }
+                | Command::ResolveEffectSave { .. }
+                | Command::Roll { .. }
+                | Command::Attack { .. }
+                | Command::Summon { .. }
+                | Command::Dismiss { .. }
+                | Command::SetInitiativeMode { .. }
+                | Command::Damage { .. }
+                | Command::Heal { .. }
+                | Command::SetHp { .. }
+                | Command::GrantTempHp { .. }
+                | Command::RollHp { .. }
+                | Command::AddCondition { .. }
+                | Command::RemoveCondition { .. }
+                | Command::SetExhaustion { .. }
+                | Command::AddEffect { .. }
+                | Command::RemoveEffect { .. }
+                | Command::UseCharge { .. }
+                | Command::UseAbility { .. }
+                | Command::SetEconomy { .. }
+                | Command::RollRecharge { .. }
+                | Command::SetRecharge { .. }
+                | Command::AdjustSlot { .. }
+                | Command::AdjustResource { .. }
         )
-    }
-
-    /// The combatant a player command is about.
-    #[must_use]
-    pub fn subject(&self) -> Option<&CombatantId> {
-        match self {
-            Command::SetInitiative { id, .. }
-            | Command::DeathSave { id, .. }
-            | Command::SetConcentration { id, .. }
-            | Command::EndConcentration { id }
-            | Command::ResolveConcentration { id, .. } => Some(id),
-            _ => None,
-        }
     }
 
     /// A short label for the undo list.
@@ -517,6 +595,22 @@ impl Command {
             Command::SetRuleActive { .. } => "rule on/off",
             Command::RemoveRule { .. } => "remove rule",
             Command::SetGroupLimit { .. } => "group limit",
+            Command::Roll { .. } => "roll",
+            Command::Attack { .. } => "attack",
+            Command::RollHp { .. } => "roll HP",
+            Command::Summon { .. } => "summon",
+            Command::Dismiss { .. } => "dismiss",
+            Command::SetInitiativeMode { .. } => "initiative mode",
         }
     }
+}
+
+/// A roll for [`Command::Roll`]: a d20 test or a dice expression, each in the app or typed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RollInput {
+    /// `{"d20": {"kind": "app", "modifier": 4}}`.
+    D20(D20Input),
+    /// `{"dice": {"kind": "typed", "total": 9}}`.
+    Dice(DiceInput),
 }

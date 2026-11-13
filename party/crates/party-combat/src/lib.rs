@@ -28,11 +28,13 @@ pub mod model;
 pub mod visibility;
 
 pub use combat::{Combat, LOG_RETENTION_DAYS, UNDO_LIMIT};
-pub use command::{Actor, Command, DamagePart, DamageTaken};
-pub use engine::{apply, Outcome};
+pub use command::{Actor, Command, DamagePart, DamageTaken, RollInput};
+pub use engine::{account_of, apply, player_may, Outcome};
 pub use error::{CombatError, Unavailable};
-pub use event::{DmEvent, DmEventKind, Events, PlayerEvent};
+pub use event::{DmEvent, DmEventKind, Events, PlayerEvent, RollOutcome};
 pub use export::{export_json, import_json, SCHEMA_VERSION};
 pub use model::*;
 pub use party_dice;
-pub use visibility::{is_visible, turn_pointer, visible_order, TurnPointer, ViewerKind};
+pub use visibility::{
+    is_visible, player_view_of, turn_pointer, visible_order, TurnPointer, ViewerKind,
+};

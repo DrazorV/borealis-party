@@ -14,21 +14,22 @@ A port of `ui/src/lib/dice.ts`: the same notation, breakdown text and error mess
 | `roll_expr(expr, die, opts)` | Roll with a die floor (`opts.floor`) and a label |
 | `critical(expr)` | Double the dice, not the modifiers |
 | `roll_d20(modifier, mode, die, crit_range)` | A d20 test with advantage or disadvantage |
-| `D20Input::{Typed, Roll}`, `resolve_d20` | **A typed result from physical dice, or a roll (D43)** |
-| `DiceInput::{Typed, Roll}`, `resolve_dice` | The same for damage, healing and recharge dice |
+| `D20Input::{App, Typed}`, `resolve_d20` | **Every roll is either rolled in the app (the server's seeded die) or a typed table roll (D21, D43)** |
+| `DiceInput::{App, Typed}`, `resolve_dice` | The same for damage, healing, HP and recharge dice |
 | `DieRoller` | The injectable die (closures work too) |
 | `SeededDie` | mulberry32, serializable; the same rolls as the UI's `seededDie` for the same seed |
 | `SequenceDie` | Scripted rolls for tests |
 
-A typed result never touches the die. Inputs serialize with a `kind` tag:
-`{"kind":"typed","total":15,"natural":12}` or `{"kind":"roll","modifier":2,"mode":"advantage"}`.
+A typed result never touches the die. Every result carries `source: "app" | "typed"`, so the log shows which it
+was. Inputs serialize with a `kind` tag:
+`{"kind":"typed","total":15,"natural":12}` or `{"kind":"app","modifier":2,"mode":"advantage"}`.
 
 ## `party-combat`
 
 ### The flow
 
 ```rust
-let mut combat = Combat::new(Edition::Srd521, seed);   // the server picks the seed (D21)
+let mut combat = Combat::new(Edition::Srd521, seed);   // the server picks the seed
 let events = combat.execute(&Actor::Dm, &Command::Start)?;
 // events.dm      -> the DM-only log and the DM's live view
 // events.players -> safe for players: ids of visible combatants and PCs only, never a creature's numbers
@@ -46,7 +47,7 @@ combat.undo(&Actor::Dm, false)?;                        // C8: back to the exact
 | Field | Meaning |
 |---|---|
 | `edition` | `"2014"` (SRD 5.1) or `"2024"` (SRD 5.2.1) |
-| `settings` | `show_enemy_turn` (D5 opt-in) and `auto_recharge` (D21; off means the DM types the d6) |
+| `settings` | `show_enemy_turn` (D5 opt-in) and `auto_recharge` (opt-in, off by default: the DM rolls each recharge in the app or types it) |
 | `status`, `round`, `current` | `setup` / `active` / `ended`; whose turn it is |
 | `last_visible` | The last turn players saw (D5) |
 | `combatants` | In the order they were added. Removed ones stay as tombstones (`removed: true`) and are never shown |
@@ -60,9 +61,11 @@ A `Combatant` holds:
   `visible` / `ever_revealed`;
 - **initiative:** `initiative`, `initiative_bonus`, `initiative_advantage`, `tiebreak`, `absent` (C1),
   `linked_to` (C3), `surprised`;
+- **control:** `owner_id` (the summoner or pet owner), `controller` (`{kind: "dm"}` or `{kind: "player", pc}`),
+  `initiative_mode` (`after_owner` or `own`);
 - **HP:** `hp {current, max, temp}`; `hp_authority` (`engine` or `player`, D7); `zero_hp` (`dies` or
   `death_saves`); `life` (`alive`, `dying {successes, failures}`, `stable`, `dead`);
-- **combat stats:** `ac`; `speed`; `defenses` (damage clauses shaped like upstream's `DamageClause`, plus condition
+- **combat stats:** `ac` (`null` when the block has none); `speed`; `defenses` (damage clauses shaped like upstream's `DamageClause`, plus condition
   immunities); `exhaustion`;
 - **concentration:** `concentration`, `pending_concentration`;
 - **resources:** `economy` (C5); `abilities` (C14: `kind`, `recharge`, `uses`, `legendary_cost`, `group_limit`,
@@ -71,6 +74,13 @@ A `Combatant` holds:
 
 Build them with `Combatant::creature(id, label, hp, ac, init_bonus)` or
 `Combatant::character(id, owner, name, hp, ac, init_bonus)`. Ids come from the server (random UUIDs).
+
+**Thin stat blocks (D17 b, Aurora Companions).**
+- Only `id`, `kind` and `label` are required.
+- A missing AC is `null`. Unknown HP is `max: 0`: no health band, and damage changes nothing until the DM sets HP.
+- Abilities, recharges, legendary actions, slots and resources are empty unless the block has them. The engine
+  never invents them: using one that isn't there is a clear error (`unknown_ability`, `invalid`), never a panic.
+- HP, AC, initiative, conditions, effects, concentration and turns always work.
 
 ### Commands (`Command`, tagged `"command"`)
 
@@ -86,12 +96,20 @@ Build them with `Combatant::creature(id, label, hp, ac, init_bonus)` or
 | Effects (C12, C13) | `add_effect {effect: EffectSpec}`, `remove_effect {effect, skip_follow_up}`, `use_charge`, `resolve_effect_save {effect, roll}` |
 | Abilities (C14–C18) | `use_ability {id, ability, slot?}`, `roll_recharge {id, ability, roll: DiceInput}`, `set_recharge`, `set_legendary_pool`, `adjust_legendary`, `adjust_legendary_resistance`, `adjust_slot`, `set_slots`, `adjust_resource` |
 | Rules (C20, C21) | `set_rule`, `set_rule_active`, `remove_rule`, `set_group_limit` |
+| Rolls (D21) | `roll {id, label, roll: {d20: D20Input} or {dice: DiceInput}}`; `attack {attacker, target, label, roll}` against the effective AC (a natural 20 hits, a natural 1 misses, `hit: null` when the AC is unknown); `roll_hp {id, roll: DiceInput}` (D22) |
+| Controlled creatures | `summon {owner, combatant, initiative?, visible?}`, `dismiss {id}`, `set_initiative_mode {id, mode, roll?}` |
 
 **Who may issue what.**
 - `Actor::Dm` and `Actor::System` may issue anything.
-- `Actor::Player { account }` may issue only `set_initiative`, `death_save`, `set_concentration`,
-  `end_concentration` and `resolve_concentration`, and only for a PC whose `owner` is that account. The server
-  still checks membership in the same transaction.
+- `Actor::Player { account }` acts only for their own PC and the creatures it controls (`engine::player_may`; the
+  server still checks membership in the same transaction):
+  - **for the PC:** `set_initiative`, `death_save`, the concentration commands, `resolve_effect_save`, `roll`,
+    `attack` and `summon`. The PC's HP lives on the player's sheet (D7), so there are no HP commands for it;
+  - **for its creatures** (summons, pets, companions): all of that, plus `damage`, `heal`, `set_hp`,
+    `grant_temp_hp`, `roll_hp`, conditions, effects, `use_ability`, `set_economy`, recharges, slots, resources,
+    `set_initiative_mode` and `dismiss`;
+  - an `attack` target must be visible to players. Anything else (another player's creature, a DM creature, a
+    hidden or made-up id) is refused with the same `not_allowed`.
 - Undo is DM-only. If the last write was a player's, undo needs `force`.
 
 ### The rules, in short
@@ -103,10 +121,22 @@ Build them with `Combatant::creature(id, label, hp, ac, init_bonus)` or
     active creature never restarts the round (C4);
   - a 2014 surprised creature has no actions on its round 1 turn; under 2024, surprise means disadvantage on
     initiative.
+- **Controlled creatures:**
+  - by default a controlled creature acts right after its owner, at the owner's initiative. Several follow in the
+    order they were summoned (the DM can `swap_tie` two of them), and nesting works (a summon's summon);
+  - `set_initiative_mode own`, with a roll in the app or typed, gives it its own place;
+  - a creature summoned by a PC is controlled by that PC's player and is always visible;
+  - a DM creature's pet has its own `visible` flag. It starts as its owner is (or as `visible` says), and
+    revealing an owner never reveals its pets;
+  - when an owner goes down or is dismissed, the DM gets an `owner_defeated` event for each of its creatures:
+    keep, dismiss or own initiative. Nothing changes on its own, so a kept creature goes on acting in its dead
+    owner's slot;
+  - a summon's HP lives in combat state; `damage_prompt` is for PCs only.
 - **Turn start:**
   - the economy resets, and so do resources with `reset: turn_start`;
   - a legendary pool refills at the start of the turn of its first member that isn't defeated;
-  - recharges are rolled (auto) or reminded (`recharge_due`);
+  - recharges are reminded (`recharge_due`) for the DM to roll in the app or type; `auto_recharge` rolls them
+    instead;
   - effect durations and repeated saves at `start` are counted.
 - **Turn end:** durations and saves at `end` are counted. **Round start:** group limits and `round_start`
   resources reset.
@@ -151,10 +181,13 @@ Build them with `Combatant::creature(id, label, hp, ac, init_bonus)` or
     deletes an ended combat's log after `LOG_RETENTION_DAYS` = 90 days).
 - `PlayerEvent`:
   - `started`, `ended`, `turn {pointer}`, `order`, `appeared {id}`, `disappeared {id}`, `changed {id}`;
-  - `damage_prompt`, `heal_prompt`, `concentration_check`, `death_save_due` and `your_turn`, each with the PC's
-    `owner`.
-  - They are derived by comparing what players could see before and after the command. **A DM-only write (anything
-    about a hidden creature, labels, notes, legendary pools…) produces no player events.**
+  - `damage_prompt`, `heal_prompt`, `concentration_check`, `death_save_due` and `your_turn` (also for the PC's
+    own creatures), each with the player's `owner` account;
+  - `roll_result {id, owner, label, total, natural, source, breakdown, hit?, critical}`: every roll for the
+    player's PC or its creatures (initiative, death saves, saves, attacks, recharges, HP and `roll`), whoever
+    made it, whether in the app or typed.
+  - They are derived by comparing `player_view_of` for every visible combatant before and after the command.
+    **A DM-only write (anything about a hidden creature, labels, notes…) produces no player events.**
 
 ### Visibility (for part D's `view_for`)
 - `visible_order(&state, ViewerKind::Player)`: the turn order without hidden or removed creatures.
@@ -163,9 +196,16 @@ Build them with `Combatant::creature(id, label, hp, ac, init_bonus)` or
     visible turn, with **that turn's** round, so players can't count hidden turns (D5);
   - `enemy_turn {round}`: only with `settings.show_enemy_turn`;
   - `waiting {round}`, `not_started`, `ended`.
-- `is_visible(&state, id, viewer)`.
-- **The projection must not serialize:** `label`, `notes`, `tiebreak`, effect ids, `next_effect`, raw positions,
-  or an effect's `source` when that source is hidden.
+- `is_visible(&state, id, viewer)`: hidden or revealed, nothing in between (D20 b).
+- `player_view_of(&state, id)`: everything players may see of a revealed creature or a PC, as JSON. Revealed means
+  the full stat block: exact HP, conditions, effects, concentration, resources and legendary actions left.
+  - It leaves out `label`, `notes`, `tiebreak`, effect ids and follow-ups. It also leaves out every reference to a
+    hidden combatant: a hidden effect source and that effect's duration (it counts the source's turns), and a
+    hidden owner or link.
+  - Part D narrows it per viewer where D6 says so: other players' PCs show a health band only.
+- **Known side channel:** when a legendary pool is shared between a revealed and a hidden creature, players see the
+  pool's count change when the hidden one uses it. A DM who wants that hidden should not share pools across
+  visibility.
 
 ### Export (D45)
 - `export_json(&combat)` writes `{format: "borealis-party-combat", schema_version: 1, state, log}`. It is DM only.
@@ -180,4 +220,6 @@ Build them with `Combatant::creature(id, label, hp, ac, init_bonus)` or
 - The offline buffer (D44) belongs to the server and the UI.
 - The player projection belongs to part D.
 - Stat-block parsing into `abilities` belongs to the server or the builder.
-- Lair actions on initiative 20, mythic actions and automatic attack rolls (0.5.1) are not modelled yet.
+- Building a `Combatant` from a `MonsterDetail` (a monster or a companion, with abilities, defenses and
+  resources) belongs to the server.
+- Lair actions on initiative 20, mythic actions and parsed attacks (0.5.1) are not modelled yet.

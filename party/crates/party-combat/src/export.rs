@@ -108,6 +108,20 @@ fn validate(s: &CombatState) -> Result<(), CombatError> {
     }
     let known = |id: &crate::model::CombatantId| ids.contains(id);
     for c in &s.combatants {
+        if c.owner_id.as_ref().is_some_and(|o| !known(o)) {
+            return bad(format!("combatant {} has an unknown owner", c.id));
+        }
+        if let crate::model::Controller::Player { pc } = &c.controller {
+            if !s
+                .combatant(pc)
+                .is_some_and(crate::model::Combatant::is_character)
+            {
+                return bad(format!(
+                    "combatant {} is controlled by an unknown player character",
+                    c.id
+                ));
+            }
+        }
         if c.linked_to.as_ref().is_some_and(|l| !known(l)) {
             return bad(format!(
                 "combatant {} is linked to an unknown combatant",

@@ -112,8 +112,17 @@ fn slots_run_out_and_adjust() {
 }
 
 #[test]
-fn recharge_is_spent_by_use_and_rolled_at_turn_start() {
+fn opt_in_auto_recharge_is_spent_by_use_and_rolled_at_turn_start() {
     let mut combat = Combat::new(Edition::Srd521, 1);
+    dm(
+        &mut combat,
+        Command::SetSettings {
+            settings: Settings {
+                show_enemy_turn: false,
+                auto_recharge: true,
+            },
+        },
+    );
     add(&mut combat, adult_red_dragon("d"));
     add(&mut combat, goblin("g"));
     init(&mut combat, "d", 15);

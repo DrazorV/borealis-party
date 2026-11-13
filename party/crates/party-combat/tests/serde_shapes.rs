@@ -12,7 +12,7 @@ fn command_shapes() {
         "target": "g",
         "parts": [
             {"amount": {"kind": "typed", "total": 7}, "damage_type": "slashing"},
-            {"amount": {"kind": "roll", "notation": "1d6", "critical": true}, "damage_type": "fire"}
+            {"amount": {"kind": "app", "notation": "1d6", "critical": true}, "damage_type": "fire"}
         ],
         "magical": true
     }))

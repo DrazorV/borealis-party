@@ -99,7 +99,7 @@ impl Gen {
 
 fn random_command(g: &mut Gen, state: &CombatState) -> Command {
     let effect_id = state.effects.first().map_or(EffectId(1), |e| e.id);
-    match g.n(24) {
+    match g.n(30) {
         1..=4 => Command::NextTurn,
         5 => Command::PreviousTurn,
         6 | 7 => Command::Damage {
@@ -108,7 +108,7 @@ fn random_command(g: &mut Gen, state: &CombatState) -> Command {
                 amount: if g.n(2) == 1 {
                     DiceInput::typed(g.n(30) as i32)
                 } else {
-                    DiceInput::roll("2d8+2")
+                    DiceInput::app("2d8+2")
                 },
                 damage_type: Some(g.pick(DamageType::ALL)),
             }],
@@ -120,7 +120,7 @@ fn random_command(g: &mut Gen, state: &CombatState) -> Command {
             target: g.who(),
             amount: DiceInput::typed(g.n(20) as i32),
         },
-        9 => {
+        9 | 29 | 30 => {
             // Aim at someone dying, when there is one, so the machine gets exercised.
             let dying = state
                 .combatants
@@ -171,7 +171,7 @@ fn random_command(g: &mut Gen, state: &CombatState) -> Command {
         },
         14 => Command::ResolveConcentration {
             id: g.who(),
-            roll: D20Input::roll(2, RollMode::Normal),
+            roll: D20Input::app(2, RollMode::Normal),
         },
         15 => Command::UseAbility {
             id: g.who(),
@@ -201,6 +201,45 @@ fn random_command(g: &mut Gen, state: &CombatState) -> Command {
         23 => Command::SetInitiative {
             id: g.who(),
             roll: D20Input::typed(g.n(25) as i32),
+        },
+        25 => {
+            let n = state.next_tiebreak;
+            Command::Summon {
+                owner: g.who(),
+                combatant: Box::new(Combatant::creature(format!("pet-{n}"), "Wolf", 11, 13, 2)),
+                initiative: if g.n(3) == 1 {
+                    Some(D20Input::typed(g.n(20) as i32))
+                } else {
+                    None
+                },
+                visible: if g.n(2) == 1 { Some(g.n(2) == 1) } else { None },
+            }
+        }
+        26 => {
+            let pet = state
+                .combatants
+                .iter()
+                .rev()
+                .find(|c| c.owner_id.is_some() && !c.removed)
+                .map(|c| c.id.clone());
+            Command::Dismiss {
+                id: pet.unwrap_or_else(|| g.who()),
+            }
+        }
+        27 => Command::Attack {
+            attacker: g.who(),
+            target: g.who(),
+            label: String::new(),
+            roll: if g.n(2) == 1 {
+                D20Input::typed(g.n(25) as i32)
+            } else {
+                D20Input::app(4, RollMode::Normal)
+            },
+        },
+        28 => Command::Roll {
+            id: g.who(),
+            label: "check".into(),
+            roll: RollInput::Dice(DiceInput::app("1d8")),
         },
         _ => Command::UseCharge { effect: effect_id },
     }
@@ -252,6 +291,19 @@ fn check_invariants(s: &CombatState) {
     for c in &s.combatants {
         if c.concentration.is_some() {
             assert!(c.life.is_alive(), "{} concentrates at 0 HP", c.id);
+        }
+    }
+    for c in &s.combatants {
+        if let Some(o) = &c.owner_id {
+            assert!(s.combatant(o).is_some(), "{} has an unknown owner", c.id);
+        }
+        if let Controller::Player { pc } = &c.controller {
+            assert!(
+                s.combatant(pc).is_some_and(|p| p.is_character()),
+                "{} has a bad controller",
+                c.id
+            );
+            assert!(c.visible, "a player's creature {} is hidden", c.id);
         }
     }
     for p in s.legendary_pools.values() {
@@ -306,6 +358,9 @@ fn random_sequences_keep_the_invariants_undo_and_determinism() {
                             DmEventKind::RoundStarted => "round",
                             DmEventKind::LegendaryReset { .. } => "legendary-reset",
                             DmEventKind::Unlinked { .. } => "unlinked",
+                            DmEventKind::Summoned { .. } => "summoned",
+                            DmEventKind::OwnerDefeated { .. } => "owner-defeated",
+                            DmEventKind::Attack { .. } => "attack",
                             DmEventKind::EffectAdded { .. }
                                 if cmd.label() != "add effect"
                                     && cmd.label() != "add condition" =>
@@ -358,6 +413,9 @@ fn random_sequences_keep_the_invariants_undo_and_determinism() {
         "legendary-reset",
         "unlinked",
         "follow-up",
+        "summoned",
+        "owner-defeated",
+        "attack",
     ] {
         assert!(
             seen.get(tag).copied().unwrap_or(0) > 0,

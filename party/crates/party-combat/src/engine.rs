@@ -1,22 +1,23 @@
 //! The rules: [`apply`] turns a state and a command into a new state and its events. Pure and deterministic: the
 //! only randomness is the injected die.
 
-use crate::command::{Actor, Command, DamagePart, DamageTaken};
+use crate::command::{Actor, Command, DamagePart, DamageTaken, RollInput};
 use crate::damage::{concentration_dc, type_damage, DamageResult, PartResult};
 use crate::derive::{
     ability_status, anchor_order, effective_initiative, incapacitated, pool_of, pool_reset_owner,
     takes_turn,
 };
 use crate::error::{invalid, CombatError};
-use crate::event::{DmEvent, DmEventKind as K, Events, PlayerEvent, PromptPart};
+use crate::event::{DmEvent, DmEventKind as K, Events, PlayerEvent, PromptPart, RollOutcome};
 use crate::model::{
     AbilityKind, Boundary, CombatState, CombatantId, Concentration, ConcentrationCheck, Condition,
-    Duration, Edition, Effect, EffectId, EffectOrigin, EffectSpec, HpAuthority, Life, Reset,
-    Status, VisibleMark, ZeroHpRule,
+    Controller, Duration, Edition, Effect, EffectId, EffectOrigin, EffectSpec, HpAuthority,
+    InitiativeMode, Life, Reset, Status, VisibleMark, ZeroHpRule,
 };
 use crate::visibility::PlayerSummary;
 use party_dice::{
-    resolve_d20, resolve_dice, roll_d20, D20Input, D20Result, DiceInput, DieRoller, RollMode,
+    resolve_d20, resolve_dice, roll_d20, D20Input, D20Result, DiceInput, DiceResult, DieRoller,
+    RollMode,
 };
 use serde::{Deserialize, Serialize};
 
@@ -60,17 +61,83 @@ fn authorize(state: &CombatState, actor: &Actor, cmd: &Command) -> Result<(), Co
     }
     match actor {
         Actor::Dm | Actor::System => Ok(()),
-        Actor::Player { account } => {
-            let own = cmd
-                .subject()
-                .and_then(|id| state.combatant(id))
-                .is_some_and(|c| !c.removed && c.owner() == Some(account.as_str()));
-            if cmd.player_allowed() && own {
-                Ok(())
-            } else {
-                Err(CombatError::NotAllowed)
-            }
+        Actor::Player { account } if player_may(state, account, cmd) => Ok(()),
+        Actor::Player { .. } => Err(CombatError::NotAllowed),
+    }
+}
+
+/// The account that plays a combatant: a PC's owner, or the owner of the PC that controls a creature.
+#[must_use]
+pub fn account_of(state: &CombatState, c: &crate::model::Combatant) -> Option<String> {
+    if let Some(owner) = c.owner() {
+        return Some(owner.to_string());
+    }
+    match &c.controller {
+        Controller::Player { pc } => state
+            .combatant(pc)
+            .and_then(|p| p.owner())
+            .map(str::to_string),
+        Controller::Dm => None,
+    }
+}
+
+/// Whether a player may issue `cmd` (the server still checks party membership). A player acts only for their own
+/// PC and the creatures that PC controls, never for another player's or the DM's.
+/// - For the PC: initiative, death saves, concentration, effect saves, rolls, attacks, summons. Its HP lives on
+///   the player's sheet (D7), so no HP commands.
+/// - For its creatures: all of that, plus HP, temp HP, conditions, effects, abilities, resources and dismiss.
+/// - An attack's target must be one the player can see.
+#[must_use]
+pub fn player_may(state: &CombatState, account: &str, cmd: &Command) -> bool {
+    let live = |id: &CombatantId| state.combatant(id).filter(|c| !c.removed);
+    let mine = |id: &CombatantId| {
+        live(id).is_some_and(|c| account_of(state, c).as_deref() == Some(account))
+    };
+    let my_creature = |id: &CombatantId| mine(id) && live(id).is_some_and(|c| !c.is_character());
+    let effect_target = |e: &EffectId| state.effect(*e).map(|e| e.spec.target.clone());
+    match cmd {
+        Command::SetInitiative { id, .. }
+        | Command::DeathSave { id, .. }
+        | Command::SetConcentration { id, .. }
+        | Command::EndConcentration { id }
+        | Command::ResolveConcentration { id, .. }
+        | Command::Roll { id, .. }
+        | Command::Summon { owner: id, .. } => mine(id),
+        Command::ResolveEffectSave { effect, .. } => {
+            effect_target(effect).is_some_and(|t| mine(&t))
         }
+        Command::Attack {
+            attacker, target, ..
+        } => {
+            mine(attacker)
+                && crate::visibility::is_visible(
+                    state,
+                    target,
+                    crate::visibility::ViewerKind::Player,
+                )
+        }
+        Command::Dismiss { id }
+        | Command::SetInitiativeMode { id, .. }
+        | Command::SetHp { id, .. }
+        | Command::GrantTempHp { id, .. }
+        | Command::RollHp { id, .. }
+        | Command::SetExhaustion { id, .. }
+        | Command::UseAbility { id, .. }
+        | Command::SetEconomy { id, .. }
+        | Command::RollRecharge { id, .. }
+        | Command::SetRecharge { id, .. }
+        | Command::AdjustSlot { id, .. }
+        | Command::AdjustResource { id, .. }
+        | Command::Damage { target: id, .. }
+        | Command::Heal { target: id, .. }
+        | Command::RemoveCondition { target: id, .. } => my_creature(id),
+        Command::AddCondition { effect } | Command::AddEffect { effect } => {
+            my_creature(&effect.target) && effect.source.as_ref().is_none_or(mine)
+        }
+        Command::RemoveEffect { effect, .. } | Command::UseCharge { effect } => {
+            effect_target(effect).is_some_and(|t| my_creature(&t))
+        }
+        _ => false,
     }
 }
 
@@ -166,8 +233,12 @@ impl Cx<'_> {
             }
             Command::Hide { id } => {
                 let i = self.idx(id)?;
-                if self.s.combatants[i].is_character() {
-                    return Err(invalid("A player character is always visible."));
+                if self.s.combatants[i].is_character()
+                    || matches!(self.s.combatants[i].controller, Controller::Player { .. })
+                {
+                    return Err(invalid(
+                        "A player character and the creatures it controls are always visible.",
+                    ));
                 }
                 let was_seen = self.s.combatants[i].ever_revealed;
                 self.s.combatants[i].visible = false;
@@ -549,7 +620,288 @@ impl Cx<'_> {
                 );
                 Ok(())
             }
+            Command::Roll { id, label, roll } => self.roll(id, label, roll),
+            Command::Attack {
+                attacker,
+                target,
+                label,
+                roll,
+            } => self.attack(attacker, target, label, roll),
+            Command::RollHp { id, roll } => self.roll_hp(id, roll),
+            Command::Summon {
+                owner,
+                combatant,
+                initiative,
+                visible,
+            } => self.summon(owner, (**combatant).clone(), initiative.as_ref(), *visible),
+            Command::Dismiss { id } => {
+                let i = self.idx(id)?;
+                if self.s.combatants[i].owner_id.is_none() {
+                    return Err(invalid(
+                        "Only a summon, pet or companion is dismissed; remove other combatants.",
+                    ));
+                }
+                let n = self.name(id);
+                self.ev(Some(id), K::Dismissed, format!("{n} is dismissed"));
+                self.remove(id)
+            }
+            Command::SetInitiativeMode { id, mode, roll } => {
+                let i = self.idx(id)?;
+                if self.s.combatants[i].owner_id.is_none() {
+                    return Err(invalid("Only a controlled creature follows an owner."));
+                }
+                if let Some(r) = roll {
+                    let r = resolve_d20(r, self.die)?;
+                    self.set_initiative(i, r);
+                }
+                if *mode == InitiativeMode::Own && self.s.combatants[i].initiative.is_none() {
+                    return Err(invalid(
+                        "Its own initiative needs a roll (in the app or typed).",
+                    ));
+                }
+                self.s.combatants[i].initiative_mode = *mode;
+                let n = self.name(id);
+                let text = match mode {
+                    InitiativeMode::Own => format!("{n} acts on its own initiative"),
+                    InitiativeMode::AfterOwner => format!("{n} acts right after its owner"),
+                };
+                self.ev(Some(id), K::OrderChanged, text);
+                Ok(())
+            }
         }
+    }
+
+    // ----- rolls (D21) -----
+
+    /// Sends a roll's result to the player who plays `id`, if any.
+    #[allow(clippy::too_many_arguments)]
+    fn report(
+        &mut self,
+        id: &CombatantId,
+        label: &str,
+        total: i32,
+        natural: Option<u32>,
+        source: party_dice::RollSource,
+        breakdown: &str,
+        hit: Option<bool>,
+        critical: bool,
+    ) {
+        let Some(owner) = self.s.combatant(id).and_then(|c| account_of(&self.s, c)) else {
+            return;
+        };
+        self.prompts.push(PlayerEvent::RollResult {
+            id: id.clone(),
+            owner,
+            label: label.to_string(),
+            total,
+            natural,
+            source,
+            breakdown: breakdown.to_string(),
+            hit,
+            critical,
+        });
+    }
+
+    fn report_d20(&mut self, id: &CombatantId, label: &str, r: &D20Result) {
+        self.report(
+            id,
+            label,
+            r.total,
+            r.natural,
+            r.source,
+            &r.breakdown,
+            None,
+            false,
+        );
+    }
+
+    fn report_dice(&mut self, id: &CombatantId, label: &str, r: &DiceResult) {
+        self.report(
+            id,
+            label,
+            r.total,
+            None,
+            r.source,
+            &r.breakdown,
+            None,
+            false,
+        );
+    }
+
+    fn roll(&mut self, id: &CombatantId, label: &str, roll: &RollInput) -> Result<(), CombatError> {
+        self.idx(id)?;
+        let n = self.name(id);
+        let result = match roll {
+            RollInput::D20(input) => {
+                let r = resolve_d20(input, self.die)?;
+                self.report_d20(id, label, &r);
+                RollOutcome::D20(r)
+            }
+            RollInput::Dice(input) => {
+                let r = resolve_dice(input, self.die)?;
+                self.report_dice(id, label, &r);
+                RollOutcome::Dice(r)
+            }
+        };
+        let breakdown = match &result {
+            RollOutcome::D20(r) => r.breakdown.clone(),
+            RollOutcome::Dice(r) => r.breakdown.clone(),
+        };
+        self.ev(
+            Some(id),
+            K::Rolled {
+                label: label.to_string(),
+                result,
+            },
+            format!("{n}: {label} {breakdown}"),
+        );
+        Ok(())
+    }
+
+    fn attack(
+        &mut self,
+        attacker: &CombatantId,
+        target: &CombatantId,
+        label: &str,
+        roll: &D20Input,
+    ) -> Result<(), CombatError> {
+        self.idx(attacker)?;
+        let t = self.idx(target)?;
+        let r = resolve_d20(roll, self.die)?;
+        let ac = crate::derive::effective_ac(&self.s, &self.s.combatants[t]).total;
+        let hit = if r.is_nat20 {
+            Some(true)
+        } else if r.is_nat1 {
+            Some(false)
+        } else {
+            ac.map(|ac| r.total >= ac)
+        };
+        let critical = r.is_crit && hit != Some(false);
+        let (na, nt) = (self.name(attacker), self.name(target));
+        let what = if label.is_empty() { "attacks" } else { label };
+        let verdict = match hit {
+            Some(true) if critical => "critical hit".to_string(),
+            Some(true) => "hit".to_string(),
+            Some(false) => "miss".to_string(),
+            None => "AC unknown: the DM decides".to_string(),
+        };
+        let ac_text = ac.map_or_else(|| "AC ?".to_string(), |a| format!("AC {a}"));
+        let text = format!("{na} {what} {nt}: {} vs {ac_text}, {verdict}", r.breakdown);
+        let label = if label.is_empty() { "Attack" } else { label };
+        self.report(
+            attacker,
+            label,
+            r.total,
+            r.natural,
+            r.source,
+            &r.breakdown,
+            hit,
+            critical,
+        );
+        self.ev(
+            Some(attacker),
+            K::Attack {
+                target: target.clone(),
+                roll: r,
+                target_ac: ac,
+                hit,
+                critical,
+            },
+            text,
+        );
+        Ok(())
+    }
+
+    fn roll_hp(&mut self, id: &CombatantId, roll: &DiceInput) -> Result<(), CombatError> {
+        let i = self.idx(id)?;
+        if self.s.combatants[i].hp_authority == HpAuthority::Player {
+            return Err(invalid(
+                "A player character's HP lives on the player's sheet (D7).",
+            ));
+        }
+        let r = resolve_dice(roll, self.die)?;
+        let hp = r.total.max(1);
+        let c = &mut self.s.combatants[i];
+        c.hp.max = hp;
+        c.hp.current = hp;
+        let n = self.name(id);
+        self.report_dice(id, "Hit points", &r);
+        let text = format!("{n} HP rolled: {} ({hp})", r.breakdown);
+        self.ev(Some(id), K::HpRolled { roll: r }, text);
+        self.revive(i);
+        Ok(())
+    }
+
+    // ----- controlled creatures -----
+
+    fn summon(
+        &mut self,
+        owner: &CombatantId,
+        mut c: crate::model::Combatant,
+        initiative: Option<&D20Input>,
+        visible: Option<bool>,
+    ) -> Result<(), CombatError> {
+        let o = self.idx(owner)?;
+        if c.is_character() {
+            return Err(invalid("A player character can't be summoned."));
+        }
+        let owner_c = &self.s.combatants[o];
+        c.controller = if owner_c.is_character() {
+            Controller::Player {
+                pc: owner_c.id.clone(),
+            }
+        } else {
+            owner_c.controller.clone()
+        };
+        c.visible = match c.controller {
+            Controller::Player { .. } => true,
+            Controller::Dm => visible.unwrap_or(owner_c.visible),
+        };
+        c.owner_id = Some(owner.clone());
+        c.hp_authority = HpAuthority::Engine;
+        c.linked_to = None;
+        c.initiative = None;
+        c.initiative_mode = if initiative.is_some() {
+            InitiativeMode::Own
+        } else {
+            InitiativeMode::AfterOwner
+        };
+        let id = c.id.clone();
+        let label = c.label.clone();
+        self.add_combatant(c, false)?;
+        if let Some(r) = initiative {
+            let r = resolve_d20(r, self.die)?;
+            let i = self.idx(&id)?;
+            self.set_initiative(i, r);
+        }
+        let on = self.name(owner);
+        self.ev(
+            Some(&id),
+            K::Summoned {
+                owner: owner.clone(),
+            },
+            format!("{on} summons {label}"),
+        );
+        Ok(())
+    }
+
+    /// Following `linked_to` and `owner_id` from `from` reaches `id`.
+    fn reaches(&self, from: &CombatantId, id: &CombatantId) -> bool {
+        let mut stack = vec![from.clone()];
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(cur) = stack.pop() {
+            if &cur == id {
+                return true;
+            }
+            if !seen.insert(cur.clone()) {
+                continue;
+            }
+            if let Some(c) = self.s.combatant(&cur) {
+                stack.extend(c.linked_to.iter().cloned());
+                stack.extend(c.owner_id.iter().cloned());
+            }
+        }
+        false
     }
 
     // ----- roster -----
@@ -574,8 +926,17 @@ impl Cx<'_> {
         if let Some(l) = &c.linked_to {
             self.idx(l)?;
         }
+        if let Some(o) = &c.owner_id {
+            self.idx(o)?;
+        }
+        if let Controller::Player { pc } = &c.controller {
+            let p = self.idx(pc)?;
+            if !self.s.combatants[p].is_character() {
+                return Err(invalid("A player controller must be a player character."));
+            }
+        }
         c.hp.current = c.hp.current.clamp(0, c.hp.max);
-        if c.is_character() {
+        if c.is_character() || matches!(c.controller, Controller::Player { .. }) {
             c.visible = true;
         }
         c.ever_revealed |= c.visible;
@@ -635,6 +996,7 @@ impl Cx<'_> {
         c.absent = false;
         let id = c.id.clone();
         let text = format!("{} initiative {} ({})", c.label, r.total, r.breakdown);
+        self.report_d20(&id, "Initiative", &r);
         self.ev(Some(&id), K::Initiative { roll: r }, text);
     }
 
@@ -667,13 +1029,24 @@ impl Cx<'_> {
     fn swap_tie(&mut self, a: &CombatantId, b: &CombatantId) -> Result<(), CombatError> {
         let (i, j) = (self.idx(a)?, self.idx(b)?);
         let (ca, cb) = (&self.s.combatants[i], &self.s.combatants[j]);
-        let tied = effective_initiative(&self.s, ca).is_some()
-            && effective_initiative(&self.s, ca) == effective_initiative(&self.s, cb)
-            && ca.initiative_bonus == cb.initiative_bonus
-            && !crate::derive::link_active(&self.s, ca)
-            && !crate::derive::link_active(&self.s, cb);
+        let (la, lb) = (
+            crate::derive::leader(&self.s, ca).map(|l| &l.id),
+            crate::derive::leader(&self.s, cb).map(|l| &l.id),
+        );
+        // Two roots tied on initiative and modifier, or two followers of the same leader (their sub-order).
+        let tied = match (la, lb) {
+            (None, None) => {
+                effective_initiative(&self.s, ca).is_some()
+                    && effective_initiative(&self.s, ca) == effective_initiative(&self.s, cb)
+                    && ca.initiative_bonus == cb.initiative_bonus
+            }
+            (Some(x), Some(y)) => x == y,
+            _ => false,
+        };
         if !tied || i == j {
-            return Err(invalid("Only two combatants tied on initiative can swap."));
+            return Err(invalid(
+                "Only two combatants tied on initiative, or two that follow the same leader, can swap.",
+            ));
         }
         let t = self.s.combatants[i].tiebreak;
         self.s.combatants[i].tiebreak = self.s.combatants[j].tiebreak;
@@ -691,18 +1064,9 @@ impl Cx<'_> {
         let i = self.idx(id)?;
         if let Some(to) = to {
             self.idx(to)?;
-            // No cycles: walking from `to` must never reach `id`.
-            let mut at = Some(to.clone());
-            let mut steps = 0;
-            while let Some(cur) = at {
-                if &cur == id {
-                    return Err(invalid("That link would make a loop."));
-                }
-                steps += 1;
-                if steps > self.s.combatants.len() {
-                    break;
-                }
-                at = self.s.combatant(&cur).and_then(|c| c.linked_to.clone());
+            // No cycles through links or owners: walking from `to` must never reach `id`.
+            if self.reaches(to, id) {
+                return Err(invalid("That link would make a loop."));
             }
         }
         self.s.combatants[i].linked_to = to.cloned();
@@ -882,7 +1246,7 @@ impl Cx<'_> {
             .collect();
         for (key, min) in due {
             if self.s.settings.auto_recharge && creature {
-                let roll = resolve_dice(&DiceInput::roll("1d6"), self.die)?;
+                let roll = resolve_dice(&DiceInput::app("1d6"), self.die)?;
                 self.finish_recharge(i, &key, min, roll);
             } else {
                 self.ev(
@@ -898,7 +1262,7 @@ impl Cx<'_> {
         self.tick_effects(id, Boundary::Start);
 
         let c = &self.s.combatants[i];
-        if let Some(owner) = c.owner().map(str::to_string) {
+        if let Some(owner) = account_of(&self.s, c) {
             self.prompts.push(PlayerEvent::YourTurn {
                 id: id.clone(),
                 owner: owner.clone(),
@@ -1217,6 +1581,23 @@ impl Cx<'_> {
         {
             self.end_concentration(id, reason);
         }
+        let pets: Vec<CombatantId> = self
+            .s
+            .combatants
+            .iter()
+            .filter(|c| !c.removed && c.owner_id.as_ref() == Some(id))
+            .map(|c| c.id.clone())
+            .collect();
+        for pet in pets {
+            let (np, no) = (self.name(&pet), self.name(id));
+            self.ev(
+                Some(&pet),
+                K::OwnerDefeated { owner: id.clone() },
+                format!(
+                    "{no} is down: keep {np} after it, dismiss it, or give it its own initiative"
+                ),
+            );
+        }
         let followers: Vec<usize> = (0..self.s.combatants.len())
             .filter(|&j| self.s.combatants[j].linked_to.as_ref() == Some(id))
             .collect();
@@ -1425,6 +1806,7 @@ impl Cx<'_> {
             return Err(CombatError::NotDying);
         };
         let r = resolve_d20(roll, self.die)?;
+        self.report_d20(id, "Death save", &r);
         let natural = r
             .natural
             .or_else(|| u32::try_from(r.total).ok().filter(|t| *t == 1 || *t == 20));
@@ -1631,6 +2013,7 @@ impl Cx<'_> {
             return Err(CombatError::NoPendingCheck);
         }
         let r = resolve_d20(roll, self.die)?;
+        self.report_d20(id, "Concentration save", &r);
         let check = self.s.combatants[i].pending_concentration.remove(0);
         let kept = r.total >= check.dc as i32;
         let name = self.name(id);
@@ -1784,6 +2167,7 @@ impl Cx<'_> {
         let r = resolve_d20(roll, self.die)?;
         let success = r.total >= save.dc as i32;
         let target = self.s.effects[k].spec.target.clone();
+        self.report_d20(&target, &format!("{} save", save.ability), &r);
         let text = format!(
             "{} {} save {} vs DC {}: {}",
             self.name(&target),
@@ -1880,6 +2264,7 @@ impl Cx<'_> {
             .ok_or_else(|| invalid("That ability has no recharge."))?
             .min;
         let r = resolve_dice(roll, self.die)?;
+        self.report_dice(id, &format!("Recharge {key}"), &r);
         if !(1..=6).contains(&r.total) {
             return Err(invalid("A recharge d6 is 1 to 6."));
         }

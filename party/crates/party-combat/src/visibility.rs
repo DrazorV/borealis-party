@@ -1,9 +1,10 @@
 //! What each kind of viewer may see: the visible turn order and the turn pointer (D5). Part D's projection
 //! (`view_for`) builds on these; it must not read hidden combatants any other way.
 
-use crate::derive::{conditions, turn_order};
-use crate::model::{CombatState, CombatantId, Condition, HealthBand, Life, Status};
+use crate::derive::{conditions, pool_of, turn_order};
+use crate::model::{CombatState, CombatantId, Controller, Status};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// The DM, or a player.
@@ -43,13 +44,18 @@ pub enum TurnPointer {
     },
 }
 
-/// The combatant is visible to the viewer: the DM sees everyone not removed; players see PCs and revealed
-/// creatures that aren't removed.
+/// The combatant is visible to the viewer. The DM sees everyone not removed. Players see PCs, creatures a player
+/// controls (their summons and pets), and revealed creatures, if not removed. A DM creature's pet has its own
+/// `visible` flag: it stays hidden while hidden, whatever its owner's state (revealing an owner reveals no pets).
 #[must_use]
 pub fn is_visible(state: &CombatState, id: &CombatantId, viewer: ViewerKind) -> bool {
-    state
-        .combatant(id)
-        .is_some_and(|c| !c.removed && (viewer == ViewerKind::Dm || c.visible || c.is_character()))
+    state.combatant(id).is_some_and(|c| {
+        !c.removed
+            && (viewer == ViewerKind::Dm
+                || c.visible
+                || c.is_character()
+                || matches!(c.controller, Controller::Player { .. }))
+    })
 }
 
 /// The turn order as the viewer may see it. For players, hidden creatures don't exist.
@@ -92,26 +98,85 @@ pub fn turn_pointer(state: &CombatState, viewer: ViewerKind) -> TurnPointer {
     }
 }
 
-/// What players can see of one combatant, coarsely, to decide whether a change is player-relevant.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Seen {
-    name: String,
-    band: Option<HealthBand>,
-    life: Life,
-    conditions: Vec<Condition>,
-    exhaustion: u8,
-    concentration: Option<String>,
-    pending_concentration: usize,
+/// Everything players may see of one combatant, or `None` when it is hidden from them. A revealed creature shows
+/// its full stat block (D20 b): exact HP, conditions, effects, concentration, resources and legendary actions left.
+/// DM-only data is left out: the DM label, notes, tie-break, effect ids, follow-ups, and any reference to a hidden
+/// combatant (an effect's hidden source and its duration, which counts that source's turns; a hidden owner or
+/// link). Part D's projection may narrow it further per viewer (D6: other players' PCs show a health band only).
+#[must_use]
+pub fn player_view_of(state: &CombatState, id: &CombatantId) -> Option<Value> {
+    let c = state.combatant(id)?;
+    if !is_visible(state, id, ViewerKind::Player) {
+        return None;
+    }
+    let seen = |other: &CombatantId| is_visible(state, other, ViewerKind::Player);
+    let mut v = serde_json::to_value(c).ok()?;
+    let o = v.as_object_mut()?;
+    for dm_only in [
+        "label",
+        "notes",
+        "tiebreak",
+        "ever_revealed",
+        "visible",
+        "removed",
+    ] {
+        o.remove(dm_only);
+    }
+    for (field, target) in [("owner_id", &c.owner_id), ("linked_to", &c.linked_to)] {
+        if target.as_ref().is_some_and(|t| !seen(t)) {
+            o.remove(field);
+        }
+    }
+    if let Controller::Player { pc } = &c.controller {
+        if !seen(pc) {
+            o.remove("controller");
+        }
+    }
+    let effects: Vec<Value> = state
+        .effects
+        .iter()
+        .filter(|e| &e.spec.target == id)
+        .map(|e| {
+            let s = &e.spec;
+            let source_seen = s.source.as_ref().is_none_or(seen);
+            let mut fx = serde_json::json!({
+                "name": s.name,
+                "detail": s.detail,
+                "concentration": s.concentration,
+                "conditions": s.conditions,
+                "modifiers": s.modifiers,
+                "charges": s.charges,
+                "repeat_save": s.repeat_save,
+            });
+            if source_seen {
+                fx["source"] = serde_json::to_value(&s.source).unwrap_or(Value::Null);
+                fx["duration"] = serde_json::to_value(s.duration).unwrap_or(Value::Null);
+            }
+            fx
+        })
+        .collect();
+    o.insert("effects".into(), Value::Array(effects));
+    o.insert(
+        "conditions".into(),
+        serde_json::to_value(conditions(state, id)).ok()?,
+    );
+    if let Some((_, pool)) = pool_of(state, id) {
+        o.insert(
+            "legendary_actions".into(),
+            serde_json::json!({"remaining": pool.remaining, "max": pool.max}),
+        );
+    }
+    Some(v)
 }
 
 /// A coarse summary of everything players may see. Two states with the same summary are the same to players, so
 /// a command whose before and after summaries match produces no player events.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PlayerSummary {
     status: Status,
     pointer: TurnPointer,
     order: Vec<CombatantId>,
-    seen: BTreeMap<CombatantId, Seen>,
+    seen: BTreeMap<CombatantId, Value>,
 }
 
 impl PlayerSummary {
@@ -119,24 +184,7 @@ impl PlayerSummary {
         let seen = state
             .combatants
             .iter()
-            .filter(|c| is_visible(state, &c.id, ViewerKind::Player))
-            .map(|c| {
-                let pc = c.is_character();
-                let seen = Seen {
-                    name: c.public_name.clone(),
-                    band: c.hp.band(),
-                    life: c.life,
-                    conditions: conditions(state, &c.id),
-                    exhaustion: c.exhaustion,
-                    concentration: if pc {
-                        c.concentration.as_ref().map(|k| k.name.clone())
-                    } else {
-                        None
-                    },
-                    pending_concentration: if pc { c.pending_concentration.len() } else { 0 },
-                };
-                (c.id.clone(), seen)
-            })
+            .filter_map(|c| player_view_of(state, &c.id).map(|v| (c.id.clone(), v)))
             .collect();
         Self {
             status: state.status,

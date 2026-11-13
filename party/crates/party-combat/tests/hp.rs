@@ -114,7 +114,7 @@ fn damage_parts_are_typed_separately_and_rolled_with_the_server_die() {
         target: id("s"),
         parts: vec![
             DamagePart {
-                amount: DiceInput::roll("1d6"),
+                amount: DiceInput::app("1d6"),
                 damage_type: Some(DamageType::Bludgeoning),
             },
             DamagePart::typed(5, Some(DamageType::Poison)),
@@ -352,7 +352,7 @@ fn a_typed_total_without_its_natural_counts_20_and_1() {
         &mut combat,
         Command::DeathSave {
             id: id("p"),
-            roll: D20Input::roll(0, Default::default()),
+            roll: D20Input::app(0, Default::default()),
         },
         &[11],
     );

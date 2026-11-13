@@ -470,8 +470,8 @@ pub fn critical(expr: &DiceExpr) -> DiceExpr {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RollSource {
-    /// Rolled by a [`DieRoller`].
-    Rolled,
+    /// Rolled in the app, by a [`DieRoller`] (the server's seeded die).
+    App,
     /// Typed in from physical dice (D43).
     Typed,
 }
@@ -596,7 +596,7 @@ pub fn roll_expr(
         format!(", {}", notes.join(", "))
     };
     Ok(DiceResult {
-        source: RollSource::Rolled,
+        source: RollSource::App,
         notation: expr.to_string(),
         total,
         terms,
@@ -706,7 +706,7 @@ pub fn roll_d20(
         .collect::<Vec<_>>()
         .join(", ");
     Ok(D20Result {
-        source: RollSource::Rolled,
+        source: RollSource::App,
         mode,
         breakdown: format!("d20 [{list}] {} = {total}{tail}", signed(modifier)),
         dice,
@@ -731,8 +731,8 @@ pub enum D20Input {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         natural: Option<u32>,
     },
-    /// Roll it with the injected die.
-    Roll {
+    /// Rolled in the app, with the injected die (the server's seeded die).
+    App {
         /// Added to the kept die.
         #[serde(default)]
         modifier: i32,
@@ -764,10 +764,10 @@ impl D20Input {
         }
     }
 
-    /// A rolled test.
+    /// A test rolled in the app.
     #[must_use]
-    pub fn roll(modifier: i32, mode: RollMode) -> Self {
-        D20Input::Roll {
+    pub fn app(modifier: i32, mode: RollMode) -> Self {
+        D20Input::App {
             modifier,
             mode,
             crit_range: None,
@@ -785,7 +785,7 @@ fn check_typed(total: i32) -> Result<(), DiceError> {
 /// Resolves a [`D20Input`]: a typed result as given, or a roll with `die`. The die is not touched for a typed result.
 pub fn resolve_d20(input: &D20Input, die: &mut dyn DieRoller) -> Result<D20Result, DiceError> {
     match *input {
-        D20Input::Roll {
+        D20Input::App {
             modifier,
             mode,
             crit_range,
@@ -826,8 +826,8 @@ pub enum DiceInput {
         /// The total.
         total: i32,
     },
-    /// Roll this notation with the injected die.
-    Roll {
+    /// Rolled in the app: this notation, with the injected die.
+    App {
         /// Dice notation, as `2d6+3`.
         notation: String,
         /// Double the dice (a critical hit).
@@ -846,10 +846,10 @@ impl DiceInput {
         DiceInput::Typed { total }
     }
 
-    /// Roll `notation`.
+    /// `notation`, rolled in the app.
     #[must_use]
-    pub fn roll(notation: impl Into<String>) -> Self {
-        DiceInput::Roll {
+    pub fn app(notation: impl Into<String>) -> Self {
+        DiceInput::App {
             notation: notation.into(),
             critical: false,
             floor: None,
@@ -870,7 +870,7 @@ pub fn resolve_dice(input: &DiceInput, die: &mut dyn DieRoller) -> Result<DiceRe
                 breakdown: format!("typed {total}"),
             })
         }
-        DiceInput::Roll {
+        DiceInput::App {
             notation,
             critical: crit,
             floor,
