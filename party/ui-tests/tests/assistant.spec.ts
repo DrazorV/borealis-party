@@ -54,7 +54,7 @@ async function deviceModel(page: Page, partyId: string): Promise<Record<string, 
     if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
     sent.push(route.request().postDataJSON() as Record<string, unknown>);
     const answers = [
-      call("bestiary_search", { text: "wolf", pageSize: 3 }),
+      call("bestiary_search", { text: "wolf", limit: 3 }),
       call("encounter_create", { partyId, name: "Forest ambush", notes: "Wolves circle from the trees." }),
       { choices: [{ message: { content: "I made a draft, Forest ambush: a pack of wolves that circles in from the trees." } }] },
     ];
