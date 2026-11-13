@@ -3,7 +3,8 @@
 //! token calling every tool with hidden ids, random ids and malformed arguments gets nothing hidden or DM-only),
 //! no tool for live combats (D25) and placeholders that write nothing, and idempotent writes.
 //!
-//! Tokens come from `mcp::testing` until part A's `TokenAuth` lands. Monsters are the bundled SRD 5.2.1 ones. Runs on
+//! Tokens are real personal tokens checked by part A's `TokenAuth` (`mcp::testing` writes them as the Account page
+//! does, without its per-account limits; one flow mints its token through `POST /api/me/ai/tokens` itself). Monsters are the bundled SRD 5.2.1 ones. Runs on
 //! SQLite, and on PostgreSQL too when `BOREALIS_TEST_POSTGRES_URL` names a database it may wipe.
 
 use std::path::Path;
@@ -175,13 +176,21 @@ async fn table(state: AppState) -> Table {
     }
 }
 
+/// The server state with a public URL, as a real server has: the 401 challenge names the metadata URL from it.
+fn mcp_state(dir: &Path, db: Db) -> AppState {
+    let mut state = state_with(dir.to_path_buf(), db, Setup::default());
+    state.config = std::sync::Arc::new(crate::Config {
+        open_registration: true,
+        require_approval: false,
+        public_url: Some("https://party.example.com".to_string()),
+        app_download: None,
+        trusted_proxies: Vec::new(),
+    });
+    state
+}
+
 async fn memory_table(dir: &Path) -> Table {
-    table(state_with(
-        dir.to_path_buf(),
-        Db::open(&Location::Memory).await.unwrap(),
-        Setup::default(),
-    ))
-    .await
+    table(mcp_state(dir, Db::open(&Location::Memory).await.unwrap())).await
 }
 
 /// One POST to `/api/mcp`: status, headers and the body (`Null` when empty).
@@ -269,7 +278,7 @@ async fn count(db: &Db, table: &str) -> i64 {
 
 async fn conformance(t: &Table) {
     let r = &t.router;
-    let tok = testing::token(&t.dm.id, ALL_SCOPES);
+    let tok = testing::token(&t.state.db, &t.dm.id, ALL_SCOPES).await;
 
     // Auth: none, an app session token, a revoked token: 401 with the RFC 9728 challenge.
     for token in [None, Some(t.dm.token.as_str())] {
@@ -289,8 +298,27 @@ async fn conformance(t: &Table) {
         );
         assert_eq!(h["cache-control"], "no-store, private");
     }
-    let gone = testing::token(&t.dm.id, ALL_SCOPES);
-    testing::revoke(&gone);
+    // A token made on the Account page (part A's route) works end to end.
+    let made = ok(
+        &t.dm,
+        "POST",
+        "/api/me/ai/tokens",
+        json!({ "name": "Claude Code", "scopes": ["bestiary:read"] }),
+    )
+    .await;
+    let minted = made["token"].as_str().unwrap().to_string();
+    assert!(minted.starts_with("bpt_"));
+    let (s, _, b) = rpc(r, &minted, &modern(1, "tools/list", json!({}))).await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    let names: Vec<&str> = b["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["bestiary_search", "monster_get"]);
+    let gone = testing::token(&t.state.db, &t.dm.id, ALL_SCOPES).await;
+    testing::revoke(&t.state.db, &gone).await;
     let (s, _, _) = post(
         r,
         Some(&gone),
@@ -536,7 +564,7 @@ async fn scope_matrix(t: &Table) {
             .filter(|s| !party_tools::scope::grants(&[**s].into_iter().collect(), spec.scope))
             .map(|s| s.as_str())
             .collect();
-        let tok = testing::token(&t.dm.id, &without.join(" "));
+        let tok = testing::token(&t.state.db, &t.dm.id, &without.join(" ")).await;
         let (_, _, list) = rpc(r, &tok, &modern(1, "tools/list", json!({}))).await;
         let names: Vec<&str> = list["result"]["tools"]
             .as_array()
@@ -563,7 +591,7 @@ async fn scope_matrix(t: &Table) {
             "{www}"
         );
         // With only its scope: allowed past the scope check (whatever the handler then says).
-        let tok = testing::token(&t.dm.id, spec.scope.as_str());
+        let tok = testing::token(&t.state.db, &t.dm.id, spec.scope.as_str()).await;
         let (s, b) = call(r, &tok, spec.name, args(spec.name)).await;
         assert_eq!(s, StatusCode::OK, "{}: {b}", spec.name);
         assert!(
@@ -573,7 +601,7 @@ async fn scope_matrix(t: &Table) {
         );
     }
     // Implications: write implies read; simulate implies nothing else.
-    let tok = testing::token(&t.dm.id, "encounters:write");
+    let tok = testing::token(&t.state.db, &t.dm.id, "encounters:write").await;
     data(
         r,
         &tok,
@@ -581,7 +609,7 @@ async fn scope_matrix(t: &Table) {
         json!({ "encounterId": t.encounter }),
     )
     .await;
-    let tok = testing::token(&t.dm.id, "encounters:simulate");
+    let tok = testing::token(&t.state.db, &t.dm.id, "encounters:simulate").await;
     let (s, _) = call(
         r,
         &tok,
@@ -595,7 +623,7 @@ async fn scope_matrix(t: &Table) {
 /// Every tool the player-owned token can name, with hidden, random and malformed arguments.
 async fn leak_suite(t: &Table) {
     let r = &t.router;
-    let mut tok = testing::token(&t.player.id, ALL_SCOPES);
+    let mut tok = testing::token(&t.state.db, &t.player.id, ALL_SCOPES).await;
     let random = uuid::Uuid::new_v4().to_string();
     let mut ids: Vec<String> = t.hidden_ids.clone();
     ids.push(random.clone());
@@ -658,7 +686,7 @@ async fn leak_suite(t: &Table) {
     for (n, (tool, args)) in calls.iter().enumerate() {
         if n % 50 == 49 {
             // A fresh token now and then, so the per-token rate never hides a call.
-            tok = testing::token(&t.player.id, ALL_SCOPES);
+            tok = testing::token(&t.state.db, &t.player.id, ALL_SCOPES).await;
         }
         let msg = modern(9, "tools/call", json!({ "name": tool, "arguments": args }));
         let (s, h, b) = rpc(r, &tok, &msg).await;
@@ -705,7 +733,7 @@ async fn leak_suite(t: &Table) {
         "{view}"
     );
     // The outsider sees the party as not found, whatever the scopes.
-    let out = testing::token(&t.outsider.id, ALL_SCOPES);
+    let out = testing::token(&t.state.db, &t.outsider.id, ALL_SCOPES).await;
     let (_, b) = call(r, &out, "encounter_list", json!({ "partyId": t.party })).await;
     assert!(b.to_string().contains("not_found"), "{b}");
     let (_, b) = call(
@@ -737,7 +765,7 @@ async fn rows_now(db: &Db) -> Vec<i64> {
 /// D25: no tool reads or changes a live combat; the simulator's tools are placeholders that touch nothing.
 async fn no_combat_tools(t: &Table) {
     let r = &t.router;
-    let dm = testing::token(&t.dm.id, ALL_SCOPES);
+    let dm = testing::token(&t.state.db, &t.dm.id, ALL_SCOPES).await;
     let started = ok(
         &t.dm,
         "POST",
@@ -809,7 +837,7 @@ async fn no_combat_tools(t: &Table) {
 
 async fn idempotency(t: &Table) {
     let r = &t.router;
-    let tok = testing::token(&t.dm.id, "encounters:write");
+    let tok = testing::token(&t.state.db, &t.dm.id, "encounters:write").await;
     let rid = request_id();
     let before = count(&t.state.db, "encounters").await;
     let args = json!({ "requestId": rid, "partyId": t.party, "name": "Swamp ambush" });
@@ -850,7 +878,7 @@ async fn idempotency(t: &Table) {
     assert_eq!(b["result"]["structuredContent"]["replayed"], true, "{b}");
     assert_eq!(count(&t.state.db, "encounter_creatures").await, 3 + 2);
     // The per-token rate limit.
-    let limited = testing::token(&t.dm.id, "bestiary:read");
+    let limited = testing::token(&t.state.db, &t.dm.id, "bestiary:read").await;
     let mut refused = false;
     for _ in 0..70 {
         let (_, b) = call(r, &limited, "monster_get", json!({ "id": OWLBEAR })).await;
@@ -904,12 +932,7 @@ async fn mcp_on_postgres() {
     {
         drop_all(&url).await;
         let db = Db::open(&Location::Postgres(url.clone())).await.unwrap();
-        let t = table(state_with(
-            dir.path().join(format!("{i}")),
-            db,
-            Setup::default(),
-        ))
-        .await;
+        let t = table(mcp_state(&dir.path().join(format!("{i}")), db)).await;
         match *flow {
             "conformance" => conformance(&t).await,
             "scopes" => scope_matrix(&t).await,

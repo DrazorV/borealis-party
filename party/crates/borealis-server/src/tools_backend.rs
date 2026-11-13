@@ -20,12 +20,26 @@ use crate::AppState;
 pub struct ServerTools {
     pub state: AppState,
     pub user: User,
+    /// The token or app the calls came through, as the activity log names it (`TokenClient::label`); none for the
+    /// in-app assistant.
+    pub client: Option<String>,
 }
 
 impl ServerTools {
     #[must_use]
     pub fn new(state: AppState, user: User) -> Self {
-        Self { state, user }
+        Self {
+            state,
+            user,
+            client: None,
+        }
+    }
+
+    /// Calls through this token or app (`TokenClient::label`).
+    #[must_use]
+    pub fn via_client(mut self, label: String) -> Self {
+        self.client = Some(label);
+        self
     }
 }
 
@@ -309,7 +323,7 @@ impl party_tools::Backend for ServerTools {
             );
             let mut entry = Activity::new("ai_tool").by(&self.user).detail(detail);
             if let Some(token) = &caller.token {
-                entry = entry.on(token, "token");
+                entry = entry.on(token, self.client.as_deref().unwrap_or("token"));
             }
             crate::admin::record(&self.state, entry).await;
         })
