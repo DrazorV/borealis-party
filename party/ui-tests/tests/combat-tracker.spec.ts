@@ -117,6 +117,32 @@ test.describe("The DM's combat tracker (0.3.0)", () => {
   });
 });
 
+test.describe("Two DM tabs stay current (no stale state)", () => {
+  test("a write in one tab shows in the other within a second, with no reload", async ({ page, signIn, context }, testInfo) => {
+    test.skip(!["android-portrait", "desktop"].includes(testInfo.project.name), "one phone size and the desktop");
+    await signIn("admin");
+    await openMock(page, testInfo);
+    const other = await context.newPage();
+    if (phoneProject(testInfo)) await open(other, "/combat/c1");
+    else await other.goto("/#/combat/c1");
+    await expect(other.locator("[data-combatant]").first()).toBeVisible({ timeout: 30_000 });
+    // A marker on the second tab's window: a reload would lose it.
+    await other.evaluate(() => { (window as unknown as { stayed: boolean }).stayed = true; });
+
+    const box = page.getByLabel("Mage initiative", { exact: true });
+    await box.fill("17");
+    await box.press("Enter");
+    const t0 = Date.now();
+    await expect(other.getByLabel("Mage initiative", { exact: true })).toHaveValue("17", { timeout: 1_000 });
+    expect(Date.now() - t0).toBeLessThan(1_000);
+
+    // And back the other way: damage in the second tab shows in the first.
+    await other.locator('[data-combatant="mage"]').getByRole("button", { name: "5 damage to Mage" }).click();
+    await expect(page.locator('[data-combatant="mage"] .cb-hp-text')).toContainText("35", { timeout: 1_000 });
+    expect(await other.evaluate(() => (window as unknown as { stayed?: boolean }).stayed)).toBe(true);
+  });
+});
+
 // ---- Two accounts against the real combat server (skips until it is there) ----
 
 async function login(request: APIRequestContext, who: AccountName) {
@@ -165,8 +191,14 @@ test("two accounts: the DM reveals a creature and the player sees it within abou
   await playerPage.goto("/?mock=mobile#/play");
   await expect(playerPage.getByText("Goblin 1")).toHaveCount(0);
 
+  // A second DM tab on the same combat follows the first without a reload (the real server's events).
+  const dmTab = await page.context().newPage();
+  await open(dmTab, `/combat/${started.id}`);
+  await expect(dmTab.getByRole("button", { name: /Reveal Goblin 1 to players/ })).toBeVisible({ timeout: 30_000 });
+
   await page.getByRole("button", { name: /Reveal Goblin 1 to players/ }).click();
   const t0 = Date.now();
+  await expect(dmTab.getByRole("button", { name: /Hide Goblin 1 from players/ })).toBeVisible({ timeout: 1_000 });
   await expect(playerPage.getByText(/Goblin/).first()).toBeVisible({ timeout: 2_500 });
   expect(Date.now() - t0).toBeLessThan(2_500);
   await playerPage.context().close();

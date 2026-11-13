@@ -203,7 +203,9 @@ describe("CombatTracker", () => {
     server.offline = true;
     fireEvent.click(within(row("mage")).getByRole("button", { name: "5 damage to Mage" }));
     await screen.findByText(/No signal: 1 change waiting/);
-    expect(within(row("mage")).getByText("40")).toBeTruthy();
+    // The tap shows at once (optimistic); the server's state stays underneath until it answers.
+    expect(within(row("mage")).getByText("35")).toBeTruthy();
+    expect(byId(state(), "mage")!.hp.current).toBe(40);
   });
 
   it("a recharge rolls in the app (C15)", async () => {

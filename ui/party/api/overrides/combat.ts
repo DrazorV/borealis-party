@@ -22,15 +22,23 @@ export interface CombatEvent {
 
 export interface CombatDeps {
   fetch: (session: Pick<ServerSession, "baseUrl" | "token">, method: string, path: string, body?: unknown) => Promise<unknown>;
-  /** The account's event stream: events, and opens (`again` after a drop). Answers a stop. */
-  events: (onEvent: (e: ServerEvent) => void, onOpen: (again: boolean) => void) => () => void;
+  /** The account's event stream: events, opens (`again` after a drop), and its pings and drops. Answers a stop. */
+  events: (onEvent: (e: ServerEvent) => void, onOpen: (again: boolean) => void, status?: StreamStatus) => () => void;
+}
+
+/** The stream's health, for the tracker's "Reconnecting…" chip. */
+export interface StreamStatus {
+  /** Anything arrived: an event or the server's ping. */
+  onBeat?: () => void;
+  /** The stream dropped; it reopens by itself. */
+  onDrop?: () => void;
 }
 
 const DEFAULT_DEPS: CombatDeps = {
   fetch: (session, method, path, body) => serverFetch(session, method, path, body),
-  events: (onEvent, onOpen) => {
+  events: (onEvent, onOpen, status) => {
     const session = loadSession();
-    return session ? liveEvents(session, onEvent, { onOpen }) : () => {};
+    return session ? liveEvents(session, onEvent, { onOpen, onBeat: status?.onBeat, onDrop: status?.onDrop }) : () => {};
   },
 };
 
@@ -112,12 +120,15 @@ const COMBAT_EVENT = "party://combat";
 const RESYNC_EVENT = "party://resync";
 
 /** Combat changes on the account's stream; a reopened stream or a resync is `{combat: "*"}` (reload everything). */
-export function watchCombats(listener: (e: CombatEvent) => void): () => void {
+export function watchCombats(listener: (e: CombatEvent) => void, status: StreamStatus & { onOpen?: (again: boolean) => void } = {}): () => void {
   return combatDeps.events((e) => {
     const p = (e.payload ?? {}) as Record<string, unknown>;
     if (e.event === COMBAT_EVENT && typeof p.combat === "string") listener({ party: String(p.party ?? ""), combat: p.combat, seq: Number(p.seq ?? p.pseq ?? 0) });
     else if (e.event === RESYNC_EVENT) listener({ party: "", combat: "*", seq: 0 });
-  }, (again) => { if (again) listener({ party: "", combat: "*", seq: 0 }); });
+  }, (again) => {
+    status.onOpen?.(again);
+    if (again) listener({ party: "", combat: "*", seq: 0 });
+  }, status);
 }
 
 /** A failure that means "no answer" (D44: queue and retry), not "the server refused". */

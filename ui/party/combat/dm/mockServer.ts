@@ -5,6 +5,7 @@
  */
 import type { CombatDeps } from "../../api/overrides/combat";
 import { sampleCombat } from "./fixtures";
+import { seededDie } from "../../../src/lib/dice";
 import { CombatRefusal, execute, exportCombat, importCombat, undo, type MockCombat } from "./mockEngine";
 import type { Combatant, Command, DmCombat } from "./types";
 
@@ -19,6 +20,10 @@ export interface MockServer {
   notify: (combat: string) => void;
   /** A player's write (their initiative): moves `seq` on, as the server would. */
   playerWrite: (combat: string, command: Command) => void;
+  /** Another DM tab's write: done on the server, announced on the stream. */
+  otherWrite: (combat: string, command: Command) => void;
+  /** The stream: a ping, a drop, a reopen (events may have been missed). */
+  stream: { beat: () => void; drop: () => void; reopen: () => void };
 }
 
 const fail = (code: string, message: string) => ({ code, message });
@@ -35,9 +40,47 @@ export function dmView(m: MockCombat): DmCombat {
   };
 }
 
-export function mockCombatServer(seed?: MockCombat[]): MockServer {
+/**
+ * Several tabs of one browser sharing the mock (the rig's two-tab test): the combats live in localStorage, and a
+ * write in one tab is announced to the others over a BroadcastChannel, as the server's event stream would.
+ */
+export interface MockSharing {
+  load: () => string | null;
+  save: (text: string) => void;
+  channel: { postMessage: (m: unknown) => void; listen: (fn: (data: unknown) => void) => void };
+}
+
+export function browserSharing(): MockSharing | undefined {
+  try {
+    if (typeof BroadcastChannel === "undefined") return undefined;
+    const channel = new BroadcastChannel("party.combatMock");
+    return {
+      load: () => localStorage.getItem("party.combatMock.state"),
+      save: (t) => localStorage.setItem("party.combatMock.state", t),
+      channel: { postMessage: (m) => channel.postMessage(m), listen: (fn) => { channel.onmessage = (e) => fn(e.data); } },
+    };
+  } catch { return undefined; }
+}
+
+export function mockCombatServer(seed?: MockCombat[], sharing?: MockSharing): MockServer {
   const combats = new Map<string, MockCombat>((seed ?? [sampleCombat()]).map((m) => [m.view.id, m]));
+  const pull = () => {
+    const text = sharing?.load();
+    if (!text) return;
+    try {
+      for (const [id, saved] of Object.entries(JSON.parse(text) as Record<string, Pick<MockCombat, "view" | "journal">>)) {
+        combats.set(id, { view: saved.view, journal: saved.journal, die: seededDie(7 + saved.view.seq), playerEvents: [] });
+      }
+    } catch { /* a broken save: start from the seed */ }
+  };
+  const push = (combat: string) => {
+    if (!sharing) return;
+    sharing.save(JSON.stringify(Object.fromEntries([...combats].map(([id, m]) => [id, { view: m.view, journal: m.journal }]))));
+    sharing.channel.postMessage({ combat });
+  };
   const listeners = new Set<(e: { event: string; payload: unknown }) => void>();
+  const opens = new Set<(again: boolean) => void>();
+  const statuses = new Set<{ onBeat?: () => void; onDrop?: () => void }>();
   const done = new Map<string, true>();
   let made = 0;
   const server: MockServer = {
@@ -47,14 +90,25 @@ export function mockCombatServer(seed?: MockCombat[]): MockServer {
     notify: (combat) => {
       const m = combats.get(combat);
       for (const l of [...listeners]) l({ event: "party://combat", payload: { party: m?.view.partyId, combat, seq: m?.view.seq ?? 0 } });
+      for (const st of [...statuses]) st.onBeat?.();
     },
     playerWrite: (combat, command) => {
       execute(combats.get(combat)!, command, undefined, "player");
       server.notify(combat);
     },
+    otherWrite: (combat, command) => {
+      execute(combats.get(combat)!, command);
+      server.notify(combat);
+    },
+    stream: {
+      beat: () => { for (const s of [...statuses]) s.onBeat?.(); },
+      drop: () => { for (const s of [...statuses]) s.onDrop?.(); },
+      reopen: () => { for (const o of [...opens]) o(true); },
+    },
     deps: {
       fetch: async (_session, method, path, body) => {
         server.requests.push(`${method} ${path}`);
+        pull();
         await Promise.resolve();
         if (server.offline) throw fail("network", "The server can't be reached. Check your connection.");
         const b = (body ?? {}) as { requestId?: string; expectSeq?: number; args?: Record<string, unknown>; file?: unknown };
@@ -114,6 +168,7 @@ export function mockCombatServer(seed?: MockCombat[]): MockServer {
             execute(m, { command: tag, ...args } as Command);
           }
           if (b.requestId) done.set(key, true);
+          push(m.view.id);
           server.notify(m.view.id);
           return dmView(m);
         } catch (e) {
@@ -121,13 +176,25 @@ export function mockCombatServer(seed?: MockCombat[]): MockServer {
           throw e;
         }
       },
-      events: (onEvent, onOpen) => {
+      events: (onEvent, onOpen, status) => {
         listeners.add(onEvent);
+        opens.add(onOpen);
+        const st = status ?? {};
+        statuses.add(st);
         onOpen(false);
-        return () => { listeners.delete(onEvent); };
+        return () => { listeners.delete(onEvent); opens.delete(onOpen); statuses.delete(st); };
       },
     },
   };
+  if (sharing) {
+    pull();
+    sharing.channel.listen((data) => {
+      const combat = (data as { combat?: string } | null)?.combat;
+      if (!combat) return;
+      pull();
+      server.notify(combat);
+    });
+  }
   return server;
 }
 

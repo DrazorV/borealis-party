@@ -629,6 +629,20 @@ export function importCombat(text: string, id: string, partyId: string): MockCom
   return m;
 }
 
+/**
+ * What a DM command does to `state`, for showing it at once while the server confirms (optimistic writes). Null when
+ * it can't be told here: it rolls dice (only the server rolls, D21), it would be refused, or it's a server action.
+ * The server's answer always replaces it.
+ */
+export function predict(state: CombatState, cmd: Command): CombatState | null {
+  const m: MockCombat = { view: { id: "", partyId: "", encounterId: null, seq: 0, state, log: [], statblocks: {}, undo: null }, journal: [], die: () => { throw new CombatRefusal("rolls"); }, playerEvents: [] };
+  try {
+    return execute(m, cmd).state;
+  } catch {
+    return null;
+  }
+}
+
 export function commandLabel(cmd: Command): string {
   return cmd.command.replace(/_/g, " ");
 }

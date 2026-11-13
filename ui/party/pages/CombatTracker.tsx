@@ -29,7 +29,7 @@ import "../combat/dm/tracker.css";
 export function CombatTracker() {
   const { id = "" } = useParams();
   const combat = useCombat(id);
-  const { view, connection, held, error, send } = combat;
+  const { view, connection, held, error, send, streamDown } = combat;
   const toast = useToast();
   const confirm = useConfirm();
   const nav = useNavigate();
@@ -127,6 +127,8 @@ export function CombatTracker() {
           {next && <div className="cb-small muted">Up next: {next.label}</div>}
         </div>
         <div className="cb-top-actions">
+          {streamDown && connection === "live" && <span className="chip warning cb-reconnecting" role="status">Reconnecting…</span>}
+          {combat.queue.length > 0 && connection === "sending" && <span className="chip cb-saving" role="status" aria-label="Saving">Saving…</span>}
           <span className="cb-round" aria-label={`Round ${state.round}`}>ROUND {state.round || "–"}</span>
           {state.status !== "ended" && <Button variant="primary" className="cb-next" disabled={disabled || ordered.length === 0} onClick={step}>
             ▶ {state.status === "setup" ? "Start combat" : "Next turn"}</Button>}

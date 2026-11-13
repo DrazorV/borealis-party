@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useToast } from "../../../src/components/Toast";
 import { combatDeps } from "../../api/overrides/combat";
 import { CombatClient, defaultClientDeps, type ClientDeps, type ClientState } from "./client";
-import { mockCombatServer, mockWanted } from "./mockServer";
+import { browserSharing, mockCombatServer, mockWanted } from "./mockServer";
 import type { Command } from "./types";
 
-// Trying the tracker before the server has its routes: the mock answers them in this browser (./mockServer.ts).
-if (typeof window !== "undefined" && mockWanted()) Object.assign(combatDeps, mockCombatServer().deps);
+// Trying the tracker before the server has its routes: the mock answers them in this browser, shared by its tabs
+// (./mockServer.ts).
+if (typeof window !== "undefined" && mockWanted()) Object.assign(combatDeps, mockCombatServer(undefined, browserSharing()).deps);
 
 /** Tests replace the client's clock and timers. */
 export const clientOverrides: { deps?: Partial<ClientDeps> } = {};
@@ -28,5 +29,6 @@ export function useCombat(id: string) {
     () => client.snapshot,
   );
   const send = useCallback((command: Command) => client.send(command), [client]);
-  return { ...state, client, send, accepting: client.accepting };
+  // The screen shows the optimistic state: the server's with the writes on their way applied (./client.ts).
+  return { ...state, view: state.shown, server: state.view, client, send, accepting: client.accepting };
 }

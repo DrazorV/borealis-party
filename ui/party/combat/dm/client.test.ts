@@ -3,7 +3,7 @@ import { combatDeps, resetCombatDeps } from "../../api/overrides/combat";
 import { saveSession } from "../../api/session";
 import { memoryStorage } from "../../test/memoryStorage";
 import { CombatClient, OFFLINE_AFTER_MS, type ClientDeps } from "./client";
-import { mockCombatServer, type MockServer } from "./mockServer";
+import { mockCombatServer, type MockServer, type MockSharing } from "./mockServer";
 import { loadCombat, sendCommand, undoCombat, watchCombats } from "../../api/overrides/combat";
 
 /** The DM's write queue and offline state (D44): about a minute of queued writes, then "offline". */
@@ -12,6 +12,8 @@ let server: MockServer;
 let now = 0;
 let timers: { at: number; fn: () => void }[] = [];
 const reports: string[] = [];
+let visible: (() => void) | null = null;
+const gets = () => server.requests.filter((r) => r === "GET /api/combats/c1").length;
 
 function deps(): ClientDeps {
   return {
@@ -22,6 +24,7 @@ function deps(): ClientDeps {
     send: (id, command, op) => sendCommand(id, command, op),
     undo: undoCombat,
     watch: watchCombats,
+    onVisible: (fn) => { visible = fn; return () => { visible = null; }; },
     report: (m) => { reports.push(m); },
   };
 }
@@ -182,4 +185,113 @@ describe("CombatClient", () => {
     expect(await c.undo(true)).toBe("done");
     expect(c.snapshot.view?.state.combatants.find((x) => x.id === "pc-bram")?.initiative).toBeNull();
   });
+
+  it("shows a write at once (optimistic) and keeps the server's state underneath until it answers", async () => {
+    const c = await opened();
+    c.send({ command: "damage", target: "mage", parts: [{ amount: { kind: "typed", total: 5 } }] });
+    const hp = (v: typeof c.snapshot.view) => v?.state.combatants.find((x) => x.id === "mage")?.hp.current;
+    expect(hp(c.snapshot.shown)).toBe(35);
+    expect(hp(c.snapshot.view)).toBe(40);
+    await settle();
+    expect(hp(c.snapshot.view)).toBe(35);
+    expect(c.snapshot.shown).toBe(c.snapshot.view);
+  });
+
+  it("rolls a write back on a 409, re-fetches and says someone else changed it", async () => {
+    const c = await opened();
+    const real = combatDeps.fetch;
+    combatDeps.fetch = async (session, method, path, body) => {
+      if (method === "POST") { server.otherWrite("c1", { command: "set_hp", id: "mage", current: 20 }); throw { code: "conflict", message: "Conflict", status: 409 }; }
+      return real(session, method, path, body);
+    };
+    const before = gets();
+    c.send({ command: "damage", target: "mage", parts: [{ amount: { kind: "typed", total: 5 } }] });
+    await settle();
+    await settle();
+    expect(reports.at(-1)).toBe("Someone else changed this; updated.");
+    expect(gets()).toBeGreaterThan(before);
+    expect(c.snapshot.queue).toHaveLength(0);
+    expect(c.snapshot.shown?.state.combatants.find((x) => x.id === "mage")?.hp.current).toBe(20);
+  });
+
+  it("rolls a refused write back with the server's reason", async () => {
+    const c = await opened();
+    const real = combatDeps.fetch;
+    combatDeps.fetch = async (session, method, path, body) => {
+      if (method === "POST") throw { code: "refused", message: "Needs recharge" };
+      return real(session, method, path, body);
+    };
+    c.send({ command: "use_ability", id: "dragon", ability: "tail" });
+    expect(c.snapshot.shown?.state.legendary_pools.court!.remaining).toBe(2);
+    await settle();
+    expect(reports.at(-1)).toBe("Needs recharge");
+    expect(c.snapshot.shown?.state.legendary_pools.court!.remaining).toBe(3);
+  });
+
+  it("ignores events it has already seen, and turns a burst or a gap into one reload", async () => {
+    const c = await opened();
+    const start = gets();
+    server.notify("c1"); // seq 0: not newer
+    await settle();
+    expect(gets()).toBe(start);
+    // Three writes elsewhere announce seq 1, 2 and 3 at once (and a gap: 1 then 3).
+    server.otherWrite("c1", { command: "set_initiative", id: "mage", roll: { kind: "typed", total: 3 } });
+    server.otherWrite("c1", { command: "set_initiative", id: "mage", roll: { kind: "typed", total: 4 } });
+    server.otherWrite("c1", { command: "set_initiative", id: "mage", roll: { kind: "typed", total: 5 } });
+    await settle();
+    expect(gets() - start).toBeLessThanOrEqual(2);
+    expect(c.snapshot.view?.seq).toBe(3);
+    expect(c.snapshot.view?.state.combatants.find((x) => x.id === "mage")?.initiative).toBe(5);
+  });
+
+  it("re-fetches once when the stream reopens and when the tab comes back", async () => {
+    const c = await opened();
+    const start = gets();
+    server.stream.reopen();
+    await settle();
+    expect(gets()).toBe(start + 1);
+    visible?.();
+    await settle();
+    expect(gets()).toBe(start + 2);
+    expect(c.snapshot.error).toBeNull();
+  });
+
+  it("says Reconnecting only 3 s after a drop that didn't reopen, or after 23 s without even a ping", async () => {
+    const c = await opened();
+    server.stream.drop();
+    await advance(2000);
+    expect(c.snapshot.streamDown).toBe(false);
+    await advance(1500);
+    expect(c.snapshot.streamDown).toBe(true);
+    const start = gets();
+    server.stream.beat();
+    await settle();
+    expect(c.snapshot.streamDown).toBe(false);
+    expect(gets()).toBe(start + 1);
+    await advance(22_000);
+    expect(c.snapshot.streamDown).toBe(false);
+    await advance(2000);
+    expect(c.snapshot.streamDown).toBe(true);
+  });
+
+  it("two DM tabs: a write in one reaches the other through the event, with no reload of the page", async () => {
+    let stored: string | null = null;
+    const tabs: ((d: unknown) => void)[] = [];
+    const sharing = (): MockSharing => {
+      const me = tabs.length;
+      return {
+        load: () => stored, save: (t) => { stored = t; },
+        channel: { postMessage: (m) => tabs.forEach((fn, i) => { if (i !== me) fn(m); }), listen: (fn) => { tabs[me] = fn; } },
+      };
+    };
+    const a = mockCombatServer(undefined, sharing());
+    const b = mockCombatServer(undefined, sharing());
+    Object.assign(combatDeps, b.deps);
+    const tabB = await opened();
+    // Tab A writes through its own copy of the routes.
+    await a.deps.fetch({ baseUrl: "", token: "t" }, "POST", "/api/combats/c1/set_initiative", { requestId: "r1", args: { id: "mage", roll: { kind: "typed", total: 17 } } });
+    await settle();
+    expect(tabB.snapshot.view?.state.combatants.find((x) => x.id === "mage")?.initiative).toBe(17);
+  });
 });
+
