@@ -902,7 +902,7 @@ async fn tools_flow(db: Db, data: &Path) {
     );
     let (_, list) = dm.get(&format!("/api/parties/{party}/encounters")).await;
     assert_eq!(list["encounters"].as_array().unwrap().len(), 1, "{list}");
-    // The simulation, homebrew and index tools answer in words until parts D and E land.
+    // The simulation, homebrew and index tools are wired into the registry (parts D and E): none is unavailable.
     for (name, args) in [
         ("sim_start", json!({ "encounter_id": enc, "seed": 1 })),
         ("homebrew_validate", json!({ "xml": "<elements/>" })),
@@ -912,7 +912,7 @@ async fn tools_flow(db: Db, data: &Path) {
         ),
     ] {
         let (_, out) = tool(&dm, name, json!({ "args": args })).await;
-        assert_eq!(out["error"]["code"], "unavailable", "{name}: {out}");
+        assert_ne!(out["error"]["code"], "unavailable", "{name}: {out}");
     }
     // Each purpose offers its own tools.
     let (_, t) = dm.get("/api/ai/tools?purpose=homebrew").await;
