@@ -51,6 +51,7 @@ mod shares;
 mod simulate;
 mod simulate_ai;
 mod simulate_tools;
+mod spells;
 mod sync;
 #[cfg(test)]
 mod tests;
@@ -179,6 +180,7 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
         .merge(mcp::routes())
         .merge(ai_assistant::routes())
         .merge(homebrew::routes())
+        .merge(spells::routes())
         .route("/api/{*rest}", any(no_such_route))
         .layer(DefaultBodyLimit::max(max_upload))
         .with_state(state)

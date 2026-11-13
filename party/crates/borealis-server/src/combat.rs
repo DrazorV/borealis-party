@@ -2224,7 +2224,8 @@ async fn start_inner(state: &AppState, user: &User, encounter: &str, body: &[u8]
     }
     // Starting effects (C19) and encounter rules (C20), when the encounter has them.
     if let Ok(rows) = sqlx::query(
-        "SELECT creature_id, name, detail, source_creature_id, duration_turns, charges, concentration, modifiers_json
+        "SELECT creature_id, name, detail, source_creature_id, duration_turns, charges, concentration, modifiers_json,
+            slot_level
          FROM encounter_effects WHERE encounter_id = $1 ORDER BY sort, id",
     )
     .bind(encounter)
@@ -2272,10 +2273,22 @@ async fn start_inner(state: &AppState, user: &User, encounter: &str, body: &[u8]
             if mods.get("speedZero").and_then(Value::as_bool) == Some(true) {
                 spec.modifiers.push(Modifier::SpeedZero);
             }
+            // A custom effect with a slot level spends that slot of its caster (the source, else the creature it
+            // is on), like a precast spell does.
+            let slot = row
+                .try_get::<Option<i64>, _>(8)
+                .ok()
+                .flatten()
+                .and_then(|l| u8::try_from(l).ok())
+                .filter(|l| (1..=9).contains(l));
+            let caster = spec.source.clone().unwrap_or_else(|| spec.target.clone());
             let cmd = Command::AddEffect { effect: Box::new(spec) };
             match apply(&st, &Actor::System, &cmd, &mut die) {
                 Ok(o) => st = o.state,
                 Err(e) => tracing::warn!("combat: a starting effect of {encounter} didn't apply: {e}"),
+            }
+            if let Some(level) = slot {
+                st = spend_slot(st, &caster, level, &mut die, encounter);
             }
         }
     }
@@ -2366,6 +2379,39 @@ async fn start_inner(state: &AppState, user: &User, encounter: &str, body: &[u8]
             }
         }
         Err(e) => Err(e),
+    }
+}
+
+/// One slot of `level` spent by `caster` before the fight. A caster without slots of that level (a stat block whose
+/// slots weren't seeded) spends nothing; the log says why.
+fn spend_slot(
+    st: CombatState,
+    caster: &CombatantId,
+    level: u8,
+    die: &mut SeededDie,
+    encounter: &str,
+) -> CombatState {
+    let has = st
+        .combatants
+        .iter()
+        .find(|c| &c.id == caster)
+        .and_then(|c| c.spell_slots.get(&level))
+        .is_some_and(|p| p.remaining > 0);
+    if !has {
+        tracing::info!("combat: no level {level} slot to spend before the fight in {encounter}");
+        return st;
+    }
+    let cmd = Command::AdjustSlot {
+        id: caster.clone(),
+        level,
+        delta: -1,
+    };
+    match apply(&st, &Actor::System, &cmd, die) {
+        Ok(o) => o.state,
+        Err(e) => {
+            tracing::warn!("combat: a slot of {encounter} wasn't spent: {e}");
+            st
+        }
     }
 }
 

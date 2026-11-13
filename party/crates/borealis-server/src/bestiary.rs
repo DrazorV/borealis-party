@@ -145,6 +145,11 @@ pub struct Meta {
     /// The 5etools data has a token image for it (not imported).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub token: bool,
+    /// The raw 5etools `spellcasting` blocks, as the data has them (0.3.2): the monster spellbook parser
+    /// (`party-encounter` spellbook) reads their spell lists, slots, uses per day, DC and ability, which the
+    /// imported text keeps only as prose. Account data like the rest; never shipped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spellcasting: Option<Value>,
 }
 
 fn text_of(v: Option<&Value>) -> String {
@@ -234,6 +239,10 @@ pub fn meta_of(raw: &Value) -> Meta {
         reaction_intro: text_of(raw.get("reactionHeader")),
         fluff: flag("hasFluff") || flag("hasFluffImages"),
         token: flag("hasToken"),
+        spellcasting: raw
+            .get("spellcasting")
+            .filter(|v| v.as_array().is_some_and(|a| !a.is_empty()))
+            .cloned(),
     }
 }
 
@@ -696,6 +705,21 @@ async fn stored_meta(state: &AppState, owner: &str) -> ApiResult<HashMap<String,
         out.insert(id, (rev, meta));
     }
     Ok(out)
+}
+
+/// The raw 5etools `spellcasting` blocks captured for `element` of `owner`'s content, when the current pack revision
+/// has them (0.3.2: the input of the monster spellbook parser). `None` for Aurora and SRD creatures, which have only
+/// their text.
+///
+/// # Errors
+/// When the workspace or the database fails.
+pub async fn spellcasting_of(
+    state: &AppState,
+    owner: &str,
+    element: &str,
+) -> ApiResult<Option<Value>> {
+    let index = index(state, owner).await?;
+    Ok(index.meta.get(element).and_then(|m| m.spellcasting.clone()))
 }
 
 /// One pack's import record: `(revision, in data, skipped {total, reasons}, partial {total, notes})`.
@@ -1579,6 +1603,7 @@ fn extras_counts(metas: &[&Meta]) -> Value {
         "reactionIntro": n(&|m| !m.reaction_intro.is_empty()),
         "fluff": n(&|m| m.fluff),
         "tokens": n(&|m| m.token),
+        "spellcasting": n(&|m| m.spellcasting.is_some()),
     })
 }
 

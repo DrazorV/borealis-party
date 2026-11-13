@@ -442,6 +442,51 @@ const MIGRATIONS: &[&[&str]] = &[
             PRIMARY KEY (user_id, day)
         )",
     ],
+    // 9 (M-spells, 0.3.2), after M-ai-providers. Spells as mechanics in combat (spells.rs).
+    // `spell_mechanics`: what a DM decided about spells, per account (D: per account, with a JSON file export and
+    // import; not in homebrew packs yet). One table, by `kind`:
+    // - `def`: an effect the DM built (`def_json` is the engine's SpellMech, `schema_v` its version, `rev` bumped on
+    //   every save);
+    // - `link`: "use that spell's mechanics" (`def_json` is `{"target": <spell key>}`), e.g. a 5etools Fireball linked
+    //   to the SRD one after the "Use SRD Fireball rules?" banner;
+    // - `alias`: a name that means this spell (`alias_name` normalized): a monster spellbook's ambiguous or unlinked
+    //   name the DM resolved once, and the DM's override of the "one spell per edition" choice.
+    // `alias_name` is '' for the other kinds, so the primary key needs no NULL. `origin` says where a row came from
+    // (dm, suggested, import); `source_hash` is the drafted text's hash for "this changed, check it again".
+    &[
+        "CREATE TABLE IF NOT EXISTS spell_mechanics (
+            account_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            spell_key TEXT NOT NULL,
+            ruleset TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            alias_name TEXT NOT NULL DEFAULT '',
+            def_json TEXT NOT NULL DEFAULT '{}',
+            schema_v BIGINT NOT NULL DEFAULT 1,
+            rev BIGINT NOT NULL DEFAULT 1,
+            origin TEXT NOT NULL DEFAULT 'dm',
+            source_hash TEXT,
+            created_at BIGINT NOT NULL,
+            updated_at BIGINT NOT NULL,
+            PRIMARY KEY (account_id, spell_key, ruleset, kind, alias_name)
+        )",
+        "CREATE INDEX IF NOT EXISTS spell_mechanics_alias ON spell_mechanics (account_id, ruleset, kind, alias_name)",
+        // Precast spells (they replace "Starting effect"; legacy rows stay in encounter_effects as "Custom effect"):
+        // cast when combat starts, with their real effect, and their slot spent. `slot_level` NULL is a cantrip or an
+        // at-will/per-day use. `name` is kept for display when the spell element is gone.
+        "CREATE TABLE IF NOT EXISTS encounter_casts (
+            id TEXT PRIMARY KEY,
+            encounter_id TEXT NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
+            caster_creature_id TEXT NOT NULL REFERENCES encounter_creatures(id) ON DELETE CASCADE,
+            sort BIGINT NOT NULL,
+            spell_key TEXT NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            slot_level BIGINT,
+            targets_json TEXT NOT NULL DEFAULT '[]',
+            choices_json TEXT NOT NULL DEFAULT '{}',
+            created_at BIGINT NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS encounter_casts_encounter ON encounter_casts (encounter_id, sort)",
+    ],
 ];
 
 /// How many steps [`MIGRATIONS`] has: the schema version a database is at after [`Db::open`].
@@ -461,6 +506,7 @@ const MARKERS: &[(usize, &str)] = &[
     (6, "combats"),
     (7, "api_tokens"),
     (8, "ai_providers"),
+    (9, "spell_mechanics"),
 ];
 
 /// A table only the versions with groups had. A database that still has it opens like any other: the table is left

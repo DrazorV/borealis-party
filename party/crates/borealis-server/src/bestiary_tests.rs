@@ -63,7 +63,13 @@ fn fixture() -> Value {
             creature("Green Hag", &json!({
                 "cr": {"cr": "3", "coven": "5"}, "type": "fey", "environment": ["swamp", "forest"],
                 "variant": [{"type": "inset", "name": "Hag Coven", "entries": ["Hags gather in covens of three."]}],
-                "hasFluff": true
+                "hasFluff": true,
+                "spellcasting": [{
+                    "name": "Innate Spellcasting", "type": "spellcasting", "ability": "cha",
+                    "headerEntries": ["The hag's innate spellcasting ability is Charisma ({@dc 12})."],
+                    "will": ["{@spell dancing lights}", "{@spell minor illusion}", "{@spell vicious mockery}"],
+                    "displayAs": "trait"
+                }]
             })),
             creature("Adult Red Dragon", &json!({
                 "cr": "17", "size": ["H"], "type": "dragon", "environment": ["mountain", "hill"],
@@ -451,7 +457,7 @@ async fn import_checks(dm: &Client, other: &Client, data: &Path) {
     assert_eq!(
         p["extras"],
         json!({ "environment": 4, "page": 1, "mythic": 1, "covenCr": 1, "altSpeeds": 1, "variants": 1,
-                "reactionIntro": 0, "fluff": 1, "tokens": 1 }),
+                "reactionIntro": 0, "fluff": 1, "tokens": 1, "spellcasting": 1 }),
     );
     assert_eq!(
         p["byCr"],
@@ -494,6 +500,17 @@ async fn import_checks(dm: &Client, other: &Client, data: &Path) {
     )
     .await;
     assert_eq!(hag["meta"]["covenCr"], json!({ "cr": "5" }));
+    // The raw spellcasting blocks are kept for the spellbook parser (0.3.2), as the data has them.
+    assert_eq!(
+        hag["meta"]["spellcasting"][0]["will"][2], "{@spell vicious mockery}",
+        "{}",
+        hag["meta"]
+    );
+    assert_eq!(hag["meta"]["spellcasting"][0]["ability"], "cha");
+    assert!(
+        detail["meta"].get("spellcasting").is_none(),
+        "none for a creature without it"
+    );
     assert!(
         hag["monster"].is_object()
             && hag["monster"].get("xp").is_none()
@@ -843,6 +860,20 @@ fn details_are_read_from_a_creature() {
     assert!(!m.alt_speeds.contains_key("swim"));
     assert_eq!(m.reaction_intro, "The creature can take one reaction.");
     assert!(m.fluff && !m.token);
+    assert!(m.spellcasting.is_none());
+    let caster = meta_of(&json!({
+        "spellcasting": [{ "name": "Spellcasting", "spells": { "1": { "slots": 4, "spells": ["{@spell shield}"] } } }]
+    }));
+    assert_eq!(
+        caster.spellcasting.unwrap()[0]["spells"]["1"]["slots"],
+        4,
+        "kept raw"
+    );
+    let none = meta_of(&json!({ "spellcasting": [] }));
+    assert!(
+        none.spellcasting.is_none(),
+        "an empty list is no spellcasting"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------------------------
