@@ -11,6 +11,7 @@ import { AccountBar } from "../pages/AccountBar";
 import { AccountPage } from "../pages/AccountPage";
 import { AdminPage } from "../pages/AdminPage";
 import { ImportHub } from "../pages/ImportHub";
+import { JoinRoute, PartiesPage } from "../pages/PartiesPage";
 import { OfflinePage } from "../pages/OfflineBanner";
 import { setImportNavigate } from "../import/door";
 import { SharePage } from "../pages/SharePage";
@@ -69,6 +70,9 @@ export function App() {
         {/* Share codes (plan E4): send from any device with no file, and receive by code or link. */}
         <Route path="/share" element={<AppShell>{offline ? <OfflinePage /> : <SharePage />}</AppShell>} />
         <Route path="/share/receive/:code?" element={<AppShell>{offline ? <OfflinePage /> : <ShareReceivePage />}</AppShell>} />
+        {/* Parties (plan 4.1); a join link keeps its code and opens them. */}
+        <Route path="/parties" element={<AppShell>{offline ? <OfflinePage /> : <PartiesPage />}</AppShell>} />
+        <Route path="/join/:code" element={<JoinRoute />} />
         {/* Notes read a folder on the device, which a server doesn't offer. */}
         <Route path="/notes" element={<Navigate to="/" replace />} />
         <Route path="*" element={<UpstreamApp />} />

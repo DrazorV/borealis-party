@@ -24,10 +24,15 @@ mod sync_tests;
 #[path = "jobs_tests.rs"]
 mod jobs_tests;
 
+#[path = "parties_tests.rs"]
+mod parties_tests;
 #[path = "shares_tests.rs"]
 mod shares_tests;
 
 const PASSWORD: &str = "correct horse battery";
+
+/// The PostgreSQL tests share one database: they take turns.
+static POSTGRES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 struct Client {
     router: Router,
@@ -41,6 +46,8 @@ struct Setup {
     mailer: Option<Arc<Recorder>>,
     signups_allowed: usize,
     max_upload: usize,
+    /// `server.trusted_proxies`.
+    trusted_proxies: Vec<String>,
 }
 
 impl Default for Setup {
@@ -50,6 +57,7 @@ impl Default for Setup {
             mailer: None,
             signups_allowed: 1000,
             max_upload: 64 * 1024 * 1024,
+            trusted_proxies: Vec::new(),
         }
     }
 }
@@ -75,6 +83,7 @@ fn router_with(data: PathBuf, db: Db, setup: Setup) -> Router {
                 .as_ref()
                 .map(|_| "https://party.example.com".to_string()),
             app_download: Some(crate::config::DEFAULT_APP_DOWNLOAD.to_string()),
+            trusted_proxies: setup.trusted_proxies,
         }),
         login_limiter: RateLimiter::logins(),
         signup_limiter: RateLimiter::new(setup.signups_allowed, Duration::from_secs(3600)),
@@ -95,12 +104,27 @@ async fn send(
     path: &str,
     body: Value,
 ) -> (StatusCode, Value) {
+    send_with(router, token, method, path, body, &[]).await
+}
+
+/// [`send`] with more headers.
+async fn send_with(
+    router: &Router,
+    token: Option<&str>,
+    method: &str,
+    path: &str,
+    body: Value,
+    headers: &[(&str, &str)],
+) -> (StatusCode, Value) {
     let mut request = Request::builder()
         .method(method)
         .uri(path)
         .header("content-type", "application/json");
     if let Some(token) = token {
         request = request.header("authorization", format!("Bearer {token}"));
+    }
+    for (name, value) in headers {
+        request = request.header(*name, *value);
     }
     let response = router
         .clone()
@@ -341,7 +365,7 @@ async fn check_moved(router: &Router) {
 }
 
 /// The rows `some_accounts` makes, as the copy reports them.
-const MOVED: &str = "users 3, sessions 3, server_settings 1, activity 4, shares 0, share_blocks 0";
+const MOVED: &str = "users 3, sessions 3, server_settings 1, activity 4, shares 0, share_blocks 0, account_roles 0, parties 0, party_invites 0, party_invite_holds 0, party_offers 0, party_members 0";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_sqlite_instance_moves_with_its_accounts() {
@@ -432,6 +456,12 @@ async fn drop_all(url: &str) {
     sqlx::any::install_default_drivers();
     let pool = sqlx::AnyPool::connect(url).await.unwrap();
     for table in [
+        "party_members",
+        "party_offers",
+        "party_invite_holds",
+        "party_invites",
+        "parties",
+        "account_roles",
         "activity",
         "server_settings",
         "party_groups",
@@ -455,6 +485,7 @@ async fn each_account_has_its_own_characters_and_content_on_postgres() {
         eprintln!("skipped: set BOREALIS_TEST_POSTGRES_URL to run against PostgreSQL");
         return;
     };
+    let _one = POSTGRES.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let data = dir.path().join("data");
     drop_all(&url).await;
@@ -482,6 +513,7 @@ async fn each_account_has_its_own_characters_and_content_on_postgres() {
     // The moved first account is the admin here. This ends with sign-up open and no approval needed.
     let admin = sign_in(&router, "moving-admin").await;
     admin_flow(&router, &admin, &data).await;
+    proxy_flow(&router_trusting(data.clone(), db.clone()), &admin).await;
     sessions_slide(&router, &db).await;
     bundle_flow(router.clone(), &data).await;
     receive_flow(router.clone(), &data).await;
@@ -594,7 +626,7 @@ async fn full_flow(router: Router, data: &Path) {
     for path in [
         "/api/rpc/personal/list_characters",
         "/api/groups",
-        "/api/invites",
+        // `/api/invites` is the parties' route again since 0.2.0 (parties_tests.rs).
         "/api/characters",
     ] {
         let (status, _) = alice.post(path, json!({})).await;
@@ -2676,4 +2708,287 @@ async fn forwarded_headers_from_an_untrusted_peer_change_nothing() {
         ],
         "one client, whatever the headers say"
     );
+}
+
+/// The trusted proxies on the admin page, on a server whose `config.toml` trusts `198.51.100.1`. `admin` is an admin
+/// of `router`; every request here comes from 127.0.0.1. Leaves the setting as it found it (not saved).
+async fn proxy_flow(router: &Router, admin: &Client) {
+    let forwarded = [("x-forwarded-for", "203.0.113.5")];
+    let get = || {
+        send_with(
+            router,
+            Some(&admin.token),
+            "GET",
+            "/api/admin/proxies",
+            Value::Null,
+            &forwarded,
+        )
+    };
+    let save = |proxies: Value| {
+        send_with(
+            router,
+            Some(&admin.token),
+            "POST",
+            "/api/admin/proxies",
+            json!({ "proxies": proxies }),
+            &forwarded,
+        )
+    };
+
+    // The config file's list applies, and the admin sees how their own request arrives.
+    let (status, out) = get().await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["source"], "config", "{out}");
+    assert_eq!(out["proxies"], json!(["198.51.100.1"]));
+    assert_eq!(out["configFile"], json!(["198.51.100.1"]));
+    assert_eq!(out["peer"], "127.0.0.1");
+    assert_eq!(out["peerTrusted"], false);
+    assert_eq!(out["headers"]["xForwardedFor"], "203.0.113.5");
+    assert_eq!(out["headers"]["cfConnectingIp"], Value::Null);
+    assert_eq!(out["clientIp"], "127.0.0.1", "not believed yet");
+
+    // Unsafe or garbled lists are refused, and nothing changes.
+    for (list, says) in [
+        (json!(["0.0.0.0/0"]), "every address"),
+        (json!(["::/0"]), "every address"),
+        (json!(["127.0.0.1", "10.0.0.0/4"]), "too wide"),
+        (json!(["2001:db8::/16"]), "too wide"),
+        (json!(["npm"]), "not an address"),
+        (json!(["10.0.0.0/40"]), "prefix length"),
+        (
+            json!((0..33).map(|n| format!("10.0.0.{n}")).collect::<Vec<_>>()),
+            "At most",
+        ),
+    ] {
+        let (status, out) = save(list.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{list}: {out}");
+        assert!(
+            out["message"].as_str().unwrap().contains(says),
+            "{list}: {out}"
+        );
+    }
+    assert_eq!(get().await.1["source"], "config");
+
+    // Trusting the peer: the saved list wins over the config file, and applies to this very request.
+    let (status, out) = save(json!([" 127.0.0.1 ", "127.0.0.1", ""])).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["source"], "admin", "{out}");
+    assert_eq!(out["proxies"], json!(["127.0.0.1"]), "trimmed, no repeats");
+    assert_eq!(out["configFile"], json!(["198.51.100.1"]));
+    assert_eq!(out["peerTrusted"], true);
+    assert_eq!(out["clientIp"], "203.0.113.5");
+
+    // Sign-ins through the proxy are now counted under their own address.
+    sign_up(router, "proxy-player").await;
+    let (status, out) = send_with(
+        router,
+        None,
+        "POST",
+        "/api/auth/login",
+        json!({ "username": "proxy-player", "password": PASSWORD }),
+        &[("x-forwarded-for", "6.6.6.6, 198.51.100.77")],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (_, log) = admin.get("/api/admin/activity").await;
+    let items = log["items"].as_array().unwrap();
+    let signed_in = items
+        .iter()
+        .find(|e| e["kind"] == "sign_in" && e["actorName"] == "proxy-player")
+        .unwrap_or_else(|| panic!("{log}"));
+    assert_eq!(signed_in["ip"], "198.51.100.77", "{signed_in}");
+    assert!(
+        items.iter().any(|e| e["kind"] == "setting_changed"
+            && e["detail"] == "trusted_proxies = 127.0.0.1"
+            && e["actorId"] == json!(admin.id)),
+        "{log}"
+    );
+
+    // An empty saved list trusts nobody, whatever the file says.
+    let (_, out) = save(json!([])).await;
+    assert_eq!(out["source"], "admin", "{out}");
+    assert_eq!(out["proxies"], json!([]));
+    assert_eq!(out["clientIp"], "127.0.0.1");
+
+    // Back to the config file.
+    let (status, out) = save(Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["source"], "config", "{out}");
+    assert_eq!(out["clientIp"], "127.0.0.1");
+    let (_, log) = admin.get("/api/admin/activity").await;
+    assert_eq!(
+        log["items"][0]["detail"], "trusted_proxies = as in config.toml",
+        "{log}"
+    );
+
+    // Only admins see or change it.
+    let player = sign_in(router, "proxy-player").await;
+    let (status, _) = player.get("/api/admin/proxies").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = player
+        .post("/api/admin/proxies", json!({ "proxies": ["127.0.0.1"] }))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = send(router, None, "GET", "/api/admin/proxies", Value::Null).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(get().await.1["source"], "config", "nothing changed");
+}
+
+/// A router over `db` whose config file trusts `198.51.100.1`.
+fn router_trusting(data: PathBuf, db: Db) -> Router {
+    router_with(
+        data,
+        db,
+        Setup {
+            trusted_proxies: vec!["198.51.100.1".into()],
+            ..Setup::default()
+        },
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn trusted_proxies_from_the_admin_page_win_over_the_config_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(&Location::Memory).await.unwrap();
+    let router = router_trusting(dir.path().to_path_buf(), db.clone());
+    let admin = sign_up(&router, "proxy-admin").await;
+    proxy_flow(&router, &admin).await;
+
+    // A saved list is kept in the database: a restarted server reads it again.
+    let (status, _) = admin
+        .post("/api/admin/proxies", json!({ "proxies": ["127.0.0.1"] }))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let again = router_on(dir.path().to_path_buf(), db);
+    let (status, out) = send_with(
+        &again,
+        Some(&admin.token),
+        "GET",
+        "/api/admin/proxies",
+        Value::Null,
+        &[("cf-connecting-ip", "2001:db8::9")],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["source"], "admin", "{out}");
+    assert_eq!(out["configFile"], json!([]));
+    assert_eq!(out["headers"]["cfConnectingIp"], "2001:db8::9");
+    assert_eq!(out["clientIp"], "2001:db8::9");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn with_no_trusted_proxy_anywhere_the_peer_is_the_client() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = router(dir.path().to_path_buf()).await;
+    let admin = sign_up(&router, "plain-admin").await;
+    let (status, out) = send_with(
+        &router,
+        Some(&admin.token),
+        "GET",
+        "/api/admin/proxies",
+        Value::Null,
+        &[
+            ("x-forwarded-for", "198.51.100.7"),
+            ("cf-connecting-ip", "203.0.113.9"),
+        ],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["source"], "none", "{out}");
+    assert_eq!(out["proxies"], json!([]));
+    assert_eq!(out["peerTrusted"], false);
+    assert_eq!(out["clientIp"], "127.0.0.1");
+}
+
+#[test]
+fn the_proxy_check_keeps_ranges_and_refuses_everyone() {
+    use crate::admin::checked_proxies;
+    let list = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        checked_proxies(&list(&[
+            "172.20.20.100",
+            " 172.18.0.0/16",
+            "10.0.0.0/8",
+            "fd00::/32",
+            "::1"
+        ]))
+        .unwrap(),
+        [
+            "172.20.20.100",
+            "172.18.0.0/16",
+            "10.0.0.0/8",
+            "fd00::/32",
+            "::1"
+        ]
+    );
+    for bad in [
+        "0.0.0.0/0",
+        "::/0",
+        "1.2.3.4/0",
+        "128.0.0.0/1",
+        "::ffff:0.0.0.0/96",
+        "2000::/3",
+    ] {
+        assert!(checked_proxies(&list(&[bad])).is_err(), "{bad}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn several_trusted_proxies_mixed_addresses_and_ranges() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = router(dir.path().to_path_buf()).await;
+    let admin = sign_up(&router, "multi-admin").await;
+    let save = |list: Value| {
+        send_with(
+            &router,
+            Some(&admin.token),
+            "POST",
+            "/api/admin/proxies",
+            json!({ "proxies": list }),
+            &[("x-forwarded-for", "203.0.113.5")],
+        )
+    };
+    // The request comes through 127.0.0.1, the second entry here (as a range); order and repeats don't matter.
+    let (status, out) = save(json!([
+        "172.20.20.100",
+        "127.0.0.0/8",
+        "2001:db8::7",
+        "172.20.20.100",
+        "10.20.0.0/16"
+    ]))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(
+        out["proxies"],
+        json!([
+            "172.20.20.100",
+            "127.0.0.0/8",
+            "2001:db8::7",
+            "10.20.0.0/16"
+        ])
+    );
+    assert_eq!(out["peerTrusted"], true);
+    assert_eq!(out["clientIp"], "203.0.113.5");
+    // A chain through two listed proxies: the client is left of both.
+    let (_, out) = send_with(
+        &router,
+        Some(&admin.token),
+        "GET",
+        "/api/admin/proxies",
+        Value::Null,
+        &[("x-forwarded-for", "198.51.100.8, 10.20.3.4")],
+    )
+    .await;
+    assert_eq!(out["clientIp"], "198.51.100.8", "{out}");
+    // Removing the entry the request comes through: the peer is the client again; the others stay.
+    let (status, out) = save(json!(["172.20.20.100", "2001:db8::7", "10.20.0.0/16"])).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["peerTrusted"], false);
+    assert_eq!(out["clientIp"], "127.0.0.1");
+    assert_eq!(out["proxies"].as_array().unwrap().len(), 3);
+    // One bad entry refuses the whole list, and the saved one stays.
+    let (status, out) = save(json!(["172.20.20.100", "::/0"])).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
+    let (_, out) = admin.get("/api/admin/proxies").await;
+    assert_eq!(out["proxies"].as_array().unwrap().len(), 3, "{out}");
 }

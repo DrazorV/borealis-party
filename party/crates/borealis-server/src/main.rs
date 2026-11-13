@@ -27,6 +27,7 @@ mod jobs;
 mod mail;
 mod migrate;
 mod net_guard;
+mod parties;
 #[cfg(test)]
 mod route_tests;
 mod rpc;
@@ -84,7 +85,8 @@ enum Command {
     },
 }
 
-/// Server settings the routes need, from `config.toml`. The admin page can override sign-up and approval.
+/// Server settings the routes need, from `config.toml`. The admin page can override sign-up, approval and the
+/// trusted proxies.
 pub struct Config {
     open_registration: bool,
     require_approval: bool,
@@ -92,6 +94,8 @@ pub struct Config {
     public_url: Option<String>,
     /// `server.app_download`: the folder the apps are downloaded from, if any.
     app_download: Option<String>,
+    /// `server.trusted_proxies`, as written. A list saved on the admin page wins ([`admin::trusted_proxies`]).
+    trusted_proxies: Vec<String>,
 }
 
 /// Shared by every route.
@@ -139,6 +143,7 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
         .merge(admin::routes())
         .merge(rpc::routes())
         .merge(shares::routes())
+        .merge(parties::routes())
         .route("/api/{*rest}", any(no_such_route))
         .layer(DefaultBodyLimit::max(max_upload))
         .with_state(state)
@@ -393,6 +398,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             require_approval: settings.server.require_approval,
             public_url: settings.public_url(),
             app_download: settings.app_download(),
+            trusted_proxies: settings.server.trusted_proxies.clone(),
         }),
         login_limiter: RateLimiter::logins(),
         signup_limiter: RateLimiter::signups(),

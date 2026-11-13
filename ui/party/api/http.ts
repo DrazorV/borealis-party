@@ -14,6 +14,7 @@ import "./overrides/jobs";
 import "./overrides/version";
 import "./overrides/updates"; // after links, whose openLink it wraps
 import "./overrides/shares";
+import "./overrides/parties";
 
 function fail(code: string, message: string): ApiError {
   return { code, message } as ApiError;

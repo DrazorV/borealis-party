@@ -12,6 +12,7 @@ import {
   type Account, type AccountStatus, type ActivityEntry, type AdminSettings, type Paged, type ServerStats,
 } from "../api/party";
 import { loadSession } from "../api/session";
+import { TrustedProxies } from "./TrustedProxies";
 import "./party.css";
 
 const message = (e: unknown): string => (e as { message?: string }).message ?? "Something went wrong.";
@@ -42,7 +43,7 @@ function duration(seconds: number): string {
   return `${minutes} min`;
 }
 
-/** The admin page: accounts, statistics, sign-up settings and the activity log. */
+/** The admin page: accounts, statistics, settings (sign-up, trusted proxies) and the activity log. */
 export function AdminPage() {
   const [section, setSection] = useState<Section>("accounts");
   return (
@@ -298,31 +299,34 @@ function Settings() {
   if (error) return <Alert tone="danger">{error}</Alert>;
   if (!settings) return null;
   return (
-    <Card title="Sign-up">
-      <div className="party-form">
-        <Check
-          label="Anyone can ask for an account"
-          description="Off: new accounts come only from the add-user command on the server."
-          checked={settings.openRegistration}
-          onChange={(e) => void save({ openRegistration: e.target.checked })}
-        />
-        <Check
-          label="New accounts wait for an admin"
-          description="Off: a new account can sign in straight away (after confirming its email, when email is set up)."
-          checked={settings.requireApproval}
-          onChange={(e) => void save({ requireApproval: e.target.checked })}
-        />
-        <p className="muted">
-          These are saved on the server and win over config.toml, which says: sign-up {settings.configFile.openRegistration ? "on" : "off"},
-          approval {settings.configFile.requireApproval ? "required" : "not required"}.
-        </p>
-        <p className="muted">
-          {settings.email
-            ? `Sign-up email is set up: new accounts confirm their address through a link to ${settings.publicUrl ?? "this server"}, and admins with an email address hear about each request.`
-            : "Sign-up email is not set up ([smtp] in config.toml), so addresses aren't confirmed: approval is the check."}
-        </p>
-      </div>
-    </Card>
+    <>
+      <Card title="Sign-up">
+        <div className="party-form">
+          <Check
+            label="Anyone can ask for an account"
+            description="Off: new accounts come only from the add-user command on the server."
+            checked={settings.openRegistration}
+            onChange={(e) => void save({ openRegistration: e.target.checked })}
+          />
+          <Check
+            label="New accounts wait for an admin"
+            description="Off: a new account can sign in straight away (after confirming its email, when email is set up)."
+            checked={settings.requireApproval}
+            onChange={(e) => void save({ requireApproval: e.target.checked })}
+          />
+          <p className="muted">
+            These are saved on the server and win over config.toml, which says: sign-up {settings.configFile.openRegistration ? "on" : "off"},
+            approval {settings.configFile.requireApproval ? "required" : "not required"}.
+          </p>
+          <p className="muted">
+            {settings.email
+              ? `Sign-up email is set up: new accounts confirm their address through a link to ${settings.publicUrl ?? "this server"}, and admins with an email address hear about each request.`
+              : "Sign-up email is not set up ([smtp] in config.toml), so addresses aren't confirmed: approval is the check."}
+          </p>
+        </div>
+      </Card>
+      <TrustedProxies />
+    </>
   );
 }
 

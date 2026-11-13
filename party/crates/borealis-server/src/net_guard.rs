@@ -54,6 +54,18 @@ impl Cidr {
         Ok(Self { net, bits })
     }
 
+    /// The prefix length: 32 or 128 for one address.
+    #[must_use]
+    pub fn bits(&self) -> u8 {
+        self.bits
+    }
+
+    /// Whether it is an IPv4 range (IPv4 written as IPv6 counts as IPv4).
+    #[must_use]
+    pub fn is_ipv4(&self) -> bool {
+        self.net.is_ipv4()
+    }
+
     /// Whether `ip` is in the range.
     #[must_use]
     pub fn contains(&self, ip: IpAddr) -> bool {
