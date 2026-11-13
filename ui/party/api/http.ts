@@ -16,6 +16,7 @@ import "./overrides/updates"; // after links, whose openLink it wraps
 import "./overrides/shares";
 import "./overrides/parties";
 import "./overrides/playerName";
+import "./overrides/encounters";
 import "./overrides/personality";
 import "./overrides/sourceRemoval";
 

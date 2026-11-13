@@ -880,6 +880,7 @@ dependencies = [
  "clap",
  "http-body-util",
  "lettre",
+ "party-encounter",
  "rand 0.9.5",
  "serde",
  "serde_json",
@@ -3616,6 +3617,16 @@ dependencies = [
  "redox_syscall 0.5.18",
  "smallvec",
  "windows-link 0.2.1",
+]
+
+[[package]]
+name = "party-encounter"
+version = "0.2.2"
+dependencies = [
+ "borealis-content",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

@@ -23,6 +23,8 @@ borealis-content = { path = "../../../crates/borealis-content" }
 borealis-character = { path = "../../../crates/borealis-character" }
 # The bestiary reads the creature details upstream's 5etools import drops from the same data (bestiary.rs).
 borealis-import-5etools = { path = "../../../crates/borealis-import-5etools" }
+# Encounter maths, stat block copies and overrides (encounters.rs).
+party-encounter = { path = "../party-encounter" }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "fs", "set-header"] }
 tokio = { version = "1", features = ["full"] }

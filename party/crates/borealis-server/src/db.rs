@@ -174,6 +174,81 @@ const MIGRATIONS: &[&[&str]] = &[
             PRIMARY KEY (owner_id, pack_id)
         )",
     ],
+    // 5 (M-encounters, 0.3.0), after M-monster-meta.
+    // A DM's encounters (encounters.rs). No dm_id: authorization always joins parties.dm_id; the edition is the party's
+    // (D23 b). Each creature keeps a copy of its stat block (a Monster's or an Aurora Companion's, D17 b), so a player's
+    // view never depends on anyone's installed content. A controlled creature (pet, summon) names its owner in
+    // owner_creature_id; no foreign key, so the copy between databases needs no row order (encounters.rs removes a
+    // creature's controlled creatures with it).
+    &[
+        "CREATE TABLE IF NOT EXISTS encounters (
+            id TEXT PRIMARY KEY,
+            party_id TEXT NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            public_name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'draft',
+            player_visible BIGINT NOT NULL DEFAULT 0,
+            hp_mode TEXT NOT NULL DEFAULT 'average',
+            dm_notes TEXT NOT NULL DEFAULT '',
+            created_at BIGINT NOT NULL,
+            updated_at BIGINT NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS encounters_party ON encounters (party_id, created_at)",
+        "CREATE TABLE IF NOT EXISTS encounter_creatures (
+            id TEXT PRIMARY KEY,
+            encounter_id TEXT NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
+            sort BIGINT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'monster',
+            dm_label TEXT NOT NULL,
+            public_name TEXT NOT NULL,
+            element_id TEXT NOT NULL,
+            pack_id TEXT NOT NULL,
+            pack_rev TEXT NOT NULL,
+            statblock_json TEXT NOT NULL,
+            overrides_json TEXT NOT NULL DEFAULT '{}',
+            automation_json TEXT,
+            hp_mode TEXT NOT NULL DEFAULT 'encounter',
+            hp_max BIGINT,
+            visibility TEXT NOT NULL DEFAULT 'hidden',
+            revealed_at BIGINT,
+            owner_creature_id TEXT,
+            init_mode TEXT NOT NULL DEFAULT 'after_owner',
+            created_at BIGINT NOT NULL,
+            updated_at BIGINT NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS encounter_creatures_encounter ON encounter_creatures (encounter_id, sort)",
+        // Starting effects (companion C19): applied when combat starts.
+        "CREATE TABLE IF NOT EXISTS encounter_effects (
+            id TEXT PRIMARY KEY,
+            encounter_id TEXT NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
+            creature_id TEXT NOT NULL REFERENCES encounter_creatures(id) ON DELETE CASCADE,
+            sort BIGINT NOT NULL,
+            name TEXT NOT NULL,
+            detail TEXT NOT NULL DEFAULT '',
+            source_creature_id TEXT REFERENCES encounter_creatures(id) ON DELETE SET NULL,
+            duration_turns BIGINT,
+            charges BIGINT,
+            concentration BIGINT NOT NULL DEFAULT 0,
+            slot_level BIGINT,
+            modifiers_json TEXT NOT NULL DEFAULT '{}',
+            created_at BIGINT NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS encounter_effects_encounter ON encounter_effects (encounter_id, sort)",
+        // Encounter rules (companion C20, D42): a banner and on/off flags tied to a creature, no scripting.
+        "CREATE TABLE IF NOT EXISTS encounter_rules (
+            id TEXT PRIMARY KEY,
+            encounter_id TEXT NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
+            sort BIGINT NOT NULL,
+            name TEXT NOT NULL,
+            text TEXT NOT NULL DEFAULT '',
+            creature_id TEXT REFERENCES encounter_creatures(id) ON DELETE SET NULL,
+            ends_when TEXT NOT NULL DEFAULT 'creature_down',
+            active BIGINT NOT NULL DEFAULT 1,
+            flags_json TEXT NOT NULL DEFAULT '[]',
+            created_at BIGINT NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS encounter_rules_encounter ON encounter_rules (encounter_id, sort)",
+    ],
 ];
 
 /// How many steps [`MIGRATIONS`] has: the schema version a database is at after [`Db::open`].
@@ -185,7 +260,7 @@ pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
 /// database they left at version 3 would otherwise skip these steps. Every such step must be idempotent (`CREATE ...
 /// IF NOT EXISTS`). Step 1 has none: every database has its tables. A new step adds its own line here, with its
 /// main table.
-const MARKERS: &[(usize, &str)] = &[(2, "shares"), (3, "parties"), (4, "monster_meta")];
+const MARKERS: &[(usize, &str)] = &[(2, "shares"), (3, "parties"), (4, "monster_meta"), (5, "encounters")];
 
 /// A table only the versions with groups had. A database that still has it opens like any other: the table is left
 /// alone and a warning is logged, so an instance that ran those versions (or rolls back to one) still boots.
