@@ -245,16 +245,19 @@ jobs:
       - run: npm ci
         working-directory: ui
 
-      # The party front end (party/tauri.party.json), the party app's own identity, as on Android and the desktop,
-      # and party/tauri.party.ios.json on top when the fork has one.
+      # The party front end (party/tauri.party.json), the party app's own identity and version (the IPA's
+      # CFBundleShortVersionString is the party version, not Borealis's), as on Android and the desktop, and
+      # party/tauri.party.ios.json on top when the fork has one.
       - name: Party config
         env:
           TEAM_ID: ${{ secrets.PARTY_APPLE_TEAM_ID }}
           RUN_NUMBER: ${{ github.run_number }}
+          PARTY_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          identity=$(jq -n --arg build "$RUN_NUMBER" --arg team "$TEAM_ID" '
-            {productName: "Borealis Party", identifier: "app.borealis.party",
+          test -n "$PARTY_VERSION"
+          identity=$(jq -n --arg build "$RUN_NUMBER" --arg team "$TEAM_ID" --arg version "$PARTY_VERSION" '
+            {productName: "Borealis Party", identifier: "app.borealis.party", version: $version,
              bundle: {iOS: ({bundleVersion: $build} + (if $team == "" then {} else {developmentTeam: $team} end))}}')
           printf '%s' "$identity" > "$RUNNER_TEMP/identity.json"
           files=(party/tauri.party.json "$RUNNER_TEMP/identity.json")
