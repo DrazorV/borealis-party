@@ -7,7 +7,7 @@
 // the WebView's DevTools socket (debug APKs only). Screenshots go to the output folder.
 //
 // node party/android/smoke/run.mjs --apk <path> [--out <folder>] [--port 18799] [--avd BalanceLab_Tablet]
-//   [--server-bin <WSL path>] [--keep]
+//   [--server-bin <WSL path>] [--keep] [--no-wide]
 // Exit code 0 when every check passed.
 
 import { spawn, spawnSync } from "node:child_process";
@@ -422,7 +422,9 @@ async function phoneLayout() {
   await screenshot("02b-sources");
 
   // The AVD's own screen (BalanceLab_Tablet: 1280x800 CSS) gets upstream's desktop shell, without the phone layer: the
-  // account row stays off there too in the Android app, and More still has the rows.
+  // account row stays off there too in the Android app, and More still has the rows. `--no-wide` skips it: on some
+  // emulator images the resize stalls the web view (a screenshot gets no answer), 0.2.0 included.
+  if (args["no-wide"]) { log("      (--no-wide: no wide-window check)"); return; }
   adbShell("wm size reset");
   adbShell("wm density reset");
   await resized("the wide window", (w) => w >= 900).catch(() => false);
