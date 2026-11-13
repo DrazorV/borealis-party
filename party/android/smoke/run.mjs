@@ -37,6 +37,7 @@ const apk = args.apk ? resolve(args.apk) : null;
 const sheetOnly = args["sheet-only"] === "true";
 // The whole run stops after this many minutes (default 20), so a stalled emulator never holds it for hours.
 const maxMinutes = Number(args["max-minutes"] ?? 20);
+if (!Number.isFinite(maxMinutes) || maxMinutes <= 0) throw new Error(`--max-minutes needs a number of minutes above 0, not ${args["max-minutes"]}`);
 const serverBin = args["server-bin"] ?? process.env.BOREALIS_SERVER_WSL_BIN ?? "";
 const devtoolsPort = 9333;
 const password = randomBytes(12).toString("base64url");
@@ -645,6 +646,8 @@ try {
     run(adbPath, ["shell", `pm clear ${PACKAGE}`], { allowFail: true });
     run(adbPath, ["shell", "wm size reset"], { allowFail: true });
     run(adbPath, ["shell", "wm density reset"], { allowFail: true });
+    // sheetPreview restores the font size itself, but a run stopped by --max-minutes never reaches its finally.
+    run(adbPath, ["shell", "settings put system font_scale 1.0"], { allowFail: true });
     run(adbPath, ["forward", "--remove", `tcp:${devtoolsPort}`], { allowFail: true });
   }
   const bad = results.filter((r) => !r.ok);
