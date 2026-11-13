@@ -3618,6 +3618,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "party-combat"
+version = "0.2.1"
+dependencies = [
+ "party-dice",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "party-dice"
+version = "0.2.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "password-hash"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
