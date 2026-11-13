@@ -867,7 +867,7 @@ dependencies = [
 
 [[package]]
 name = "borealis-server"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "argon2",
  "axum",
@@ -3628,7 +3628,7 @@ dependencies = [
 
 [[package]]
 name = "party-combat"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "party-dice",
  "serde",
@@ -3638,7 +3638,7 @@ dependencies = [
 
 [[package]]
 name = "party-dice"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3647,7 +3647,7 @@ dependencies = [
 
 [[package]]
 name = "party-encounter"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "borealis-content",
  "party-combat",
@@ -3658,7 +3658,7 @@ dependencies = [
 
 [[package]]
 name = "party-mcp-bridge"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "reqwest",
  "serde_json",
@@ -3666,7 +3666,7 @@ dependencies = [
 
 [[package]]
 name = "party-sim"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "borealis-content",
  "party-combat",
@@ -3679,7 +3679,7 @@ dependencies = [
 
 [[package]]
 name = "party-tools"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -5494,7 +5494,7 @@ version = "2.99.0"
 
 [[package]]
 name = "tauri-macros"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "proc-macro2",
  "quote",
