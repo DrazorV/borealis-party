@@ -15,10 +15,8 @@
 //!   (part C), one structured answer per card, as a background run whose progress `sim_state` shows.
 //!
 //! The tool table ([`tool_defs`]) and the dispatcher ([`call`]) know nothing of the tool registry; the adapter in
-//! `simulate_tools.rs` plugs them into `party-tools`.
-
-// Until the merge wires `simulate_tools` into the registry (tools_backend.rs), only the tests call in here.
-#![allow(dead_code)]
+//! `simulate_tools.rs` plugs them into `party-tools`; `simulate_ai.rs` installs the account's model as the
+//! assistant oracle at start-up.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -56,17 +54,6 @@ pub enum SimError {
     Busy(String),
     Unavailable(String),
     Internal,
-}
-
-impl SimError {
-    #[must_use]
-    pub fn message(&self) -> String {
-        match self {
-            Self::NotFound => "There is no such encounter or simulation here.".into(),
-            Self::Invalid(m) | Self::Busy(m) | Self::Unavailable(m) => m.clone(),
-            Self::Internal => "The simulation failed on the server.".into(),
-        }
-    }
 }
 
 type SimResult<T> = Result<T, SimError>;
@@ -416,13 +403,12 @@ pub trait Decider: Send + Sync {
     }
 }
 
+/// What a [`DeciderSource`] answers: the account's model, once its settings are read.
+pub type DeciderFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Option<Arc<dyn Decider>>> + Send>>;
+
 /// Where part C's provider plugs in: the account's own model, if it set one up and opted in.
-pub type DeciderSource = fn(
-    AppState,
-    User,
-) -> std::pin::Pin<
-    Box<dyn std::future::Future<Output = Option<Arc<dyn Decider>>> + Send>,
->;
+pub type DeciderSource = fn(AppState, User) -> DeciderFuture;
 
 static DECIDERS: LazyLock<Mutex<Option<DeciderSource>>> = LazyLock::new(|| Mutex::new(None));
 
