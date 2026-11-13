@@ -9,7 +9,8 @@ import { override } from "./registry";
  * routes, the DM switch, the DM's read-only view of a member character and the party events on the account's event
  * stream, as party/docs/parties-api.md describes them. Characters never move: a party is rows on the server, and a
  * member character stays in its owner's folder. What anyone sees of a member is the server's projection of its card
- * for them (`card_view_for`): the DM and the owner get the numbers, other members a name, class, level and health band.
+ * for them (`card_view_for`): the DM and the owner get the numbers, other members a name, class and level, and during
+ * a combat only (0.4.x), a health band.
  *
  * Every call goes through {@link partiesDeps}, so tests answer them from a fake server (../../test/partiesServer.ts).
  * Times from the server are seconds since the epoch; the functions here turn them into milliseconds.
@@ -76,6 +77,7 @@ export interface PartyMember {
   /** When `stats` were read (ms). */
   readAt?: number | null;
   /** Other members only. */
+  /** Other members only, and only during a combat: the server sends no band otherwise (plan D6). */
   band?: HealthBand | null;
   /** The DM only: the owner has the app open. */
   online?: boolean;

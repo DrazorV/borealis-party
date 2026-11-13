@@ -8,7 +8,8 @@ import type { CardStats, ClassLine, MyInvite, Party, PartyInvite, PartyMember, P
  * - a character is in at most one party (409 `conflict`);
  * - a code's uses are taken only when a character joins;
  * - times are in seconds;
- * - a member's card is projected for the viewer (plan D6): stats for the DM and the owner, a health band for others;
+ * - a member's card is projected for the viewer (plan D6): stats for the DM and the owner; for others a health band
+ *   during combat only (`inCombat`), and no band field at all otherwise;
  * - `emit` sends an event on the account's stream (`listen` is what `partiesDeps.events` calls).
  */
 
@@ -34,6 +35,8 @@ export interface FakeServer {
   calls: { method: string; path: string; body?: unknown }[];
   /** Each party's sequence (the tests move it with the events they send). */
   pseq: Map<string, number>;
+  /** The parties are in a combat: other members see the health band. Never before 0.4.x. */
+  inCombat: boolean;
   fetch: (session: unknown, method: string, path: string, body?: unknown) => Promise<unknown>;
   /** For `partiesDeps.events`. */
   listen: (onEvent: (e: ServerEvent) => void, onOpen: (again: boolean) => void) => () => void;
@@ -69,7 +72,7 @@ export const charId = (n: number) => `c_${String(n).padStart(32, "0")}`;
 export function fakePartiesServer(accounts: Account[], me: string): FakeServer {
   const s: FakeServer = {
     accounts, parties: [], invites: [], redeemed: new Map(), declined: new Set(), members: [], me, off: false, calls: [],
-    pseq: new Map(),
+    pseq: new Map(), inCombat: false,
     fetch: async () => null, listen: () => () => {}, emit: () => {}, reopen: () => {}, listening: () => 0,
   };
   const streams = new Set<{ onEvent: (e: ServerEvent) => void; onOpen: (again: boolean) => void }>();
@@ -94,7 +97,7 @@ export function fakePartiesServer(accounts: Account[], me: string): FakeServer {
       ...(dm ? { online: Boolean(owner.online) } : {}),
       mine, dmCharacter: m.ownerId === party.dmId, name: c?.name ?? null, level: c?.level ?? null, ruleset: c ? "dnd2024" : null,
       classes: c?.classes ?? [],
-      ...(full ? { stats: c?.stats ?? null, readAt: c?.stats ? now() : null } : { band: band(c?.stats) }),
+      ...(full ? { stats: c?.stats ?? null, readAt: c?.stats ? now() : null } : s.inCombat ? { band: band(c?.stats) } : {}),
       build: null, state: c ? "ok" : "missing", joinedAt: m.joinedAt,
     };
   };

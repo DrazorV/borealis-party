@@ -79,7 +79,8 @@ function StatLine({ stats }: { stats: CardStats }) {
 
 /**
  * A member's roster card, as the server projects it for this account (plan 3.5, D6): the DM and the owner see the
- * numbers, live as the owner plays; another member sees the name, class, level and a health band. Read-only.
+ * numbers, live as the owner plays; another member sees the name, class and level, and during a combat a health
+ * band. Read-only.
  */
 function MemberRow({ member, dm, partyId, onRemove, onLeave }: {
   member: PartyMember; dm: boolean; partyId: string; onRemove: () => void; onLeave: () => void;

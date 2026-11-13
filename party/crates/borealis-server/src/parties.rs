@@ -463,12 +463,14 @@ async fn members(
         } else if mine {
             Viewer::Owner
         } else {
-            Viewer::Member
+            Viewer::Member {
+                in_combat: in_combat(&party.id),
+            }
         };
         let mut member = serde_json::Map::new();
         member.insert("characterId".into(), json!(character));
         member.insert("ownerName".into(), json!(owner_name));
-        if viewer != Viewer::Member {
+        if !matches!(viewer, Viewer::Member { .. }) {
             member.insert("ownerId".into(), json!(owner));
         }
         if viewer == Viewer::Dm {
@@ -1685,6 +1687,12 @@ fn snapshot_of(
     )))
 }
 
+/// Whether a party is in a combat: the other members then see each other's health band (D6, the user's choice:
+/// during combat only). There is no combat before 0.4.x, so never yet; the combat tracker switches it on here.
+pub(crate) fn in_combat(_party: &str) -> bool {
+    false
+}
+
 /// Read a member character's card again from its owner's workspace, keep it, and tell the party when it changed.
 /// Never fails: a card that can't be read stays as it was.
 ///
@@ -1700,6 +1708,7 @@ pub(crate) async fn refresh_card(
 ) -> Option<borealis_lib::dto::CharacterSnapshot> {
     let _one = state.hub.cards.refreshing(owner).await;
     let member = matches!(party_of(state, owner, character).await, Ok(Some(p)) if p == party);
+    let combat = in_combat(party);
     let hub = std::sync::Arc::clone(&state.hub);
     let (owner_id, id) = (owner.to_string(), character.to_string());
     let read = workspace
@@ -1709,7 +1718,7 @@ pub(crate) async fn refresh_card(
             };
             let changed = if member {
                 hub.cards
-                    .put(&owner_id, &id, Card::from_snapshot(&snapshot))
+                    .put(&owner_id, &id, Card::from_snapshot(&snapshot), combat)
             } else {
                 crate::hub::Changed::default()
             };
