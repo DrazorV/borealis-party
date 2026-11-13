@@ -192,7 +192,44 @@ export function classifyLink(text: string): Link | null {
 }
 
 /**
- * Where "Get the latest 5etools data" downloads from: the public 5etools source repository on GitHub. The server's
+ * Where "Get the default 5etools data" downloads from: the public 5etools source repository on GitHub. The server's
  * importer resolves its newest commit and downloads only the files it reads; Update later re-imports the same packs.
  */
 export const LATEST_5ETOOLS_URL = "https://github.com/5etools-mirror-3/5etools-src";
+
+/** The default 5etools source as the Import screen names it. */
+export const DEFAULT_5ETOOLS = { name: "5etools-src on GitHub (5etools-mirror-3)", url: LATEST_5ETOOLS_URL } as const;
+
+/**
+ * What the server takes as a 5etools source (`parse_location` in src-tauri/src/content_fivetools_remote.rs): an
+ * https:// address of a GitHub repository (`github.com/owner/repo`), a branch or folder in one (`…/tree/branch/folder`),
+ * the same on raw.githubusercontent.com, or any https:// folder that holds `books.json` (a file in it stands for the
+ * folder). Private and LAN addresses are refused by the server, which says so in its own words.
+ */
+export type SourceCheck = { url: string; error?: undefined } | { url?: undefined; error: string };
+
+export function checkFiveToolsSource(text: string): SourceCheck {
+  const typed = text.trim();
+  if (!typed) return { error: "Enter the address of your 5etools source." };
+  if (/\s/.test(typed)) return { error: "An address has no spaces in it." };
+  const url = /^[a-z][a-z0-9+.-]*:\/\//i.test(typed) ? typed : `https://${typed}`;
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { return { error: "That is not a web address." }; }
+  if (parsed.protocol !== "https:") return { error: "Use an https:// address." };
+  if (!parsed.hostname) return { error: "That is not a web address." };
+  const path = parsed.pathname.replace(/\/+$/, "");
+  if (path.toLowerCase().endsWith(".index")) return { error: "That is an index file. Add it under Paste a link." };
+  const parts = path.split("/").filter(Boolean);
+  const host = parsed.hostname.toLowerCase();
+  if (host === "github.com" || host === "www.github.com") {
+    const [, , tree, ref] = parts;
+    const repoOnly = parts.length === 2;
+    const inTree = parts.length >= 4 && tree === "tree" && !!ref;
+    if (!repoOnly && !inTree) {
+      return { error: "On GitHub, use the repository's address (github.com/owner/repo) or a branch or folder in it (…/tree/branch/folder)." };
+    }
+  } else if (host === "raw.githubusercontent.com" && parts.length < 3) {
+    return { error: "A raw.githubusercontent.com address needs the owner, the repository and the branch." };
+  }
+  return { url };
+}

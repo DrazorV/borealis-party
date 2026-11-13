@@ -1,0 +1,20 @@
+/* The Import screen's 5etools card: two sources (the default one, the account's own), the addresses imported from,
+   and the 5etools import report kept usable on a phone. Kept apart from party.css so the card's styles live with it. */
+.party-import-sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: var(--sp-3); margin-top: var(--sp-2); }
+.party-import-source { padding: var(--sp-2) var(--sp-3); border: var(--border-w) solid var(--border); border-radius: var(--radius); background: var(--surface); min-width: 0; display: flex; flex-direction: column; }
+.party-import-source h3, .party-import-known h3 { margin: 0 0 var(--sp-1); font-size: 1rem; }
+.party-import-source .party-import-actions { margin-top: auto; padding-top: var(--sp-1); }
+.party-import-source .party-import-link { margin-bottom: var(--sp-1); }
+.party-import .party-import-source p { margin: 0 0 var(--sp-1); }
+.party-import-url { overflow-wrap: anywhere; word-break: break-word; }
+.party-import-field-error { color: var(--danger, #b22222); margin: 0 0 var(--sp-1); }
+.party-import-known { margin-top: var(--sp-3); }
+.party-import-known ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.party-import-known-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
+.party-import-known-text { flex: 1 1 12em; min-width: 0; display: flex; flex-direction: column; overflow-wrap: anywhere; }
+html.phone .party-import-known-row > .btn { flex: 0 0 auto; }
+/* The report of a big import (hundreds of entries in groups): the summary stays at the top of its box, groups fold. */
+.party-import-report .aur-expander-toggle { min-width: 0; text-align: left; overflow-wrap: anywhere; }
+.party-import-report .v4-5et-notes { overflow-wrap: anywhere; }
+html.phone .party-import-report .aur-expander-toggle, html.phone .party-import-report .aur-expander-chev { min-height: var(--ph-hit); }
+html.phone .party-import-report .aur-expander-chev { min-width: var(--ph-hit); }

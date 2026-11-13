@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { planImport } from "./plan";
-import { BOM, classifyJson, classifyLink, classifyZip, HEAD_BYTES, sniffFile, xmlRoot, zipEntryNames } from "./sniff";
+import { BOM, checkFiveToolsSource, classifyJson, classifyLink, classifyZip, HEAD_BYTES, sniffFile, xmlRoot, zipEntryNames } from "./sniff";
 import {
   AURORA_CHARACTER, AURORA_INDEX, AURORA_PACK, AURORA_ZIP, BOREALIS_PACK, BUNDLE_ZIP, fileOf, FIVETOOLS_HOMEBREW,
   FIVETOOLS_ZIP, NATIVE_CHARACTER, zipOf,
@@ -106,6 +106,44 @@ describe("classifyLink", () => {
     expect(classifyLink("")).toBeNull();
     expect(classifyLink("two words")).toBeNull();
     expect(classifyLink("https://")).toBeNull();
+  });
+});
+
+describe("checkFiveToolsSource", () => {
+  const ok = (text: string) => checkFiveToolsSource(text).url;
+  const why = (text: string) => checkFiveToolsSource(text).error;
+
+  it("takes what the server's importer reads", () => {
+    expect(ok("https://github.com/someone/data-repo")).toBe("https://github.com/someone/data-repo");
+    expect(ok("https://github.com/someone/data-repo/")).toBe("https://github.com/someone/data-repo/");
+    expect(ok("https://www.github.com/someone/data-repo.git")).toBe("https://www.github.com/someone/data-repo.git");
+    expect(ok("https://github.com/someone/repo/tree/main")).toBeTruthy();
+    expect(ok("https://github.com/someone/repo/tree/main/sub/data")).toBeTruthy();
+    expect(ok("https://raw.githubusercontent.com/someone/repo/main/data")).toBeTruthy();
+    expect(ok("https://mirror.example.com/5e/data/")).toBe("https://mirror.example.com/5e/data/");
+    expect(ok("https://mirror.example.com/5e/data/books.json")).toBeTruthy();
+  });
+
+  it("adds https:// when the scheme is missing", () => {
+    expect(ok("  github.com/someone/repo ")).toBe("https://github.com/someone/repo");
+  });
+
+  it("says what is wrong before anything is sent", () => {
+    expect(why("")).toBe("Enter the address of your 5etools source.");
+    expect(why("my data")).toBe("An address has no spaces in it.");
+    expect(why("http://mirror.example.com/data/")).toBe("Use an https:// address.");
+    expect(why("ftp://mirror.example.com/data/")).toBe("Use an https:// address.");
+    expect(why("https://")).toBe("That is not a web address.");
+    expect(why("https://example.com/srd.index")).toMatch(/index file/);
+    expect(why("https://github.com/someone")).toMatch(/On GitHub/);
+    expect(why("https://github.com/someone/repo/blob/main/data/books.json")).toMatch(/On GitHub/);
+    expect(why("https://github.com/someone/repo/tree")).toMatch(/On GitHub/);
+    expect(why("https://raw.githubusercontent.com/someone/repo")).toMatch(/branch/);
+  });
+
+  it("leaves private and LAN addresses to the server, which refuses them in its own words", () => {
+    expect(ok("https://192.168.1.10/data/")).toBe("https://192.168.1.10/data/");
+    expect(ok("https://localhost/data/")).toBe("https://localhost/data/");
   });
 });
 
