@@ -13,6 +13,7 @@ import {
   onPartiesChanged, redeemJoinCode, removeMember, renameParty, watchParties, type CardStats, type HealthBand,
   type MyInvite, type Party, type PartyMember, type Ruleset,
 } from "../api/overrides/parties";
+import { EncounterTeaser } from "./EncountersPage";
 import { InviteDialog, NameDialog, PickCharacterDialog } from "./PartiesDialogs";
 import "./party.css";
 
@@ -154,6 +155,7 @@ function PartyCard({ party, act, open }: {
     <Card className={`party-card ${dm ? "party-card-dm" : "party-card-player"}`} aria-label={party.name} title={party.name}
       actions={<Chip tone={dm ? "gold" : "accent"}>{dm ? "DM" : "Player"}</Chip>}>
       <p className="muted party-note">{dm ? EDITION[party.ruleset] : `DM: ${party.dmName} · ${EDITION[party.ruleset]}`}</p>
+      <EncounterTeaser partyId={party.id} dm={dm} />
       {dm && (
         <div className="party-actions">
           <Button small icon="send" variant="primary" onClick={() => open({ kind: "invite", party })}>Invite</Button>

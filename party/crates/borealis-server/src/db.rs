@@ -147,15 +147,17 @@ const MIGRATIONS: &[&[&str]] = &[
         "CREATE INDEX IF NOT EXISTS party_members_party ON party_members (party_id)",
     ],
     // 4 (M-encounters, 0.3.0; becomes 5 if M-monster-meta merges first: numbers are fixed at merge), after M-parties.
-    // A DM's encounters (encounters.rs). No dm_id: authorization always joins parties.dm_id. Each creature keeps a copy
-    // of its stat block, so a player's view never depends on anyone's installed content.
+    // A DM's encounters (encounters.rs). No dm_id: authorization always joins parties.dm_id; the edition is the party's
+    // (D23 b). Each creature keeps a copy of its stat block (a Monster's or an Aurora Companion's, D17 b), so a player's
+    // view never depends on anyone's installed content. A controlled creature (pet, summon) names its owner in
+    // owner_creature_id; no foreign key, so the copy between databases needs no row order (encounters.rs removes a
+    // creature's controlled creatures with it).
     &[
         "CREATE TABLE IF NOT EXISTS encounters (
             id TEXT PRIMARY KEY,
             party_id TEXT NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
             name TEXT NOT NULL,
             public_name TEXT NOT NULL,
-            ruleset TEXT,
             status TEXT NOT NULL DEFAULT 'draft',
             player_visible BIGINT NOT NULL DEFAULT 0,
             hp_mode TEXT NOT NULL DEFAULT 'average',
@@ -168,6 +170,7 @@ const MIGRATIONS: &[&[&str]] = &[
             id TEXT PRIMARY KEY,
             encounter_id TEXT NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
             sort BIGINT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'monster',
             dm_label TEXT NOT NULL,
             public_name TEXT NOT NULL,
             element_id TEXT NOT NULL,
@@ -179,8 +182,9 @@ const MIGRATIONS: &[&[&str]] = &[
             hp_mode TEXT NOT NULL DEFAULT 'encounter',
             hp_max BIGINT,
             visibility TEXT NOT NULL DEFAULT 'hidden',
-            reveal_level TEXT NOT NULL DEFAULT 'name',
             revealed_at BIGINT,
+            owner_creature_id TEXT,
+            init_mode TEXT NOT NULL DEFAULT 'after_owner',
             created_at BIGINT NOT NULL,
             updated_at BIGINT NOT NULL
         )",

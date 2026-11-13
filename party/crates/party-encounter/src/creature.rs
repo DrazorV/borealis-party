@@ -1,105 +1,85 @@
-//! A creature in an encounter: the snapshot of its stat block, what it is worth, and what players may see of it.
+//! A creature in an encounter: the copy of its stat block, and what players may see of it.
 
 use borealis_content::{Element, MapKind, MonsterData, Ruleset as ContentRuleset};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::{Cr, MonsterGroup};
+use crate::overrides::{Overrides, Printed};
 
-/// The copy of a Monster element an encounter keeps (plan 4.3): players' views never depend on anyone's installed
-/// content, and a later change to the DM's content changes nothing until the DM refreshes.
+/// What kind of element a creature was copied from (plan D17 b).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    /// A typed `Monster` element: its `MonsterData`.
+    #[default]
+    Monster,
+    /// An Aurora `Companion` element (a familiar, beast companion, steed): only what it prints.
+    Companion,
+}
+
+impl Kind {
+    /// The stored word.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Monster => "monster",
+            Self::Companion => "companion",
+        }
+    }
+}
+
+/// The copy of a creature an encounter keeps (plan 4.3): players' views never depend on anyone's installed content,
+/// and a later change to the DM's content changes nothing until the DM refreshes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    /// Monster or companion.
+    #[serde(default)]
+    pub kind: Kind,
     /// The element's name ("Goblin Warrior").
     pub name: String,
     /// Its source book.
     pub source: String,
+    /// `dnd2014`, `dnd2024` or `any`.
+    pub ruleset: String,
     /// The counterpart in the other edition (`maps_to`), offered when editions don't match (D23).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub maps_to: Option<String>,
-    /// The stat block.
-    pub data: MonsterData,
+    /// The stat block of a monster.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<MonsterData>,
+    /// The printed block of a companion (the bestiary's `CompanionDetail`, camelCase; missing fields are null).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub companion: Option<Value>,
 }
 
 /// Why an element can't go into an encounter.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SnapshotError {
-    /// Only typed Monster elements can (D17): Aurora companions and other types can't.
-    #[error("Only monsters can be added to an encounter.")]
-    NotAMonster,
+    /// Only creatures can: typed Monster elements and Aurora Companion elements.
+    #[error("Only monsters and companions can be added to an encounter.")]
+    NotACreature,
     /// Its data doesn't fit the stat block model.
     #[error("This monster's stat block can't be read.")]
     Unreadable,
 }
 
-impl Snapshot {
-    /// Copy a Monster element.
-    ///
-    /// # Errors
-    /// [`SnapshotError`] for any other element type, or a stat block that doesn't fit the model.
-    pub fn from_element(element: &Element) -> Result<Self, SnapshotError> {
-        if element.ty != "Monster" {
-            return Err(SnapshotError::NotAMonster);
-        }
-        let data = MonsterData::from_element(element).map_err(|_| SnapshotError::Unreadable)?;
-        let ruleset = element.ruleset.unwrap_or(data.ruleset);
-        let maps_to = element.maps_to.as_ref().and_then(|m| {
-            if m.kind == Some(MapKind::Equivalent) {
-                return None;
-            }
-            match ruleset {
-                ContentRuleset::Dnd2014 => m.dnd2024.clone(),
-                _ => m.dnd2014.clone(),
-            }
-            .filter(|id| *id != element.id)
-        });
-        Ok(Self {
-            name: element.name.clone(),
-            source: element.source.clone(),
-            maps_to,
-            data,
-        })
+/// Stat block keys left out of every copy anyone is shown: what a creature is worth in XP (plan D16).
+pub const HIDDEN_KEYS: [&str; 2] = ["xp", "xp_lair"];
+
+fn counterpart(element: &Element, ruleset: ContentRuleset) -> Option<String> {
+    let m = element.maps_to.as_ref()?;
+    if m.kind == Some(MapKind::Equivalent) {
+        return None;
     }
-
-    /// The edition of the block (`dnd2014` or `dnd2024`; `any` for neither).
-    #[must_use]
-    pub fn ruleset(&self) -> &'static str {
-        self.data.ruleset.as_str()
+    match ruleset {
+        ContentRuleset::Dnd2014 => m.dnd2024.clone(),
+        _ => m.dnd2014.clone(),
     }
+    .filter(|id| *id != element.id)
 }
 
-/// A short, stable fingerprint of a stat block, to tell whether the source changed since the snapshot (the plan's
-/// `pack_rev`). FNV-1a 64 over its JSON, as 16 hex digits.
-#[must_use]
-pub fn block_rev(data: &MonsterData) -> String {
-    let text = serde_json::to_string(data).unwrap_or_default();
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in text.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    format!("{hash:016x}")
-}
-
-/// The creature's challenge rating, when it has one.
-#[must_use]
-pub fn challenge(data: &MonsterData) -> Option<Cr> {
-    data.cr?.as_text().parse().ok()
-}
-
-/// One creature as an encounter group (the stored XP, HB5), or `None` for a creature with no challenge rating: it
-/// adds nothing to the XP and is reported as unrated.
-#[must_use]
-pub fn group(data: &MonsterData) -> Option<MonsterGroup> {
-    let cr = challenge(data)?;
-    Some(MonsterGroup::with_stored_xp(cr, data.xp.map(u64::from), 1))
-}
-
-/// The word players see by default instead of the creature's name: its type ("Humanoid", "Beast").
-#[must_use]
-pub fn type_word(data: &MonsterData) -> String {
-    let word = data.creature_type.as_str();
+fn capitalised(word: &str) -> String {
     let mut chars = word.chars();
     chars
         .next()
@@ -107,91 +87,189 @@ pub fn type_word(data: &MonsterData) -> String {
         .unwrap_or_default()
 }
 
-/// How much of a revealed creature players see (D20). Hidden creatures are not shown at all.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum RevealLevel {
-    /// The public name, size, type and conditions.
-    #[default]
-    Name,
-    /// That, and how hurt it looks (Unhurt / Bloodied / Down).
-    Band,
-    /// That, and the stat block (no XP), exact hit points.
-    Full,
-}
+impl Snapshot {
+    /// Copy a typed Monster element.
+    ///
+    /// # Errors
+    /// [`SnapshotError`] for any other element type, or a stat block that doesn't fit the model.
+    pub fn of_monster(element: &Element) -> Result<Self, SnapshotError> {
+        if element.ty != "Monster" {
+            return Err(SnapshotError::NotACreature);
+        }
+        let data = MonsterData::from_element(element).map_err(|_| SnapshotError::Unreadable)?;
+        let ruleset = element.ruleset.unwrap_or(data.ruleset);
+        Ok(Self {
+            kind: Kind::Monster,
+            name: element.name.clone(),
+            source: element.source.clone(),
+            ruleset: ruleset.as_str().to_string(),
+            maps_to: counterpart(element, ruleset),
+            data: Some(data),
+            companion: None,
+        })
+    }
 
-impl RevealLevel {
-    /// The stored word.
+    /// Copy an Aurora Companion element, given its printed block (the `CompanionDetail` shape).
+    ///
+    /// # Errors
+    /// [`SnapshotError::NotACreature`] for any other element type.
+    pub fn of_companion(element: &Element, block: Value) -> Result<Self, SnapshotError> {
+        if element.ty != "Companion" {
+            return Err(SnapshotError::NotACreature);
+        }
+        let ruleset = element.ruleset.unwrap_or(ContentRuleset::Any);
+        Ok(Self {
+            kind: Kind::Companion,
+            name: element.name.clone(),
+            source: element.source.clone(),
+            ruleset: ruleset.as_str().to_string(),
+            maps_to: counterpart(element, ruleset),
+            data: None,
+            companion: Some(block),
+        })
+    }
+
+    /// The numbers its block prints.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Name => "name",
-            Self::Band => "band",
-            Self::Full => "full",
+    pub fn printed(&self) -> Printed {
+        match (&self.data, &self.companion) {
+            (Some(data), _) => Printed::of_monster(data),
+            (None, Some(block)) => Printed::of_companion(block),
+            (None, None) => Printed::default(),
         }
     }
 
-    /// From the stored word.
+    /// The block the encounter uses, overrides applied, without XP: a `MonsterData` (snake_case) for a monster, a
+    /// `CompanionDetail` (camelCase) for a companion.
     #[must_use]
-    pub fn parse(word: &str) -> Option<Self> {
-        match word {
-            "name" => Some(Self::Name),
-            "band" => Some(Self::Band),
-            "full" => Some(Self::Full),
-            _ => None,
+    pub fn block(&self, overrides: &Overrides) -> Value {
+        let mut out = match (&self.data, &self.companion) {
+            (Some(data), _) => serde_json::to_value(overrides.apply(data)).unwrap_or(Value::Null),
+            (None, Some(block)) => overrides.apply_companion(block),
+            (None, None) => Value::Null,
+        };
+        if let Some(map) = out.as_object_mut() {
+            for key in HIDDEN_KEYS {
+                map.remove(key);
+            }
+        }
+        out
+    }
+
+    /// The hit points it starts with by default: the average it prints (overridden or not), at least 1.
+    #[must_use]
+    pub fn average_hp(&self, overrides: &Overrides) -> u32 {
+        overrides
+            .hp
+            .as_ref()
+            .map(|h| h.value.average)
+            .or_else(|| self.printed().hp.map(|h| h.average))
+            .unwrap_or(1)
+            .max(1)
+    }
+
+    /// Its armor class, overridden or printed.
+    #[must_use]
+    pub fn ac(&self, overrides: &Overrides) -> Option<u32> {
+        overrides
+            .ac
+            .as_ref()
+            .map(|a| a.value.value)
+            .or_else(|| self.printed().ac.map(|a| a.value))
+    }
+
+    /// Its challenge rating as printed (`1/4`), if any. Only a stat: nothing rates encounters with it (D16).
+    #[must_use]
+    pub fn challenge(&self) -> Option<String> {
+        match (&self.data, &self.companion) {
+            (Some(data), _) => data.cr.map(|c| c.as_text()),
+            (None, Some(block)) => block["challenge"].as_str().map(str::to_string),
+            (None, None) => None,
         }
     }
-}
 
-/// The health band players see at `band` and above: Down at 0, Bloodied at half or less, Unhurt otherwise.
-#[must_use]
-pub fn health_band(current: u32, max: u32) -> &'static str {
-    if current == 0 {
-        "down"
-    } else if u64::from(current) * 2 <= u64::from(max) {
-        "bloodied"
-    } else {
-        "unhurt"
+    /// The word players see by default instead of the creature's name: its type ("Beast", "Fey"), else "Creature".
+    #[must_use]
+    pub fn type_word(&self) -> String {
+        let word = match (&self.data, &self.companion) {
+            (Some(data), _) => data.creature_type.as_str().to_string(),
+            (None, Some(block)) => block["type"]
+                .as_str()
+                .and_then(|t| t.split(['(', ',']).next())
+                .map(|t| t.trim().to_lowercase())
+                .filter(|t| !t.is_empty())
+                .unwrap_or_default(),
+            (None, None) => String::new(),
+        };
+        if word.is_empty() {
+            "Creature".into()
+        } else {
+            capitalised(&word)
+        }
+    }
+
+    /// Its size words (`small`, `medium`...).
+    #[must_use]
+    pub fn sizes(&self) -> Vec<String> {
+        match (&self.data, &self.companion) {
+            (Some(data), _) => data.size.iter().map(|s| s.as_str().to_string()).collect(),
+            (None, Some(block)) => {
+                let text = block["size"].as_str().unwrap_or("").to_lowercase();
+                ["tiny", "small", "medium", "large", "huge", "gargantuan"]
+                    .iter()
+                    .filter(|s| {
+                        text.split(|c: char| !c.is_ascii_alphabetic())
+                            .any(|w| w == **s)
+                    })
+                    .map(|s| (*s).to_string())
+                    .collect()
+            }
+            (None, None) => Vec::new(),
+        }
+    }
+
+    /// A short, stable fingerprint of the copied block, to tell whether the source changed since. FNV-1a 64 over its
+    /// JSON, as 16 hex digits.
+    #[must_use]
+    pub fn rev(&self) -> String {
+        let text = match (&self.data, &self.companion) {
+            (Some(data), _) => serde_json::to_string(data).unwrap_or_default(),
+            (None, Some(block)) => block.to_string(),
+            (None, None) => String::new(),
+        };
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for byte in text.bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
+        }
+        format!("{hash:016x}")
     }
 }
 
-/// Stat block keys players never get, even at [`RevealLevel::Full`]: what a creature is worth.
-pub const PLAYER_HIDDEN_KEYS: [&str; 2] = ["xp", "xp_lair"];
-
-/// What a player sees of one revealed creature (the reveal field matrix, plan 4.3). `data` is the block the encounter
-/// uses (overrides applied); `hp` is `(current, max)`. The creature's id is a random UUID; the DM's label, notes, the
-/// element id, XP and difficulty are never part of this.
+/// What a player sees of one revealed creature (plan D20 b: hidden creatures are not shown at all; revealed ones
+/// with their whole stat block). `hp` is `(current, max)`; `owner` is the id of the creature it is controlled by,
+/// given only when that one is revealed too. The DM's label, notes, the element id and XP are never part of this.
 #[must_use]
 pub fn player_view(
     id: &str,
     public_name: &str,
-    level: RevealLevel,
-    data: &MonsterData,
+    snapshot: &Snapshot,
+    overrides: &Overrides,
     hp: (u32, u32),
     conditions: &[String],
+    owner: Option<&str>,
 ) -> Value {
     let mut out = Map::new();
     out.insert("id".into(), json!(id));
     out.insert("publicName".into(), json!(public_name));
-    out.insert("revealLevel".into(), json!(level.as_str()));
-    out.insert(
-        "size".into(),
-        json!(data.size.iter().map(|s| s.as_str()).collect::<Vec<_>>()),
-    );
-    out.insert("type".into(), json!(type_word(data)));
+    out.insert("kind".into(), json!(snapshot.kind.as_str()));
+    out.insert("size".into(), json!(snapshot.sizes()));
+    out.insert("type".into(), json!(snapshot.type_word()));
     out.insert("conditions".into(), json!(conditions));
-    if level != RevealLevel::Name {
-        out.insert("band".into(), json!(health_band(hp.0, hp.1)));
-    }
-    if level == RevealLevel::Full {
-        let mut block = serde_json::to_value(data).unwrap_or(Value::Null);
-        if let Some(map) = block.as_object_mut() {
-            for key in PLAYER_HIDDEN_KEYS {
-                map.remove(key);
-            }
-        }
-        out.insert("statBlock".into(), block);
-        out.insert("hp".into(), json!({ "current": hp.0, "max": hp.1 }));
+    out.insert("hp".into(), json!({ "current": hp.0, "max": hp.1 }));
+    out.insert("statBlock".into(), snapshot.block(overrides));
+    if let Some(owner) = owner {
+        out.insert("ownerId".into(), json!(owner));
     }
     Value::Object(out)
 }
