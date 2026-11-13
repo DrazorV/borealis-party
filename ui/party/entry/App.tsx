@@ -10,6 +10,7 @@ import { loadSession, updateUser } from "../api/session";
 import { AccountBar } from "../pages/AccountBar";
 import { AccountPage } from "../pages/AccountPage";
 import { AdminPage } from "../pages/AdminPage";
+import { CombatTracker } from "../pages/CombatTracker";
 import { JoinRoute, PartiesPage } from "../pages/PartiesPage";
 import { PartyCharacterView } from "../pages/PartyCharacterView";
 import { EncounterBuilder } from "../pages/EncounterBuilder";
@@ -80,6 +81,8 @@ export function App() {
         {/* Encounters (0.3.0): the DM's builder; players see only what the server projects for them. */}
         <Route path="/parties/:party/encounters" element={<AppShell>{offline ? <OfflinePage /> : <EncountersPage />}</AppShell>} />
         <Route path="/parties/:party/encounters/:encounter" element={<AppShell>{offline ? <OfflinePage /> : <EncounterBuilder />}</AppShell>} />
+        {/* The DM's live combat tracker (plan 4.4, 0.3.0); the Live chip in the top bar leads back to it. */}
+        <Route path="/combat/:id" element={<AppShell>{offline ? <OfflinePage /> : <CombatTracker />}</AppShell>} />
         {/* Notes read a folder on the device, which a server doesn't offer. */}
         <Route path="/notes" element={<Navigate to="/" replace />} />
         <Route path="*" element={<UpstreamApp />} />

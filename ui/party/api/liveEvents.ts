@@ -21,6 +21,10 @@ const STEADY_MS = 5000;
 
 export interface LiveOptions {
   onOpen?: (again: boolean) => void;
+  /** Anything arrived on the open stream: an event, or the server's keep-alive ping (an SSE comment). */
+  onBeat?: () => void;
+  /** The open stream ended or failed; it reopens by itself (onOpen with `again`). */
+  onDrop?: () => void;
   /** Tests: a stream of its own over this fetch, not the shared one. */
   fetch?: typeof fetch;
 }
@@ -28,6 +32,8 @@ export interface LiveOptions {
 interface Listener {
   onEvent: (e: ServerEvent) => void;
   onOpen?: (again: boolean) => void;
+  onBeat?: () => void;
+  onDrop?: () => void;
 }
 
 /** The shared streams, by session. */
@@ -45,12 +51,16 @@ export function liveEvents(session: ServerSession, onEvent: (e: ServerEvent) => 
         for (const l of [...listeners]) {
           try { l.onEvent(e); } catch { /* one listener's bad event never reaches the others */ }
         }
-      }, { onOpen: (again) => { for (const l of [...listeners]) l.onOpen?.(again); } }),
+      }, {
+        onOpen: (again) => { for (const l of [...listeners]) l.onOpen?.(again); },
+        onBeat: () => { for (const l of [...listeners]) l.onBeat?.(); },
+        onDrop: () => { for (const l of [...listeners]) l.onDrop?.(); },
+      }),
     };
     shared.set(key, created);
     entry = created;
   }
-  const listener: Listener = { onEvent, onOpen: options.onOpen };
+  const listener: Listener = { onEvent, onOpen: options.onOpen, onBeat: options.onBeat, onDrop: options.onDrop };
   const mine = entry;
   mine.listeners.add(listener);
   return () => {
@@ -105,6 +115,7 @@ function openStream(session: ServerSession, onEvent: (e: ServerEvent) => void, o
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
+          options.onBeat?.();
           buffer += value;
           let end = buffer.indexOf("\n\n");
           while (end >= 0) {
@@ -125,6 +136,7 @@ function openStream(session: ServerSession, onEvent: (e: ServerEvent) => void, o
         if (!answered) suspectServer();
       }
       if (abort.signal.aborted) break;
+      if (reached) options.onDrop?.();
       // It was open a while and dropped: reopen at once. It could not open, or ended at once: back off.
       if (reached && Date.now() - openedAt >= STEADY_MS) {
         fails = 0;

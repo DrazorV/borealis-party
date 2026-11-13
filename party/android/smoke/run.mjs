@@ -8,8 +8,9 @@
 // It also opens the imported character's sheet preview at Android font sizes 1.0 and 1.15 (sheetPreview below).
 //
 // node party/android/smoke/run.mjs --apk <path> [--out <folder>] [--port 18799] [--avd BalanceLab_Tablet]
-//   [--server-bin <WSL path>] [--keep] [--no-wide] [--sheet-only] [--max-minutes 20]
+//   [--server-bin <WSL path>] [--keep] [--no-wide] [--sheet-only] [--combat-only] [--max-minutes 20]
 // --sheet-only: sign in, import the character and check its sheet preview (step 7), nothing else.
+// --combat-only: sign in and check the DM's combat tracker (combatTracker below), nothing else.
 // Exit code 0 when every check passed.
 
 import { spawn, spawnSync } from "node:child_process";
@@ -35,6 +36,7 @@ const avd = args.avd ?? "BalanceLab_Tablet";
 const out = resolve(args.out ?? join(repo, "target", "party-android-smoke"));
 const apk = args.apk ? resolve(args.apk) : null;
 const sheetOnly = args["sheet-only"] === "true";
+const combatOnly = args["combat-only"] === "true";
 // The whole run stops after this many minutes (default 20), so a stalled emulator never holds it for hours.
 const maxMinutes = Number(args["max-minutes"] ?? 20);
 if (!Number.isFinite(maxMinutes) || maxMinutes <= 0) throw new Error(`--max-minutes needs a number of minutes above 0, not ${args["max-minutes"]}`);
@@ -293,6 +295,7 @@ async function main() {
   // Upstream's first-start notices, if any, are closed so they don't cover the import dialogs.
   for (const label of ["Close", "Dismiss", "OK", "Got it"]) await smoke(`click(${JSON.stringify(label)}, true)`).catch(() => false);
   await screenshot("02-signed-in");
+  if (combatOnly) { await combatTracker(); return; }
   if (!sheetOnly) await phoneLayout();
 
   const characters = async () => (await api(token, "list_characters")).map((c) => c.name);
@@ -401,6 +404,7 @@ async function main() {
   await sleep(2000);
   await partyLive(token);
   await encounters(token);
+  await combatTracker();
 
   // 7. The sheet preview at Android font sizes 1.0 and 1.15 (last: it restarts the app).
   await sheetPreview(token);
@@ -487,6 +491,63 @@ async function encounters(token) {
   } finally {
     await rest(token, "DELETE", `/api/parties/${party.id}`).catch(() => null);
     await page(`location.hash = "#/characters"`).catch(() => null);
+  }
+}
+
+/**
+ * The DM's combat tracker in the real app (0.3.0): the browser rig has no Tauri, so this is where the app's own phone
+ * shell is checked. It runs on the tracker's mock server (`party.combatMock`, an SRD sample fight), so it needs no
+ * combat routes on the throwaway server. Checks: the tracker opens, Next turn sits above the app's tab bar (a
+ * full-size target) and starts the fight, a typed damage changes HP, and nothing scrolls sideways. The Live chip is
+ * only logged: it comes with the player view's branch.
+ */
+async function combatTracker() {
+  const reloadTo = async (hash) => {
+    await page(`location.hash = ${JSON.stringify(hash)}; location.reload(); true`).catch(() => null);
+    await sleep(2000);
+    await until("the page after a reload", async () => { try { await connectPage(); return await page("document.readyState === 'complete'"); } catch { return false; } }, 60000, 1500);
+  };
+  try {
+    await page(`localStorage.setItem("party.combatMock", "1"); true`);
+    await reloadTo("#/combat/c1");
+    const opened = await until("the combat tracker", () => page(`document.querySelectorAll("[data-combatant]").length`), 30000).catch(() => 0);
+    check("the DM's combat tracker opens in the app", opened > 0, `${opened} combatants`);
+    if (!opened) return;
+    // The Live chip is the player view's (feat/player-combat); with both merged it shows here for the DM too.
+    const chip = await page(`(() => { const b = [...document.querySelectorAll(".party-bar button")].find((x) => /^\W*Live/.test(x.textContent.trim()) && x.getClientRects().length);
+      return b ? b.textContent.trim() : null; })()`).catch(() => null);
+    log(`      Live chip in the top bar: ${chip ?? "not shown (needs feat/player-combat, and the real combat routes)"}`);
+    for (const [label, n] of [["Knight", 18], ["Adult Red Dragon", 12], ["Priest", 10], ["Cultist 1", 9], ["Cultist 2", 8], ["Mage", 5]]) {
+      await page(`(() => { const i = document.querySelector('input[aria-label=${JSON.stringify(`${label} initiative`)}]'); if (!i) return false;
+        const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(i, ${JSON.stringify(String(n))});
+        i.dispatchEvent(new Event("input", { bubbles: true })); i.dispatchEvent(new FocusEvent("blur")); i.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); return true; })()`);
+      await sleep(400);
+    }
+    const thumb = await page(`(() => {
+      const bar = document.querySelector(".cb-thumb"); const tabs = document.querySelector("nav.aur-bottombar");
+      if (!bar || !bar.getClientRects().length) return null;
+      const b = bar.getBoundingClientRect(); const t = tabs ? tabs.getBoundingClientRect() : null;
+      return { bottom: Math.round(b.bottom), tabsTop: t ? Math.round(t.top) : null, h: innerHeight, button: bar.querySelector(".btn")?.getBoundingClientRect().height };
+    })()`);
+    check("Next turn sits in the thumb zone, above the app's tab bar", !!thumb && thumb.bottom <= (thumb.tabsTop ?? thumb.h) + 1 && thumb.bottom > thumb.h * 0.6,
+      thumb ? JSON.stringify(thumb) : "no thumb bar");
+    check("Next turn is a full-size tap target (48 px on Android)", !!thumb && thumb.button >= 47.5, thumb ? `${thumb.button}px` : "");
+    await page(`document.querySelector(".cb-thumb .btn")?.click(); true`);
+    const started = await until("round 1", () => page(`!!document.querySelector('[data-combatant][aria-current="true"]')`), 15000).catch(() => false);
+    check("Start begins round 1 with the first combatant", !!started);
+    await page(`document.querySelector('[data-combatant="mage"] .cb-row-main')?.click(); true`);
+    await sleep(600);
+    await page(`(() => { const i = document.querySelector('#cb-card input[aria-label^="Damage or healing"]'); if (!i) return false;
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(i, "7"); i.dispatchEvent(new Event("input", { bubbles: true }));
+      [...document.querySelectorAll("#cb-card button")].find((b) => b.textContent.trim() === "Damage")?.click(); return true; })()`);
+    const hp = await until("the mage's HP", () => page(`(() => { const t = document.querySelector('[data-combatant="mage"] .cb-hp-text'); return t && t.textContent.startsWith("33") ? t.textContent : null; })()`), 10000).catch(() => null);
+    check("a typed damage changes the creature's HP", !!hp, hp ?? "unchanged");
+    const sideways = await page(`document.documentElement.scrollWidth - innerWidth`);
+    check("the tracker fits the phone's width", sideways <= 0, `${sideways} px too wide`);
+    await screenshot("13-combat-tracker");
+  } finally {
+    await page(`localStorage.removeItem("party.combatMock"); true`).catch(() => null);
+    await reloadTo("#/characters").catch(() => null);
   }
 }
 
