@@ -189,6 +189,10 @@ test("against the real server: a second DM tab follows within 1 s, and the playe
   const reveal = (p: Page) => p.getByRole("button", { name: `Reveal ${goblin.label} to players` });
   await expect(reveal(page)).toBeVisible({ timeout: 30_000 });
   await expect(reveal(dmTab)).toBeVisible({ timeout: 30_000 });
+  // The players' order lists only combatants with an initiative: roll the creatures' in the app first.
+  await page.getByRole("button", { name: "Roll initiatives" }).click();
+  await expect(page.locator(`[data-combatant="${goblin.id}"] input`)).not.toHaveValue("", { timeout: 5_000 });
+  await expect(dmTab.locator(`[data-combatant="${goblin.id}"] input`)).not.toHaveValue("", { timeout: 1_000 });
   const seen = async () => JSON.stringify(await api(request, player.token, "GET", `/api/combats/${started.id}`)).includes(goblin.id);
   expect(await seen(), "a hidden creature isn't in the player's view").toBe(false);
 
