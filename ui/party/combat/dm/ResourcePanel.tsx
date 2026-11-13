@@ -1,16 +1,26 @@
 import { useState } from "react";
 import { Button } from "../../../src/components/Button";
-import { abilityStatus, byId, isDefeated, linkActive, poolResetOwner } from "./derive";
-import type { Command, CombatState, EncounterRule } from "./types";
+import { abilityStatus, byId, isDefeated, linkActive, poolResetOwner, poolTitle } from "./derive";
+import type { Command, CombatState, EncounterRule, LegendaryPool } from "./types";
 
 /**
- * The sticky resource panel (C16, C17, C15, C21, C22): legendary pools, shared across creatures, with each member's
- * legendary options; Legendary Resistance; recharges; group per-round limits; mount links. On phones only the pools
- * show until "More" (C26).
+ * The sticky resource panel (C16, C17, C15, C21, C22): each legendary creature's own legendary actions with its
+ * options and remaining count (a pool the DM linked, such as the heads of one creature, shows once as LINKED);
+ * Legendary Resistance; recharges; group per-round limits; mount links. On phones only the pools show until "More"
+ * (C26). All of it is DM only.
  */
 export function ResourcePanel({ state, send, disabled, onSelect }: { state: CombatState; send: (cmd: Command) => void; disabled: boolean; onSelect: (id: string) => void }) {
   const [more, setMore] = useState(false);
-  const pools = Object.entries(state.legendary_pools ?? {});
+  const at = (id: string | undefined) => state.combatants.findIndex((c) => c.id === id);
+  const pools = Object.entries(state.legendary_pools ?? {})
+    .filter(([, p]) => p.members.some((m) => byId(state, m) && !byId(state, m)!.removed))
+    .sort(([, a], [, b]) => at(a.members[0]) - at(b.members[0]));
+  const current = byId(state, state.current);
+  /** The DM sets a creature's count (a guessed 3, or a homebrew block): what's left moves by the same amount. */
+  const setMax = (key: string, pool: LegendaryPool, max: number) => {
+    const remaining = Math.max(0, Math.min(max, pool.remaining + (max - pool.max)));
+    send({ command: "set_legendary_pool", pool: key, value: { max, remaining, members: pool.members } });
+  };
   const resist = state.combatants.filter((c) => c.legendary_resistance && !c.removed);
   const recharges = state.combatants.flatMap((c) => (c.removed ? [] : (c.abilities ?? []).filter((a) => a.recharge).map((a) => ({ c, a }))));
   const groups = Object.entries(state.group_limits ?? {});
@@ -27,12 +37,18 @@ export function ResourcePanel({ state, send, disabled, onSelect }: { state: Comb
         const owner = poolResetOwner(state, pool);
         const members = pool.members.map((m) => byId(state, m)).filter((c) => c && !c.removed);
         const shared = members.length > 1;
+        const title = poolTitle(state, pool);
+        const ownTurn = Boolean(state.current && pool.members.includes(state.current));
         return (
-          <section key={key} className="cb-res-section">
+          <section key={key} className="cb-res-section" aria-label={`${title} legendary actions`}>
             <div className="cb-res-title">
-              <span>Legendary actions{shared && <span className="chip gold">SHARED</span>}</span>
-              <span className="chip" aria-label={`${pool.remaining} of ${pool.max} left`}>{pool.remaining}/{pool.max}</span>
+              <span>{title} · Legendary actions{shared && <span className="chip gold" title="Linked by the DM: one pool for these creatures">LINKED</span>}
+                {pool.guessed && <span className="chip warning" title="The stat block prints no count, so this is the usual 3. Set the real count below.">GUESS</span>}</span>
+              <span className="chip" aria-label={`${title}: ${pool.remaining} of ${pool.max} left`}>{pool.remaining}/{pool.max}</span>
             </div>
+            {state.status === "active" && (
+              <div className="cb-small muted">{ownTurn ? "Its own turn: none until another creature's turn ends." : `${pool.remaining} left${current ? ` · at the end of ${current.label}'s turn` : ""}`}</div>
+            )}
             <div className="cb-pips" aria-hidden="true">{Array.from({ length: pool.max }, (_, i) => <span key={i} className={i < pool.remaining ? "on" : ""}>{i < pool.remaining ? "●" : "○"}</span>)}</div>
             <div className="cb-legend-opts">
               {members.flatMap((m) => (m!.abilities ?? []).filter((a) => a.kind === "legendary").map((a) => {
@@ -49,7 +65,13 @@ export function ResourcePanel({ state, send, disabled, onSelect }: { state: Comb
             <div className="cb-res-foot">
               <Button small variant="ghost" disabled={disabled || pool.remaining <= 0} onClick={() => send({ command: "adjust_legendary", pool: key, delta: -1 })}>−1</Button>
               <Button small variant="ghost" disabled={disabled || pool.remaining >= pool.max} onClick={() => send({ command: "adjust_legendary", pool: key, delta: 1 })}>+1</Button>
-              <span className="cb-small muted">Resets at the start of {owner ? `${owner.label}'s` : "its owner's"} turn. Not on a member's own turn.</span>
+              <span className="cb-la-count" role="group" aria-label={`${title} legendary actions per round`}>
+                <span className="cb-small muted">Per round</span>
+                <Button small variant="ghost" aria-label={`${title}: one fewer legendary action per round`} disabled={disabled || pool.max <= 1} onClick={() => setMax(key, pool, pool.max - 1)}>−</Button>
+                <b>{pool.max}</b>
+                <Button small variant="ghost" aria-label={`${title}: one more legendary action per round`} disabled={disabled || pool.max >= 9} onClick={() => setMax(key, pool, pool.max + 1)}>+</Button>
+              </span>
+              <span className="cb-small muted">Refills to {pool.max} at the start of {owner ? `${owner.label}'s` : "its"} own turn.</span>
             </div>
           </section>
         );

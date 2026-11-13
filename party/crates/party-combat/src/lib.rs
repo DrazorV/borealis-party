@@ -24,6 +24,7 @@ pub mod engine;
 pub mod error;
 pub mod event;
 pub mod export;
+pub mod legendary;
 pub mod model;
 pub mod visibility;
 

@@ -466,6 +466,12 @@ impl Cx<'_> {
                 }
                 let mut v = value.clone();
                 v.remaining = v.remaining.min(v.max);
+                for (k, p) in &mut self.s.legendary_pools {
+                    if k != pool {
+                        p.members.retain(|m| !v.members.contains(m));
+                    }
+                }
+                self.s.legendary_pools.retain(|_, p| !p.members.is_empty());
                 self.s.legendary_pools.insert(pool.clone(), v);
                 self.ev(None, K::Resources, format!("Legendary pool {pool} set"));
                 Ok(())

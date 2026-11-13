@@ -160,21 +160,33 @@ describe("concentration and effects (C11, C12)", () => {
 });
 
 describe("legendary actions, rules and group limits (C16, C20, C21)", () => {
-  it("two creatures share one pool; it isn't usable on a member's own turn and refills at the first member's turn", () => {
+  it("each legendary creature has its own pool: spending one leaves the other, and each refills on its own turn", () => {
     const m = ready();
     run(m, { command: "start" });
     const s = () => m.view.state;
+    const left = () => [s().legendary_pools.dragon!.remaining, s().legendary_pools.knight!.remaining];
+    expect(left()).toEqual([3, 2]);
     // The knight's own turn: its legendary option is refused, the dragon's is not.
     expect(abilityStatus(s(), byId(s(), "knight")!, byId(s(), "knight")!.abilities!.find((a) => a.key === "charge")!)).toBe("Not on its own turn");
     run(m, { command: "use_ability", id: "dragon", ability: "wing" });
-    expect(s().legendary_pools.court!.remaining).toBe(1);
-    run(m, { command: "next_turn" }, { command: "use_ability", id: "knight", ability: "charge" });
-    expect(s().legendary_pools.court!.remaining).toBe(0);
-    expect(abilityStatus(s(), byId(s(), "dragon")!, byId(s(), "dragon")!.abilities!.find((a) => a.key === "tail")!)).toBe("Not enough legendary actions");
-    // The pool resets at the start of the dragon's turn (the first member listed).
+    expect(left()).toEqual([1, 2]);
+    run(m, { command: "next_turn" }, { command: "use_ability", id: "knight", ability: "charge" }, { command: "use_ability", id: "knight", ability: "charge" });
+    expect(left()).toEqual([1, 0]);
+    expect(abilityStatus(s(), byId(s(), "knight")!, byId(s(), "knight")!.abilities!.find((a) => a.key === "charge")!)).toBe("Not enough legendary actions");
+    expect(abilityStatus(s(), byId(s(), "dragon")!, byId(s(), "dragon")!.abilities!.find((a) => a.key === "tail")!)).toBeNull();
+    // Only the dragon's own pool refills at the start of its turn.
     run(m, { command: "next_turn" }, { command: "next_turn" });
     expect(s().current).toBe("dragon");
-    expect(s().legendary_pools.court!.remaining).toBe(3);
+    expect(left()).toEqual([3, 0]);
+  });
+
+  it("a DM link puts two creatures in one pool, opt-in; they leave their own pools", () => {
+    const m = ready();
+    run(m, { command: "set_legendary_pool", pool: "heads", value: { max: 3, remaining: 3, members: ["dragon", "knight"] } }, { command: "start" });
+    const s = () => m.view.state;
+    expect(Object.keys(s().legendary_pools)).toEqual(["heads"]);
+    run(m, { command: "use_ability", id: "dragon", ability: "wing" }, { command: "next_turn" }, { command: "use_ability", id: "knight", ability: "charge" });
+    expect(s().legendary_pools.heads!.remaining).toBe(0);
   });
 
   it("a rule tied to the priest switches the cultists' gift off for good when the priest drops", () => {

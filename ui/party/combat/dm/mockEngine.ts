@@ -291,7 +291,16 @@ class Run {
         return;
       }
       case "set_recharge": { const a = this.c(cmd.id).abilities?.find((x) => x.key === cmd.ability); if (a?.recharge) a.recharge.ready = cmd.ready; this.ev(cmd.id, "recharge_set", `${a?.name ?? cmd.ability} ${cmd.ready ? "ready" : "spent"}`); return; }
-      case "set_legendary_pool": { s.legendary_pools[cmd.pool] = clone(cmd.value); return; }
+      case "set_legendary_pool": {
+        // As the engine: the members leave their other pools (a DM link is opt-in), and an emptied pool goes.
+        for (const [key, p] of Object.entries(s.legendary_pools)) {
+          if (key === cmd.pool) continue;
+          p.members = p.members.filter((m) => !cmd.value.members.includes(m));
+          if (p.members.length === 0) delete s.legendary_pools[key];
+        }
+        s.legendary_pools[cmd.pool] = { ...clone(cmd.value), remaining: Math.min(cmd.value.remaining, cmd.value.max) };
+        return;
+      }
       case "adjust_legendary": {
         const p = s.legendary_pools[cmd.pool] ?? refuse("No such pool.");
         p.remaining = Math.max(0, Math.min(p.max, p.remaining + cmd.delta));

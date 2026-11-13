@@ -359,6 +359,7 @@ fn dm_only_writes_produce_no_player_events() {
                 max: 3,
                 remaining: 3,
                 members: vec![id("o")],
+                guessed: false,
             },
         },
         Command::SetEconomy {
@@ -504,6 +505,7 @@ fn revealed_means_the_full_stat_block() {
         max: 3,
         remaining: 3,
         members: vec![id("d")],
+        guessed: false,
     };
     dm(
         &mut combat,
@@ -584,6 +586,7 @@ fn a_hidden_pool_member_leaves_no_trace() {
         max: 3,
         remaining: 3,
         members: vec![id("hidden"), id("seen")],
+        guessed: false,
     };
     dm(
         &mut combat,

@@ -145,17 +145,56 @@ describe("CombatTracker", () => {
     await within(card()).findByText("AC 18");
   });
 
-  it("the shared legendary pool: one pool for two creatures, refused on a member's own turn (C16)", async () => {
+  it("legendary actions per creature: each has its own count on its row and in the panel (C16)", async () => {
     readyAndStart();
     page();
     const panel = await screen.findByRole("complementary", { name: "Resources" });
-    expect(within(panel).getByText("SHARED")).toBeTruthy();
-    const charge = within(panel).getByRole("button", { name: /Knight: Lance Charge/ });
+    const dragon = within(panel).getByRole("region", { name: "Adult Red Dragon legendary actions" });
+    const knight = within(panel).getByRole("region", { name: "Knight legendary actions" });
+    expect(within(dragon).getByLabelText("Adult Red Dragon: 3 of 3 left")).toBeTruthy();
+    expect(within(knight).getByLabelText("Knight: 2 of 2 left")).toBeTruthy();
+    expect(within(panel).queryByText("LINKED")).toBeNull();
+    // The knight's turn: its own option is refused, the dragon's is not.
+    const charge = within(knight).getByRole("button", { name: /Lance Charge/ });
     expect((charge as HTMLButtonElement).disabled).toBe(true);
     expect(charge.textContent).toMatch(/Not on its own turn/);
-    fireEvent.click(within(panel).getByRole("button", { name: /Adult Red Dragon: Wing Attack/ }));
-    await waitFor(() => expect(state().legendary_pools.court!.remaining).toBe(1));
-    expect(within(panel).getByLabelText("1 of 3 left")).toBeTruthy();
+    fireEvent.click(within(dragon).getByRole("button", { name: /Wing Attack/ }));
+    await waitFor(() => expect(state().legendary_pools.dragon!.remaining).toBe(1));
+    expect(state().legendary_pools.knight!.remaining).toBe(2);
+    await within(dragon).findByLabelText("Adult Red Dragon: 1 of 3 left");
+    expect(within(knight).getByLabelText("Knight: 2 of 2 left")).toBeTruthy();
+    // The roster rows show each creature's own pips.
+    expect(within(row("dragon")).getByLabelText("Adult Red Dragon legendary actions: 1 of 3 left").textContent).toBe("LA ●○○");
+    expect(within(row("knight")).getByLabelText("Knight legendary actions: 2 of 2 left").textContent).toBe("LA ●●");
+    expect(within(row("mage")).queryByText(/^LA /)).toBeNull();
+  });
+
+  it("a guessed count is marked, and the DM sets each creature's own count (C16)", async () => {
+    combat().view.state.legendary_pools.knight = { max: 3, remaining: 3, members: ["knight"], guessed: true };
+    readyAndStart();
+    page();
+    const panel = await screen.findByRole("complementary", { name: "Resources" });
+    const knight = within(panel).getByRole("region", { name: "Knight legendary actions" });
+    const dragon = within(panel).getByRole("region", { name: "Adult Red Dragon legendary actions" });
+    expect(within(knight).getByText("GUESS")).toBeTruthy();
+    expect(within(dragon).queryByText("GUESS")).toBeNull();
+    fireEvent.click(within(knight).getByRole("button", { name: "Knight: one fewer legendary action per round" }));
+    await waitFor(() => expect(state().legendary_pools.knight).toMatchObject({ max: 2, remaining: 2 }));
+    expect(state().legendary_pools.knight!.guessed).toBeFalsy();
+    expect(state().legendary_pools.dragon).toMatchObject({ max: 3, remaining: 3 });
+    await within(knight).findByLabelText("Knight: 2 of 2 left");
+    expect(within(knight).queryByText("GUESS")).toBeNull();
+  });
+
+  it("a pool the DM linked shows once, as LINKED (C16, opt-in)", async () => {
+    execute(combat(), { command: "set_legendary_pool", pool: "heads", value: { max: 3, remaining: 3, members: ["dragon", "knight"] } });
+    readyAndStart();
+    page();
+    const panel = await screen.findByRole("complementary", { name: "Resources" });
+    const linked = within(panel).getByRole("region", { name: "Adult Red Dragon + Knight legendary actions" });
+    expect(within(linked).getByText("LINKED")).toBeTruthy();
+    expect(within(linked).getByRole("button", { name: /Knight: Lance Charge/ })).toBeTruthy();
+    expect(within(panel).getAllByText(/· Legendary actions/)).toHaveLength(1);
   });
 
   it("Use spends the economy and says why an ability can't be used (C14, C5)", async () => {

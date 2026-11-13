@@ -52,7 +52,8 @@ combat.undo(&Actor::Dm, false)?;                        // C8: back to the exact
 | `last_visible` | The last turn players saw (D5) |
 | `combatants` | In the order they were added. Removed ones stay as tombstones (`removed: true`) and are never shown |
 | `effects` | Active effects and conditions (a condition is an effect that gives it) |
-| `legendary_pools` | Pools by id, each with `members` (several creatures can share one, C16) |
+| `legendary_pools` | Pools by id, each with `members`. One per legendary creature (key = its id), sized from its own block ("can take N legendary actions", default 3). Several members only when the DM linked them with `set_legendary_pool`, e.g. the heads of one creature (C16, opt-in) |
+| `legendary_per_creature` | True once pools are per creature. Combats saved by 0.3.0 lack it: on load the server splits every multi-member pool into one pool per creature, sized from the creatures' blocks, once (`party_combat::legendary::per_creature_pools`) |
 | `rules` | Encounter rules (C20, D42) |
 | `group_limits` | Per-round limits by group tag (C21) |
 
@@ -135,7 +136,9 @@ Build them with `Combatant::creature(id, label, hp, ac, init_bonus)` or
   - a summon's HP lives in combat state; `damage_prompt` is for PCs only.
 - **Turn start:**
   - the economy resets, and so do resources with `reset: turn_start`;
-  - a legendary pool refills at the start of the turn of its first member that isn't defeated;
+  - a legendary pool refills at the start of the turn of its first member that isn't defeated (for a creature's own
+    pool, its own turn); spending drains only that pool. Legendary Resistance is per creature, per day (never
+    refilled by a turn);
   - recharges are reminded (`recharge_due`) for the DM to roll in the app or type; `auto_recharge` rolls them
     instead;
   - effect durations and repeated saves at `start` are counted.

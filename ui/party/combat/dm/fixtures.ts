@@ -1,6 +1,6 @@
 /**
  * An SRD-only sample fight for tests, the rig and the mock server: a knight on a warhorse (linked initiative and
- * cover, C3/C22), a dragon and the knight sharing one legendary pool (C16), a priest whose life holds an encounter
+ * cover, C3/C22), a dragon (3) and the knight (2) with a legendary pool each (C16), a priest whose life holds an encounter
  * rule for the cultists (C20) with a group limit (C21), a mage with spell slots and concentration (C18), and two PCs.
  */
 import { emptyState, newCombat, type MockCombat } from "./mockEngine";
@@ -144,7 +144,7 @@ export function sampleState(): CombatState {
   ];
   s.combatants.forEach((c, i) => { c.tiebreak = i; });
   s.next_tiebreak = s.combatants.length;
-  s.legendary_pools = { court: { max: 3, remaining: 3, members: ["dragon", "knight"] } };
+  s.legendary_pools = { dragon: { max: 3, remaining: 3, members: ["dragon"] }, knight: { max: 2, remaining: 2, members: ["knight"] } };
   s.group_limits = { cultists: { per_round: 1, used: 0 } };
   s.rules = [{
     id: "dark-gift", name: "The priest's gift", linked: "priest", active: true,

@@ -62,6 +62,7 @@ fn roster(seed: u32) -> Combat {
         max: 3,
         remaining: 3,
         members: vec![id("hidden-dragon"), id("o")],
+        guessed: false,
     };
     dm(
         &mut combat,
