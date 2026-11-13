@@ -217,6 +217,91 @@ const MIGRATIONS: &[&[&str]] = &[
         )",
         "CREATE INDEX IF NOT EXISTS encounter_rules_encounter ON encounter_rules (encounter_id, sort)",
     ],
+    // 6 (M-combat, 0.3.0; after M-monster-meta 4 and M-encounters 5: numbers are fixed at merge), after M-encounters.
+    // Live combats (combat.rs). The engine's state and die are JSON in `combats`, with `seq` as the compare-and-set
+    // counter of every write. `encounter_id` has no foreign key: a combat (and its log) outlives its encounter, and
+    // M-encounters' tables stay droppable on their own. Everything else cascades from the party; the log, journal and
+    // prompts of a combat ended more than 90 days ago are deleted (D32 a).
+    &[
+        "CREATE TABLE IF NOT EXISTS combats (
+            id TEXT PRIMARY KEY,
+            party_id TEXT NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
+            encounter_id TEXT,
+            status TEXT NOT NULL DEFAULT 'live',
+            seq BIGINT NOT NULL DEFAULT 0,
+            state_json TEXT NOT NULL,
+            die_json TEXT NOT NULL,
+            started_at BIGINT NOT NULL,
+            updated_at BIGINT NOT NULL,
+            ended_at BIGINT
+        )",
+        "CREATE INDEX IF NOT EXISTS combats_party ON combats (party_id, started_at)",
+        // At most one live combat per party, kept by the database itself.
+        "CREATE UNIQUE INDEX IF NOT EXISTS combats_live ON combats (party_id) WHERE status = 'live'",
+        // Who each combatant id is: a creature with the stat block it fights with, or a PC by owner and character.
+        "CREATE TABLE IF NOT EXISTS combatants (
+            combat_id TEXT NOT NULL REFERENCES combats(id) ON DELETE CASCADE,
+            id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            encounter_creature_id TEXT,
+            owner_id TEXT,
+            character_id TEXT,
+            statblock_json TEXT,
+            created_at BIGINT NOT NULL,
+            PRIMARY KEY (combat_id, id)
+        )",
+        "CREATE INDEX IF NOT EXISTS combatants_owner ON combatants (owner_id)",
+        // Undo (C8): the state before each write, the newest 50 per combat.
+        "CREATE TABLE IF NOT EXISTS combat_journal (
+            combat_id TEXT NOT NULL REFERENCES combats(id) ON DELETE CASCADE,
+            seq BIGINT NOT NULL,
+            author TEXT NOT NULL,
+            label TEXT NOT NULL,
+            before_json TEXT NOT NULL,
+            PRIMARY KEY (combat_id, seq)
+        )",
+        // The DM-only log (D32 a). Never read by a player route.
+        "CREATE TABLE IF NOT EXISTS combat_log (
+            combat_id TEXT NOT NULL REFERENCES combats(id) ON DELETE CASCADE,
+            seq BIGINT NOT NULL,
+            n BIGINT NOT NULL,
+            at BIGINT NOT NULL,
+            author TEXT NOT NULL,
+            event_json TEXT NOT NULL,
+            PRIMARY KEY (combat_id, seq, n)
+        )",
+        // Each player's last projection hash and own sequence: events move only when that player's view changed.
+        "CREATE TABLE IF NOT EXISTS combat_views (
+            combat_id TEXT NOT NULL REFERENCES combats(id) ON DELETE CASCADE,
+            viewer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            seq BIGINT NOT NULL,
+            hash TEXT NOT NULL,
+            PRIMARY KEY (combat_id, viewer_id)
+        )",
+        // Damage and heal prompts for a PC's owner (D7 a).
+        "CREATE TABLE IF NOT EXISTS combat_prompts (
+            id TEXT PRIMARY KEY,
+            combat_id TEXT NOT NULL REFERENCES combats(id) ON DELETE CASCADE,
+            combatant_id TEXT NOT NULL,
+            owner_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at BIGINT NOT NULL,
+            resolved_at BIGINT,
+            applied BIGINT
+        )",
+        "CREATE INDEX IF NOT EXISTS combat_prompts_open ON combat_prompts (combat_id, resolved_at)",
+        // Request ids already done (D44 retries), by scope: a combat id, or start/import of an encounter or party.
+        "CREATE TABLE IF NOT EXISTS combat_requests (
+            scope TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            request_id TEXT NOT NULL,
+            result TEXT NOT NULL,
+            created_at BIGINT NOT NULL,
+            PRIMARY KEY (scope, account_id, request_id)
+        )",
+        "CREATE INDEX IF NOT EXISTS combat_requests_at ON combat_requests (created_at)",
+    ],
 ];
 
 /// How many steps [`MIGRATIONS`] has: the schema version a database is at after [`Db::open`].
@@ -228,7 +313,12 @@ pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
 /// database they left at version 3 would otherwise skip these steps. Every such step must be idempotent (`CREATE ...
 /// IF NOT EXISTS`). Step 1 has none: every database has its tables. A new step adds its own line here, with its
 /// main table.
-const MARKERS: &[(usize, &str)] = &[(2, "shares"), (3, "parties"), (4, "encounters")];
+const MARKERS: &[(usize, &str)] = &[
+    (2, "shares"),
+    (3, "parties"),
+    (4, "encounters"),
+    (5, "combats"),
+];
 
 /// A table only the versions with groups had. A database that still has it opens like any other: the table is left
 /// alone and a warning is logged, so an instance that ran those versions (or rolls back to one) still boots.

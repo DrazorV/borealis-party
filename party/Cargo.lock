@@ -879,6 +879,7 @@ dependencies = [
  "clap",
  "http-body-util",
  "lettre",
+ "party-combat",
  "party-encounter",
  "rand 0.9.5",
  "serde",

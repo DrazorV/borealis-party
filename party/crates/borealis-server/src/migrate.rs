@@ -225,6 +225,89 @@ const TABLES: &[(&str, &[(&str, Column)])] = &[
             ("created_at", Column::Int),
         ],
     ),
+    // M-combat.
+    (
+        "combats",
+        &[
+            ("id", Column::Text),
+            ("party_id", Column::Text),
+            ("encounter_id", Column::Text),
+            ("status", Column::Text),
+            ("seq", Column::Int),
+            ("state_json", Column::Text),
+            ("die_json", Column::Text),
+            ("started_at", Column::Int),
+            ("updated_at", Column::Int),
+            ("ended_at", Column::OptInt),
+        ],
+    ),
+    (
+        "combatants",
+        &[
+            ("combat_id", Column::Text),
+            ("id", Column::Text),
+            ("kind", Column::Text),
+            ("encounter_creature_id", Column::Text),
+            ("owner_id", Column::Text),
+            ("character_id", Column::Text),
+            ("statblock_json", Column::Text),
+            ("created_at", Column::Int),
+        ],
+    ),
+    (
+        "combat_journal",
+        &[
+            ("combat_id", Column::Text),
+            ("seq", Column::Int),
+            ("author", Column::Text),
+            ("label", Column::Text),
+            ("before_json", Column::Text),
+        ],
+    ),
+    (
+        "combat_log",
+        &[
+            ("combat_id", Column::Text),
+            ("seq", Column::Int),
+            ("n", Column::Int),
+            ("at", Column::Int),
+            ("author", Column::Text),
+            ("event_json", Column::Text),
+        ],
+    ),
+    (
+        "combat_views",
+        &[
+            ("combat_id", Column::Text),
+            ("viewer_id", Column::Text),
+            ("seq", Column::Int),
+            ("hash", Column::Text),
+        ],
+    ),
+    (
+        "combat_prompts",
+        &[
+            ("id", Column::Text),
+            ("combat_id", Column::Text),
+            ("combatant_id", Column::Text),
+            ("owner_id", Column::Text),
+            ("kind", Column::Text),
+            ("payload_json", Column::Text),
+            ("created_at", Column::Int),
+            ("resolved_at", Column::OptInt),
+            ("applied", Column::OptInt),
+        ],
+    ),
+    (
+        "combat_requests",
+        &[
+            ("scope", Column::Text),
+            ("account_id", Column::Text),
+            ("request_id", Column::Text),
+            ("result", Column::Text),
+            ("created_at", Column::Int),
+        ],
+    ),
 ];
 
 /// Tests: every table the copy moves, with its columns as `text`, `int` (never NULL) or `optint`.
