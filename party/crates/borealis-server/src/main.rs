@@ -48,6 +48,7 @@ mod route_tests;
 mod rpc;
 mod settings;
 mod shares;
+mod simulate;
 mod sync;
 #[cfg(test)]
 mod tests;

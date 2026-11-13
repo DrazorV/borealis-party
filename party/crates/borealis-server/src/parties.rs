@@ -1662,7 +1662,7 @@ async fn party_of(state: &AppState, owner: &str, character: &str) -> ApiResult<O
 
 /// Upstream's snapshot of a character as its owner has it now: the open session's, or else the saved file read with
 /// the owner's content. Opens no session. None when there is no such character.
-fn snapshot_of(
+pub(crate) fn snapshot_of(
     app: &tauri::AppHandle,
     id: &str,
 ) -> ApiResult<Option<borealis_lib::dto::CharacterSnapshot>> {

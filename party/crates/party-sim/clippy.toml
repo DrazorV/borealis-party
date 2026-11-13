@@ -1,0 +1,5 @@
+# Determinism: no hash-ordered collections in the simulation.
+disallowed-types = [
+  { path = "std::collections::HashMap", reason = "use BTreeMap: iteration order must be fixed" },
+  { path = "std::collections::HashSet", reason = "use BTreeSet: iteration order must be fixed" },
+]

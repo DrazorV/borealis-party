@@ -883,6 +883,7 @@ dependencies = [
  "lettre",
  "party-combat",
  "party-encounter",
+ "party-sim",
  "party-tools",
  "rand 0.9.5",
  "reqwest",
@@ -3649,6 +3650,7 @@ name = "party-encounter"
 version = "0.3.0"
 dependencies = [
  "borealis-content",
+ "party-combat",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -3660,6 +3662,19 @@ version = "0.3.0"
 dependencies = [
  "reqwest",
  "serde_json",
+]
+
+[[package]]
+name = "party-sim"
+version = "0.3.0"
+dependencies = [
+ "borealis-content",
+ "party-combat",
+ "party-encounter",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]
