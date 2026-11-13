@@ -47,6 +47,16 @@ describe("turn order", () => {
     expect(m.view.state.current).toBe("knight");
   });
 
+  it("a creature whose block prints no AC (a thin companion) has no AC, with or without effects (D17 b)", () => {
+    const m = ready();
+    const knight = byId(m.view.state, "knight")!;
+    const thin = { ...knight, id: "wisp", ac: null };
+    const state = { ...m.view.state, combatants: [...m.view.state.combatants, thin] };
+    expect(effectiveAc(state, thin)).toEqual({ base: null, effects: 0, cover: 0, total: null });
+    const shielded = { ...state, effects: [{ id: 99, name: "Shield", target: "wisp", modifiers: [{ kind: "ac" as const, value: 5 }] }] };
+    expect(effectiveAc(shielded, thin).total).toBeNull();
+  });
+
   it("unlinks the mount when its rider goes down, and the rider loses the mount's cover (C3, C22)", () => {
     const m = ready();
     run(m, { command: "add_effect", effect: { name: "Mounted", target: "knight", modifiers: [{ kind: "cover", value: "half" }], ends_on_defeat_of: ["warhorse"] } });

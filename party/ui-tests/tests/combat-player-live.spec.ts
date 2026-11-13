@@ -162,7 +162,12 @@ test.describe("The player's Combat sub-tab with the combat server (0.3.0)", () =
         // The DM ends it: the sub-tab goes.
         await api(request, dm.token, "POST", `/api/combats/${started.id}/end`, { requestId: rid(), args: {} });
         await expect(page.getByRole("tab", { name: "Combat" })).toHaveCount(0, { timeout: LIVE_MS });
-        await expect(page.getByRole("button", { name: /^Live$/ })).toHaveCount(0);
+        // The Live chip is the account's: the rig's seeded player may be in another spec's live combat meanwhile
+        // (the tracker's real-server spec runs in parallel), so it must go only when none is live anywhere.
+        const parties = (await api<{ parties: { id: string }[] }>(request, player.token, "GET", "/api/parties")).parties;
+        const elsewhere = await Promise.all(parties.filter((p) => p.id !== party.id).map(async (p) =>
+          ((await api<{ combat: string | null }>(request, player.token, "GET", `/api/parties/${p.id}/combat`)).combat !== null)));
+        if (!elsewhere.some(Boolean)) await expect(page.getByRole("button", { name: /^Live$/ })).toHaveCount(0);
       } finally {
         await page.context().close();
       }

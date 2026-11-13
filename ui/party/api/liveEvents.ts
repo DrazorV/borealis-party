@@ -12,16 +12,23 @@ import type { ServerSession } from "./session";
  * One stream per session is shared by everyone who listens (the API's events, the sync runner, the Parties page), so
  * a browser over plain HTTP keeps its few connections to the server for requests (plan 3.7). It reopens with
  * `?after=<the last event id>`, so the server can tell the client whether it missed anything (party events carry ids).
+ *
+ * A stream that stays open but goes silent (a proxy or a phone network that keeps the socket and drops the data) is
+ * caught too: once the server has sent its first `party://ping` (every 15 s, combat-api.md), {@link SILENT_MS} with
+ * nothing at all aborts that stream and reopens it like a drop. A server that doesn't ping is never cut off this way.
  */
 
 const FIRST_MS = 1000;
 const CAP_MS = 30 * 1000;
 /** A stream that ends sooner than this after opening counts as a failed open (no tight reopen loop). */
 const STEADY_MS = 5000;
+/** The server's heartbeat (every 15 s): after the first one, three missed and the stream is taken for dead. */
+export const PING_EVENT = "party://ping";
+export const SILENT_MS = 45_000;
 
 export interface LiveOptions {
   onOpen?: (again: boolean) => void;
-  /** Anything arrived on the open stream: an event, or the server's keep-alive ping (an SSE comment). */
+  /** Anything arrived on the open stream: an event, the server's `party://ping`, or a keep-alive comment. */
   onBeat?: () => void;
   /** The open stream ended or failed; it reopens by itself (onOpen with `again`). */
   onDrop?: () => void;
@@ -96,9 +103,19 @@ function openStream(session: ServerSession, onEvent: (e: ServerEvent) => void, o
       let reached = false;
       let answered = false;
       let openedAt = 0;
+      // This attempt's own abort: the caller's stop, or the silence watchdog.
+      const attempt = new AbortController();
+      const onStop = () => attempt.abort();
+      abort.signal.addEventListener("abort", onStop, { once: true });
+      let pings = false;
+      let dog: ReturnType<typeof setTimeout> | undefined;
+      const watch = () => {
+        clearTimeout(dog);
+        if (pings) dog = setTimeout(() => attempt.abort(), SILENT_MS);
+      };
       try {
         const after = lastId !== null ? `?after=${encodeURIComponent(lastId)}` : "";
-        const response = await get(`${session.baseUrl}/api/events${after}`, { headers: { authorization: `Bearer ${session.token}` }, signal: abort.signal });
+        const response = await get(`${session.baseUrl}/api/events${after}`, { headers: { authorization: `Bearer ${session.token}` }, signal: attempt.signal });
         answered = true;
         if (!response.ok || !response.body) {
           // A proxy in front of a server that is down; a refused token is the requests' business (http.ts).
@@ -116,6 +133,7 @@ function openStream(session: ServerSession, onEvent: (e: ServerEvent) => void, o
           const { done, value } = await reader.read();
           if (done) break;
           options.onBeat?.();
+          watch();
           buffer += value;
           let end = buffer.indexOf("\n\n");
           while (end >= 0) {
@@ -125,7 +143,13 @@ function openStream(session: ServerSession, onEvent: (e: ServerEvent) => void, o
             buffer = buffer.slice(end + 2);
             if (id) lastId = id;
             if (data) {
-              try { onEvent(JSON.parse(data) as ServerEvent); } catch { /* one bad event never ends the stream */ }
+              try {
+                const event = JSON.parse(data) as ServerEvent;
+                // The heartbeat is the stream's own business: it arms the watchdog and goes no further.
+                if (event.event === PING_EVENT) {
+                  if (!pings) { pings = true; watch(); }
+                } else onEvent(event);
+              } catch { /* one bad event never ends the stream */ }
             }
             end = buffer.indexOf("\n\n");
           }
@@ -134,6 +158,9 @@ function openStream(session: ServerSession, onEvent: (e: ServerEvent) => void, o
         if (abort.signal.aborted) break;
         // No answer at all: the network or the server.
         if (!answered) suspectServer();
+      } finally {
+        clearTimeout(dog);
+        abort.signal.removeEventListener("abort", onStop);
       }
       if (abort.signal.aborted) break;
       if (reached) options.onDrop?.();

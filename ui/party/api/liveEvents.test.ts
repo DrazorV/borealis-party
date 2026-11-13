@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { memoryStorage } from "../test/memoryStorage";
 import { BACK_MS, connectivity, resetConnectivity } from "./connectivity";
 import type { ServerEvent } from "./http";
-import { liveEvents as start } from "./liveEvents";
+import { liveEvents as start, SILENT_MS } from "./liveEvents";
 import { saveSession, type ServerSession } from "./session";
 
 const user = { id: "u1", username: "ana", email: null, admin: false, mustChangePassword: false };
@@ -96,6 +96,35 @@ it("a stream that drops after a while reopens at once, and says events may have 
   expect(open).toHaveBeenLastCalledWith(true);
   // A drop the stream got over by itself is no reconnecting.
   expect(connectivity().link).toBe("up");
+  stop();
+});
+
+it("after the server's first ping, a stream that goes silent is reopened; the ping itself isn't an event", async () => {
+  const got: ServerEvent[] = [];
+  const open = vi.fn();
+  const drop = vi.fn();
+  const stop = liveEvents(session, (e) => got.push(e), { onOpen: open, onDrop: drop });
+  await tick();
+  streams[0]!.send({ event: "party://ping", payload: {} });
+  await tick(SILENT_MS - 1000);
+  // Pings keep it open.
+  streams[0]!.send({ event: "party://ping", payload: {} });
+  await tick(SILENT_MS - 1000);
+  expect(opens).toBe(1);
+  expect(got).toEqual([]);
+  // Silence past the limit: aborted and reopened, events may have been missed.
+  await tick(2000);
+  expect(drop).toHaveBeenCalled();
+  expect(opens).toBe(2);
+  expect(open).toHaveBeenLastCalledWith(true);
+  stop();
+});
+
+it("a server that never pings is never cut off for being quiet", async () => {
+  const stop = liveEvents(session, () => {}, {});
+  await tick();
+  await tick(5 * SILENT_MS);
+  expect(opens).toBe(1);
   stop();
 });
 

@@ -213,7 +213,7 @@ export function AddCreatureDialog({ creatures, onDone }: {
       <div className="cb-form">
         <label className="cb-field"><span>A copy of</span>
           <select className="input" value={fromId} onChange={(e) => setFromId(e.target.value)}>
-            {creatures.map((c) => <option key={c.id} value={c.id}>{c.label} ({c.hp.max} HP, AC {c.ac})</option>)}
+            {creatures.map((c) => <option key={c.id} value={c.id}>{c.label} ({c.hp.max} HP, AC {c.ac ?? "—"})</option>)}
           </select>
         </label>
         <label className="cb-field"><span>Name</span><input className="input" value={label} placeholder={from ? `${from.label.replace(/\s*\d+$/, "")} (new)` : ""} onChange={(e) => setLabel(e.target.value)} /></label>
@@ -232,7 +232,8 @@ export interface SummonChoice {
   companion?: string;
   name: string;
   hp: number;
-  ac: number;
+  /** Null when the copied creature's block prints no AC (a thin companion). */
+  ac: number | null;
   initBonus: number;
   walk: number;
   /** "" = right after its owner; a number = its own (typed) initiative; "roll" = rolled in the app. */
@@ -285,7 +286,7 @@ export function SummonDialog({ owner, creatures, offers = [], onDone }: {
           <select className="input" value={copyOf} onChange={(e) => setCopyOf(e.target.value)}>
             <option value="">A quick block (type it below)</option>
             {offers.map((o) => <option key={o.key} value={`companion:${o.key}`}>From {owner.label}'s sheet: {o.name} ({o.hp} HP, AC {o.ac})</option>)}
-            {creatures.map((c) => <option key={c.id} value={c.id}>A copy of {c.label} ({c.hp.max} HP, AC {c.ac})</option>)}
+            {creatures.map((c) => <option key={c.id} value={c.id}>A copy of {c.label} ({c.hp.max} HP, AC {c.ac ?? "—"})</option>)}
           </select>
         </label>
         <label className="cb-field"><span>Name</span><input className="input" value={name} placeholder={from ? from.label : "Wolf"} onChange={(e) => setName(e.target.value)} /></label>

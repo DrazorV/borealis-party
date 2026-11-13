@@ -82,7 +82,7 @@ function Row({ c, state, selected, onSelect, send, disabled }: {
           {owner && <span className="cb-pet-mark" title={`Controlled by ${c.controller?.kind === "player" ? `${owner.label}'s player` : "the DM"}`}>{c.controller?.kind === "player" ? "Player's" : "Summon"}</span>}
         </span>
         <span className="cb-row-meta">
-          {pc ? <span>Player · {c.absent ? "absent" : out ? "no initiative" : "PC"}</span> : <span>AC <b>{effectiveAc(state, c).total}</b></span>}
+          {pc ? <span>Player · {c.absent ? "absent" : out ? "no initiative" : "PC"}</span> : <span>AC <b>{effectiveAc(state, c).total ?? "—"}</b></span>}
           {owner && <span>↳ {owner.label}</span>}
           {conds.length > 0 && <span className="cb-row-conds">{conds.map(conditionWord).join(", ")}</span>}
         </span>

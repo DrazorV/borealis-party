@@ -1955,6 +1955,7 @@ async fn combats_on_postgres() {
     add_sweep_and_limits(&postgres_table(&url, &dir.path().join("add")).await).await;
     summons_and_companions(&postgres_table(&url, &dir.path().join("summons")).await).await;
     live_and_unblocked(&postgres_table(&url, &dir.path().join("live")).await).await;
+    companions_from_an_encounter(&postgres_table(&url, &dir.path().join("companions")).await).await;
     drop_all(&url).await;
 }
 
@@ -2320,4 +2321,94 @@ fn a_hidden_pool_member_changes_no_player_byte() {
         !text.contains("legendary_actions") && !text.contains("\"remaining\""),
         "{text}"
     );
+}
+
+// Companions from an encounter (D17 b): their printed HP and AC, and rolled HP from their formula.
+
+/// An Aurora pack with two made-up Companion elements (Aurora's loader needs every one of these setters).
+fn companions_pack() -> Value {
+    use base64::Engine as _;
+    let xml = r#"<?xml version="1.0" encoding="utf-8"?><elements>
+      <info><update version="0.0.1"><file name="combat-companions.xml" url="https://example.invalid/combat-companions.xml"/></update></info>
+      <element name="Hound" type="Companion" source="Test Companions" id="ID_TEST_COMPANION_HOUND">
+        <setters><set name="ac">13</set><set name="hp">9 (2d8)</set><set name="speed">40 ft.</set>
+          <set name="strength">13</set><set name="dexterity">14</set><set name="constitution">12</set>
+          <set name="intelligence">3</set><set name="wisdom">12</set><set name="charisma">6</set>
+          <set name="type">Beast</set><set name="size">Medium</set><set name="challenge">1/4</set><set name="alignment">unaligned</set></setters>
+      </element>
+      <element name="Wisp" type="Companion" source="Test Companions" id="ID_TEST_COMPANION_WISP">
+        <setters><set name="ac">12</set><set name="hp">4 (1d8)</set><set name="speed">0 ft., fly 30 ft.</set>
+          <set name="strength">1</set><set name="dexterity">16</set><set name="constitution">10</set>
+          <set name="intelligence">6</set><set name="wisdom">12</set><set name="charisma">10</set>
+          <set name="type">Fey</set><set name="size">Tiny</set><set name="challenge">0</set><set name="alignment">neutral</set></setters>
+      </element></elements>"#;
+    json!({ "request": {
+        "fileName": "combat-companions.xml",
+        "contentBase64": base64::engine::general_purpose::STANDARD.encode(xml),
+    }})
+}
+
+async fn companions_from_an_encounter(t: &Table) {
+    let (status, out) = t.dm.rpc("import_pack", companions_pack()).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let hp_of_label = |v: &Value, label: &str| {
+        combatants_of(v)
+            .into_iter()
+            .find(|c| c["label"] == label)
+            .unwrap_or_else(|| panic!("no {label}: {v}"))
+    };
+    for (mode, rolled) in [("average", false), ("rolled", true)] {
+        let e = ok(
+            &t.dm,
+            "POST",
+            &format!("/api/parties/{}/encounters", t.party),
+            json!({ "name": format!("Companions {mode}"), "hpMode": mode }),
+        )
+        .await;
+        let e = e["id"].as_str().unwrap().to_string();
+        let path = format!("/api/encounters/{e}/creatures");
+        ok(
+            &t.dm,
+            "POST",
+            &path,
+            json!({ "elementId": "ID_TEST_COMPANION_HOUND", "dmLabel": "Hound", "hidden": false }),
+        )
+        .await;
+        ok(
+            &t.dm,
+            "POST",
+            &path,
+            json!({ "elementId": "ID_TEST_COMPANION_WISP", "dmLabel": "Wisp", "hidden": false }),
+        )
+        .await;
+        let v = ok(
+            &t.dm,
+            "POST",
+            &format!("/api/encounters/{e}/start"),
+            json!({ "requestId": request_id() }),
+        )
+        .await;
+        let hound = hp_of_label(&v, "Hound");
+        let wisp = hp_of_label(&v, "Wisp");
+        let hp = hound["hp"]["max"].as_i64().unwrap();
+        if rolled {
+            assert!((2..=16).contains(&hp), "2d8 rolled: {hp}");
+        } else {
+            assert_eq!(hp, 9, "the printed average, not a fallback: {hound}");
+            assert_eq!(wisp["hp"]["max"], 4);
+        }
+        assert_eq!(hound["ac"], 13, "{hound}");
+        assert_eq!(wisp["ac"], 12, "{wisp}");
+        let id = hound["id"].as_str().unwrap();
+        assert_eq!(v["creatures"][id]["origin"], "encounter");
+        assert_eq!(v["creatures"][id]["name"], "Hound");
+        let combat = v["id"].as_str().unwrap().to_string();
+        act_ok(&t.dm, &combat, "end", json!({})).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn encounter_companions_start_with_their_printed_or_rolled_numbers() {
+    let dir = tempfile::tempdir().unwrap();
+    companions_from_an_encounter(&memory_table(dir.path()).await).await;
 }
