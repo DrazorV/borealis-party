@@ -13,8 +13,10 @@ const state = vi.hoisted(() => ({ confirm: "confirm" as string, toasts: [] as { 
 vi.mock("../../src/components/Confirm", () => ({ useConfirm: () => async () => state.confirm }));
 vi.mock("../../src/components/Toast", () => ({ useToast: () => ({ push: (text: string, tone?: string) => state.toasts.push({ text, tone }) }) }));
 
-const { EncountersPage, EncounterTeaser } = await import("./EncountersPage");
-const { EncounterBuilder } = await import("./EncounterBuilder");
+const { EncountersPage, EncounterTeaser, OldEncounterRoute } = await import("./EncountersPage");
+const { DmOnly, EncounterWorkspace } = await import("./EncounterWorkspace");
+const { CombatHome } = await import("./CombatHome");
+const { combatDeps, resetCombatDeps } = await import("../api/overrides/combat");
 
 let server: FakeEncounters;
 let listeners: ((e: ServerEvent) => void)[] = [];
@@ -28,9 +30,15 @@ function page(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
+        {/* As entry/App.tsx has them. */}
+        <Route path="/encounters/:party" element={<DmOnly><EncounterWorkspace /></DmOnly>} />
+        <Route path="/encounters/:party/:encounter" element={<DmOnly><EncounterWorkspace /></DmOnly>} />
         <Route path="/parties/:party/encounters" element={<EncountersPage />} />
-        <Route path="/parties/:party/encounters/:encounter" element={<EncounterBuilder />} />
+        <Route path="/parties/:party/encounters/:encounter" element={<OldEncounterRoute />} />
         <Route path="/parties" element={<EncounterTeaser partyId="p1" dm={server.me === "dm1"} />} />
+        <Route path="/combat" element={<DmOnly><CombatHome /></DmOnly>} />
+        <Route path="/combat/:id" element={<p>Tracker</p>} />
+        <Route path="/" element={<p>Start page</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -40,7 +48,7 @@ const dialog = () => screen.getByRole("dialog");
 
 /** The DM makes an encounter from the list page; answers its id. */
 async function makeEncounter(name = "Goblin ambush") {
-  page("/parties/p1/encounters");
+  page("/encounters/p1");
   fireEvent.click(await screen.findByRole("button", { name: /New encounter/ }));
   fireEvent.change(within(dialog()).getByLabelText("Encounter name"), { target: { value: name } });
   fireEvent.click(within(dialog()).getByRole("button", { name: "Create" }));
@@ -72,7 +80,13 @@ beforeEach(() => {
   listeners = [];
   partiesDeps.events = (onEvent) => { listeners.push(onEvent); return () => { listeners = listeners.filter((l) => l !== onEvent); }; };
   partiesDeps.fetch = async (_s, _m, path) => {
-    if (path === "/api/parties/p1") return { id: "p1", name: "Tuesday Party", ruleset: "dnd2024", role: "dm", dmName: "dana", memberCount: 1, myCharacters: [], createdAt: 1, updatedAt: 1, members: [] };
+    const summary = { id: "p1", name: "Tuesday Party", ruleset: "dnd2024", role: server.me === "dm1" ? "dm" : "player", dmName: "dana", memberCount: 1, myCharacters: [], createdAt: 1, updatedAt: 1 };
+    if (path === "/api/parties/p1") return { ...summary, members: [] };
+    // dm1 runs p1; pl1 plays in it, and pl2 has the DM switch on for parties of its own.
+    if (path === "/api/parties") {
+      return { dm: server.me !== "pl1", parties: server.me === "pl2" ? [summary, { ...summary, id: "p2", name: "Own party", role: "dm" }] : [summary] };
+    }
+    if (path === "/api/me/roles") return { dm: server.me !== "pl1" };
     return Promise.reject({ code: "not_found" });
   };
   state.toasts = [];
@@ -83,7 +97,118 @@ beforeEach(() => {
 afterEach(() => {
   resetEncounters();
   resetParties();
+  resetCombatDeps();
   vi.unstubAllGlobals();
+});
+
+/** A big screen (1440 px): the Encounters tab uses the whole width (EncounterToolPanel.tsx WIDE_QUERY). */
+function bigScreen() {
+  vi.stubGlobal("matchMedia", (q: string) => ({
+    matches: q.includes("min-width: 1100px"), media: q, onchange: null, addEventListener: () => undefined,
+    removeEventListener: () => undefined, addListener: () => undefined, removeListener: () => undefined, dispatchEvent: () => false,
+  }));
+}
+
+describe("encounters on a big screen", () => {
+  beforeEach(bigScreen);
+
+  it("shows the list beside the open encounter, with no bottom bar and the Players card tidied", async () => {
+    const id = await makeEncounter("Goblin ambush");
+    expect(screen.getByRole("navigation", { name: "Tuesday Party: encounters" })).toBeTruthy();
+    const current = screen.getByRole("link", { name: "Open Goblin ambush" });
+    expect(current.getAttribute("aria-current")).toBe("page");
+    expect(current.getAttribute("href")).toBe(`/encounters/p1/${id}`);
+    expect(screen.queryByRole("status", { name: "Encounter summary" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Back to encounters" })).toBeNull();
+    expect(document.querySelector(".enc-builder.is-wide .enc-cols .enc-col-side")!.textContent).toContain("Players and combat");
+    expect(screen.getByText("Set the status to Ready to start its combat.")).toBeTruthy();
+    expect(document.querySelector(".enc-head-actions")).toBeTruthy();
+  });
+
+  it("docks the picker beside the creatures: search has the focus, Enter adds the highlighted one, the panel stays", async () => {
+    await makeEncounter();
+    fireEvent.click(within(screen.getByRole("region", { name: "Creatures" })).getByRole("button", { name: /Add creatures/ }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const panel = await screen.findByRole("complementary", { name: "Add creatures" });
+    const search = within(panel).getByLabelText("Search creatures");
+    await waitFor(() => expect(document.activeElement).toBe(search));
+    await within(panel).findByRole("button", { name: "Add Owlbear" });
+    fireEvent.change(search, { target: { value: "owlbear" } });
+    await waitFor(() => expect(within(panel).queryByRole("button", { name: "Add Goblin Warrior" })).toBeNull());
+    fireEvent.change(within(panel).getByLabelText("How many to add"), { target: { value: "2" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+    await within(panel).findByText("Added 2 × Owlbear.");
+    expect(server.calls.filter((c) => c.path.endsWith("/creatures") && c.method === "POST").map((c) => c.body))
+      .toEqual([{ elementId: "ID_SRD521_MONSTER_OWLBEAR", count: 2 }]);
+    expect(screen.getByRole("heading", { name: "Creatures (2)" })).toBeTruthy();
+    expect(screen.getByRole("complementary", { name: "Add creatures" })).toBeTruthy();
+    // A row's own Add, then the arrow keys.
+    fireEvent.change(search, { target: { value: "" } });
+    fireEvent.click(await within(panel).findByRole("button", { name: "Add Goblin Warrior" }));
+    // "How many" is back to one after an add.
+    expect((within(panel).getByLabelText("How many to add") as HTMLInputElement).value).toBe("1");
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Creatures (3)" })).toBeTruthy());
+    fireEvent.keyDown(search, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "Add creatures" })).toBeNull());
+  });
+
+  it("opens the picker with / when nobody is typing", async () => {
+    await makeEncounter();
+    fireEvent.keyDown(document.body, { key: "/" });
+    expect(await screen.findByRole("complementary", { name: "Add creatures" })).toBeTruthy();
+  });
+
+  it("asks to pick an encounter when none is open", async () => {
+    await makeEncounter("First");
+    cleanup();
+    page("/encounters/p1");
+    expect(await screen.findByText("Pick an encounter")).toBeTruthy();
+  });
+});
+
+describe("the Combat tab", () => {
+  it("lists live combats first, then ready encounters to start, then drafts to finish", async () => {
+    await makeEncounter("Draft one");
+    await makeEncounter("Ready one");
+    await makeEncounter("Live one");
+    const [live, ready] = [server.encounters.find((e) => e.name === "Live one")!, server.encounters.find((e) => e.name === "Ready one")!];
+    live.status = "live";
+    ready.status = "ready";
+    combatDeps.fetch = async (_s, _m, path) => (path === "/api/parties/p1/combat" ? { combat: "c9" } : Promise.reject({ code: "not_found" }));
+    cleanup();
+    page("/combat");
+    const now = await screen.findByRole("region", { name: "Live now" });
+    const resume = await within(now).findByRole("link", { name: "Resume Live one" });
+    expect(resume.getAttribute("href")).toBe("/combat/c9");
+    const toRun = screen.getByRole("region", { name: "Ready to run" });
+    // One live combat per party: the ready one waits for it.
+    expect(within(toRun).getByText("Tuesday Party has a combat running.")).toBeTruthy();
+    const drafts = screen.getByRole("region", { name: "Drafts" });
+    expect(within(drafts).getByRole("link", { name: "Finish Draft one in Encounters" }).getAttribute("href")).toMatch(/^\/encounters\/p1\//);
+    const order = [...document.querySelectorAll(".cbh .card")].map((c) => c.getAttribute("aria-label"));
+    expect(order).toEqual(["Live now", "Ready to run", "Drafts"]);
+    expect(document.body.textContent).not.toMatch(/XP|difficulty/i);
+  });
+
+  it("starts a ready encounter's combat and opens the tracker", async () => {
+    await makeEncounter("Ready one");
+    server.encounters[0]!.status = "ready";
+    combatDeps.fetch = async (_s, m, path) => {
+      if (m === "POST" && path.endsWith("/start")) return { id: "c1" };
+      return Promise.reject({ code: "not_found" });
+    };
+    cleanup();
+    page("/combat");
+    const toRun = await screen.findByRole("region", { name: "Ready to run" });
+    fireEvent.click(await within(toRun).findByRole("button", { name: "Start combat" }));
+    expect(await screen.findByText("Tracker")).toBeTruthy();
+  });
+
+  it("is closed to players", async () => {
+    signIn("pl1");
+    page("/combat");
+    expect(await screen.findByText("Start page")).toBeTruthy();
+  });
 });
 
 describe("encounters list (DM)", () => {
@@ -99,7 +224,7 @@ describe("encounters list (DM)", () => {
     await makeEncounter("Goblin ambush");
     await addFromPicker([["Goblin Warrior", 4]]);
     cleanup();
-    page("/parties/p1/encounters");
+    page("/encounters/p1");
     const row = await screen.findByRole("link", { name: "Open Goblin ambush" });
     expect(row.textContent).toContain("4 creatures (4 hidden)");
     expect(within(row).getByText("Draft")).toBeTruthy();
@@ -273,13 +398,34 @@ describe("encounter builder (DM)", () => {
     expect(await screen.findByRole("heading", { name: "Renamed elsewhere" })).toBeTruthy();
   });
 
-  it("a player opening the builder's address gets nothing of a draft", async () => {
+  it("a player opening the builder's address (old or new) gets the start page, and nothing of a draft", async () => {
+    const id = await makeEncounter("Secret");
+    for (const path of [`/parties/p1/encounters/${id}`, `/encounters/p1/${id}`]) {
+      cleanup();
+      signIn("pl1");
+      page(path);
+      expect(await screen.findByText("Start page")).toBeTruthy();
+      expect(screen.queryByText("Secret")).toBeNull();
+    }
+  });
+
+  it("another DM opening it gets told it isn't theirs", async () => {
     const id = await makeEncounter("Secret");
     cleanup();
-    signIn("pl1");
-    page(`/parties/p1/encounters/${id}`);
-    expect(await screen.findByText("This encounter isn't there any more.")).toBeTruthy();
+    signIn("pl2");
+    page(`/encounters/p1/${id}`);
+    expect(await screen.findByText("This party isn't there any more, or you don't run it.")).toBeTruthy();
     expect(screen.queryByText("Secret")).toBeNull();
+  });
+
+  it("the 0.3.0 addresses lead the DM to the Encounters tab", async () => {
+    const id = await makeEncounter("Goblin ambush");
+    cleanup();
+    page("/parties/p1/encounters");
+    expect(await screen.findByRole("link", { name: "Open Goblin ambush" })).toBeTruthy();
+    cleanup();
+    page(`/parties/p1/encounters/${id}`);
+    expect(await screen.findByRole("heading", { name: "Goblin ambush" })).toBeTruthy();
   });
 });
 
@@ -312,7 +458,7 @@ describe("players", () => {
 
   it("the DM's party card links to the encounters", () => {
     page("/parties");
-    expect(screen.getByRole("link", { name: "Encounters" }).getAttribute("href")).toBe("/parties/p1/encounters");
+    expect(screen.getByRole("link", { name: "Encounters" }).getAttribute("href")).toBe("/encounters/p1");
   });
 });
 

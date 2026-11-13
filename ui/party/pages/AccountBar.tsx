@@ -5,7 +5,9 @@ import { Button } from "../../src/components/Button";
 import { Icon } from "../../src/components/Icon";
 import { phoneOs, usePhone } from "../../src/lib/phone";
 import { isTauri } from "../../src/lib/tauri";
+import { useDmRole } from "../api/dmRole";
 import { loadSession } from "../api/session";
+import { COMBAT_ROUTE, ENCOUNTERS_ROUTE } from "../entry/encountersTab";
 import { requestSync, useSyncStatus, type SyncStatus } from "../sync/runner";
 import { AppOffer } from "./AppOffer";
 import { DesktopUpdate } from "./DesktopUpdate";
@@ -112,6 +114,8 @@ function MoreRows({ admin, exit }: { admin: boolean; exit: ReturnType<typeof use
   const { pathname } = useLocation();
   const nav = useNavigate();
   const status = useSyncStatus();
+  // A DM's Encounters and Combat main tabs live here on phones (entry/encountersTab.ts).
+  const dm = useDmRole();
   const host = useHost("party-more", ".v5-list-pane > .v5-list");
   if (pathname !== "/more" || !host) return null;
   const name = loadSession()?.user.username;
@@ -135,6 +139,12 @@ function MoreRows({ admin, exit }: { admin: boolean; exit: ReturnType<typeof use
       <li><Link className="v5-row" to="/share" style={{ textDecoration: "none" }}><Icon name="send" /><span className="grow">Share with a code</span><Icon name="chevron" /></Link></li>
       <li><Link className="v5-row" to={PARTIES_ROUTE} style={{ textDecoration: "none" }}><Icon name="swords" /><span className="grow">Parties</span><Icon name="chevron" /></Link></li>
       <li><Link className="v5-row" to={HOMEBREW_ROUTE} style={{ textDecoration: "none" }}><Icon name="hammer" /><span className="grow">Homebrew</span><Icon name="chevron" /></Link></li>
+      {dm && (
+        <>
+          <li><Link className="v5-row" to={ENCOUNTERS_ROUTE} style={{ textDecoration: "none" }}><Icon name="cards" /><span className="grow">Encounters</span><Icon name="chevron" /></Link></li>
+          <li><Link className="v5-row" to={COMBAT_ROUTE} style={{ textDecoration: "none" }}><Icon name="swords" /><span className="grow">Combat</span><Icon name="chevron" /></Link></li>
+        </>
+      )}
       {admin && (
         <li><Link className="v5-row" to="/admin" style={{ textDecoration: "none" }}><Icon name="shield" /><span className="grow">Admin</span><Icon name="chevron" /></Link></li>
       )}

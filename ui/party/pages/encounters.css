@@ -112,3 +112,84 @@ html.phone .enc-creature-controls > .btn { flex: 1 1 auto; justify-content: cent
   .enc-sb-abilities { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .enc-creature.is-pet { margin-left: var(--sp-2); }
 }
+
+/*
+ * The Encounters main tab (0.3.1): a DM preparing a session on a big screen. From 1100 px (EncounterToolPanel.tsx
+ * WIDE_QUERY) the page uses the whole width: the party's encounters on the left, then the open one in columns, with
+ * the creatures as the big middle panel, the tool panel (picker, assistant) beside them, and players, combat and setup
+ * on the right. Every column scrolls on its own; the page itself doesn't.
+ */
+.aur-content > .enc-ws { flex: 1 1 0; min-height: 0; }
+.enc-ws { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 0; overflow: hidden; }
+.enc-ws-list { overflow: auto; padding: var(--sp-3); border-right: var(--border-w, 1px) solid var(--border); background: var(--bg); min-width: 0; }
+.enc-ws-list .enc-list-card { border: 0; background: transparent; padding: 0; }
+.enc-ws-list .enc-list { gap: var(--sp-1); }
+.enc-ws-list .enc-row { flex-wrap: wrap; }
+.enc-row.is-current { border-color: var(--accent-base, currentColor); background: var(--accent-60, var(--surface-2)); box-shadow: inset 3px 0 0 var(--gold, #b38b2d); }
+.enc-ws-main { overflow: auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.enc-ws-empty { margin: auto; max-width: 420px; padding: var(--sp-5); }
+
+.enc-builder.is-wide { max-width: none; margin: 0; flex: 1 1 auto; min-height: 0; }
+.enc-builder.is-wide .enc-head { position: sticky; top: 0; z-index: 4; background: var(--bg); padding: var(--sp-2) 0; }
+.enc-head-actions { display: flex; gap: var(--sp-2); align-items: center; flex: none; }
+.enc-head .enc-title { flex: 0 1 auto; }
+
+.enc-cols {
+  display: grid; gap: var(--sp-3); align-items: start;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
+  grid-template-areas: "main side";
+}
+.enc-col-main { grid-area: main; display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.enc-col-side { grid-area: side; display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; position: sticky; top: 48px; }
+.enc-panels { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); align-items: start; }
+.enc-panels > .enc-card { margin: 0; }
+/* With a tool open the side column moves under the creatures, unless the screen has room for all four columns. */
+.enc-builder.has-tool .enc-cols { grid-template-columns: minmax(0, 1fr) minmax(380px, 440px); grid-template-areas: "main tool" "side tool"; }
+.enc-builder.has-tool .enc-col-side { position: static; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); align-items: start; }
+@media (min-width: 1700px) {
+  .enc-builder.has-tool .enc-cols { grid-template-columns: minmax(0, 1fr) 440px 340px; grid-template-areas: "main tool side"; }
+  .enc-builder.has-tool .enc-col-side { position: sticky; display: flex; }
+}
+.enc-tool {
+  grid-area: tool; position: sticky; top: 48px; display: flex; flex-direction: column; min-width: 0; margin: 0;
+  max-height: calc(100dvh - 260px); min-height: 360px; border-style: solid; border-color: var(--accent-base, var(--border));
+}
+.enc-tool > .card-head { flex: none; margin-bottom: var(--sp-2); }
+.enc-tool-body { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.enc-tool-foot { flex: none; display: flex; gap: var(--sp-2); justify-content: flex-end; padding-top: var(--sp-2); }
+.enc-tool .enc-picker-body { min-height: 0; }
+
+/* The picker as a panel: search with "How many", a keyboard cursor, one Add per row. */
+.enc-search-row { display: flex; gap: var(--sp-2); align-items: flex-end; position: sticky; top: 0; z-index: 1; background: inherit; }
+.enc-tool .enc-search-row { background: var(--accent-20, var(--surface)); padding-bottom: var(--sp-1); }
+.enc-search-row .enc-search { flex: 1 1 auto; min-width: 0; }
+.enc-howmany { display: flex; flex-direction: column; gap: 2px; flex: none; }
+.enc-howmany .input { width: 64px; box-sizing: border-box; }
+.enc-result.is-cursor { border-color: var(--gold, #b38b2d); box-shadow: inset 3px 0 0 var(--gold, #b38b2d); }
+.enc-added { margin: 0; color: var(--success, #6fbf73); }
+.enc-builder.is-wide .enc-creatures-card .card-head .muted { white-space: nowrap; }
+.enc-builder.is-wide .enc-creature-head .enc-creature-text { flex-direction: row; flex-wrap: wrap; column-gap: var(--sp-3); align-items: baseline; }
+
+/* Players and combat (the tidied 0.3.0 Players card): label and its note on the left, the control on the right. */
+.enc-field { display: flex; gap: var(--sp-3); align-items: center; justify-content: space-between; padding: var(--sp-2) 0; }
+.enc-field + .enc-field { border-top: var(--border-w, 1px) dashed var(--border); }
+.enc-field-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
+.enc-field > .btn, .enc-field > .aur-switch { flex: none; }
+.enc-combat { display: flex; flex-direction: column; gap: var(--sp-1); padding-top: var(--sp-2); border-top: var(--border-w, 1px) dashed var(--border); }
+.enc-combat > .btn, .enc-combat > a.btn { align-self: stretch; justify-content: center; }
+.enc-players .card-head { margin-bottom: 0; }
+
+/* The Combat tab's list (CombatHome.tsx): live first, then ready, then drafts; cards across a big screen. */
+.cbh { max-width: none; }
+.cbh-grid { display: grid; gap: var(--sp-2); grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); }
+.cbh-item { list-style: none; display: flex; gap: var(--sp-2); align-items: center; padding: var(--sp-2) var(--sp-3); border: var(--border-w, 1px) solid var(--border); background: var(--surface); min-height: 44px; }
+.cbh-item.is-live { border-left: 4px solid var(--danger, #c0392b); }
+.cbh-item.is-draft { border-style: dashed; }
+.cbh-item > .btn, .cbh-item > a.btn { flex: none; }
+html.phone .cbh-item .btn { min-height: var(--ph-hit); }
+@media (max-width: 480px) { .cbh-grid { grid-template-columns: minmax(0, 1fr); } .cbh-item { flex-wrap: wrap; } }
+/* A big screen: one line per creature, its switch and Edit beside its name. */
+.enc-builder.is-wide .enc-creature { display: flex; gap: var(--sp-3); align-items: center; }
+.enc-builder.is-wide .enc-creature > .enc-creature-head { flex: 1 1 auto; min-width: 0; align-items: center; }
+.enc-builder.is-wide .enc-creature > .enc-creature-controls { margin-top: 0; flex: none; flex-wrap: nowrap; }
+.enc-result-text { flex: 1 1 auto; }

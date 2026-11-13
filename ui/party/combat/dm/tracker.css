@@ -27,7 +27,8 @@
 @media (prefers-reduced-motion: reduce) { .cb-live-dot { animation: none; } }
 
 /* ---- the tracker page ---- */
-.cb-page { padding: var(--sp-3) var(--sp-4) var(--sp-5); max-width: 1550px; margin: 0 auto; width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: var(--sp-3); }
+/* The Combat tab uses the whole width of a big screen (0.3.1). */
+.cb-page { padding: var(--sp-3) var(--sp-4) var(--sp-5); max-width: none; margin: 0 auto; width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: var(--sp-3); }
 .cb-small { font-size: var(--fs-xs); }
 .cb-pad { padding: var(--sp-3); }
 .cb-overline { font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; opacity: 0.7; font-weight: 700; }

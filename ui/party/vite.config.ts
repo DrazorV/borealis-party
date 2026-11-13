@@ -18,8 +18,9 @@ const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     "./AppProviders": local("./entry/AppProviders.tsx"),
   },
   // A NavLink the shell marks "not current" stays so (entry/shellRouter.tsx): one selected START sub-tab.
-  "src/components/shell/Chrome.tsx": { "react-router": local("./entry/shellRouter.tsx") },
-  "src/components/shell/MobileChrome.tsx": { "react-router": local("./entry/shellRouter.tsx") },
+  // The main tabs gain Encounters for a DM (entry/partySections.ts), and redraw when the DM switch changes.
+  "src/components/shell/Chrome.tsx": { "react-router": local("./entry/shellRouter.tsx"), "./sections": local("./entry/partySections.ts") },
+  "src/components/shell/MobileChrome.tsx": { "react-router": local("./entry/shellRouter.tsx"), "./sections": local("./entry/partySections.ts") },
   // The Play tab gains its Combat sub-tab while the open character's party has a live combat (combat/player/playTabs.tsx).
   "src/pages/play/PlayPage.tsx": { "../../components": local("./combat/player/playTabs.tsx") },
   // Additional Content is the one import page: the Import section above upstream's packs (content/WithImport.tsx).

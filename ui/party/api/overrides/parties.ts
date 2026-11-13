@@ -1,6 +1,7 @@
 import type { CharacterSnapshot } from "../../../src/api/contract";
 import { serverFetch, type ServerEvent } from "../http";
 import { liveEvents } from "../liveEvents";
+import { rememberDmRole } from "../dmRole";
 import { loadSession, type ServerSession } from "../session";
 import { override } from "./registry";
 
@@ -208,10 +209,25 @@ export const MAX_CODE_USES = 50;
 export const MAX_PARTIES = 20;
 export const MAX_NAME = 60;
 
-export const dungeonMaster = () => call<{ dm: boolean }>("GET", "/api/me/roles").then((r) => r.dm);
+/** The server's answer about the DM switch, also kept for the top bar's Encounters tab (../dmRole.ts). */
+const known = (dm: boolean) => { rememberDmRole(dm); return dm; };
+
+export const dungeonMaster = () => call<{ dm: boolean }>("GET", "/api/me/roles").then((r) => known(r.dm));
 /** Off is refused (409 `conflict`) while the account still runs parties. */
 export const setDungeonMaster = (on: boolean) =>
-  (on ? call<{ dm: boolean }>("POST", "/api/me/roles/dm", {}) : call<{ dm: boolean }>("DELETE", "/api/me/roles/dm")).then((r) => r.dm);
+  (on ? call<{ dm: boolean }>("POST", "/api/me/roles/dm", {}) : call<{ dm: boolean }>("DELETE", "/api/me/roles/dm")).then((r) => known(r.dm));
+
+/** The parties in the list, without their rosters: the Encounters tab's party strip. Null when parties are off. */
+export async function listParties(): Promise<{ dm: boolean; parties: PartySummary[] } | null> {
+  try {
+    const list = await call<{ dm: boolean; parties: PartySummary[] }>("GET", "/api/parties");
+    known(list.dm);
+    return { dm: list.dm, parties: list.parties.map(summary) };
+  } catch (e) {
+    if (notFound(e)) return null;
+    throw e;
+  }
+}
 
 /**
  * The parties this account runs or has a character in, each with its roster, and whether it has DM tools on.
@@ -221,6 +237,7 @@ export async function loadParties(): Promise<{ dm: boolean; parties: Party[]; of
   let list: { dm: boolean; parties: PartySummary[] };
   try {
     list = await call<{ dm: boolean; parties: PartySummary[] }>("GET", "/api/parties");
+    known(list.dm);
   } catch (e) {
     if (notFound(e)) return { dm: false, parties: [], off: true };
     throw e;

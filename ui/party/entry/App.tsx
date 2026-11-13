@@ -8,6 +8,7 @@ import { registerDmLiveCombats, startCombatWatch } from "../combat/player/store"
 import { dmLiveCombats } from "../api/overrides/combat";
 import { watchOpened } from "../api/overrides/opened";
 import { fetchMe } from "../api/party";
+import { dungeonMaster } from "../api/overrides/parties";
 import { loadSession, updateUser } from "../api/session";
 import { AccountBar } from "../pages/AccountBar";
 import { AccountPage } from "../pages/AccountPage";
@@ -16,10 +17,11 @@ import { AdminPage } from "../pages/AdminPage";
 import { CombatTracker } from "../pages/CombatTracker";
 import { JoinRoute, PartiesPage } from "../pages/PartiesPage";
 import { PartyCharacterView } from "../pages/PartyCharacterView";
-import { EncounterBuilder } from "../pages/EncounterBuilder";
-import { EncountersPage } from "../pages/EncountersPage";
 import { HomebrewEditor } from "../pages/HomebrewEditor";
 import { HomebrewPackPage, HomebrewPage } from "../pages/HomebrewPage";
+import { EncountersPage, OldEncounterRoute } from "../pages/EncountersPage";
+import { DmOnly, EncounterWorkspace } from "../pages/EncounterWorkspace";
+import { CombatHome } from "../pages/CombatHome";
 import { OfflinePage } from "../pages/OfflineBanner";
 import { IMPORT_PATH, OLD_IMPORT_PATH, setImportNavigate } from "../import/door";
 import { SharePage } from "../pages/SharePage";
@@ -68,6 +70,10 @@ export function App() {
       if (before && (before.admin !== user.admin || before.mustChangePassword !== user.mustChangePassword)) window.location.reload();
     }, () => { /* offline, or signed out: the next request says so */ });
   }, [offline]);
+  // The DM switch, for the Encounters tab: the device's last answer draws it at once; this keeps it current (api/dmRole.ts).
+  useEffect(() => {
+    if (!offline) dungeonMaster().catch(() => { /* parties off, or offline: the last answer stands */ });
+  }, [offline]);
   // The apps keep a copy of the account (sync/); a browser doesn't. Offline it is the page's backend and stays still.
   useEffect(() => (offline ? undefined : startSync()), [offline]);
   // A browser's open character follows a device's edit the server took (the apps hear it in their sync's events).
@@ -92,10 +98,17 @@ export function App() {
         <Route path="/join/:code" element={<JoinRoute />} />
         {/* The DM's read-only view of a member character (plan 3.5, 0.2.1). */}
         <Route path="/parties/:party/view/:owner/:character" element={<AppShell>{offline ? <OfflinePage /> : <PartyCharacterView />}</AppShell>} />
-        {/* Encounters (0.3.0): the DM's builder; players see only what the server projects for them. */}
+        {/* Encounters (0.3.1): the DM's main tab, DMs only (entry/encountersTab.ts). The server refuses the rest anyway. */}
+        {["/encounters", "/encounters/:party", "/encounters/:party/:encounter"].map((path) => (
+          <Route key={path} path={path} element={<AppShell>{offline ? <OfflinePage /> : <DmOnly><EncounterWorkspace /></DmOnly>}</AppShell>} />
+        ))}
+        {/* 0.3.0's addresses: the players' page of shown encounters (a DM is sent on to the tab), and the builder's. */}
         <Route path="/parties/:party/encounters" element={<AppShell>{offline ? <OfflinePage /> : <EncountersPage />}</AppShell>} />
-        <Route path="/parties/:party/encounters/:encounter" element={<AppShell>{offline ? <OfflinePage /> : <EncounterBuilder />}</AppShell>} />
+        <Route path="/parties/:party/encounters/:encounter" element={<OldEncounterRoute />} />
         {/* The DM's live combat tracker (plan 4.4, 0.3.0); the Live chip in the top bar leads back to it. */}
+        {/* The Combat main tab (0.3.1, plan 4.5b): the DM's encounters to run, live ones first; DMs only. */}
+        <Route path="/combat" element={<AppShell>{offline ? <OfflinePage /> : <DmOnly><CombatHome /></DmOnly>}</AppShell>} />
+        {/* A combat only opens for its party's DM (the server's 404 for anyone else), so it needs no guard of its own. */}
         <Route path="/combat/:id" element={<AppShell>{offline ? <OfflinePage /> : <CombatTracker />}</AppShell>} />
         {/* Homebrew (0.3.1): the account's own packs, a form or XML per element, and publishing as an index. */}
         <Route path="/homebrew" element={<AppShell>{offline ? <OfflinePage /> : <HomebrewPage />}</AppShell>} />

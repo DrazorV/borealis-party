@@ -189,7 +189,7 @@ export function CombatTracker() {
           </details>
         </div>
         <div className="cb-main" ref={cardRef}>
-          {chosen ? <CombatantCard state={state} c={chosen} block={view.creatures?.[chosen.id]?.statBlock} blockName={view.creatures?.[chosen.id]?.name ?? undefined} offers={view.offers} send={send} disabled={disabled} />
+          {chosen ? <CombatantCard state={state} c={chosen} block={view.creatures?.[chosen.id]?.statBlock} blockName={view.creatures?.[chosen.id]?.name ?? undefined} send={send} disabled={disabled} />
             : <div className="cb-panel cb-pad muted">Pick a combatant.</div>}
         </div>
         <div className="cb-right">
