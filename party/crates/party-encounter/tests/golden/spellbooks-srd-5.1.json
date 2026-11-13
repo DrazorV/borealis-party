@@ -1,0 +1,638 @@
+{
+  "ID_SRD51_MONSTER_ACOLYTE": [
+    {
+      "ability": "wis",
+      "casterLevel": 1,
+      "chips": [],
+      "class": "cleric",
+      "dc": 12,
+      "hit": 4,
+      "lists": [
+        "At will: light, sacred flame, thaumaturgy",
+        "L1 x3: bless, cure wounds, sanctuary"
+      ],
+      "name": "Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_ANDROSPHINX": [
+    {
+      "ability": "wis",
+      "casterLevel": 12,
+      "chips": [],
+      "class": "cleric",
+      "dc": 18,
+      "hit": 10,
+      "lists": [
+        "At will: sacred flame, spare the dying, thaumaturgy",
+        "L1 x4: command, detect evil and good, detect magic",
+        "L2 x3: lesser restoration, zone of truth",
+        "L3 x3: dispel magic, tongues",
+        "L4 x3: banishment, freedom of movement",
+        "L5 x2: flame strike, greater restoration",
+        "L6 x1: heroes’ feast"
+      ],
+      "name": "Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_ARCHMAGE": [
+    {
+      "ability": "int",
+      "casterLevel": 18,
+      "chips": [
+        "The archmage casts these spells on itself before combat."
+      ],
+      "class": "wizard",
+      "dc": 17,
+      "hit": 9,
+      "lists": [
+        "At will: disguise self, invisibility",
+        "At will: fire bolt, light, mage hand, prestidigitation, shocking grasp",
+        "L1 x4: detect magic, identify, mage armor*, magic missile",
+        "L2 x3: detect thoughts, mirror image, misty step",
+        "L3 x3: counterspell, fly, lightning bolt",
+        "L4 x3: banishment, fire shield, stoneskin*",
+        "L5 x3: cone of cold, scrying, wall of force",
+        "L6 x1: globe of invulnerability",
+        "L7 x1: teleport",
+        "L8 x1: mind blank*",
+        "L9 x1: time stop*"
+      ],
+      "name": "Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_CLOUD_GIANT": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": null,
+      "hit": null,
+      "lists": [
+        "At will: detect magic, fog cloud, light",
+        "3/day each: feather fall, fly, misty step, telekinesis",
+        "1/day each: control weather, gaseous form"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_COUATL": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 14,
+      "hit": null,
+      "lists": [
+        "At will: detect evil and good, detect magic, detect thoughts",
+        "3/day each: bless, create food and water, cure wounds, lesser restoration, protection from poison, sanctuary, shield",
+        "1/day each: dream, greater restoration, scrying"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_CULT_FANATIC": [
+    {
+      "ability": "wis",
+      "casterLevel": 4,
+      "chips": [],
+      "class": "cleric",
+      "dc": 11,
+      "hit": 3,
+      "lists": [
+        "At will: light, sacred flame, thaumaturgy",
+        "L1 x4: command, inflict wounds, shield of faith",
+        "L2 x3: hold person, spiritual weapon"
+      ],
+      "name": "Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_DEVA": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 17,
+      "hit": null,
+      "lists": [
+        "At will: detect evil and good",
+        "1/day each: commune, raise dead"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_DJINNI": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 17,
+      "hit": 9,
+      "lists": [
+        "At will: detect evil and good, detect magic, thunderwave",
+        "3/day each: create food and water, tongues, wind walk",
+        "1/day each: conjure elemental, creation, gaseous form, invisibility, major image, plane shift"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_DRIDER": [
+    {
+      "ability": "wis",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 13,
+      "hit": null,
+      "lists": [
+        "At will: dancing lights",
+        "1/day each: darkness, faerie fire"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_DRUID": [
+    {
+      "ability": "wis",
+      "casterLevel": 4,
+      "chips": [],
+      "class": "druid",
+      "dc": 12,
+      "hit": 4,
+      "lists": [
+        "At will: druidcraft, produce flame, shillelagh",
+        "L1 x4: entangle, longstrider, speak with animals, thunderwave",
+        "L2 x3: animal messenger, barkskin"
+      ],
+      "name": "Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_DRYAD": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 14,
+      "hit": null,
+      "lists": [
+        "At will: druidcraft",
+        "3/day each: entangle, goodberry",
+        "1/day each: barkskin, pass without trace, shillelagh"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_DUST_MEPHIT": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": null,
+      "hit": null,
+      "lists": [
+        "1/day: sleep"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_EFREETI": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 15,
+      "hit": 7,
+      "lists": [
+        "At will: detect magic",
+        "3/day: enlarge/reduce, tongues",
+        "1/day each: conjure elemental, gaseous form, invisibility, major image, plane shift, wall of fire"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_ELF_DROW": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 11,
+      "hit": null,
+      "lists": [
+        "At will: dancing lights",
+        "1/day each: darkness, faerie fire"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_GLABREZU": [
+    {
+      "ability": "int",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 16,
+      "hit": null,
+      "lists": [
+        "At will: darkness, detect magic, dispel magic",
+        "1/day each: confusion, fly, power word stun"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_GNOME_DEEP_SVIRFNEBLIN": [
+    {
+      "ability": "int",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 11,
+      "hit": null,
+      "lists": [
+        "At will: nondetection",
+        "1/day each: blindness/deafness, blur, disguise self"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_GREEN_HAG": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 12,
+      "hit": null,
+      "lists": [
+        "At will: dancing lights, minor illusion, vicious mockery"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_GUARDIAN_NAGA": [
+    {
+      "ability": "wis",
+      "casterLevel": 11,
+      "chips": [],
+      "class": "cleric",
+      "dc": 16,
+      "hit": 8,
+      "lists": [
+        "At will: mending, sacred flame, thaumaturgy",
+        "L1 x4: command, cure wounds, shield of faith",
+        "L2 x3: calm emotions, hold person",
+        "L3 x3: bestow curse, clairvoyance",
+        "L4 x3: banishment, freedom of movement",
+        "L5 x2: flame strike, geas",
+        "L6 x1: true seeing"
+      ],
+      "name": "Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_GYNOSPHINX": [
+    {
+      "ability": "int",
+      "casterLevel": 9,
+      "chips": [],
+      "class": "wizard",
+      "dc": 16,
+      "hit": 8,
+      "lists": [
+        "At will: mage hand, minor illusion, prestidigitation",
+        "L1 x4: detect magic, identify, shield",
+        "L2 x3: darkness, locate object, suggestion",
+        "L3 x3: dispel magic, remove curse, tongues",
+        "L4 x3: banishment, greater invisibility",
+        "L5 x1: legend lore"
+      ],
+      "name": "Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_ICE_MEPHIT": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": null,
+      "hit": null,
+      "lists": [
+        "1/day: fog cloud"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_LAMIA": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 13,
+      "hit": null,
+      "lists": [
+        "At will: disguise self, major image",
+        "3/day each: charm person, mirror image, scrying, suggestion",
+        "1/day: geas"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_LICH": [
+    {
+      "ability": "int",
+      "casterLevel": 18,
+      "chips": [],
+      "class": "wizard",
+      "dc": 20,
+      "hit": 12,
+      "lists": [
+        "At will: mage hand, prestidigitation, ray of frost",
+        "L1 x4: detect magic, magic missile, shield, thunderwave",
+        "L2 x3: acid arrow, detect thoughts, invisibility, mirror image",
+        "L3 x3: animate dead, counterspell, dispel magic, fireball",
+        "L4 x3: blight, dimension door",
+        "L5 x3: cloudkill, scrying",
+        "L6 x1: disintegrate, globe of invulnerability",
+        "L7 x1: finger of death, plane shift",
+        "L8 x1: dominate monster, power word stun",
+        "L9 x1: power word kill"
+      ],
+      "name": "Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_MAGE": [
+    {
+      "ability": "int",
+      "casterLevel": 9,
+      "chips": [],
+      "class": "wizard",
+      "dc": 14,
+      "hit": 6,
+      "lists": [
+        "At will: fire bolt, light, mage hand, prestidigitation",
+        "L1 x4: detect magic, mage armor, magic missile, shield",
+        "L2 x3: misty step, suggestion",
+        "L3 x3: counterspell, fireball, fly",
+        "L4 x3: greater invisibility, ice storm",
+        "L5 x1: cone of cold"
+      ],
+      "name": "Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_MAGMA_MEPHIT": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 10,
+      "hit": null,
+      "lists": [
+        "1/day: heat metal"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_MUMMY_LORD": [
+    {
+      "ability": "wis",
+      "casterLevel": 10,
+      "chips": [],
+      "class": "cleric",
+      "dc": 17,
+      "hit": 9,
+      "lists": [
+        "At will: sacred flame, thaumaturgy",
+        "L1 x4: command, guiding bolt, shield of faith",
+        "L2 x3: hold person, silence, spiritual weapon",
+        "L3 x3: animate dead, dispel magic",
+        "L4 x3: divination, guardian of faith",
+        "L5 x2: contagion, insect plague",
+        "L6 x1: harm"
+      ],
+      "name": "Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_NIGHT_HAG": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [
+        "Magic Resistance. The hag has advantage on saving throws against spells and other magical effects"
+      ],
+      "class": null,
+      "dc": 14,
+      "hit": 6,
+      "lists": [
+        "At will: detect magic, magic missile",
+        "2/day each: plane shift, ray of enfeeblement, sleep"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_ONI": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [
+        "Magic Weapons. The oni’s weapon attacks are magical"
+      ],
+      "class": null,
+      "dc": 13,
+      "hit": null,
+      "lists": [
+        "At will: darkness, invisibility",
+        "1/day each: charm person, cone of cold, gaseous form, sleep"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_PIT_FIEND": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 21,
+      "hit": null,
+      "lists": [
+        "At will: detect magic, fireball",
+        "3/day each: hold monster, wall of fire"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_PLANETAR": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 20,
+      "hit": null,
+      "lists": [
+        "At will: detect evil and good, invisibility",
+        "3/day each: blade barrier, dispel evil and good, flame strike, raise dead",
+        "1/day each: commune, control weather, insect plague"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_PRIEST": [
+    {
+      "ability": "wis",
+      "casterLevel": 5,
+      "chips": [],
+      "class": "cleric",
+      "dc": 13,
+      "hit": 5,
+      "lists": [
+        "At will: light, sacred flame, thaumaturgy",
+        "L1 x4: cure wounds, guiding bolt, sanctuary",
+        "L2 x3: lesser restoration, spiritual weapon",
+        "L3 x2: dispel magic, spirit guardians"
+      ],
+      "name": "Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_RAKSHASA": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 18,
+      "hit": 10,
+      "lists": [
+        "At will: detect thoughts, disguise self, mage hand, minor illusion",
+        "3/day each: charm person, detect magic, invisibility, major image, suggestion",
+        "1/day each: dominate person, fly, plane shift, true seeing"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_SOLAR": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 25,
+      "hit": null,
+      "lists": [
+        "At will: detect evil and good, invisibility",
+        "3/day each: blade barrier, dispel evil and good, resurrection",
+        "1/day each: commune, control weather"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_SPIRIT_NAGA": [
+    {
+      "ability": "int",
+      "casterLevel": 10,
+      "chips": [],
+      "class": "wizard",
+      "dc": 14,
+      "hit": 6,
+      "lists": [
+        "At will: mage hand, minor illusion, ray of frost",
+        "L1 x4: charm person, detect magic, sleep",
+        "L2 x3: detect thoughts, hold person",
+        "L3 x3: lightning bolt, water breathing",
+        "L4 x3: blight, dimension door",
+        "L5 x2: dominate person"
+      ],
+      "name": "Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_STEAM_MEPHIT": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": null,
+      "hit": null,
+      "lists": [
+        "1/day: blur"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_STORM_GIANT": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 17,
+      "hit": null,
+      "lists": [
+        "At will: detect magic, feather fall, levitate, light",
+        "3/day each: control weather, water breathing"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD51_MONSTER_UNICORN": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [
+        "Magic Resistance. The unicorn has advantage on saving throws against spells and other magical effects"
+      ],
+      "class": null,
+      "dc": 14,
+      "hit": null,
+      "lists": [
+        "At will: detect evil and good, druidcraft, pass without trace",
+        "1/day each: calm emotions, dispel evil and good, entangle"
+      ],
+      "name": "Innate Spellcasting",
+      "origin": "text"
+    }
+  ]
+}

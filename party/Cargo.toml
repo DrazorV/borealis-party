@@ -12,6 +12,7 @@ members = [
   "crates/party-tools",
   "crates/party-mcp-bridge",
   "crates/party-sim",
+  "crates/party-spells",
   "crates/tauri",
   "crates/tauri-macros",
   "crates/tauri-build",

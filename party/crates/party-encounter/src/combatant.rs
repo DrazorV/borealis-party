@@ -214,6 +214,8 @@ pub fn build_creature(
             add(&mut c, f, AbilityKind::Legendary);
         }
     }
+    // Spell slots and per-day spell pools from its Spellcasting entries (0.3.2), so casts and precasts spend them.
+    crate::spellbook::seed(&mut c, &crate::spellbook::of_monster(d, None, None));
     c
 }
 
