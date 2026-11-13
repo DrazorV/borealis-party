@@ -138,10 +138,8 @@ pub enum OverrideError {
 
 fn clean_text(text: &str, max: usize, what: &'static str) -> Result<String, OverrideError> {
     let t = text.trim();
-    let ok = t.chars().count() <= max
-        && t
-            .chars()
-            .all(|c| !c.is_control() || c == '\n' || c == '\t');
+    let ok =
+        t.chars().count() <= max && t.chars().all(|c| !c.is_control() || c == '\n' || c == '\t');
     if ok {
         Ok(t.to_string())
     } else {
@@ -160,7 +158,9 @@ pub fn valid_formula(formula: &str) -> bool {
         None => (rest, None),
     };
     let small = |s: &str, max: u32| {
-        !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) && s.parse::<u32>().is_ok_and(|n| n <= max)
+        !s.is_empty()
+            && s.bytes().all(|b| b.is_ascii_digit())
+            && s.parse::<u32>().is_ok_and(|n| n <= max)
     };
     small(count, 99)
         && count != "0"
@@ -194,8 +194,12 @@ fn ac_value(v: AcValue) -> Result<AcValue, OverrideError> {
         return Err(OverrideError::OutOfRange("Armor class is 1 to 40."));
     }
     let source = match v.source {
-        Some(s) => Some(clean_text(&s, MAX_TRAIT_NAME, "What gives the armor class is up to 80 characters.")?)
-            .filter(|s| !s.is_empty()),
+        Some(s) => Some(clean_text(
+            &s,
+            MAX_TRAIT_NAME,
+            "What gives the armor class is up to 80 characters.",
+        )?)
+        .filter(|s| !s.is_empty()),
         None => None,
     };
     Ok(AcValue {
@@ -283,15 +287,24 @@ impl Overrides {
         }
         if let Some(traits) = form.traits {
             if traits.len() > MAX_TRAITS {
-                return Err(OverrideError::OutOfRange("A creature can have 12 added traits."));
+                return Err(OverrideError::OutOfRange(
+                    "A creature can have 12 added traits.",
+                ));
             }
             out.traits = traits
                 .into_iter()
                 .map(|t| {
-                    let name = clean_text(&t.name, MAX_TRAIT_NAME, "Trait names are 1 to 80 characters.")?;
-                    let text = clean_text(&t.text, MAX_TEXT, "Trait text is up to 4000 characters.")?;
+                    let name = clean_text(
+                        &t.name,
+                        MAX_TRAIT_NAME,
+                        "Trait names are 1 to 80 characters.",
+                    )?;
+                    let text =
+                        clean_text(&t.text, MAX_TEXT, "Trait text is up to 4000 characters.")?;
                     if name.is_empty() {
-                        return Err(OverrideError::BadText("Trait names are 1 to 80 characters."));
+                        return Err(OverrideError::BadText(
+                            "Trait names are 1 to 80 characters.",
+                        ));
                     }
                     Ok(AddedTrait { name, text })
                 })
@@ -300,8 +313,12 @@ impl Overrides {
         if let Some(notes) = form.notes {
             out.notes = match notes {
                 None => None,
-                Some(n) => Some(clean_text(&n, MAX_TEXT, "Notes are up to 4000 characters.")?)
-                    .filter(|n| !n.is_empty()),
+                Some(n) => Some(clean_text(
+                    &n,
+                    MAX_TEXT,
+                    "Notes are up to 4000 characters.",
+                )?)
+                .filter(|n| !n.is_empty()),
             };
         }
         Ok(out)

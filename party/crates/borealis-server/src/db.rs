@@ -146,6 +146,77 @@ const MIGRATIONS: &[&[&str]] = &[
         )",
         "CREATE INDEX IF NOT EXISTS party_members_party ON party_members (party_id)",
     ],
+    // 4 (M-encounters, 0.3.0; becomes 5 if M-monster-meta merges first: numbers are fixed at merge), after M-parties.
+    // A DM's encounters (encounters.rs). No dm_id: authorization always joins parties.dm_id. Each creature keeps a copy
+    // of its stat block, so a player's view never depends on anyone's installed content.
+    &[
+        "CREATE TABLE IF NOT EXISTS encounters (
+            id TEXT PRIMARY KEY,
+            party_id TEXT NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            public_name TEXT NOT NULL,
+            ruleset TEXT,
+            status TEXT NOT NULL DEFAULT 'draft',
+            player_visible BIGINT NOT NULL DEFAULT 0,
+            hp_mode TEXT NOT NULL DEFAULT 'average',
+            dm_notes TEXT NOT NULL DEFAULT '',
+            created_at BIGINT NOT NULL,
+            updated_at BIGINT NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS encounters_party ON encounters (party_id, created_at)",
+        "CREATE TABLE IF NOT EXISTS encounter_creatures (
+            id TEXT PRIMARY KEY,
+            encounter_id TEXT NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
+            sort BIGINT NOT NULL,
+            dm_label TEXT NOT NULL,
+            public_name TEXT NOT NULL,
+            element_id TEXT NOT NULL,
+            pack_id TEXT NOT NULL,
+            pack_rev TEXT NOT NULL,
+            statblock_json TEXT NOT NULL,
+            overrides_json TEXT NOT NULL DEFAULT '{}',
+            automation_json TEXT,
+            hp_mode TEXT NOT NULL DEFAULT 'encounter',
+            hp_max BIGINT,
+            visibility TEXT NOT NULL DEFAULT 'hidden',
+            reveal_level TEXT NOT NULL DEFAULT 'name',
+            revealed_at BIGINT,
+            created_at BIGINT NOT NULL,
+            updated_at BIGINT NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS encounter_creatures_encounter ON encounter_creatures (encounter_id, sort)",
+        // Starting effects (companion C19): applied when combat starts.
+        "CREATE TABLE IF NOT EXISTS encounter_effects (
+            id TEXT PRIMARY KEY,
+            encounter_id TEXT NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
+            creature_id TEXT NOT NULL REFERENCES encounter_creatures(id) ON DELETE CASCADE,
+            sort BIGINT NOT NULL,
+            name TEXT NOT NULL,
+            detail TEXT NOT NULL DEFAULT '',
+            source_creature_id TEXT REFERENCES encounter_creatures(id) ON DELETE SET NULL,
+            duration_turns BIGINT,
+            charges BIGINT,
+            concentration BIGINT NOT NULL DEFAULT 0,
+            slot_level BIGINT,
+            modifiers_json TEXT NOT NULL DEFAULT '{}',
+            created_at BIGINT NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS encounter_effects_encounter ON encounter_effects (encounter_id, sort)",
+        // Encounter rules (companion C20, D42): a banner and on/off flags tied to a creature, no scripting.
+        "CREATE TABLE IF NOT EXISTS encounter_rules (
+            id TEXT PRIMARY KEY,
+            encounter_id TEXT NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
+            sort BIGINT NOT NULL,
+            name TEXT NOT NULL,
+            text TEXT NOT NULL DEFAULT '',
+            creature_id TEXT REFERENCES encounter_creatures(id) ON DELETE SET NULL,
+            ends_when TEXT NOT NULL DEFAULT 'creature_down',
+            active BIGINT NOT NULL DEFAULT 1,
+            flags_json TEXT NOT NULL DEFAULT '[]',
+            created_at BIGINT NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS encounter_rules_encounter ON encounter_rules (encounter_id, sort)",
+    ],
 ];
 
 /// How many steps [`MIGRATIONS`] has: the schema version a database is at after [`Db::open`].
@@ -157,7 +228,7 @@ pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
 /// database they left at version 3 would otherwise skip these steps. Every such step must be idempotent (`CREATE ...
 /// IF NOT EXISTS`). Step 1 has none: every database has its tables. A new step adds its own line here, with its
 /// main table.
-const MARKERS: &[(usize, &str)] = &[(2, "shares"), (3, "parties")];
+const MARKERS: &[(usize, &str)] = &[(2, "shares"), (3, "parties"), (4, "encounters")];
 
 /// A table only the versions with groups had. A database that still has it opens like any other: the table is left
 /// alone and a warning is logged, so an instance that ran those versions (or rolls back to one) still boots.

@@ -22,6 +22,7 @@ mod auth;
 mod backend;
 mod config;
 mod db;
+mod encounters;
 mod error;
 mod hub;
 mod import_source;
@@ -149,6 +150,7 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
         .merge(rpc::routes())
         .merge(shares::routes())
         .merge(parties::routes())
+        .merge(encounters::routes())
         .merge(import_source::routes())
         .merge(pack_removal::routes())
         .route("/api/{*rest}", any(no_such_route))
