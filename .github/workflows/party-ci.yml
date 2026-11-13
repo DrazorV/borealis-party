@@ -95,11 +95,26 @@ jobs:
       - name: Clippy
         working-directory: party
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Tests (SQLite and PostgreSQL)
+      # The server's test binary needs over 10 GB with every test at once (0.3.0's suite was killed, exit 143), so it
+      # runs with two threads, and each PostgreSQL test in its own process. The other crates are small.
+      - name: Tests (other crates)
+        working-directory: party
+        run: cargo test --workspace --exclude borealis-server --locked
+      - name: Tests (server, SQLite)
+        working-directory: party
+        run: cargo test -p borealis-server --locked -- --test-threads=2 --skip postgres
+      - name: Tests (server, PostgreSQL)
         working-directory: party
         env:
           BOREALIS_TEST_POSTGRES_URL: postgres://postgres:party-ci@localhost:5432/postgres
-        run: cargo test -p borealis-server --locked
+        run: |
+          tests=$(cargo test -p borealis-server --locked -- --list 2>/dev/null | grep -E 'postgres.*: test$' | sed 's/: test$//')
+          test -n "$tests"
+          for t in $tests; do
+            echo "::group::$t"
+            cargo test -p borealis-server --locked -- --exact --test-threads=1 "$t"
+            echo "::endgroup::"
+          done
 
   phone:
     # The phone UI suite (party/ui-tests): the built web app on a throwaway local server, in Chromium as an Android
