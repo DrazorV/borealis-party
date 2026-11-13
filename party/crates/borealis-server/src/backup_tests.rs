@@ -35,11 +35,14 @@ fn settings(dir: &Path) -> BackupSettings {
 }
 
 /// Files in the backup folder, by name.
+/// The files in `dir`, without SQLite's `-wal` / `-shm` beside a copy the test itself opened (they can still be
+/// there for a moment after its pool closes).
 fn listing(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .map(|it| {
             it.flatten()
                 .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| !n.ends_with("-wal") && !n.ends_with("-shm"))
                 .collect()
         })
         .unwrap_or_default();
@@ -261,7 +264,10 @@ async fn a_waiting_step_is_backed_up_first_on_sqlite() {
         "{name}"
     );
     assert!(written.bytes > 0);
-    assert_eq!(listing(&dir.path().join("backups")), [name]);
+    assert_eq!(
+        listing(&dir.path().join("backups")),
+        std::slice::from_ref(&name)
+    );
     // The copy is the database as it was: the user, and the last step still to run.
     let copy = Db::connect(&Location::Sqlite(written.path.clone()))
         .await
@@ -288,7 +294,7 @@ async fn a_waiting_step_is_backed_up_first_on_sqlite() {
     .await
     .unwrap()
     .is_none());
-    assert_eq!(listing(&dir.path().join("backups")).len(), 1);
+    assert_eq!(listing(&dir.path().join("backups")), [name]);
 }
 
 #[tokio::test(flavor = "multi_thread")]

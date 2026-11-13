@@ -1432,7 +1432,7 @@ async fn the_switch_removes_every_route() {
 
 // The upgrade from 0.3.0.
 
-/// Schema 6 (0.3.0) with accounts, a party and an encounter; HEAD adds step 7 and every flow works over it. A
+/// Schema 6 (0.3.0) with accounts, a party and an encounter; HEAD adds step 7 (and the later ones) and every flow works over it. A
 /// database that says it is at 7 but has no `api_tokens` gets the step again.
 async fn upgrade_from_0_3_0(location: &Location, data: &Path, url: Option<&str>) {
     let old = Db::open_at(location, 6).await.unwrap();
@@ -1449,7 +1449,7 @@ async fn upgrade_from_0_3_0(location: &Location, data: &Path, url: Option<&str>)
         .unwrap()
         .try_get(0)
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, i64::try_from(Db::schema_version()).unwrap());
     let router = ai_router(ai_state(data.to_path_buf(), db.clone()));
     let dm = super::sign_in(&router, "dm-up").await;
     let secret = new_secret_token(&dm, json!({ "name": "after upgrade" })).await;
