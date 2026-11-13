@@ -18,10 +18,6 @@ ui/src/api/types/settings.ts https://github.com/TeamBorealis/borealis/pull/42
 ui/src/pages/settings/SheetTab.tsx https://github.com/TeamBorealis/borealis/pull/42
 ui/src/pages/settings/settingsForm.ts https://github.com/TeamBorealis/borealis/pull/42
 
-# Imported characters: add-on grants under installed content are not missing content
-crates/borealis-character/src/import/sections.rs https://github.com/TeamBorealis/borealis/pull/45
-crates/borealis-character/tests/recheck.rs https://github.com/TeamBorealis/borealis/pull/45
-
 # Missing content: "Leave them unselected" (not sent upstream yet)
 crates/borealis-character/tests/recheck.rs branch:feat/leave-missing-unselected
 crates/borealis-engine/src/commands/selection.rs branch:feat/leave-missing-unselected
@@ -37,18 +33,6 @@ ui/src/api/mock/MockApi.ts branch:feat/leave-missing-unselected
 ui/src/pages/builder/MissingContentAction.tsx branch:feat/leave-missing-unselected
 ui/src/pages/characters/MissingContentList.tsx branch:feat/leave-missing-unselected
 ui/src/test/i37-missing-content-list.test.tsx branch:feat/leave-missing-unselected
-
-# Sheet preview: long text no longer runs over the next section or the footer
-crates/borealis-sheet/src/html_sheet.rs https://github.com/TeamBorealis/borealis/pull/46
-crates/borealis-sheet/src/html_sheet_css.rs https://github.com/TeamBorealis/borealis/pull/46
-crates/borealis-sheet/src/html_sheet_tests.rs https://github.com/TeamBorealis/borealis/pull/46
-e2e/fixtures/sheet-preview/2014-a4-story.html https://github.com/TeamBorealis/borealis/pull/46
-e2e/fixtures/sheet-preview/2014-a4.html https://github.com/TeamBorealis/borealis/pull/46
-e2e/fixtures/sheet-preview/2014-letter-long.html https://github.com/TeamBorealis/borealis/pull/46
-e2e/fixtures/sheet-preview/2014-letter.html https://github.com/TeamBorealis/borealis/pull/46
-e2e/fixtures/sheet-preview/2024-a4-long.html https://github.com/TeamBorealis/borealis/pull/46
-e2e/fixtures/sheet-preview/2024-a4-story.html https://github.com/TeamBorealis/borealis/pull/46
-e2e/tests/b145-sheet-preview-fit.e2e.ts https://github.com/TeamBorealis/borealis/pull/46
 
 # Planned, not opened (plan item I7/I10): an optional host guard in src-tauri/src/content_index.rs (`https_client`),
 # so the HTTPS client checks the address it actually connects to (after its own lookup and after every redirect)
