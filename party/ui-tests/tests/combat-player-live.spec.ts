@@ -68,9 +68,10 @@ test.describe("The player's Combat sub-tab with the combat server (0.3.0)", () =
       await api(request, player.token, "POST", "/api/join", { code: made.code, characterId: hero });
 
       // The DM's encounter: one creature in sight, one hidden.
-      const found = await api<{ items: { id: string }[] }>(request, dm.token, "POST", "/api/bestiary/search", { text: "goblin" });
-      test.skip(found.items.length === 0, "no SRD goblin in the server's content");
-      const monster = found.items[0]!.id;
+      // The bestiary's search when the server has it (feat/bestiary), else the bundled SRD 5.2.1 goblin.
+      const search = await call(request, dm.token, "POST", "/api/bestiary/search", { text: "goblin" });
+      const found = search.ok() ? ((await search.json()) as { items: { id: string }[] }).items : [];
+      const monster = found[0]?.id ?? "ID_SRD521_MONSTER_GOBLIN_WARRIOR";
       const enc = await api<{ id: string }>(request, dm.token, "POST", `/api/parties/${party.id}/encounters`, { name: "Rig ambush (DM's name)", publicName: "Road ambush" });
       await api(request, dm.token, "POST", `/api/encounters/${enc.id}/creatures`, { elementId: monster, hidden: false, publicName: "Scout" });
       await api(request, dm.token, "POST", `/api/encounters/${enc.id}/creatures`, { elementId: monster, hidden: true, dmLabel: HIDDEN_LABEL, publicName: HIDDEN_PUBLIC });

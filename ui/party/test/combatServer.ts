@@ -101,7 +101,7 @@ export function fakeCombatServer(parties: FakeCombatServer["parties"]): FakeComb
         const { requestId, args } = (body ?? {}) as { requestId?: string; args?: {
           id?: string; target?: string; roll?: D20Input & { d20?: D20Input }; promptId?: string; applied?: boolean; owner?: string; label?: string;
           parts?: { amount: { kind: string; total?: number } }[]; amount?: number | { kind: string; total?: number }; condition?: string;
-          effect?: { target: string; conditions?: string[] }; combatant?: { public_name?: string; label: string; hp?: { current: number; max: number }; ac?: number | null };
+          effect?: { target: string; conditions?: string[] }; companion?: string; combatant?: { public_name?: string; label: string; hp?: { current: number; max: number }; ac?: number | null };
         } };
         if (!requestId || !args) throw fail("not_found", NOT_FOUND);
         if (server.refuseNext) { const no = server.refuseNext; server.refuseNext = null; throw fail(no.code, no.message); }
@@ -119,9 +119,10 @@ export function fakeCombatServer(parties: FakeCombatServer["parties"]): FakeComb
         switch (m[2]) {
           case "summon": {
             const owner = c.me.find((x) => x.id === args.owner && (x.kind ?? "character") === "character");
-            if (!owner || !args.combatant) throw fail("not_found", NOT_FOUND);
+            const offer = owner?.offers?.find((k) => k.key === args.companion);
+            if (!owner || (!args.combatant && !offer)) throw fail("not_found", NOT_FOUND);
             const id = `s-${c.order.length + c.me.length}`;
-            const b = args.combatant;
+            const b = args.combatant ?? { label: offer!.name, public_name: offer!.name, hp: { current: offer!.hp ?? 0, max: offer!.hp ?? 0 }, ac: offer!.ac ?? null };
             const made = myCreature(id, b.public_name || b.label, owner.id, b.hp?.max ?? 0, { view: { owner_id: owner.id, hp: { current: b.hp?.current ?? 0, max: b.hp?.max ?? 0, temp: 0 }, ac: b.ac ?? null } });
             // Right after its owner and the creatures already following it.
             let at = c.order.findIndex((x) => x.id === owner.id);

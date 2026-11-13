@@ -74,6 +74,8 @@ export interface WireMine {
   kind?: "character" | "creature";
   /** C1: not in this fight. */
   absent?: boolean;
+  /** My PC's companions the server offers to summon (from the character), by `key`. */
+  offers?: { key: string; name: string; hp?: number | null; ac?: number | null; initiative?: number | null }[];
   /** My latest roll results, newest first (D21). */
   rolls?: { id: string; name: string; total: number; natural?: number | null; source?: string; breakdown?: string }[];
   /** The PC's character (asked of the server; matched by party and name until it sends it). */
@@ -138,6 +140,8 @@ export interface PlayerCombatant {
   inOrder: boolean;
   /** My own: the latest roll, as words. */
   lastRoll?: string | null;
+  /** My PC: the companions the server offers to summon (`summon {owner, companion: key}`). */
+  offers?: { key: string; name: string; hp?: number | null; ac?: number | null }[] | null;
 }
 
 /** Something the server asks of the signed-in player for their own PC. */
@@ -199,9 +203,13 @@ const roundOf = (t: TurnPointer) => ("round" in t ? t.round : 0);
 /** The projection as the Combat sub-tab draws it. */
 export function fromWire(w: WireProjection, ctx: WireContext = {}): PlayerCombat {
   const mineById = new Map((w.me ?? []).map((m) => [m.id, m]));
-  const minePcs = (w.order ?? []).filter((o) => o.mine || mineById.has(o.id));
+  // My PCs: in the order (mine, or listed in `me`), and in `me` only before their initiative is in.
+  const minePcs = new Set([
+    ...(w.order ?? []).filter((o) => o.kind === "character" && (o.mine || mineById.has(o.id))).map((o) => o.id),
+    ...(w.me ?? []).filter((m) => (m.kind ?? "character") === "character").map((m) => m.id),
+  ]);
   // Which character each own PC is: the server's, else the party's only one of this account's characters.
-  const onlyCharacter = (ctx.myCharacters ?? []).length === 1 && minePcs.length === 1 ? ctx.myCharacters![0]! : null;
+  const onlyCharacter = (ctx.myCharacters ?? []).length === 1 && minePcs.size === 1 ? ctx.myCharacters![0]! : null;
   const row = (o: WireCombatant, inOrder: boolean): PlayerCombatant => {
     const m = mineById.get(o.id);
     const mine = Boolean(o.mine || m);
@@ -220,6 +228,7 @@ export function fromWire(w: WireProjection, ctx: WireContext = {}): PlayerCombat
         hp: m?.hp ?? o.view?.hp ?? o.hp ?? null,
         ac: o.view?.ac ?? o.ac ?? null,
       } : {}),
+      ...(m?.offers ? { offers: m.offers.map((k) => ({ key: k.key, name: k.name, hp: k.hp ?? null, ac: k.ac ?? null })) } : {}),
       ...(roll ? { lastRoll: `${roll.name} ${roll.total}${roll.breakdown ? ` (${roll.breakdown})` : ""}` } : {}),
     };
   };
