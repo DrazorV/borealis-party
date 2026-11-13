@@ -18,7 +18,13 @@ pub fn tools() -> Vec<ToolSpec> {
     simulate::tool_defs()
         .iter()
         .map(|d| {
-            let spec = ToolSpec::external(d.name, d.title, &d.description, Scope::EncountersSimulate, d.schema.clone());
+            let spec = ToolSpec::external(
+                d.name,
+                d.title,
+                &d.description,
+                Scope::EncountersSimulate,
+                d.schema.clone(),
+            );
             if d.heavy {
                 spec.heavy()
             } else {
@@ -32,12 +38,22 @@ pub fn tools() -> Vec<ToolSpec> {
 ///
 /// # Errors
 /// The registry's errors: not found (also for anything not the caller's), invalid arguments, busy, unavailable.
-pub async fn call_tool(state: &AppState, user: &User, tool: &str, args: Map<String, Value>) -> Result<Value, ToolError> {
-    simulate::call(state, user, tool, args).await.map_err(|e| match e {
-        SimError::NotFound => ToolError::NotFound,
-        SimError::Invalid(m) => ToolError::InvalidArgs(m),
-        SimError::Busy(m) => ToolError::Refused { code: "busy".into(), message: m },
-        SimError::Unavailable(m) => ToolError::Unavailable(m),
-        SimError::Internal => ToolError::Internal,
-    })
+pub async fn call_tool(
+    state: &AppState,
+    user: &User,
+    tool: &str,
+    args: Map<String, Value>,
+) -> Result<Value, ToolError> {
+    simulate::call(state, user, tool, args)
+        .await
+        .map_err(|e| match e {
+            SimError::NotFound => ToolError::NotFound,
+            SimError::Invalid(m) => ToolError::InvalidArgs(m),
+            SimError::Busy(m) => ToolError::Refused {
+                code: "busy".into(),
+                message: m,
+            },
+            SimError::Unavailable(m) => ToolError::Unavailable(m),
+            SimError::Internal => ToolError::Internal,
+        })
 }

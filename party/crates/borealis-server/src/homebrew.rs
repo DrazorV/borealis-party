@@ -2270,13 +2270,6 @@ pub async fn build(
 ///
 /// # Errors
 /// As [`build`].
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "party-tools (0.3.1 part B) registers these; tests call them"
-    )
-)]
 pub async fn build_json(
     state: &AppState,
     user: &User,
@@ -2508,13 +2501,6 @@ pub fn routes() -> axum::Router<AppState> {
 /// The scope a tool needs (part A's `tokens::Scope`; write includes read). At merge, part B's
 /// `tools_backend::external_specs()` builds `party_tools::ToolSpec::external(name, title, description, scope,
 /// input_schema)` from each of these.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "party-tools (0.3.1 part B) registers these; tests call them"
-    )
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ToolScope {
     #[serde(rename = "homebrew:read")]
@@ -2524,13 +2510,6 @@ pub enum ToolScope {
 }
 
 /// A tool: its name, title, the scope a token needs for it, what it does and its input.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "party-tools (0.3.1 part B) registers these; tests call them"
-    )
-)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolSpec {
@@ -2541,13 +2520,6 @@ pub struct ToolSpec {
     pub input_schema: Value,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "party-tools (0.3.1 part B) registers these; tests call them"
-    )
-)]
 fn element_schema(required_id: bool) -> Value {
     json!({
         "type": "object",
@@ -2562,13 +2534,6 @@ fn element_schema(required_id: bool) -> Value {
 }
 
 /// The homebrew tools, and `index_build`. There is no publishing tool: the server never hosts an index (D47).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "party-tools (0.3.1 part B) registers these; tests call them"
-    )
-)]
 #[must_use]
 pub fn tools() -> Vec<ToolSpec> {
     let none = || json!({ "type": "object", "properties": {} });
@@ -2644,26 +2609,12 @@ pub fn tools() -> Vec<ToolSpec> {
     ]
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "party-tools (0.3.1 part B) registers these; tests call them"
-    )
-)]
 fn str_arg<'a>(args: &'a Value, name: &str) -> Option<&'a str> {
     args.get(name)
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "party-tools (0.3.1 part B) registers these; tests call them"
-    )
-)]
 fn input_of(args: &Value) -> ApiResult<ElementInput> {
     Ok(ElementInput {
         form: match args.get("form") {
@@ -2682,13 +2633,6 @@ fn input_of(args: &Value) -> ApiResult<ElementInput> {
 ///
 /// # Errors
 /// [`ApiError::NotFound`] for an unknown tool, else what the operation answers.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "party-tools (0.3.1 part B) registers these; tests call them"
-    )
-)]
 pub async fn call_tool(state: &AppState, user: &User, name: &str, args: Value) -> ApiResult<Value> {
     let pack = str_arg(&args, "packId");
     let element = str_arg(&args, "elementId");

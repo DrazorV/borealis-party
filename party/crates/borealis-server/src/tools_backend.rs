@@ -259,8 +259,7 @@ impl ServerTools {
     }
 }
 
-/// Tools other modules serve, registered in [`crate::mcp::registry`]. Each module adds two lines at merge: its
-/// specs to [`external_specs`] and its dispatch here.
+/// Tools other modules serve, registered in [`crate::mcp::registry`] through [`external_specs`].
 ///
 /// * part D (`homebrew.rs`): `homebrew_*` and `index_build` (D47: the index comes back as data; nothing is hosted);
 /// * the simulator (`simulate.rs`, D26): `sim_*`, on copies of encounters only (D25: no combat is read or written).
@@ -274,20 +273,45 @@ async fn external(
     mut args: Map<String, Value>,
 ) -> Result<Value, ToolError> {
     args.remove("requestId");
-    let _ = (state, user, args);
-    let what = if tool.starts_with("sim_") {
-        "Simulations arrive with the simulator (0.3.1)."
-    } else {
-        "Homebrew and index authoring arrive with 0.3.1 part D."
-    };
-    Err(ToolError::Unavailable(format!(
-        "{tool} is not available on this server yet. {what}"
-    )))
+    if tool.starts_with("sim_") {
+        return crate::simulate_tools::call_tool(state, user, tool, args).await;
+    }
+    crate::homebrew::call_tool(state, user, tool, Value::Object(args))
+        .await
+        .map_err(homebrew_error)
 }
 
-/// The specs of [`external`]'s tools, as their modules define them (replacing the registry's placeholders).
+/// Part D's errors. A refused save keeps its whole `{code, report, xml}`, so the model sees the engine's report and
+/// can fix the element; everything else maps as for the API's own handlers.
+fn homebrew_error(e: ApiError) -> ToolError {
+    match e {
+        ApiError::Command(v)
+            if v.get("code").and_then(Value::as_str) == Some("invalid_homebrew") =>
+        {
+            ToolError::Refused {
+                code: "invalid_homebrew".into(),
+                message: v.to_string(),
+            }
+        }
+        other => from_api(other),
+    }
+}
+
+/// The specs of [`external`]'s tools, as their modules define them (replacing the registry's placeholders):
+/// part D's homebrew tools and `index_build`, and the simulator's `sim_*`.
 pub fn external_specs() -> Vec<ToolSpec> {
-    Vec::new()
+    let mut specs: Vec<ToolSpec> = crate::homebrew::tools()
+        .into_iter()
+        .map(|t| {
+            let scope = match t.scope {
+                crate::homebrew::ToolScope::HomebrewRead => party_tools::Scope::HomebrewRead,
+                crate::homebrew::ToolScope::HomebrewWrite => party_tools::Scope::HomebrewWrite,
+            };
+            ToolSpec::external(t.name, t.title, t.description, scope, t.input_schema)
+        })
+        .collect();
+    specs.extend(crate::simulate_tools::tools());
+    specs
 }
 
 impl party_tools::Backend for ServerTools {
