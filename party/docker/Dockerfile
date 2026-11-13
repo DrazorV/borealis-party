@@ -7,6 +7,8 @@ WORKDIR /src
 COPY ui/package.json ui/package-lock.json ui/
 RUN npm --prefix ui ci --no-audit --no-fund
 COPY ui ui
+# The app shows the party version (ui/party/version.ts).
+COPY party/Cargo.toml party/Cargo.toml
 RUN node ui/party/build.mjs
 
 FROM rust:1-bookworm AS server

@@ -16,11 +16,20 @@
 .party-bar .party-bar-name, .party-bar .party-sync-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .party-bar .party-bar-name { flex-shrink: 0; max-width: 35%; }
 .party-bar .spacer, .party-member-head .spacer, .party-line .spacer, .party-inline .spacer { flex: 1; }
-.party-connect { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; background: var(--bg); color: var(--text, inherit); }
-.party-connect-card { display: flex; flex-direction: column; gap: var(--sp-3); width: 100%; max-width: 360px; padding: var(--sp-5); }
+/*
+ * The sign-in and new-password screens scroll themselves (base.css never lets the window scroll), so the card can be
+ * reached in landscape and above the keyboard: the apps keep the page's size and report the keyboard as `--kb`, which
+ * pads the bottom. `margin: auto` centres the card while it fits and lets its top scroll into view when it doesn't.
+ */
+.party-connect {
+  height: 100vh; height: 100dvh; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  display: flex; box-sizing: border-box; background: var(--bg); color: var(--text, inherit);
+  padding: max(16px, var(--safe-t, 0px)) max(16px, var(--safe-r, 0px)) max(16px, var(--safe-b, 0px), calc(var(--kb, 0px) + 16px)) max(16px, var(--safe-l, 0px));
+}
+.party-connect-card { display: flex; flex-direction: column; gap: var(--sp-3); width: 100%; max-width: 360px; padding: var(--sp-5); margin: auto; box-sizing: border-box; }
 .party-connect-card h1 { margin: 0; font-size: var(--fs-xl); }
 .party-connect-card label { display: flex; flex-direction: column; gap: var(--sp-1); }
-.party-connect-card input.aur-text { min-height: 36px; padding: 0 var(--sp-2); font-size: 16px; box-sizing: border-box; }
+.party-connect-card .input { font-size: 16px; }
 .party-connect-note { margin: 0; font-size: var(--fs-sm); }
 .party-app-offer { align-items: flex-start; font-size: var(--fs-sm); }
 .party-bar-host > .party-app-offer { margin: var(--sp-2) var(--sp-3); }
@@ -65,20 +74,120 @@ html.phone:root {
   --ph-t-title2: calc(20 * var(--ph-rem));
   --ph-t-name: calc(18 * var(--ph-rem));
   --ph-gutter: 12px;
-  --ph-hit: 40px;
+  /* Plan D9: smaller type, but full-size tap targets: 44 px (Apple's 44 pt) here, 48 px (Android's 48 dp) below. */
+  --ph-hit: 44px;
   --ph-row: 44px;
-  --ph-bar: 40px;
+  --ph-bar: 44px;
   --ph-tabbar: 46px;
 }
 html.phone.android:root {
   --ph-t-body: calc(15 * var(--ph-rem));
   --ph-t-tab: calc(11 * var(--ph-rem));
-  --ph-hit: 44px;
+  --ph-hit: 48px;
   --ph-row: 48px;
   --ph-bar: 50px;
   --ph-tabbar: 58px;
 }
-/* The account bar on a phone: the buttons keep their whole label (never "Sync…" for "Synced"); the name gives way first. */
-html.phone .party-bar { gap: var(--sp-1); padding: var(--sp-1) var(--sp-2) var(--sp-1) var(--ph-gutter); }
-html.phone .party-bar > .btn { flex-shrink: 0; min-height: 36px; padding: 0 10px; }
-html.phone .party-bar .party-bar-name { flex-shrink: 1; max-width: none; }
+/*
+ * The account bar on a phone (plan D10): only the Sync chip, which keeps its whole label (never "Sync…" for
+ * "Synced"); Account, Admin and Sign out are rows on the More page. With no chip (a browser keeps no copy) there is
+ * no bar, and none while the keyboard is open.
+ */
+html.phone .party-bar { gap: var(--sp-1); padding: 2px var(--sp-2) 2px var(--ph-gutter); }
+html.phone .party-bar > .btn { flex-shrink: 0; min-height: var(--ph-hit); padding: 0 12px; }
+html.phone .party-bar .party-bar-name { display: none; }
+html.phone .party-bar:not(:has(> .btn)), html.phone.kb-open .party-bar { display: none; }
+/* The Android app in a wide window (no phone layer): the account rows are on More, so an empty bar takes no room. */
+.party-bar.party-bar-compact:not(:has(> .btn)) { display: none; }
+html.phone .party-more { margin-bottom: 10px; }
+html.phone .party-more .v5-row:disabled { opacity: 0.6; }
+/* Party pages' own controls at the phone's tap size (D9): the admin page's tabs, and the app note's text link. */
+html.phone .party-admin [role="tab"] { min-height: var(--ph-hit); display: inline-flex; align-items: center; }
+html.phone .party .segmented button { min-width: var(--ph-hit); }
+html.phone .party-app-others { display: inline-flex; align-items: center; min-height: var(--ph-hit); }
+
+/*
+ * The Import screen (ImportHub, plan I9): three ways in, then one list of results. Long file names and addresses
+ * wrap instead of widening the page; on a phone every control is at least a tap target tall.
+ */
+.party-import .card p { margin: 0 0 var(--sp-2); }
+.party-import-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.party-import-link { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.party-import-link .input { flex: 1 1 220px; min-width: 0; }
+.party-import-results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.party-import-row { padding: var(--sp-2) var(--sp-3); background: var(--surface); border: var(--border-w) solid var(--border); border-left-width: 4px; border-radius: var(--radius); min-width: 0; }
+.party-import-row.success { border-left-color: var(--success, #3a7d44); }
+.party-import-row.warning { border-left-color: var(--warning, #b8860b); }
+.party-import-row.error { border-left-color: var(--danger, #b22222); }
+.party-import-row.working, .party-import-row.info { border-left-color: var(--accent, var(--border)); }
+.party-import-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
+.party-import-name { flex: 1 1 10em; min-width: 0; overflow-wrap: anywhere; }
+.party-import-msg, .party-import-detail { margin: var(--sp-1) 0 0; overflow-wrap: anywhere; }
+.party-import-books { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); min-width: 0; }
+.party-import-books > .btn { align-self: flex-start; }
+.party-import .party-import-books .list { max-height: 50vh; overflow-y: auto; }
+html.phone .party-import { padding: var(--sp-3) var(--ph-gutter); }
+html.phone .party-import .btn, html.phone .party-import .input { min-height: var(--ph-hit); }
+html.phone .party-import .input { font-size: 16px; }
+html.phone .party-import-actions > .btn, html.phone .party-import-link > .btn { flex: 1 1 auto; justify-content: center; }
+html.phone .party-import-books input[type="checkbox"] { min-width: 24px; min-height: 24px; }
+.party-import-report { margin-top: var(--sp-2); max-height: 50vh; overflow: auto; min-width: 0; }
+
+/* Share codes (SharePage, ShareReceivePage; plan E4). */
+.party-share { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); max-width: 760px; min-width: 0; }
+.party-share .card p { margin: 0 0 var(--sp-2); }
+.party-share-form { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.party-share-characters { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); max-height: 40vh; overflow-y: auto; min-width: 0; }
+.party-share-characters legend { font-weight: 600; margin-bottom: var(--sp-1); }
+.party-share-code { font: 600 1.6rem/1.3 var(--font-mono, ui-monospace, monospace); letter-spacing: 0.06em; overflow-wrap: anywhere; user-select: all; margin: 0 0 var(--sp-2); }
+.party-share-link { width: 100%; margin-bottom: var(--sp-2); }
+.party-share-input { font-family: var(--font-mono, ui-monospace, monospace); letter-spacing: 0.04em; }
+.party-share-list { list-style: none; margin: 0 0 var(--sp-2); padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.party-share-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--surface); border: var(--border-w) solid var(--border); border-radius: var(--radius); min-width: 0; }
+.party-share-row .grow { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; }
+.party-share-row p { margin: var(--sp-1) 0 0; }
+.party-share-url { overflow-wrap: anywhere; }
+.party-share-links h3 { margin: var(--sp-3) 0 var(--sp-1); font-size: 1rem; }
+html.phone .party-share { padding: var(--sp-3) var(--ph-gutter); }
+html.phone .party-share .btn, html.phone .party-share .input { min-height: var(--ph-hit); }
+html.phone .party-share .input { font-size: 16px; }
+html.phone .party-share .party-import-actions > .btn, html.phone .party-share .party-import-link > .btn { flex: 1 1 auto; justify-content: center; }
+html.phone .party-share-characters input[type="checkbox"] { min-width: 24px; min-height: 24px; }
+html.phone .party-share a { display: inline-flex; align-items: center; min-height: var(--ph-hit); }
+
+/*
+ * Parties (plan 4.1): a card per party with a gradient head stripe (gold for the DM's, accent for a player's), member
+ * cards with the server's read-only numbers, and the join code in large letters. Phone first: every control is a tap
+ * target tall, rows wrap instead of widening the page. The dialogs are portalled, so their classes are not under
+ * `.party-parties`.
+ */
+.party-parties .party-card { border-top: 3px solid transparent; border-image: linear-gradient(90deg, var(--accent, #4a6fa5), transparent) 1; }
+.party-parties .party-card-dm { border-image: linear-gradient(90deg, var(--gold, #b8860b), transparent) 1; }
+.party-parties .card-head h2 { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; overflow-wrap: anywhere; }
+.party-sub { margin: var(--sp-3) 0 var(--sp-1); font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.75; }
+.party-note { display: block; font-size: var(--fs-sm); margin: var(--sp-1) 0 0; overflow-wrap: anywhere; }
+.party-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.party-member .grow, .party-invite .grow, .party-pick-row .grow { flex: 1 1 10em; min-width: 0; overflow-wrap: anywhere; }
+.party-invite { padding: var(--sp-1) 0; border-bottom: var(--border-w) solid var(--border); gap: var(--sp-2); }
+.party-invite:last-child { border-bottom: 0; }
+.party-code-input { text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--font-mono, monospace); }
+.party-code { display: block; padding: var(--sp-3); text-align: center; font-family: var(--font-mono, monospace); font-size: 22px; letter-spacing: 0.08em;
+  user-select: all; overflow-wrap: anywhere; background: var(--surface-2, var(--surface)); border: var(--border-w) dashed var(--border); border-radius: var(--radius); }
+.party-field { display: flex; flex-direction: column; gap: var(--sp-1); }
+.party-segmented { display: flex; gap: 0; }
+.party-segmented .btn { flex: 1 1 0; justify-content: center; border-radius: 0; }
+.party-segmented .btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.party-segmented .btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+.party-numbers { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.party-pick { max-height: 50vh; overflow-y: auto; }
+.party-pick-row { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: var(--border-w) solid var(--border); border-radius: var(--radius); cursor: pointer; }
+.party-pick-row.chosen { border-color: var(--accent, var(--border)); background: var(--surface-2, var(--surface)); }
+.party-pick-row.disabled { opacity: 0.55; cursor: default; }
+.party-pick-row input { flex: none; width: 20px; height: 20px; margin: 0; }
+html.phone .party-parties { padding: var(--sp-3) var(--ph-gutter); }
+html.phone .party-parties .btn, html.phone .party-parties .input, html.phone .party-form .btn, html.phone .party-form .input,
+html.phone .party-pick-row, html.phone .party-parties .aur-switch { min-height: var(--ph-hit); }
+html.phone .party-parties .input, html.phone .party-form .input { font-size: 16px; }
+html.phone .party-parties .party-inline > .btn, html.phone .party-actions > .btn { flex: 1 1 auto; justify-content: center; }
+.party-dm-offer .btn { text-decoration: none; }
+html.phone .party .party-note a, html.phone .party-dm-offer .btn { display: inline-flex; align-items: center; justify-content: center; min-height: var(--ph-hit); min-width: var(--ph-hit); }

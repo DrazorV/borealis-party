@@ -7,6 +7,7 @@ import { changeEmail, changePassword, checkServer, sameAccountAt } from "../api/
 import { isLocalAddress, loadSession, normaliseAddress, setServerAddress, updateUser } from "../api/session";
 import { clearNotices, loadMirror, loadNotices } from "../sync/mirror";
 import { useSyncStatus } from "../sync/runner";
+import { DungeonMasterCard } from "./PartiesDm";
 import "./party.css";
 
 /**
@@ -102,22 +103,23 @@ export function AccountPage() {
         <p className="muted">Signed in as <strong>{user?.username}</strong>{user?.admin ? " · admin" : ""}</p>
         {!hasEmail && <Alert tone="info">Add an email address, so an admin can reach you.</Alert>}
         <form className="party-inline" onSubmit={(e) => void saveEmail(e)}>
-          <input className="aur-text" type="email" aria-label="Email address" placeholder="Email address" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <input className="input" type="email" aria-label="Email address" placeholder="Email address" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
           <Button type="submit">Save email</Button>
         </form>
         <form className="party-inline" onSubmit={(e) => void savePassword(e)}>
-          <input className="aur-text" type="password" aria-label="Current password" placeholder="Current password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} required />
-          <input className="aur-text" type="password" aria-label="New password" placeholder="New password" autoComplete="new-password" minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <input className="input" type="password" aria-label="Current password" placeholder="Current password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} required />
+          <input className="input" type="password" aria-label="New password" placeholder="New password" autoComplete="new-password" minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} required />
           <Button type="submit">Change password</Button>
         </form>
       </Card>
+      <DungeonMasterCard />
       {isTauri() && user && <SyncNotes userId={user.id} />}
       {/* A browser got the page from the server itself, so only the apps have an address to change. */}
       {isTauri() && (
         <Card title="Server address">
           <p className="muted">If your server moves to a new address, enter it here. You stay signed in.</p>
           <form className="party-inline" onSubmit={(e) => void saveAddress(e)}>
-            <input className="aur-text" aria-label="Server address" inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="party.example.com" value={address} onChange={(e) => setAddress(e.target.value)} required />
+            <input className="input" aria-label="Server address" inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="party.example.com" value={address} onChange={(e) => setAddress(e.target.value)} required />
             <Button type="submit" disabled={moving}>Change address</Button>
           </form>
         </Card>

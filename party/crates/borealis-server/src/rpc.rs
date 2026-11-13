@@ -12,7 +12,7 @@ use tokio_stream::{Stream, StreamExt};
 use crate::auth::User;
 use crate::error::{ApiError, ApiResult};
 use crate::AppState;
-use crate::{settings, sync};
+use crate::{jobs, settings, sync};
 
 /// Server paths are nobody's business: the commands report them for the desktop app's benefit.
 fn scrub_paths(value: &mut Value) {
@@ -50,6 +50,9 @@ pub async fn command(
             workspace.call(&command, args).await?
         }
         name if sync::COMMANDS.contains(&name) => sync::call(&workspace, name, &args).await?,
+        name if jobs::COMMANDS.contains(&name) => {
+            jobs::call(state.workspaces.jobs(), &user.id, &workspace, name, &args).await?
+        }
         _ => sync::call_upstream(&workspace, &command, args).await?,
     };
     if settings::COMMANDS.contains(&command.as_str()) {
@@ -72,4 +75,12 @@ pub async fn events(
         )))
     });
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+/// The Borealis commands and the account's event stream.
+pub fn routes() -> axum::Router<AppState> {
+    use axum::routing::{get, post};
+    axum::Router::new()
+        .route("/api/rpc/{command}", post(command))
+        .route("/api/events", get(events))
 }

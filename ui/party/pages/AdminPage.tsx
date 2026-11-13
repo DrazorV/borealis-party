@@ -12,6 +12,7 @@ import {
   type Account, type AccountStatus, type ActivityEntry, type AdminSettings, type Paged, type ServerStats,
 } from "../api/party";
 import { loadSession } from "../api/session";
+import { TrustedProxies } from "./TrustedProxies";
 import "./party.css";
 
 const message = (e: unknown): string => (e as { message?: string }).message ?? "Something went wrong.";
@@ -42,7 +43,7 @@ function duration(seconds: number): string {
   return `${minutes} min`;
 }
 
-/** The admin page: accounts, statistics, sign-up settings and the activity log. */
+/** The admin page: accounts, statistics, settings (sign-up, trusted proxies) and the activity log. */
 export function AdminPage() {
   const [section, setSection] = useState<Section>("accounts");
   return (
@@ -220,7 +221,7 @@ function ResetPassword({ account, onClose, onDone }: { account: Account; onClose
       <form className="party-form" onSubmit={(e) => void submit(e)}>
         <Check label="Set a temporary password" description="You tell them this password. Without one, they keep their current password but must change it at their next sign-in." checked={temporary} onChange={(e) => setTemporary(e.target.checked)} />
         {temporary && (
-          <input className="aur-text" type="text" aria-label="Temporary password" placeholder="Temporary password (8 or more characters)" autoComplete="off" spellCheck={false} value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required />
+          <input className="input" type="text" aria-label="Temporary password" placeholder="Temporary password (8 or more characters)" autoComplete="off" spellCheck={false} value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required />
         )}
         <p className="muted">Either way, they are signed out on every device now.</p>
       </form>
@@ -252,6 +253,26 @@ function Statistics() {
           {tiles.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
         </dl>
       </Card>
+      {stats.shares && (
+        <Card title="Share codes">
+          <dl className="party-stats party-admin-stats">
+            {([
+              ["Waiting to be used", stats.shares.byStatus.pending],
+              ["Opened, not yet accepted", stats.shares.byStatus.claimed],
+              ["Accepted (30 days)", stats.shares.byStatus.done],
+              ["Declined (30 days)", stats.shares.byStatus.declined],
+              ["Expired (30 days)", stats.shares.byStatus.expired],
+              ["Blocks", stats.shares.blocks],
+              ["Shared files", bytes(stats.shares.outgoingBytes)],
+              ["Received, not yet accepted", bytes(stats.shares.stagedBytes)],
+            ] as [string, string | number][]).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+          </dl>
+          <p className="muted small">
+            {stats.shares.enabled ? "On." : "Off (BOREALIS_SHARES=off in the server's environment)."} At most {bytes(stats.shares.maxBytes)} per share
+            and {bytes(stats.shares.diskBytesPerAccount)} of shared and received files per account.
+          </p>
+        </Card>
+      )}
       <Card title="Server">
         <dl className="party-facts">
           <div><dt>Version</dt><dd>{stats.version}</dd></div>
@@ -278,31 +299,34 @@ function Settings() {
   if (error) return <Alert tone="danger">{error}</Alert>;
   if (!settings) return null;
   return (
-    <Card title="Sign-up">
-      <div className="party-form">
-        <Check
-          label="Anyone can ask for an account"
-          description="Off: new accounts come only from the add-user command on the server."
-          checked={settings.openRegistration}
-          onChange={(e) => void save({ openRegistration: e.target.checked })}
-        />
-        <Check
-          label="New accounts wait for an admin"
-          description="Off: a new account can sign in straight away (after confirming its email, when email is set up)."
-          checked={settings.requireApproval}
-          onChange={(e) => void save({ requireApproval: e.target.checked })}
-        />
-        <p className="muted">
-          These are saved on the server and win over config.toml, which says: sign-up {settings.configFile.openRegistration ? "on" : "off"},
-          approval {settings.configFile.requireApproval ? "required" : "not required"}.
-        </p>
-        <p className="muted">
-          {settings.email
-            ? `Sign-up email is set up: new accounts confirm their address through a link to ${settings.publicUrl ?? "this server"}, and admins with an email address hear about each request.`
-            : "Sign-up email is not set up ([smtp] in config.toml), so addresses aren't confirmed: approval is the check."}
-        </p>
-      </div>
-    </Card>
+    <>
+      <Card title="Sign-up">
+        <div className="party-form">
+          <Check
+            label="Anyone can ask for an account"
+            description="Off: new accounts come only from the add-user command on the server."
+            checked={settings.openRegistration}
+            onChange={(e) => void save({ openRegistration: e.target.checked })}
+          />
+          <Check
+            label="New accounts wait for an admin"
+            description="Off: a new account can sign in straight away (after confirming its email, when email is set up)."
+            checked={settings.requireApproval}
+            onChange={(e) => void save({ requireApproval: e.target.checked })}
+          />
+          <p className="muted">
+            These are saved on the server and win over config.toml, which says: sign-up {settings.configFile.openRegistration ? "on" : "off"},
+            approval {settings.configFile.requireApproval ? "required" : "not required"}.
+          </p>
+          <p className="muted">
+            {settings.email
+              ? `Sign-up email is set up: new accounts confirm their address through a link to ${settings.publicUrl ?? "this server"}, and admins with an email address hear about each request.`
+              : "Sign-up email is not set up ([smtp] in config.toml), so addresses aren't confirmed: approval is the check."}
+          </p>
+        </div>
+      </Card>
+      <TrustedProxies />
+    </>
   );
 }
 

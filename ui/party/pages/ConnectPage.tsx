@@ -4,8 +4,10 @@ import { checkServer, endSession, signIn, signUp, type ServerInfo } from "../api
 import {
   dropSignInAgain, markExpired, normaliseAddress, rememberServer, rememberedServer, saveSession, type ServerSession, type ServerUser,
 } from "../api/session";
+import { usePhone } from "../../src/lib/phone";
 import { isTauri } from "../../src/lib/tauri";
 import { othersUnsentEdits, removeOtherCopies } from "../sync/account";
+import { keepJoinCode, keptJoinCode, normaliseCode, previewJoinCode, type CodePreview } from "../api/overrides/parties";
 import { AppOffer } from "./AppOffer";
 import { DiscardDialog } from "./SignOut";
 import "./party.css";
@@ -27,6 +29,8 @@ interface Waiting { baseUrl: string; token: string; user: ServerUser; names: str
 export function ConnectPage({ again }: { again?: ServerSession } = {}) {
   // A browser got this page from the server, so the server is already known.
   const needsAddress = isTauri();
+  // On a phone a focused field opens the keyboard over half the card: the first tap does that instead.
+  const focusFirst = !usePhone();
   const [address, setAddress] = useState(again?.baseUrl ?? rememberedServer());
   const [server, setServer] = useState<{ baseUrl: string; info: ServerInfo } | null>(null);
   const [mode, setMode] = useState<"in" | "up">("in");
@@ -34,6 +38,8 @@ export function ConnectPage({ again }: { again?: ServerSession } = {}) {
   const [waiting, setWaiting] = useState<Waiting | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // A join link opened before signing up (plan D39): the code goes with the sign-up.
+  const [joinCode, setJoinCode] = useState(() => keptJoinCode());
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -113,13 +119,30 @@ export function ConnectPage({ again }: { again?: ServerSession } = {}) {
         await enter(server.baseUrl, out.token, out.user);
         return;
       }
-      const out = await signUp(server.baseUrl, username, email, password);
+      const code = normaliseCode(joinCode);
+      // The server never fails a sign-up over its code, so a code that wouldn't work is caught first.
+      let join: CodePreview | null = null;
+      if (code) {
+        try { join = await previewJoinCode(server.baseUrl, code); } catch (err) {
+          setError((err as { code?: string }).code === "not_found"
+            ? "That join code isn't valid, or it has expired. Check it, or clear it to sign up without one."
+            : message(err));
+          setBusy(false);
+          return;
+        }
+      }
+      const out = await signUp(server.baseUrl, username, email, password, code || undefined);
+      // The server keeps the code now: as an invite on the new account, or until an admin approves it.
+      if (code) keepJoinCode(null);
       if (out.status === "active" && out.token && out.user) {
         await enter(server.baseUrl, out.token, out.user);
         return;
       }
       // Waiting for the emailed link or for an admin: back to signing in, with what happens next.
-      setNotice(out.message ?? "Your account is waiting for approval.");
+      const waits = out.message ?? "Your account is waiting for approval.";
+      setNotice(join
+        ? `${waits} Your join code for ${join.party.name} is kept: once ${out.awaitingEmail ? "your email address is confirmed" : "an admin approves you"}, sign in and pick the character that joins (until ${new Date(join.expiresAt).toLocaleDateString()}).`
+        : waits);
       setMode("in");
       setPassword("");
       setBusy(false);
@@ -153,7 +176,7 @@ export function ConnectPage({ again }: { again?: ServerSession } = {}) {
             <p className="muted">Enter the address of your server.</p>
             <label>
               Server address
-              <input className="aur-text" autoFocus inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="party.example.com" value={address} onChange={(e) => setAddress(e.target.value)} required />
+              <input className="input" autoFocus={focusFirst} inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="party.example.com" value={address} onChange={(e) => setAddress(e.target.value)} required />
             </label>
             <button className="btn primary" disabled={busy}>Connect</button>
           </>
@@ -164,18 +187,24 @@ export function ConnectPage({ again }: { again?: ServerSession } = {}) {
             {notice && <div className="alert success" role="status"><div>{notice}</div></div>}
             <label>
               {mode === "in" ? "Username or email" : "Username"}
-              <input className="aur-text" autoFocus autoCapitalize="none" spellCheck={false} autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+              <input className="input" autoFocus={focusFirst} autoCapitalize="none" spellCheck={false} autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
             </label>
             {mode === "up" && (
               <label>
                 Email
-                <input className="aur-text" type="email" autoCapitalize="none" spellCheck={false} autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                <input className="input" type="email" autoCapitalize="none" spellCheck={false} autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
               </label>
             )}
             <label>
               Password
-              <input className="aur-text" type="password" autoComplete={mode === "in" ? "current-password" : "new-password"} value={password} onChange={(e) => setPassword(e.target.value)} required minLength={mode === "up" ? 8 : undefined} />
+              <input className="input" type="password" autoComplete={mode === "in" ? "current-password" : "new-password"} value={password} onChange={(e) => setPassword(e.target.value)} required minLength={mode === "up" ? 8 : undefined} />
             </label>
+            {mode === "up" && (
+              <label>
+                Join code (optional)
+                <input className="input" aria-label="Join code (optional)" autoCapitalize="characters" autoComplete="off" spellCheck={false} value={joinCode} onChange={(e) => setJoinCode(e.target.value)} />
+              </label>
+            )}
             {mode === "up" && (
               <p className="muted party-connect-note">
                 {server.info.email ? "We'll email you a link to confirm your address. " : ""}

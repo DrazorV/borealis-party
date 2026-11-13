@@ -38,6 +38,26 @@ export async function checkForUpdate(): Promise<AvailableUpdate | null> {
   return await invoke<AvailableUpdate | null>("plugin:updater|check", { timeout: 30_000 });
 }
 
+/** An update found outside the bar (Help → Check for updates…), and whether it should be installed now. */
+export interface UpdateOffer {
+  update: AvailableUpdate;
+  install: boolean;
+}
+
+const offerListeners = new Set<(offer: UpdateOffer) => void>();
+
+/** The update bar (../pages/DesktopUpdate.tsx) listens here while it is shown. */
+export function onUpdateOffered(listener: (offer: UpdateOffer) => void): () => void {
+  offerListeners.add(listener);
+  return () => { offerListeners.delete(listener); };
+}
+
+/** Hands an update to the bar, which shows it (and installs it, with its progress). Answers false when no bar is shown. */
+export function offerUpdate(offer: UpdateOffer): boolean {
+  for (const listener of offerListeners) listener(offer);
+  return offerListeners.size > 0;
+}
+
 /**
  * Download the update, check its signature and install it. Windows: the installer closes the app and opens the new
  * version. Linux (the AppImage is replaced in place): the app restarts itself. `progress` gets 0 to 1 when the size

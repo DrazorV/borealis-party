@@ -2,7 +2,9 @@ import { useSyncExternalStore } from "react";
 import type { ApiError } from "../../src/api/contract";
 import { createTauriApi } from "../../src/api/tauri";
 import { isTauri } from "../../src/lib/tauri";
-import { eventStream, serverFetch } from "../api/http";
+import { connectivity, holdReload, onBack } from "../api/connectivity";
+import { serverFetch } from "../api/http";
+import { liveEvents } from "../api/liveEvents";
 import { loadSession } from "../api/session";
 import { hasCopy } from "./mirror";
 import { rereadIfReplaced } from "./replaced";
@@ -52,16 +54,31 @@ function problemText(report: SyncReport): string | null {
   return problems.length > 0 ? problems.join(" ") : null;
 }
 
+/** The server can't be reached right now (connectivity.ts is probing, or says "Reconnecting…"). */
+const unreachable = () => ["checking", "down"].includes(connectivity().link);
+
 async function run(r: Runner): Promise<void> {
   const first = !hasCopy(r.userId);
+  const before = status;
   publish({ state: "syncing", first, done: 0, total: 0 });
+  // A reload in the middle of copying files would leave the copy half-written (connectivity.ts waits).
+  const release = holdReload("sync");
   try {
     const report = await syncOnce({ ...r, onProgress: (done, total) => publish({ state: "syncing", first, done, total }) });
     const problem = problemText(report);
-    publish(problem ? { state: "problem", message: problem } : { state: "synced", atMs: Date.now(), waiting: report.waiting.length });
+    if (problem && unreachable()) {
+      // Lost the signal part-way: the banner says so, and the sync runs again once the server answers.
+      publish(before.state === "syncing" ? { state: "idle" } : before);
+    } else {
+      publish(problem ? { state: "problem", message: problem } : { state: "synced", atMs: Date.now(), waiting: report.waiting.length });
+    }
   } catch (e) {
-    publish({ state: "problem", message: (e as Partial<ApiError>)?.message ?? String(e) });
+    // No signal is no sync problem: the chip keeps what it said, the banner says "Reconnecting…".
+    if (String((e as Partial<ApiError>)?.code) === "network" || unreachable()) publish(before.state === "syncing" ? { state: "idle" } : before);
+    else publish({ state: "problem", message: (e as Partial<ApiError>)?.message ?? String(e) });
     later(RETRY_MS);
+  } finally {
+    release();
   }
 }
 
@@ -118,15 +135,18 @@ export function startSync(deps?: Partial<Runner>): () => void {
     userId: deps?.userId ?? session.user.id,
   };
   void requestSync();
-  const stopEvents = deps ? () => {} : eventStream(session, (e) => {
+  // Events missed while the stream was down: sync once it is back.
+  const stopEvents = deps ? () => {} : liveEvents(session, (e) => {
     rereadIfReplaced(e);
     if (CHANGED.includes(e.event)) later(DEBOUNCE_MS);
-  });
+  }, { onOpen: (again) => { if (again) later(DEBOUNCE_MS); } });
+  const stopBack = onBack(() => void requestSync());
   const every = setInterval(() => void requestSync(), EVERY_MS);
   const front = () => { if (document.visibilityState === "visible") void requestSync(); };
   document.addEventListener("visibilitychange", front);
   return () => {
     stopEvents();
+    stopBack();
     clearInterval(every);
     document.removeEventListener("visibilitychange", front);
     if (timer) clearTimeout(timer);

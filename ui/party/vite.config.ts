@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, mergeConfig, type Plugin } from "vite";
 import upstream from "../vite.config";
+import { cargoVersion } from "./version";
 
 const local = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
@@ -15,6 +17,9 @@ const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     "./App": local("./entry/App.tsx"),
     "./AppProviders": local("./entry/AppProviders.tsx"),
   },
+  // A NavLink the shell marks "not current" stays so (entry/shellRouter.tsx): one selected START sub-tab.
+  "src/components/shell/Chrome.tsx": { "react-router": local("./entry/shellRouter.tsx") },
+  "src/components/shell/MobileChrome.tsx": { "react-router": local("./entry/shellRouter.tsx") },
   "src/pages/settings/ApplicationSettings.tsx": {
     "./settingsTabs": local("./settings/settingsTabs.ts"),
     "./BorealisTabs": local("./settings/BorealisTabs.tsx"),
@@ -45,7 +50,38 @@ function partyEntry(): Plugin {
   };
 }
 
+const TITLE = /<title>Borealis<\/title>/;
+
+/**
+ * Upstream's `index.html` with the party's tab title and the Borealis mark as the tab icon (upstream's page has none).
+ * The icon files are in `public/` (`favicon.svg` is `.github/readme/favicon.svg`; the PNG and ICO fallbacks are
+ * rendered from it). The build fails if upstream changes its title, rather than silently shipping the plain one.
+ */
+function partyPage(): Plugin {
+  const link = (attrs: Record<string, string>) => ({ tag: "link", attrs, injectTo: "head" as const });
+  return {
+    name: "party-page",
+    transformIndexHtml(html) {
+      if (!TITLE.test(html)) throw new Error("party-page: upstream index.html no longer has <title>Borealis</title>");
+      return {
+        html: html.replace(TITLE, "<title>Borealis Party</title>"),
+        tags: [
+          link({ rel: "icon", href: "/favicon.ico", sizes: "48x48" }),
+          link({ rel: "icon", href: "/favicon.svg", type: "image/svg+xml" }),
+          link({ rel: "icon", href: "/favicon-32.png", type: "image/png", sizes: "32x32" }),
+          link({ rel: "apple-touch-icon", href: "/apple-touch-icon.png" }),
+        ],
+      };
+    },
+  };
+}
+
+/** The party version (./version.ts), shown where upstream shows its own. The Docker build copies party/Cargo.toml for it. */
+export const PARTY_VERSION = cargoVersion(readFileSync(local("../../party/Cargo.toml"), "utf8"));
+
 export default mergeConfig(upstream, defineConfig({
-  plugins: [partyEntry()],
+  plugins: [partyEntry(), partyPage()],
+  define: { __APP_VERSION__: JSON.stringify(PARTY_VERSION) },
+  publicDir: "party/public",
   build: { outDir: "party/dist", emptyOutDir: true },
 }));

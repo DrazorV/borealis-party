@@ -1,8 +1,20 @@
 import { COMMANDS, EVENTS, type Api, type ApiError, type ApiMethods, type CommandName, type DataDirs, type EventName } from "../../src/api/contract";
-import type { ExportResult, SheetShare } from "../../src/api/contract";
-import { phoneOs } from "../../src/lib/phone";
-import { exportBundle, importWatch, shareBundle, looksLikeBundle, openBundleFromImport, pickBundleFile } from "./bundles";
+import { liveEvents } from "./liveEvents";
+import { OVERRIDES, type Methods } from "./overrides/registry";
 import { clearSession, loadSession, saveSession, type ServerSession } from "./session";
+
+// Each feature's changes to the commands, one module each (./overrides/registry.ts), applied in this order.
+import "./overrides/sheet";
+import "./overrides/bundles";
+import "./overrides/android"; // after sheet and bundles, which it wraps
+import "./overrides/errors";
+import "./overrides/opened";
+import "./overrides/links";
+import "./overrides/jobs";
+import "./overrides/version";
+import "./overrides/updates"; // after links, whose openLink it wraps
+import "./overrides/shares";
+import "./overrides/parties";
 
 function fail(code: string, message: string): ApiError {
   return { code, message } as ApiError;
@@ -14,18 +26,58 @@ function fail(code: string, message: string): ApiError {
  */
 export const serverWatch: { network?: () => void; expired?: () => boolean } = {};
 
+/** A request {@link serverFetch} is about to send. `bytes` is the length of its JSON body (0 for none). */
+export interface ServerRequest {
+  baseUrl: string;
+  method: string;
+  path: string;
+  bytes: number;
+}
+
+/**
+ * A request that failed. `status` is 0 when no answer came (the network); `text` is the raw reply, which can be a
+ * proxy's HTML page; `error` is what {@link serverFetch} throws unless a hook replaces it.
+ */
+export interface ServerFailure extends ServerRequest {
+  status: number;
+  text: string;
+  error: ApiError;
+}
+
+/**
+ * Hooks into every {@link serverFetch} (commands, uploads, account calls, sync), for override modules that need the raw
+ * request or reply, so they never edit this file. Add to the lists once per page; they run in the order added.
+ * - `send` runs before the request goes out. Throwing refuses it: nothing is sent and that error is thrown.
+ * - `fail` runs for a request with no answer or a refused one, after the sign-out handling below. Returning an
+ *   ApiError replaces the one thrown (the next hook sees the replacement); returning nothing keeps it.
+ * Used by ./overrides/errors.ts (sizes and readable errors).
+ */
+export const serverHooks: {
+  send: ((request: ServerRequest) => void)[];
+  fail: ((failure: ServerFailure) => ApiError | undefined | void)[];
+} = { send: [], fail: [] };
+
+function failed(failure: ServerFailure): ApiError {
+  let error = failure.error;
+  for (const hook of serverHooks.fail) error = hook({ ...failure, error }) ?? error;
+  return error;
+}
+
 /** JSON request to the server. A rejected token signs the device out, unless the app keeps playing offline. */
 export async function serverFetch(session: Pick<ServerSession, "baseUrl" | "token">, method: string, path: string, body?: unknown): Promise<unknown> {
+  const payload = body === undefined ? undefined : JSON.stringify(body);
+  const request: ServerRequest = { baseUrl: session.baseUrl, method, path, bytes: payload?.length ?? 0 };
+  for (const hook of serverHooks.send) hook(request);
   let response: Response;
   try {
     response = await fetch(`${session.baseUrl}${path}`, {
       method,
       headers: { "content-type": "application/json", ...(session.token ? { authorization: `Bearer ${session.token}` } : {}) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(payload === undefined ? {} : { body: payload }),
     });
   } catch {
     serverWatch.network?.();
-    throw fail("network", "The server can't be reached. Check your connection.");
+    throw failed({ ...request, status: 0, text: "", error: fail("network", "The server can't be reached. Check your connection.") });
   }
   const text = await response.text();
   let parsed: unknown = null;
@@ -46,7 +98,10 @@ export async function serverFetch(session: Pick<ServerSession, "baseUrl" | "toke
       window.location.reload();
     }
   }
-  throw fail(String(error?.code ?? "internal"), String(error?.message ?? `The server answered ${response.status}.`));
+  throw failed({
+    ...request, status: response.status, text,
+    error: fail(String(error?.code ?? "internal"), String(error?.message ?? `The server answered ${response.status}.`)),
+  });
 }
 
 type Local = (args: Record<string, unknown>) => unknown;
@@ -75,38 +130,15 @@ export interface ServerEvent {
   payload: unknown;
 }
 
-/** Server-sent events over `fetch`, since EventSource can't send the Authorization header. Reconnects until closed. */
-export function eventStream(session: ServerSession, onEvent: (e: ServerEvent) => void): () => void {
-  const abort = new AbortController();
-  void (async () => {
-    while (!abort.signal.aborted) {
-      try {
-        const response = await fetch(`${session.baseUrl}/api/events`, { headers: { authorization: `Bearer ${session.token}` }, signal: abort.signal });
-        if (!response.ok || !response.body) throw new Error("events refused");
-        const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-        let buffer = "";
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += value;
-          let end = buffer.indexOf("\n\n");
-          while (end >= 0) {
-            const data = buffer.slice(0, end).split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trim()).join("\n");
-            buffer = buffer.slice(end + 2);
-            if (data) onEvent(JSON.parse(data) as ServerEvent);
-            end = buffer.indexOf("\n\n");
-          }
-        }
-      } catch { /* dropped or refused: try again below */ }
-      if (!abort.signal.aborted) await new Promise((r) => setTimeout(r, 3000));
-    }
-  })();
-  return () => abort.abort();
-}
+/**
+ * Server-sent events over `fetch`, since EventSource can't send the Authorization header. Reconnects until closed, with
+ * a backoff and connectivity.ts told about a server that can't be reached (./liveEvents.ts).
+ */
+export const eventStream = (session: ServerSession, onEvent: (e: ServerEvent) => void): (() => void) => liveEvents(session, onEvent);
 
 /** The Borealis API over HTTP. Pages use this exactly as they use the on-device backend. */
 export function createHttpApi(session: ServerSession): Api {
-  const methods = {} as Record<string, unknown>;
+  const methods = {} as Methods;
   for (const name of Object.keys(COMMANDS) as CommandName[]) {
     methods[name] = async (args?: Record<string, unknown>) => {
       const local = LOCAL[name];
@@ -121,50 +153,7 @@ export function createHttpApi(session: ServerSession): Api {
     };
   }
 
-  // Phones share the sheet PDF from the web view's own share sheet, with the bytes the server made. Android's web view
-  // has no share sheet and upstream shares from the device's backend there, which has no character to share.
-  methods.shareSheet = async (args?: Record<string, unknown>): Promise<SheetShare> => {
-    if (phoneOs() === "android") throw unavailable();
-    const file = await serverFetch(session, "POST", `/api/rpc/${COMMANDS.exportSheet}`, args ?? {}) as ExportResult;
-    return { fileName: file.fileName, mime: file.mime, shared: false, dataBase64: file.dataBase64 ?? "" };
-  };
-
-  // File > Open bundle...: the browser's file chooser and an upload stand in for the native open panel (./bundles.ts).
-  // Every other pick still goes to the server, which does not offer it.
-  const serverPick = methods.pickPath as (args?: Record<string, unknown>) => Promise<unknown>;
-  methods.pickPath = (args?: Record<string, unknown>) => (args?.purpose === "bundle-file" ? pickBundleFile(session) : serverPick(args));
-
-  // File > Export to bundle...: the server builds the file and the browser's download stands in for the save dialog.
-  methods.bundleExport = (args?: Record<string, unknown>) => exportBundle(session, args ?? {});
-  // The dialog takes upstream's phone path ("Share as a file") here, as the server reports every client as mobile.
-  // Android's web view has neither a download nor a share sheet, as for the sheet PDF above.
-  methods.bundleShare = async (args?: Record<string, unknown>) => {
-    if (phoneOs() === "android") throw unavailable();
-    return shareBundle(session, args ?? {}, phoneOs() !== null);
-  };
-
-  // Start page > Import characters with a .borealis file (or a zip under another name): the Open bundle window instead.
-  const serverImport = methods.importCharacter as (args?: Record<string, unknown>) => Promise<unknown>;
-  methods.importCharacter = (args?: Record<string, unknown>) => {
-    const fileName = String(args?.fileName ?? "");
-    const content = String(args?.contentBase64 ?? "");
-    return looksLikeBundle(fileName, content) ? openBundleFromImport(session, fileName, content) : serverImport(args);
-  };
-
-  // The Open bundle window for such an import: the preview the import already made, and how the window closed.
-  const serverOpen = methods.bundleOpen as (args?: Record<string, unknown>) => Promise<unknown>;
-  const serverAccept = methods.bundleAccept as (args?: Record<string, unknown>) => Promise<unknown>;
-  const serverDiscard = methods.bundleDiscard as (args?: Record<string, unknown>) => Promise<unknown>;
-  methods.bundleOpen = async (args?: Record<string, unknown>) => importWatch.open(String(args?.token ?? "")) ?? await serverOpen(args);
-  methods.bundleAccept = async (args?: Record<string, unknown>) => {
-    const out = await serverAccept(args);
-    importWatch.settle(String(args?.bundleId ?? ""), "accepted");
-    return out;
-  };
-  methods.bundleDiscard = async (args?: Record<string, unknown>) => {
-    importWatch.settle(String(args?.bundleId ?? ""), "cancelled");
-    return await serverDiscard(args);
-  };
+  for (const { apply } of OVERRIDES) apply(methods, session);
 
   const listeners = new Map<string, Set<(payload: never) => void>>();
   let close: (() => void) | null = null;

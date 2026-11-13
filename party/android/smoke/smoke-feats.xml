@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A tiny Aurora-format content file for the Android smoke run (../smoke-open-with.ps1). No <info>: with one,
+     Aurora needs an <update> with a <file>, and the importer follows Aurora. -->
+<elements>
+  <element name="Smoke Test Feat" type="Feat" source="Smoke Test Content" id="ID_PARTY_SMOKE_FEAT">
+    <description><p>A feat that only the Android smoke run imports.</p></description>
+    <sheet><description>Only for the smoke run.</description></sheet>
+    <rules />
+  </element>
+</elements>

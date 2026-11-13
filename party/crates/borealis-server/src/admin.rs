@@ -1,7 +1,10 @@
-//! The admin page: accounts waiting for approval, account management, statistics, runtime settings and the activity
-//! log. Every route here answers 403 to anyone but an active admin.
+//! The admin page: accounts waiting for approval, account management, statistics, runtime settings (sign-up and the
+//! trusted proxies) and the activity log. Every route here answers 403 to anyone but an active admin.
 
-use axum::extract::{Path, Query, State};
+use std::net::SocketAddr;
+
+use axum::extract::{ConnectInfo, Path, Query, State};
+use axum::http::HeaderMap;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -9,11 +12,17 @@ use serde_json::{json, Value};
 use crate::auth::{hash_password, validate_password, Status, User};
 use crate::db::{now, AccountRow, Activity};
 use crate::error::{ApiError, ApiResult};
+use crate::net_guard::Cidr;
 use crate::AppState;
 
 /// Keys in `server_settings`.
 const OPEN_REGISTRATION: &str = "open_registration";
 const REQUIRE_APPROVAL: &str = "require_approval";
+/// A JSON array of addresses and ranges. No row: `server.trusted_proxies` applies.
+const TRUSTED_PROXIES: &str = "trusted_proxies";
+
+/// Most entries the trusted proxy list takes.
+const MAX_PROXIES: usize = 32;
 
 /// Largest page the lists hand out.
 const MAX_PAGE: i64 = 200;
@@ -392,6 +401,8 @@ pub async fn stats(State(state): State<AppState>, _: Admin) -> ApiResult<Json<Va
         "database": state.db.kind(),
         "uptimeSeconds": state.started.elapsed().as_secs(),
         "email": state.mailer.is_some(),
+        // Counts and bytes only (D40).
+        "shares": crate::shares::stats(&state.db, &state.workspaces).await?,
     })))
 }
 
@@ -445,6 +456,175 @@ pub async fn save_settings(
     settings(State(state), Admin(admin)).await
 }
 
+/// Where the trusted proxy list in force comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProxySource {
+    /// Saved on the admin page.
+    Admin,
+    /// `server.trusted_proxies` in `config.toml` or `BOREALIS__SERVER__TRUSTED_PROXIES`.
+    Config,
+    /// Neither: no proxy is believed.
+    None,
+}
+
+/// The trusted proxies in force: the admin page's list when one is saved, else the config file's.
+#[derive(Debug, Clone)]
+pub struct TrustedProxies {
+    /// As written.
+    pub entries: Vec<String>,
+    /// See [`ProxySource`].
+    pub source: ProxySource,
+}
+
+impl TrustedProxies {
+    /// The entries, parsed. Saved ones were checked on the way in; anything that still doesn't parse is skipped.
+    #[must_use]
+    pub fn ranges(&self) -> Vec<Cidr> {
+        self.entries
+            .iter()
+            .filter_map(|e| Cidr::parse(e).ok())
+            .collect()
+    }
+}
+
+/// The trusted proxies in force. Read for each sign-up and sign-in, so a change applies at once.
+pub async fn trusted_proxies(state: &AppState) -> ApiResult<TrustedProxies> {
+    if let Some(saved) = state.db.setting(TRUSTED_PROXIES).await? {
+        let entries = serde_json::from_str::<Vec<String>>(&saved).unwrap_or_else(|e| {
+            tracing::warn!(
+                "server_settings.{TRUSTED_PROXIES} is not a list ({e}): trusting no proxy"
+            );
+            Vec::new()
+        });
+        return Ok(TrustedProxies {
+            entries,
+            source: ProxySource::Admin,
+        });
+    }
+    let entries = state.config.trusted_proxies.clone();
+    let source = if entries.is_empty() {
+        ProxySource::None
+    } else {
+        ProxySource::Config
+    };
+    Ok(TrustedProxies { entries, source })
+}
+
+/// Check a list from the admin page: each entry an address or a range, none so wide that it trusts strangers.
+/// Answers the list trimmed, without blanks and repeats.
+///
+/// # Errors
+/// [`ApiError::Invalid`] naming the first bad entry.
+pub fn checked_proxies(list: &[String]) -> ApiResult<Vec<String>> {
+    let mut out: Vec<String> = Vec::new();
+    for entry in list {
+        let entry = entry.trim();
+        if entry.is_empty() || out.iter().any(|e| e == entry) {
+            continue;
+        }
+        let range = Cidr::parse(entry).map_err(ApiError::Invalid)?;
+        if range.bits() == 0 {
+            return Err(ApiError::Invalid(format!(
+                "`{entry}` would trust every address, so anyone could pretend to be anyone. List only the \
+                 proxies you run, such as 172.20.20.100."
+            )));
+        }
+        let widest = if range.is_ipv4() { 8 } else { 32 };
+        if range.bits() < widest {
+            return Err(ApiError::Invalid(format!(
+                "`{entry}` is too wide a range to trust (/{widest} at most). List only the proxies you run."
+            )));
+        }
+        out.push(entry.to_string());
+    }
+    if out.len() > MAX_PROXIES {
+        return Err(ApiError::Invalid(format!(
+            "At most {MAX_PROXIES} proxies: use a range for a group of them."
+        )));
+    }
+    Ok(out)
+}
+
+fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
+    let values: Vec<&str> = headers
+        .get_all(name)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .collect();
+    (!values.is_empty()).then(|| values.join(", "))
+}
+
+/// What the admin page shows about the proxies: the list in force, where it comes from, and how the server sees the
+/// admin's own request with it.
+async fn proxies_json(state: &AppState, peer: SocketAddr, headers: &HeaderMap) -> ApiResult<Value> {
+    let trusted = trusted_proxies(state).await?;
+    let ranges = trusted.ranges();
+    let peer_ip = crate::net_guard::canonical(peer.ip());
+    Ok(json!({
+        "proxies": trusted.entries,
+        "source": trusted.source,
+        "configFile": state.config.trusted_proxies,
+        "peer": peer_ip.to_string(),
+        "peerTrusted": ranges.iter().any(|r| r.contains(peer_ip)),
+        "headers": {
+            "cfConnectingIp": header_text(headers, "cf-connecting-ip"),
+            "xForwardedFor": header_text(headers, "x-forwarded-for"),
+        },
+        "clientIp": crate::auth::client_ip(peer.ip(), headers, &ranges).to_string(),
+    }))
+}
+
+/// `GET /api/admin/proxies`.
+pub async fn proxies(
+    State(state): State<AppState>,
+    _: Admin,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(proxies_json(&state, peer, &headers).await?))
+}
+
+/// The trusted proxy form: a list to save, or `null` to go back to `config.toml`.
+#[derive(Deserialize)]
+pub struct ProxiesForm {
+    proxies: Option<Vec<String>>,
+}
+
+/// `POST /api/admin/proxies`: saved in the database, in force at once, and winning over `config.toml`. The answer
+/// shows the admin's own request under the new list.
+pub async fn save_proxies(
+    State(state): State<AppState>,
+    Admin(admin): Admin,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(form): Json<ProxiesForm>,
+) -> ApiResult<Json<Value>> {
+    let detail = match form.proxies {
+        Some(list) => {
+            let list = checked_proxies(&list)?;
+            let text = serde_json::to_string(&list)
+                .map_err(|e| ApiError::Internal(format!("trusted proxies: {e}")))?;
+            state.db.set_setting(TRUSTED_PROXIES, &text).await?;
+            if list.is_empty() {
+                format!("{TRUSTED_PROXIES} = none")
+            } else {
+                format!("{TRUSTED_PROXIES} = {}", list.join(", "))
+            }
+        }
+        None => {
+            state.db.delete_setting(TRUSTED_PROXIES).await?;
+            format!("{TRUSTED_PROXIES} = as in config.toml")
+        }
+    };
+    record(
+        &state,
+        Activity::new("setting_changed").by(&admin).detail(detail),
+    )
+    .await;
+    Ok(Json(proxies_json(&state, peer, &headers).await?))
+}
+
 /// `GET /api/admin/activity`: newest first.
 pub async fn activity(
     State(state): State<AppState>,
@@ -469,4 +649,23 @@ pub async fn activity(
         })
         .collect();
     Ok(Json(json!({ "items": items, "total": total })))
+}
+
+/// The admin page's routes. Each handler checks for an admin itself.
+pub fn routes() -> axum::Router<AppState> {
+    use axum::routing::{delete, get, post};
+    axum::Router::new()
+        .route("/api/admin/stats", get(stats))
+        .route("/api/admin/settings", get(settings).patch(save_settings))
+        .route("/api/admin/proxies", get(proxies).post(save_proxies))
+        .route("/api/admin/activity", get(activity))
+        .route("/api/admin/accounts", get(accounts))
+        .route("/api/admin/accounts/{id}", delete(delete_account))
+        .route("/api/admin/accounts/{id}/status", post(set_status))
+        .route("/api/admin/accounts/{id}/admin", post(set_admin))
+        .route("/api/admin/accounts/{id}/password", post(reset_password))
+        .route(
+            "/api/admin/accounts/{id}/sign-out",
+            post(sign_out_everywhere),
+        )
 }

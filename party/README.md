@@ -53,8 +53,10 @@ Put passwords in variables rather than in the file.
 | `BOREALIS__SERVER__PUBLIC_URL` | | The address people open, such as `https://party.example.com`; needed for email links |
 | `BOREALIS__SERVER__OPEN_REGISTRATION` | `true` | Anyone who can reach the server may ask for an account |
 | `BOREALIS__SERVER__REQUIRE_APPROVAL` | `true` | New accounts wait until an admin approves them |
-| `BOREALIS__SERVER__MAX_UPLOAD_MB` | `512` | Largest upload |
+| `BOREALIS__SERVER__MAX_UPLOAD_MB` | `512` | Largest upload, in MB |
+| `BOREALIS__SERVER__PUBLIC_UPLOAD_MB` | `95` | Largest upload through the public address, in MB (see [Upload size](#upload-size)) |
 | `BOREALIS__SERVER__APP_DOWNLOAD` | the latest GitHub release | Folder URL the website offers the apps from; `off` offers none |
+| `BOREALIS__SERVER__TRUSTED_PROXIES` | | Reverse proxies allowed to name the client, such as `172.20.20.100`; commas between entries (see [Security and proxies](#security-and-proxies)) |
 | `BOREALIS__DATABASE__TYPE` | `sqlite` | `sqlite` or `postgres` |
 | `BOREALIS__SQLITE__PATH` | `party.db` | SQLite file, relative to the config folder |
 | `BOREALIS__POSTGRES__HOST` | `localhost` | PostgreSQL server |
@@ -75,8 +77,8 @@ Put passwords in variables rather than in the file.
 | `BOREALIS__INITIAL_ADMIN__EMAIL` | | Optional |
 | `BOREALIS__LOG__LEVEL` | `info` | `error` to `trace` |
 
-`OPEN_REGISTRATION` and `REQUIRE_APPROVAL` can also be changed on the admin page while the server runs. What is saved
-there is kept in the database and wins over the file and the variables.
+`OPEN_REGISTRATION`, `REQUIRE_APPROVAL` and `TRUSTED_PROXIES` can also be changed on the admin page while the server
+runs. What is saved there is kept in the database and wins over the file and the variables.
 
 The config folder itself is `/config` in the container. For a direct install it is set by `BOREALIS_CONFIG_DIR` (one
 underscore), which the service file sets to `/var/lib/borealis-party`.
@@ -106,7 +108,8 @@ shows statistics, the sign-up settings and an activity log of sign-ups, sign-ins
 newest 10,000 entries are kept.
 
 Sign-ups are limited to 10 an hour per client address, and failed sign-ins to 10 per five minutes per address and name.
-Behind a reverse proxy every client has the proxy's address, so these limits are then shared.
+Behind a reverse proxy every client has the proxy's address, so these limits are then shared until the proxy is
+trusted (Admin > Settings > Trusted proxies, see [Security and proxies](#security-and-proxies)).
 
 ### Moving from SQLite to PostgreSQL
 
@@ -179,6 +182,23 @@ On the open internet, put the server behind a reverse proxy that terminates HTTP
 address. Plain HTTP is only sensible on a network you trust, because passwords and session tokens would cross it
 unencrypted.
 
+### Upload size
+
+Files go up as base64 in one request, which is a third larger than the file, so the largest file is about three
+quarters of the request limit. Two limits apply:
+
+- `MAX_UPLOAD_MB` (512) is the server's own. On the home network (a `localhost`, `192.168.x.x`, `10.x.x.x` or
+  `172.16-31.x.x` address, a `.local` or `.lan` name, or a Tailscale `100.64-127.x.x` address) it is the only one, so
+  files up to about 383 MB get through. A reverse proxy there must allow as much (Nginx: `client_max_body_size 512m;`).
+- `PUBLIC_UPLOAD_MB` (95) is the limit through the public address. A proxy or tunnel in front of the server can stop
+  requests long before the server would: Cloudflare's free plan refuses any request over 100 MB, which is about 71 MB
+  of file. Set it to your proxy's cap, less a little room. It is never more than `MAX_UPLOAD_MB`.
+
+The server reports both limits (`/api/server`, `uploads`). The app checks a file against them before it reads it,
+and says how large it may be and that the home-network address takes more, instead of trying and failing. Upload
+errors are put in words too: a refused size, a timeout (Cloudflare gives up after 100 seconds, while the server may
+still be finishing, so look before trying again), a server that is restarting, and a lost connection.
+
 New accounts wait for an admin's approval by default. To close sign-up entirely, set
 `BOREALIS__SERVER__OPEN_REGISTRATION=false` or switch it off on the admin page. Create the first admin with the
 `INITIAL_ADMIN` variables, and other accounts with:
@@ -189,6 +209,146 @@ docker exec -i borealis-party /app/borealis-server add-user <name> [--email <add
 
 The password is read from standard input. For a direct install, run
 `sudo -u borealis-party env BOREALIS_CONFIG_DIR=/var/lib/borealis-party /opt/borealis-party/borealis-server add-user ...`.
+
+## Security and proxies
+
+### Addresses the server downloads from
+
+Any account can give the server an address to download from: an index (Indexes tab, or the index a shared bundle's
+packs came from) or a 5etools folder. So the server checks each address before it saves or fetches it, and refuses:
+
+- addresses on this machine or a private network: `127.x`, `10.x`, `172.16-31.x`, `192.168.x`, `100.64-127.x`
+  (carrier and Tailscale), `169.254.x` (link-local, cloud metadata), IPv6 `::1`, `fc00::/7`, `fe80::/10`, reserved
+  ranges, and IPv4 written as IPv6;
+- local names: `localhost`, one-word names, `.local`, `.lan`, `.home`, `.internal`, `.home.arpa` and similar;
+- names that resolve to any such address;
+- the server's own `public_url` host;
+- addresses with a user name or password (`https://user:pw@...`) or an access key in the query (`?token=`, `?key=`,
+  `?signature=`, ...): the address is saved, shown, and travels inside bundles.
+
+The account is told why ("The server does not download from 192.168.1.1: it is on a home or office network").
+Every file an index or a 5etools folder lists is checked the same way when it is fetched, so are indexes saved before
+this check existed, so an index can't point the server at the network either. The Indexes tab shows Borealis's own
+sentence for a refused index file; the server log has the reason.
+
+This check alone is not enough: Borealis's HTTPS client looks the name up again when it connects and follows
+redirects, so a name that answers differently the second time, or a redirect, still gets through. The firewall rule
+below closes that, and it is the real protection.
+
+### Runbook: keep the server's container off the home network
+
+Done on the Docker host (for a direct install, the same rules with `-m owner --uid-owner borealis-party` in the
+`OUTPUT` chain instead). The example addresses are the reference setup: home network `172.20.20.0/24`, PostgreSQL on
+`172.20.20.247`, DNS (Pi-hole) on `172.20.20.2`. Use yours.
+
+1. Give the server a network of its own, so the rule touches no other container. In the stack:
+
+   ```yaml
+   services:
+     borealis-party:
+       networks: [borealis]
+       # remove network_mode: "bridge"
+   networks:
+     borealis:
+       ipam:
+         config:
+           - subnet: 172.30.248.0/24
+   ```
+
+2. Allow what the server needs on the home network, then refuse the rest of it. Docker leaves the `DOCKER-USER`
+   chain to you; rules there run before Docker's own:
+
+   ```sh
+   NET=172.30.248.0/24
+   iptables -N BOREALIS-EGRESS 2>/dev/null || iptables -F BOREALIS-EGRESS
+   iptables -C DOCKER-USER -s $NET -j BOREALIS-EGRESS 2>/dev/null ||
+     iptables -I DOCKER-USER -s $NET -j BOREALIS-EGRESS
+   iptables -A BOREALIS-EGRESS -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+   iptables -A BOREALIS-EGRESS -d 172.20.20.247 -p tcp --dport 5432 -j RETURN      # PostgreSQL
+   iptables -A BOREALIS-EGRESS -d 172.20.20.2 -p udp --dport 53 -j RETURN          # DNS
+   iptables -A BOREALIS-EGRESS -d 172.20.20.2 -p tcp --dport 53 -j RETURN
+   # A mail relay on the home network needs its own line here (tcp 587 or 465).
+   for range in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16 127.0.0.0/8 0.0.0.0/8 224.0.0.0/4 240.0.0.0/4; do
+     iptables -A BOREALIS-EGRESS -d $range -j REJECT --reject-with icmp-admin-prohibited
+   done
+   # The Docker host itself, reached through the network's gateway, is INPUT, not DOCKER-USER:
+   iptables -C INPUT -s $NET -m conntrack --ctstate NEW -j REJECT --reject-with icmp-admin-prohibited 2>/dev/null ||
+     iptables -I INPUT -s $NET -m conntrack --ctstate NEW -j REJECT --reject-with icmp-admin-prohibited
+   ```
+
+   With IPv6 on in Docker, add the same with `ip6tables` for `fc00::/7`, `fe80::/10` and `::1`.
+
+3. Make it survive a restart: put step 2 in a script and run it from a systemd unit ordered
+   `After=docker.service` with `Requires=docker.service` (Docker recreates `DOCKER-USER` empty when it starts), or
+   use `netfilter-persistent` if it loads after Docker.
+
+4. Check from the server's network. The image has no download tool, so use a throwaway container on the same
+   network (`docker network ls` shows its full name, usually `<stack>_borealis`). The first two must fail at once, the
+   last must print a page:
+
+   ```sh
+   docker run --rm --network <stack>_borealis curlimages/curl:8.11.1 -sS -m 5 http://172.20.20.1/
+   docker run --rm --network <stack>_borealis curlimages/curl:8.11.1 -sS -m 5 http://172.20.20.100:81/
+   docker run --rm --network <stack>_borealis curlimages/curl:8.11.1 -sS -m 5 https://example.com/
+   ```
+
+   Then, in the app, Indexes > Update: indexes on the internet still update.
+
+### Real client addresses behind a proxy
+
+Sign-up attempts are limited per client address, and failed sign-ins per client and user name. Behind a reverse
+proxy every request comes from the proxy, so without the setting below there is one sign-up limit for everyone, and
+ten wrong passwords from anyone lock that user name for everyone for five minutes.
+
+The trusted proxies are set on the admin page (Admin > Settings > Trusted proxies), or in `server.trusted_proxies`
+(`BOREALIS__SERVER__TRUSTED_PROXIES`, commas between entries); a list saved on the admin page wins, and its "Use
+config.toml instead" goes back to the file's. Entries are addresses or ranges. Only a request whose connecting
+address is in the list may name the client: the server reads `CF-Connecting-IP` (set by Cloudflare), otherwise the right-most `X-Forwarded-For` entry that is not itself a listed
+proxy (entries left of it are whatever the client sent, and are ignored). From any other address both headers are
+ignored, and the server logs once that it saw them and which setting to change. Empty, the default, means no proxy is
+believed, which is safe but gives the shared limits above. IPv6 clients are counted per /64.
+
+The admin page shows the address your own request arrives from, the `CF-Connecting-IP` and `X-Forwarded-For` headers
+on it, and the address the server takes you to be; after a change it shows that address again, so you can see it
+worked. It refuses ranges that trust everyone (`0.0.0.0/0`, `::/0`) or nearly everyone (wider than `/8` for IPv4 or
+`/32` for IPv6): a trusted address can claim to be any client. Changes are in the activity log.
+
+A client that reaches the proxy without going through Cloudflare (on the home network) can write its own
+`CF-Connecting-IP`. That only lets it choose its own rate-limit bucket on the home network.
+
+### Runbook: production behind Cloudflare and Nginx Proxy Manager
+
+1. Open the site through its public name, as an admin, and go to Admin > Settings > Trusted proxies. It says
+   "Requests arrive from 172.20.20.100" (in the reference setup, Nginx Proxy Manager; if NPM runs on the same Docker
+   host, a `172.x` bridge address instead) and that the headers came through a proxy the server doesn't trust. Tap
+   **Trust this proxy (172.20.20.100)**: it applies at once, and the page then shows your own public address as the
+   one the server sees.
+
+   List only proxies you run. Cloudflare's tunnel connects to NPM, not to the server, so it needs no entry. When no
+   admin can sign in yet, set it in the stack's environment instead and update the stack:
+
+   ```
+   BOREALIS__SERVER__TRUSTED_PROXIES=172.20.20.100
+   ```
+
+2. Sign in once from a phone on mobile data and once from the home network: the activity log now shows the phone's
+   public address and the computer's home address, not the proxy's.
+3. Lock the server's port so only the proxy can reach it, on the Docker host. A published port is DNAT'ed, so match
+   the original port:
+
+   ```sh
+   RULE="-p tcp -m conntrack --ctorigdstport 8787 --ctdir ORIGINAL ! -s 172.20.20.100 -j REJECT"
+   iptables -C DOCKER-USER $RULE 2>/dev/null || iptables -I DOCKER-USER $RULE
+   ```
+
+   Keep it with the egress rules (step 3 above). The container's own health check runs inside it and is not affected.
+   After this, home-network devices use the server's name (a local DNS record that points it at the proxy, as with
+   Pi-hole) instead of `http://<docker host>:8787`. The app counts a domain name as the public address, so for a
+   file bigger than `PUBLIC_UPLOAD_MB` allows, add an NPM proxy host for a home-only name (for example `party.lan`) or
+   leave a LAN address allowed in that rule: `! -s 172.20.20.0/24` instead keeps the port open to the home network
+   only, where the trusted proxy setting still stops anyone else from naming a client.
+4. Check from another home device: `curl -m 5 http://<docker host>:8787/api/server` is refused, and the site still
+   opens through its name.
 
 ## Bundles
 
@@ -202,15 +362,95 @@ characters and content packs to that account only, exactly as desktop Borealis w
   `Borealis content.borealis`. They open it in desktop Borealis or in their own account with File > Open bundle....
   Packs from an index keep updating: each records its index, and accepting the bundle in a party account also adds
   those indexes to that account, so its content updates follow them. Packs the account already had unchanged add
-  nothing, so an index it removed stays removed. Desktop Borealis takes the packs only, as a snapshot. The phone
-  apps do not offer it (their web view has no download).
+  nothing, so an index it removed stays removed. Desktop Borealis takes the packs only, as a snapshot. The iOS app
+  offers it as More > Share as a file, through the share sheet, up to 48 MiB per bundle. The Android app does not
+  offer it: its web view can't download or share the file and its own backend has no bundle commands, so Android
+  sends bundles with a share code instead (below). The export dialog marks packs whose
+  pack info says they are not redistributable; it does not leave them out.
+- The character sheet PDF on Android (Save and Share) is made by the app from its own copy of the character, after a
+  sync, and goes to the system save picker or share sheet.
 - Device-to-device transfer is not offered either: every device of an account reads the same account on the server.
-- A bundle is uploaded as base64, so the largest one is about three quarters of `MAX_UPLOAD_MB`.
+- A bundle is uploaded as base64, so the largest one is about three quarters of the upload limit: about 383 MB on the
+  home network, and about 71 MB through Cloudflare's free plan (see [Upload size](#upload-size)). A whole-library
+  bundle over that has to be opened on the home-network address.
 - Uploaded bundles wait in the account's `sync/incoming` folder until they are accepted or closed. At most eight wait
   at once (the oldest go first), and any left over are removed the next time the account's workspace opens. So one
   account can hold at most eight uploads' worth of disk there (under 8 x `MAX_UPLOAD_MB`).
 - Dropping a `.borealis` file on the window or choosing it with "+" is not supported: those say the file cannot be
   imported. Use "Import characters" or File > Open bundle... instead.
+
+### Share codes (0.1.5)
+
+A player shares characters and content packs with another player from any device, Android included, with no file:
+
+- **Share with a code** (More on a phone; the "Share with a code" button in the export dialog) picks characters and
+  packs. The server builds the bundle from the account's own folder, with the same builder as Export to bundle, and
+  keeps it in `data/users/<id>/sync/outgoing/`. The sender gets a code like `ABCD-EFGH-JKMN-PQRS` (80 random bits,
+  only its hash is stored) and, when `server.public_url` is set, a link to `#/share/receive/<code>`.
+- **Enter a share code** (on the Import screen, or by opening the link) stages the bundle in the recipient's own
+  `sync/incoming` and opens Borealis's own preview. It is received as another player's bundle: nothing the recipient
+  already has is replaced (see above). The recipient can decline, and decline and block the sender.
+- **Links first.** Packs downloaded from an index, or imported from a 5etools address, travel as that address: the
+  recipient adds the index (and downloads it) or imports the 5etools address again, through the server, and every
+  download passes the address checks in [Security and proxies](#security-and-proxies). 5etools packs imported from
+  files, and packs whose address has a query string, a password or a private host, are left out. "Include the files"
+  sends all of them as files instead, after a licence notice.
+- **Limits.** A code works once and for 7 days, for anyone signed in, or only for the username the sender typed. At most
+  20 open codes per account, and 8 redeemed but not yet accepted or declined per recipient from any one sender. A
+  share is at most `server.public_upload_mb`, and one account's shared and received files at most twice that. Making
+  codes (30 an hour) and wrong codes (10 per 15 minutes) are rate-limited per account. Expired shares and their files
+  are removed at start-up and every hour; ended shares are forgotten after 30 days.
+- **Admin page.** Statistics shows how many shares are in each state and how much disk shared and received files take.
+  Never the codes, names or contents.
+- **Emergency off switch.** `BOREALIS_SHARES=off` in the server's environment (not a `BOREALIS__` setting): every
+  `/api/shares` route then answers as if the server did not offer it. Nothing is deleted; turning it on again brings the
+  open shares back.
+- **Database.** Schema step 2 (`M-shares`) adds the `shares` and `share_blocks` tables; it only adds tables, so a 0.1.4
+  database upgrades in place and a 0.1.4 binary still boots on it (it ignores them).
+
+## Open with, and web links, in the apps
+
+- **Open with / Share to Borealis Party** (Android and iOS): the app asks first, in its own dialog, "Import
+  Hero.dnd5e into alice?", and Import opens the Import screen with the file, as if it had been chosen there (see
+  "One Import screen" below). Cancel drops it. The upload size limits above apply, with the same messages.
+- A `.borealis` opened on Android goes to the Import screen too, which uploads it and opens the Open bundle window.
+  The party apps are built without device transfer, and without it iOS (and the desktop app) would drop an
+  opened `.borealis` without a word, so the iOS app doesn't offer to open `.borealis` files: use File > Open bundle....
+- Offline, an opened file stays on the device and the app says it will import it when it is connected; the online
+  app takes it when it starts. (On Android a file opened while the app was closed is taken on the next online start.)
+- Web links: the apps open Borealis's own pages as before, and any other web page (this server's pages, the app
+  downloads, a link on a party page) in the system browser. If the device can't, a dialog shows the address with
+  Copy link.
+
+## One Import screen
+
+Since 0.1.5 every way to start an import leads to the Import screen (`#/import-files`), which tells files apart by
+their content and lists one result per file or link. The main doors are More > Import on a phone and Import in the
+desktop account bar. Upstream's own buttons stay where they are and look the same; the party catches their tap
+(`ui/party/entry/unifyImports.ts`, matched by their text) and opens the Import screen instead:
+
+| Where | What it does now |
+|---|---|
+| Start > Import characters | Import screen, file chooser open |
+| File menu > Load Character, Open bundle... (desktop bar and phone Menu) | Import screen, file chooser open; the menu closes |
+| File menu > Import Characters, the floating "+" | the same; upstream shows them only with its AI import, so not in the party |
+| Additional Content > Import files | Import screen, file chooser open (the content notice comes there, once content is chosen) |
+| Additional Content > 5etools: the .zip and homebrew .json buttons | Import screen, file chooser open |
+| Additional Content > Index files: Fetch | Import screen, the typed address added as an index there |
+| Additional Content > 5etools: Import from an address | Import screen, the typed address imported as 5etools-format data there |
+| Files dropped on the window (browsers) | Import screen with the files, `.borealis` included |
+| Files dropped on the desktop app's window | Import screen with the files, read from the device |
+| Open with / Share (apps) | after "Import X into alice?", Import screen with the files, `.borealis` included |
+
+Additional Content still lists, updates, enables and removes packs, indexes and 5etools addresses. Not redirected:
+"Import my content folder" and "Scan folder..." (upstream shows them only on a desktop backend, never with the server,
+and the Import screen takes files, not folders). If upstream rewords a button, it falls back to upstream's own import,
+which still works.
+
+Known limit: a `.borealis` or a folder dropped on the **desktop app's** window can't be read into the page (upstream's
+backend opens those by path and keeps the bytes on the device), so the app says to choose it with Choose files instead.
+An upstream hook that would fix it: let `take_picked_files` read a dropped bundle's token (purpose `bundle-file`), as it
+reads `dropped-file` tokens; then the party uploads it like any other file.
 
 ## Offline in the apps
 
@@ -419,6 +659,27 @@ Keep the signing key: Android only installs an update signed with the same key.
 Known limit: in the Android app the character sheet cannot be saved or shared as a PDF yet (its web view has no
 download or share sheet). Open the server in the phone's browser for that.
 
+### Android smoke run
+
+A scripted check of the Android app on the emulator (AVD `BalanceLab_Tablet`, started if none is running), from the
+repository root, with Node 22 or later and WSL:
+
+```powershell
+party/android/smoke-open-with.ps1 -Build   # build the x86_64 debug APK first
+party/android/smoke-open-with.ps1          # with the debug APK already built
+```
+
+It sets the screen to 1080x2340 at 450 dpi (384x832 CSS), starts a throwaway server in WSL
+(`party/android/smoke/server.sh`: SQLite in a new `/tmp` folder, an account `smoke` with a random password; never
+the production server), installs the APK fresh and signs in through the app. Then it opens a `.dnd5e`, an Aurora
+`.xml`, a 5etools `.json` and a `.borealis` with the app the way the Files app does (a `content://` URI from
+Downloads), and checks the "Import ... into smoke?" dialog, Cancel, and what each import did on the server. Last, a
+tap on a web link has to reach the system browser. It drives the page over the WebView's DevTools socket, so it
+needs a debug APK. Afterwards it stops the server and removes its folder, deletes the pushed files, clears the app's
+data and resets the screen size (`-Keep` leaves all of that for a look around). Screenshots and `results.json` are
+written to `target/party-android-smoke`. The server binary is `-ServerBin`, by default
+`~/bp-accounts-target/release/borealis-server` in WSL.
+
 ## Build the iOS app
 
 Only on a Mac, with Xcode, the `ui` dependencies (`npm --prefix ui ci`) and the Rust target `aarch64-apple-ios`
@@ -437,8 +698,9 @@ or on-device semantic search, and the script fails if the built app lacks the pa
 - Plain HTTP (`192.168.1.20:8787`, `.local` names, a typed `http://`) is allowed with `NSAllowsArbitraryLoads`, as on
   Android. The first connection to the home network asks for the Local Network permission; allow it.
 - In the iOS app, Share on the character sheet hands the server's PDF to the share sheet, so "Save to Files" works
-  from there. Opening a `.dnd5e` or `.borealis` file with the app from Files does nothing, as on Android: use
-  "Import characters" instead.
+  from there. Opening a file with the app from Files imports it into the account after asking (see
+  [Open with](#open-with-and-web-links-in-the-apps)); `.borealis` files are not offered there. Not yet tried on an
+  iPhone.
 
 ## Build the desktop app
 
@@ -455,3 +717,128 @@ keeps its data in `%APPDATA%\app.borealis.party`, and the app window never touch
 (never write) desktop Borealis's library and search index in `%APPDATA%\app.borealis`, so don't use them. It also leaves out upstream's update feed and file associations, which belong to desktop Borealis.
 Like the Android app it is built without device transfer or on-device semantic search. Set `CARGO_HOME` to a short
 path such as `C:\c` first, as for the Android app.
+
+## Phone UI tests
+
+`party/ui-tests` is a Playwright suite for the web app on phones: Chromium as an Android phone at 384x832 and 832x384
+(a Samsung S26 Ultra), and WebKit as an iPhone at 390x844, all through upstream's `?mock=mobile` phone layer. It starts
+its own throwaway server on a free port of 127.0.0.1, with a new temporary config folder and SQLite database, and seeds
+an admin and a player account; it never talks to another server. It checks that sign-in works with the on-screen
+keyboard open, that the main pages don't scroll sideways, that dialogs open and close, and that the import and export
+entry points can be reached. It passes before every release (from 0.1.5).
+
+Build the web app (`node party/build.mjs` in `ui/`) and the server (`cargo build -p borealis-server` in `party/`) first,
+then, from the repository root:
+
+```sh
+npm --prefix party/ui-tests ci
+npm --prefix party/ui-tests run install-browsers
+npm --prefix party/ui-tests test
+```
+
+The suite looks for the server in `party/target` (or `$CARGO_TARGET_DIR`); `BOREALIS_SERVER_BIN` names another binary.
+On Windows with the server built in WSL, set `BOREALIS_SERVER_WSL_BIN` to its Linux path instead (from Git Bash, also
+`MSYS_NO_PATHCONV=1`). `test:android` and `test:ios` run one phone only.
+
+Controls smaller than a comfortable tap target (44 px on iOS, 48 px on Android) and content cut off at the screen's
+edge are reported, not failed, in `party/ui-tests/findings.md`, with the tests marked `test.fail` for fixes that are
+planned. CI runs the suite as the "phone UI" job of `party-ci.yml` and adds `findings.md` to the run's summary.
+
+## Measurements
+
+How long the big imports take, and how large the files really are, so we know whether the server needs background
+jobs (a step over about 80 s, because Cloudflare gives up after 100 s with a 524) or chunked uploads (files over
+about 70 MB). Measured 2026-11-12 on server 0.1.3 for release 0.1.4.
+
+### Through the public address, without signing in
+
+From the home network, pinned to Cloudflare's public address (`curl --resolve`), because the home DNS sends the name
+straight to the proxy. Random bytes, a few requests spaced out:
+
+| What | Result |
+| --- | --- |
+| Largest request Cloudflare passes | exactly 100 MiB: 104,857,600 bytes reach the server, one byte more gets Cloudflare's own `413 Payload Too Large` HTML page after about 1.3 MB was sent |
+| Who answered | below the cap the server's own JSON (`401` from `/api/rpc/*`, which refuses before reading the body; `400` from `/api/auth/login`, which reads the whole body first and fails to parse it, so no sign-in is tried); over the cap Cloudflare, so the proxy's 512m and the server's 512 MB are never the limit through the public address |
+| Upload speed, home network → Cloudflare → tunnel → server | 99 MiB read in full by the server in 4.0 s, about 26 MB/s (10 MiB 0.75 s, 60 MiB 2.8 s); this is bounded by the home line, so a phone outside is bounded by its own upload speed instead |
+| `/api/server`, time to first byte | 806 ms on a cold connection (TLS), then 46-50 ms |
+
+`PUBLIC_UPLOAD_MB = 95` (MiB) is therefore right: 95 MiB of request is below the cap, which leaves files of about
+71 MB.
+
+### On the server itself, no proxy
+
+`party/tools/measure-imports.mjs` against a throwaway local server (release build, SQLite, WSL), signed in as its
+first account. Wall-clock seconds for one request:
+
+| Step | Request | Time |
+| --- | --- | --- |
+| `update_indexes`, 5 community Aurora indexes (4 found, 1 gone), first download | 0.2 MB | **194-204 s** |
+| `update_indexes`, the same, again with nothing changed | | **65 s** |
+| `stage_5etools_url`, the full 5etools data repository | | 10.6 s |
+| `import_5etools`, all 128 sources (17,032 elements, 127 packs) | | 7.5 s |
+| `preview_import_pack`, a 36.2 MB Aurora zip (1,873 files, stored) | 48.3 MB | 1.8 s |
+| `install_import_preview`, the same (28,867 elements) | | 2.9 s |
+| `bundle_export`, the whole library (132 packs) | 26.0 MB back | 2.1 s |
+| `stage_bundle` + `bundle_open` + `bundle_accept`, that export into an empty library | 26.0 MB | 0.4 + 0.2 + 2.0 s |
+
+Sizes:
+
+- Whole-library export with everything above: **19.5 MB** (26 MB as base64). The `content.borealis` in use today is
+  4.9 MB.
+- The Aurora content folder: 41 MB of XML, 36.2 MB as a stored zip, 7.7 MB deflated.
+
+`update_indexes` is the slow one: it fetches each file of every index from the index host, one after another, and
+checks every file again on the next update even when nothing changed. Everything else is a few seconds and bound by
+the server's disk and CPU.
+
+### Through the public address, signed in
+
+Run by the owner on 2026-11-12 against server 0.1.3 through Cloudflare. To repeat it: against a throwaway account made for it and approved on the admin page (it writes into that
+account's library and removes what it added when it ends):
+
+```sh
+node party/tools/measure-imports.mjs --server https://party.example.com --via-cloudflare \
+  --index <index URL> [--index <index URL> ...] --repeat-update \
+  --5etools-url <5etools data repository URL> \
+  --aurora-zip <a zip of Aurora content, about 40 MB> \
+  --json measure-public.json
+```
+
+It asks for the username and the password (not shown) and never prints or saves them. `--via-cloudflare` looks the
+name up over DNS-over-HTTPS so the run goes through Cloudflare even on the home network. `--help` lists the other
+options (`--bundle FILE` uses a given bundle instead of the export it makes).
+
+| Step | Time | Status |
+| --- | --- | --- |
+| `update_indexes`, first download (4 community Aurora indexes) | 90.0 s, then about 201 s on the server | **504** from the proxy at 90 s while the server kept going (background jobs, I1, fix this) |
+| `update_indexes`, again | 67.7 s | ok |
+| `stage_5etools_url` | 9.1 s (`scan_5etools_folder` 0.5 s) | ok |
+| `import_5etools` | 19.8 s | ok |
+| `preview_import_pack` + `install_import_preview` | not measured | |
+| `bundle_export` (size) | 4.5 s | ok |
+| `stage_bundle` + `bundle_open` + `bundle_accept` | not measured | |
+
+### What it means for 0.1.4
+
+- **Background jobs (I1): needed, for index updates.** The first download of a set of indexes took over three minutes
+  on the server alone, and a plain Update with nothing new took 65 s. Through Cloudflare the app gets a 524 at 100 s
+  while the server keeps going, and trying again starts the same work twice. `update_indexes` (and with it the
+  5etools downloads, `stage_5etools_url` and `update_5etools_url`, which depend on another host's speed) should run
+  as a job. The other imports are well under the limit and can stay one request.
+- **Chunked upload (I2): not needed.** The largest real files are well under the cap: a 36 MB Aurora zip (48 MB
+  request) and a 19.5 MB whole-library export (26 MB request), against 100 MiB per request through Cloudflare. It
+  comes back only if a real file or export goes over about 70 MB.
+
+### Long downloads run as jobs (0.1.4)
+
+`update_indexes`, `stage_5etools_url` and `update_5etools_url` now run as background jobs
+(`crates/borealis-server/src/jobs.rs`, client `ui/party/api/overrides/jobs.ts`). The app sends `job_start`, which
+answers at once, and then asks `job_status` every 0.5 to 5 seconds until the job ends, so no request waits long enough
+for Cloudflare's 524. The pages work as before, and progress still comes through the commands' own events.
+
+- Each account runs one job at a time. If another job is running, the app waits for it to finish and then starts its own.
+- A job keeps running if the app is closed, and its workspace stays open until it ends.
+- Each job writes a record to `users/<account>/sync/jobs/<id>.json`, which is kept for a day. If the server stops
+  during a job, the next start reports "The server restarted during this import; run it again."
+- Job ids are random, and an account can see only its own jobs. Every download still goes through the address guard.
+- An app connected to a server older than 0.1.4 makes the plain call instead.

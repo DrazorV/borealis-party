@@ -31,14 +31,17 @@ export function DiscardDialog({ title, intro, names, action, onResult }: {
 
 /**
  * Sign out of this device. In the apps the account's copy goes too: online after one last sync has sent this device's
- * edits; edits the server still does not have (offline, or refused) are named in a dialog first.
+ * edits; edits the server still does not have (offline, or refused) are named in a dialog first. With nothing unsent,
+ * the apps still ask once (Cancel is the default), since the copy on the device goes.
  */
 export function useSignOut(): { start: () => void; busy: boolean; dialog: ReactNode } {
   const [busy, setBusy] = useState(false);
   const [unsent, setUnsent] = useState<string[] | null>(null);
+  const [asking, setAsking] = useState(false);
 
   const leave = async () => {
     setUnsent(null);
+    setAsking(false);
     setBusy(true);
     const session = loadSession();
     // Storage first, files after (see removeCopy).
@@ -61,22 +64,32 @@ export function useSignOut(): { start: () => void; busy: boolean; dialog: ReactN
     } catch {
       names = ["The characters on this device (they could not be read)"];
     }
-    if (names.length === 0) return leave();
-    setUnsent(names);
     setBusy(false);
+    if (names.length === 0) setAsking(true);
+    else setUnsent(names);
   };
 
-  const dialog = unsent && (
+  const keep = () => {
+    setUnsent(null);
+    setAsking(false);
+    resumeSync();
+  };
+
+  const dialog = asking ? (
+    <MessageBox
+      title="Sign out"
+      message="Sign out and remove this device's copy? Your characters stay on the server."
+      buttons={[{ id: "cancel", label: "Cancel", variant: "primary" }, { id: "out", label: "Sign out", variant: "danger" }]}
+      cancelId="cancel"
+      onResult={(id) => { if (id === "out") void leave(); else keep(); }}
+    />
+  ) : unsent && (
     <DiscardDialog
       title="Sign out"
       intro="These characters have changes the server doesn't have yet. Signing out now removes them from this device and the changes are lost."
       names={unsent}
       action="Sign out and discard"
-      onResult={(discard) => {
-        if (discard) { void leave(); return; }
-        setUnsent(null);
-        resumeSync();
-      }}
+      onResult={(discard) => { if (discard) void leave(); else keep(); }}
     />
   );
   return { start: () => void start(), busy, dialog };
