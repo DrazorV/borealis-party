@@ -1,7 +1,7 @@
 //! Encounters end to end (0.3.0): the role matrix, the leak suite (nothing hidden or DM-only reaches a player, in
-//! bodies or headers, whatever id or body the player sends), player events only when the projection changes,
-//! difficulty against hand-computed SRD 5.2.1 budgets, overrides and refresh conflicts, starting effects and rules,
-//! and the upgrade from the 0.2.x schema.
+//! bodies or headers, whatever id or body the player sends), player events only when the projection changes, the
+//! party's edition and its warnings, companions and controlled creatures, overrides and refresh conflicts, starting
+//! effects and rules, and the upgrade from the 0.2.x schema. There is no difficulty rating (the user's D16).
 //!
 //! Monsters are the bundled SRD 5.2.1 ones. Runs on SQLite, and on PostgreSQL too when `BOREALIS_TEST_POSTGRES_URL`
 //! names a database it may wipe. `BOREALIS_TEST_5ETOOLS_DIR` (a local 5etools checkout) adds a realistic run that
@@ -27,8 +27,8 @@ use crate::AppState;
 
 const GOBLIN: &str = "ID_SRD521_MONSTER_GOBLIN_WARRIOR";
 const OWLBEAR: &str = "ID_SRD521_MONSTER_OWLBEAR";
-const RED_DRAGON: &str = "ID_SRD521_MONSTER_ANCIENT_RED_DRAGON";
 const GOBLIN_2014: &str = "ID_SRD51_MONSTER_GOBLIN";
+const WOLF: &str = "ID_SRD521_MONSTER_WOLF";
 const NOT_FOUND: &str = "There is no such encounter here.";
 
 // Helpers.
@@ -249,6 +249,9 @@ struct Built {
     draft: String,
     shown: String,
     hidden: String,
+    /// The hidden villain's hidden pet, and its pet the DM revealed on its own.
+    hidden_pet: String,
+    loose_pet: String,
     revealed: String,
     effect: String,
     rule: String,
@@ -286,6 +289,37 @@ async fn build(t: &Table) -> Built {
     )
     .await;
     let revealed = creature_ids(&v)[1].clone();
+    // The hidden villain's pets: one hidden with it, one the DM revealed on its own.
+    let v = add(
+        &t.dm,
+        &shown,
+        json!({ "elementId": WOLF, "ownerId": hidden, "dmLabel": "SECRET-LABEL pet" }),
+    )
+    .await;
+    let hidden_pet = v["creatures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["dmLabel"] == "SECRET-LABEL pet")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let v = add(
+        &t.dm,
+        &shown,
+        json!({ "elementId": WOLF, "ownerId": hidden, "hidden": false, "publicName": "Loose wolf", "initMode": "own" }),
+    )
+    .await;
+    let loose_pet = v["creatures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["publicName"] == "Loose wolf")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     ok(
         &t.dm,
         "PATCH",
@@ -322,6 +356,8 @@ async fn build(t: &Table) -> Built {
         draft,
         shown,
         hidden,
+        hidden_pet,
+        loose_pet,
         revealed,
         effect,
         rule,
@@ -352,7 +388,6 @@ async fn role_matrix(t: &Table) {
             format!("/api/encounters/{e}"),
             json!({ "name": "Renamed" }),
         ),
-        ("POST", format!("/api/encounters/{e}/evaluate"), json!({})),
         (
             "POST",
             format!("/api/encounters/{e}/creatures"),
@@ -361,7 +396,7 @@ async fn role_matrix(t: &Table) {
         (
             "PATCH",
             format!("/api/encounters/{e}/creatures/{}", b.revealed),
-            json!({ "revealLevel": "band" }),
+            json!({ "publicName": "Huge beast" }),
         ),
         (
             "POST",
@@ -462,7 +497,7 @@ async fn role_matrix(t: &Table) {
     // Nothing the others tried changed anything.
     let (_, v) = t.dm.get(&format!("/api/encounters/{e}")).await;
     assert_eq!(v["name"], "DM-SECRET-NAME");
-    assert_eq!(v["creatures"].as_array().unwrap().len(), 2);
+    assert_eq!(v["creatures"].as_array().unwrap().len(), 4);
     assert_eq!(v["effects"].as_array().unwrap().len(), 1);
     for (method, path, body) in &routes {
         let (status, out) = send(&t.router, Some(&t.dm.token), method, path, body.clone()).await;
@@ -496,6 +531,7 @@ async fn leak_suite(t: &Table) {
         b.shown.clone(),
         b.draft.clone(),
         b.hidden.clone(),
+        b.hidden_pet.clone(),
         b.effect.clone(),
         random.clone(),
         "not%20an%20id".to_string(),
@@ -516,12 +552,18 @@ async fn leak_suite(t: &Table) {
                 ("GET", format!("/api/encounters/{id}")),
                 ("PATCH", format!("/api/encounters/{id}")),
                 ("DELETE", format!("/api/encounters/{id}")),
-                ("POST", format!("/api/encounters/{id}/evaluate")),
                 ("POST", format!("/api/encounters/{id}/creatures")),
                 ("POST", format!("/api/encounters/{id}/effects")),
                 ("POST", format!("/api/encounters/{id}/rules")),
             ];
-            for sub in [&b.hidden, &b.revealed, &random, &b.effect, &b.rule] {
+            for sub in [
+                &b.hidden,
+                &b.hidden_pet,
+                &b.revealed,
+                &random,
+                &b.effect,
+                &b.rule,
+            ] {
                 for (m, tail) in [
                     ("PATCH", "creatures"),
                     ("DELETE", "creatures"),
@@ -598,47 +640,68 @@ async fn leak_suite(t: &Table) {
     }
     for leak in [
         b.hidden.as_str(),
+        b.hidden_pet.as_str(),
         b.effect.as_str(),
         b.rule.as_str(),
         b.draft.as_str(),
         "ID_SRD521",
         "elementId",
-        "statBlock",
-        "statblock",
-        "\"abilities\"",
+        "statblock_json",
         "\"xp\"",
         "packRev",
         "Goblin Warrior",
-        "Owlbear",
         "dmLabel",
         "dmNotes",
         "overrides",
-        "evaluation",
+        "initMode",
         "totalXp",
-        "\"band\"",
-        "ruleset",
         "updatedAt",
     ] {
         assert!(!all.contains(leak), "{leak} reached a player");
     }
-    // The projection: one revealed creature at the name level, nothing more.
-    let (_, v) = t.player.get(&format!("/api/encounters/{}", b.shown)).await;
+    // The projection: the revealed creatures with their whole stat blocks (D20 b), nothing of the DM's.
+    let (_, _, text) = raw(
+        &t.router,
+        Some(&t.player.token),
+        "GET",
+        &format!("/api/encounters/{}", b.shown),
+        "",
+    )
+    .await;
+    let v: Value = serde_json::from_str(&text).unwrap();
     let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
     assert_eq!(
         keys,
         ["creatures", "id", "partyId", "publicName", "status"],
         "{v}"
     );
-    assert_eq!(v["creatures"].as_array().unwrap().len(), 1, "{v}");
-    assert_eq!(v["creatures"][0]["id"], b.revealed.as_str());
-    assert_eq!(v["creatures"][0]["publicName"], "Big beast");
-    assert_eq!(v["creatures"][0]["type"], "Monstrosity");
-    // At full: the block without XP, and hit points; still not the hidden one.
+    let shown: Vec<&str> = v["creatures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].as_str().unwrap())
+        .collect();
+    // Pets sit right after their owner, so the loose wolf comes before the Owlbear.
+    assert_eq!(shown, [b.loose_pet.as_str(), b.revealed.as_str()], "{v}");
+    let owlbear = &v["creatures"][1];
+    assert_eq!(
+        (owlbear["publicName"].clone(), owlbear["type"].clone()),
+        (json!("Big beast"), json!("Monstrosity"))
+    );
+    assert_eq!(owlbear["hp"]["max"], 59, "{v}");
+    assert!(owlbear["statBlock"]["abilities"].is_object());
+    // The loose pet never names its hidden owner.
+    assert!(v["creatures"][0].get("ownerId").is_none(), "{v}");
+    assert!(
+        !text.contains("\"xp\"") && !text.contains(&b.hidden) && !text.contains("SECRET"),
+        "{text}"
+    );
+    // Revealing the owner doesn't reveal its hidden pet; then the loose pet names it.
     ok(
         &t.dm,
         "PATCH",
-        &format!("/api/encounters/{}/creatures/{}", b.shown, b.revealed),
-        json!({ "revealLevel": "full" }),
+        &format!("/api/encounters/{}/creatures/{}", b.shown, b.hidden),
+        json!({ "hidden": false }),
     )
     .await;
     let (_, _, text) = raw(
@@ -649,13 +712,18 @@ async fn leak_suite(t: &Table) {
         "",
     )
     .await;
-    let v: Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(v["creatures"][0]["hp"]["max"], 59, "{v}");
-    assert!(v["creatures"][0]["statBlock"]["abilities"].is_object());
     assert!(
-        !text.contains("\"xp\"") && !text.contains(&b.hidden) && !text.contains("SECRET"),
+        !text.contains(&b.hidden_pet) && !text.contains("SECRET"),
         "{text}"
     );
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let pet = v["creatures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == b.loose_pet.as_str())
+        .unwrap();
+    assert_eq!(pet["ownerId"], b.hidden.as_str());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -704,13 +772,6 @@ async fn player_events(t: &Table) {
         json!({ "name": "Rally", "creatureId": c }),
     )
     .await;
-    ok(
-        &t.dm,
-        "POST",
-        &format!("/api/encounters/{d}/evaluate"),
-        json!({}),
-    )
-    .await;
     assert!(
         drain(&mut player).is_empty(),
         "a draft's edits reach no player"
@@ -748,7 +809,7 @@ async fn player_events(t: &Table) {
         (
             "PATCH",
             format!("/api/encounters/{d}/creatures/{hidden}"),
-            json!({ "dmLabel": "Lurker", "revealLevel": "full", "overrides": { "hp": { "average": 90 } } }),
+            json!({ "dmLabel": "Lurker", "overrides": { "hp": { "average": 90 } } }),
         ),
         (
             "PATCH",
@@ -828,169 +889,241 @@ async fn players_hear_of_an_encounter_only_when_their_view_changes() {
     player_events(&memory_table(dir.path()).await).await;
 }
 
-// Difficulty.
+// Editions (D23 b), companions (D17 b) and controlled creatures.
 
-async fn difficulty(t: &Table) {
-    let e = new_encounter(&t.dm, &t.party, json!({ "name": "Rated" })).await;
-    let path = format!("/api/encounters/{e}/evaluate");
-    let r = ok(&t.dm, "POST", &path, json!({})).await;
-    assert_eq!(
-        (r["totalXp"].clone(), r["band"].clone()),
-        (json!(0), json!("trivial")),
-        "{r}"
-    );
-    // Against the members, two new level 1 characters: 100 / 150 / 200. Four Goblin Warriors (4 x 50): High.
-    add(&t.dm, &e, json!({ "elementId": GOBLIN, "count": 4 })).await;
-    let r = ok(&t.dm, "POST", &path, json!({})).await;
-    assert_eq!(
-        r["party"],
-        json!({ "levels": [1, 1], "from": "members" }),
-        "{r}"
-    );
-    assert_eq!(
-        r["thresholds"],
-        json!({ "low": 100, "moderate": 150, "high": 200 })
-    );
-    assert_eq!(
-        (r["totalXp"].clone(), r["band"].clone()),
-        (json!(200), json!("high"))
-    );
-    // Four level 1 characters: 200 / 300 / 400. 200 XP is Low; an Owlbear (700) on top is past High.
-    let r = ok(&t.dm, "POST", &path, json!({ "levels": [1, 1, 1, 1] })).await;
-    assert_eq!(
-        (r["band"].clone(), r["party"]["from"].clone()),
-        (json!("low"), json!("given"))
-    );
-    let v = add(&t.dm, &e, json!({ "elementId": OWLBEAR })).await;
-    let r = ok(&t.dm, "POST", &path, json!({ "levels": [1, 1, 1, 1] })).await;
-    assert_eq!(
-        (r["totalXp"].clone(), r["band"].clone()),
-        (json!(900), json!("extreme"))
-    );
-    assert_eq!(r["remaining"]["high"], -500);
-    assert!(has_warning(&r, "monster_above_party_level"));
-    // Four level 5 characters: 2,000 / 3,000 / 4,400; 900 XP is Low.
-    let r = ok(&t.dm, "POST", &path, json!({ "levels": [5, 5, 5, 5] })).await;
-    assert_eq!(
-        r["thresholds"],
-        json!({ "low": 2000, "moderate": 3000, "high": 4400 })
-    );
-    assert_eq!(r["band"], "low");
-    // Hidden creatures count: they are in the fight.
-    assert_eq!(
-        v["creatures"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|c| c["hidden"] == true)
-            .count(),
-        5
-    );
-    // Five level 20 characters: 32,000 / 66,000 / 110,000. An Ancient Red Dragon (62,000): Moderate.
-    let d = new_encounter(&t.dm, &t.party, json!({ "name": "Dragon" })).await;
-    add(&t.dm, &d, json!({ "elementId": RED_DRAGON })).await;
-    let r = ok(
-        &t.dm,
-        "POST",
-        &format!("/api/encounters/{d}/evaluate"),
-        json!({ "levels": [20, 20, 20, 20, 20] }),
-    )
-    .await;
-    assert_eq!(
-        r["thresholds"],
-        json!({ "low": 32000, "moderate": 66000, "high": 110000 })
-    );
-    assert_eq!(
-        (r["totalXp"].clone(), r["band"].clone()),
-        (json!(62000), json!("moderate"))
-    );
-    for bad in [
-        json!({ "levels": [] }),
-        json!({ "levels": [0] }),
-        json!({ "levels": [21] }),
-        json!({ "levels": vec![1; 13] }),
-        json!({ "levels": "five" }),
-    ] {
-        let (status, _) =
-            t.dm.post(&format!("/api/encounters/{d}/evaluate"), bad.clone())
-                .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
-    }
-    // 2014 (D16): the 5.2.1 budget and a note; the 2024 block is flagged with its 2014 counterpart (D23).
-    let v = ok(
-        &t.dm,
-        "PATCH",
-        &format!("/api/encounters/{d}"),
-        json!({ "ruleset": "dnd2014" }),
-    )
-    .await;
-    assert_eq!(
-        (v["ruleset"].clone(), v["rulesetSet"].clone()),
-        (json!("dnd2014"), json!("dnd2014"))
-    );
-    let r = &v["evaluation"];
-    assert!(r["note"].as_str().unwrap().contains("SRD 5.2.1"), "{r}");
-    let edition = r["warnings"]
+/// An Aurora pack with one Companion element (an owl familiar, made up for the test).
+fn companion_pack() -> Value {
+    use base64::Engine as _;
+    let xml = r#"<?xml version="1.0" encoding="utf-8"?><elements>
+      <info><update version="0.0.1"><file name="companions.xml" url="https://example.invalid/companions.xml"/></update></info>
+      <element name="Owl" type="Companion" source="Test Companions" id="ID_TEST_COMPANION_OWL">
+        <setters><set name="ac">11</set><set name="hp">1 (1d4-1)</set><set name="speed">5 ft., fly 60 ft.</set>
+          <set name="strength">3</set><set name="dexterity">13</set><set name="constitution">8</set>
+          <set name="intelligence">2</set><set name="wisdom">12</set><set name="charisma">7</set>
+          <set name="type">Beast</set><set name="size">Tiny</set><set name="challenge">0</set><set name="alignment">unaligned</set></setters>
+      </element></elements>"#;
+    json!({ "request": {
+        "fileName": "companions.xml",
+        "contentBase64": base64::engine::general_purpose::STANDARD.encode(xml),
+    }})
+}
+
+fn find<'a>(view: &'a Value, key: &str, value: &str) -> &'a Value {
+    view["creatures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c[key] == value)
+        .unwrap_or_else(|| panic!("no creature with {key} {value}: {view}"))
+}
+
+async fn editions_and_controlled(t: &Table) {
+    // The encounter uses the party's edition; a block of the other one is flagged with its counterpart.
+    let e = new_encounter(&t.dm, &t.party, json!({ "name": "Mixed" })).await;
+    let v = add(&t.dm, &e, json!({ "elementId": GOBLIN_2014 })).await;
+    assert_eq!(v["ruleset"], "dnd2024");
+    let edition = v["warnings"]
         .as_array()
         .unwrap()
         .iter()
         .find(|w| w["kind"] == "edition")
         .unwrap();
-    assert_eq!(
-        edition["creatures"][0]["mapsTo"],
-        "ID_SRD51_MONSTER_ANCIENT_RED_DRAGON"
-    );
-    assert!(has_warning(r, "characters_edition"), "{r}");
-    // The matching block in its place: the warning goes.
-    let cid = creature_ids(&v)[0].clone();
+    assert_eq!(edition["creatures"][0]["ruleset"], "dnd2014");
+    let goblin = creature_ids(&v)[0].clone();
     let v = ok(
         &t.dm,
         "POST",
-        &format!("/api/encounters/{d}/creatures/{cid}/swap"),
-        json!({}),
+        &format!("/api/encounters/{e}/creatures/{goblin}/swap"),
+        json!({ "elementId": GOBLIN }),
     )
     .await;
     assert_eq!(
-        v["creatures"][0]["elementId"],
-        "ID_SRD51_MONSTER_ANCIENT_RED_DRAGON"
+        (
+            v["creatures"][0]["elementId"].clone(),
+            v["creatures"][0]["ruleset"].clone()
+        ),
+        (json!(GOBLIN), json!("dnd2024"))
     );
-    assert_eq!(v["creatures"][0]["ruleset"], "dnd2014");
-    assert!(!has_warning(&v["evaluation"], "edition"));
-    let v = ok(
-        &t.dm,
-        "PATCH",
-        &format!("/api/encounters/{d}"),
-        json!({ "ruleset": null }),
-    )
-    .await;
-    assert_eq!(
-        (v["ruleset"].clone(), v["rulesetSet"].clone()),
-        (json!("dnd2024"), Value::Null)
+    assert!(!has_warning(&v, "edition"));
+    // No per-encounter edition and no difficulty (D16, D23 b).
+    let (status, _) =
+        t.dm.patch(
+            &format!("/api/encounters/{e}"),
+            json!({ "ruleset": "dnd2014" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) =
+        t.dm.post(&format!("/api/encounters/{e}/evaluate"), json!({}))
+            .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    for key in ["evaluation", "rulesetSet"] {
+        assert!(v.get(key).is_none(), "{key}");
+    }
+    assert!(
+        v["creatures"][0].get("xp").is_none() && v["creatures"][0]["statBlock"].get("xp").is_none()
     );
-    // The DM's list shows XP and counts.
+    assert_eq!(v["creatures"][0]["cr"], "1/4", "CR stays a printed stat");
+    // The party switches to 2014: the 2024 block and the 2024 characters are flagged.
+    let (status, out) =
+        t.dm.patch(
+            &format!("/api/parties/{}", t.party),
+            json!({ "ruleset": "dnd2014" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (_, v) = t.dm.get(&format!("/api/encounters/{e}")).await;
+    assert_eq!(v["ruleset"], "dnd2014");
+    assert!(
+        has_warning(&v, "edition") && has_warning(&v, "characters_edition"),
+        "{v}"
+    );
     let (_, list) =
         t.dm.get(&format!("/api/parties/{}/encounters", t.party))
             .await;
-    let rated = list["encounters"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|x| x["id"] == e.as_str())
-        .unwrap();
+    let row = &list["encounters"][0];
+    assert!(
+        row.get("xp").is_none() && row.get("band").is_none(),
+        "{row}"
+    );
+
+    // A companion (D17 b) as the goblin's pet: what it prints, nothing filled in.
+    let (status, out) = t.dm.rpc("import_pack", companion_pack()).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let v = add(
+        &t.dm,
+        &e,
+        json!({ "elementId": "ID_TEST_COMPANION_OWL", "ownerId": goblin }),
+    )
+    .await;
+    let owl = find(&v, "kind", "companion").clone();
+    let owl_id = owl["id"].as_str().unwrap().to_string();
     assert_eq!(
         (
-            rated["xp"].clone(),
-            rated["creatureCount"].clone(),
-            rated["hiddenCount"].clone()
+            owl["ownerId"].clone(),
+            owl["initMode"].clone(),
+            owl["hidden"].clone()
         ),
-        (json!(900), json!(5), json!(5))
+        (json!(goblin), json!("after_owner"), json!(true))
     );
+    assert_eq!(
+        (
+            owl["type"].clone(),
+            owl["size"].clone(),
+            owl["publicName"].clone()
+        ),
+        (json!("Beast"), json!(["tiny"]), json!("Beast"))
+    );
+    assert_eq!(
+        (
+            owl["statBlock"]["ac"].clone(),
+            owl["statBlock"]["hp"].clone(),
+            owl["statBlock"]["hpFormula"].clone()
+        ),
+        (json!(11), json!(1), json!("1d4-1"))
+    );
+    assert_eq!(
+        owl["statBlock"]["languages"],
+        Value::Null,
+        "missing fields stay null"
+    );
+    assert_eq!(owl["printed"]["saves"]["dex"], 1);
+    assert_eq!(
+        creature_ids(&v)[1],
+        owl_id,
+        "a pet sits right after its owner"
+    );
+    // Overrides work on it too.
+    let v = ok(
+        &t.dm,
+        "PATCH",
+        &format!("/api/encounters/{e}/creatures/{owl_id}"),
+        json!({ "overrides": { "hp": { "average": 3 } }, "initMode": "own" }),
+    )
+    .await;
+    let owl = find(&v, "id", &owl_id);
+    assert_eq!(
+        (
+            owl["statBlock"]["hp"].clone(),
+            owl["initMode"].clone(),
+            owl["modified"].clone()
+        ),
+        (json!(3), json!("own"), json!(true))
+    );
+    // A pet can't own pets; an owner must be in the encounter; an owner with pets can't become a pet.
+    let v = add(&t.dm, &e, json!({ "elementId": WOLF })).await;
+    let wolf = creature_ids(&v).last().unwrap().clone();
+    let path = format!("/api/encounters/{e}/creatures");
+    for body in [
+        json!({ "elementId": WOLF, "ownerId": owl_id }),
+        json!({ "elementId": WOLF, "ownerId": uuid::Uuid::new_v4().to_string() }),
+        json!({ "elementId": WOLF, "ownerId": goblin, "initMode": "whenever" }),
+    ] {
+        let (status, out) = t.dm.post(&path, body.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}: {out}");
+    }
+    let (status, _) =
+        t.dm.patch(&format!("{path}/{wolf}"), json!({ "ownerId": wolf }))
+            .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "not its own owner");
+    let (status, _) =
+        t.dm.patch(&format!("{path}/{goblin}"), json!({ "ownerId": wolf }))
+            .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "an owner can't become a pet"
+    );
+    let (status, out) =
+        t.dm.patch(&format!("{path}/{wolf}"), json!({ "ownerId": goblin }))
+            .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    // Players: the revealed owl alone, a companion with its block, its hidden owner never named.
+    ok(
+        &t.dm,
+        "PATCH",
+        &format!("{path}/{owl_id}"),
+        json!({ "hidden": false }),
+    )
+    .await;
+    ok(
+        &t.dm,
+        "PATCH",
+        &format!("/api/encounters/{e}"),
+        json!({ "status": "ready", "playerVisible": true }),
+    )
+    .await;
+    let (_, _, text) = raw(
+        &t.router,
+        Some(&t.player.token),
+        "GET",
+        &format!("/api/encounters/{e}"),
+        "",
+    )
+    .await;
+    let seen: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(seen["creatures"].as_array().unwrap().len(), 1, "{seen}");
+    assert_eq!(
+        (
+            seen["creatures"][0]["kind"].clone(),
+            seen["creatures"][0]["statBlock"]["hp"].clone()
+        ),
+        (json!("companion"), json!(3))
+    );
+    assert!(seen["creatures"][0].get("ownerId").is_none());
+    assert!(
+        !text.contains(&goblin) && !text.contains(&wolf) && !text.contains("ID_TEST"),
+        "{text}"
+    );
+    // Removing the owner removes its controlled creatures.
+    let v = ok(&t.dm, "DELETE", &format!("{path}/{goblin}"), Value::Null).await;
+    assert!(v["creatures"].as_array().unwrap().is_empty(), "{v}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn difficulty_matches_hand_computed_srd_521_budgets() {
+async fn editions_companions_and_controlled_creatures() {
     let dir = tempfile::tempdir().unwrap();
-    difficulty(&memory_table(dir.path()).await).await;
+    editions_and_controlled(&memory_table(dir.path()).await).await;
 }
 
 // Overrides and refresh.
@@ -1009,7 +1142,6 @@ async fn overrides_and_refresh(t: &Table) {
         v["creatures"][0]["hidden"], true,
         "new creatures start hidden"
     );
-    assert_eq!(v["creatures"][0]["revealLevel"], "name", "D20");
     let c = &ids[0];
     let path = format!("/api/encounters/{e}/creatures/{c}");
     let v = ok(
@@ -1042,12 +1174,11 @@ async fn overrides_and_refresh(t: &Table) {
             .unwrap()["name"],
         "Scarred"
     );
-    assert!(has_warning(&v["evaluation"], "modified"));
     for bad in [
         json!({ "overrides": { "hp": { "value": { "average": 1 }, "base": null } } }),
         json!({ "overrides": { "ac": { "value": 99 } } }),
         json!({ "overrides": { "hp": { "average": 10, "formula": "rm -rf" } } }),
-        json!({ "revealLevel": "everything" }),
+        json!({ "revealLevel": "full" }),
         json!({ "hpMode": "fixed" }),
         json!({ "hpMax": 0, "hpMode": "fixed" }),
         json!({ "dmLabel": "" }),
@@ -1181,7 +1312,7 @@ async fn overrides_and_refresh(t: &Table) {
     assert_eq!(creature_ids(&v), [ids[1].clone(), ids[0].clone()]);
     // A 2014 block in a 2024 encounter is flagged, not refused.
     let v = add(&t.dm, &e, json!({ "elementId": GOBLIN_2014 })).await;
-    assert!(has_warning(&v["evaluation"], "edition"));
+    assert!(has_warning(&v, "edition"));
     // The copies round-trip through the stat block model.
     let rows =
         sqlx::query("SELECT statblock_json FROM encounter_creatures WHERE encounter_id = $1")
@@ -1192,11 +1323,8 @@ async fn overrides_and_refresh(t: &Table) {
     for row in rows {
         let snap: party_encounter::creature::Snapshot =
             serde_json::from_str(&row.try_get::<String, _>(0).unwrap()).unwrap();
-        assert!(
-            snap.data.validate().is_empty(),
-            "{:?}",
-            snap.data.validate()
-        );
+        let data = snap.data.expect("a monster copy");
+        assert!(data.validate().is_empty(), "{:?}", data.validate());
     }
 }
 
@@ -1477,7 +1605,7 @@ async fn check_upgraded(location: &Location, data: &Path) {
         json!({ "elementId": GOBLIN, "count": 4, "hidden": false }),
     )
     .await;
-    assert_eq!(v["evaluation"]["party"]["levels"], json!([1]));
+    assert_eq!(v["creatures"].as_array().unwrap().len(), 4);
     ok(
         &dm,
         "PATCH",
@@ -1585,7 +1713,7 @@ async fn encounters_on_postgres() {
     role_matrix(&postgres_table(&url, &dir.path().join("roles")).await).await;
     leak_suite(&postgres_table(&url, &dir.path().join("leaks")).await).await;
     player_events(&postgres_table(&url, &dir.path().join("events")).await).await;
-    difficulty(&postgres_table(&url, &dir.path().join("difficulty")).await).await;
+    editions_and_controlled(&postgres_table(&url, &dir.path().join("editions")).await).await;
     overrides_and_refresh(&postgres_table(&url, &dir.path().join("overrides")).await).await;
     effects_and_rules(&postgres_table(&url, &dir.path().join("effects")).await).await;
     drop_all(&url).await;
@@ -1668,14 +1796,13 @@ async fn a_5etools_bestiary_builds_and_rates() {
                 refused += 1;
             }
         }
-        let r = ok(
-            &t.dm,
-            "POST",
-            &format!("/api/encounters/{e}/evaluate"),
-            json!({ "levels": [5, 5, 5, 5] }),
-        )
-        .await;
-        rated += r["creatures"].as_u64().unwrap() - r["unrated"].as_u64().unwrap();
+        let (_, v) = t.dm.get(&format!("/api/encounters/{e}")).await;
+        rated += v["creatures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["statBlock"].is_object())
+            .count() as u64;
         ok(
             &t.dm,
             "DELETE",
@@ -1685,12 +1812,9 @@ async fn a_5etools_bestiary_builds_and_rates() {
         .await;
     }
     println!(
-        "5etools corpus: {} monsters, {added} added, {refused} refused, {rated} rated",
+        "5etools corpus: {} monsters, {added} added, {refused} refused, {rated} with a block",
         ids.len()
     );
     assert_eq!(refused, 0, "every typed Monster element can be added");
-    assert!(
-        rated * 100 >= added * 95,
-        "almost all have a CR: {rated}/{added}"
-    );
+    assert_eq!(rated, added, "every added creature shows its block");
 }

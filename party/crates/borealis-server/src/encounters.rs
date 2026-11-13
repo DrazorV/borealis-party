@@ -1,28 +1,31 @@
-//! Encounters: a party's DM builds them from their own installed monsters; players see a player-visible one as a
-//! projection. The API is `party/docs/encounters-api.md`; the maths and stat block copies are `party-encounter`.
+//! Encounters: a party's DM builds them from their own installed creatures; players see a player-visible one as a
+//! projection. The API is `party/docs/encounters-api.md`; the stat block copies are `party-encounter`.
 //!
 //! * **Authorization** is read from the database on every request: the DM of the encounter's party
 //!   (`parties.dm_id`) may do everything; a player of the party (a `party_members` row) may only read an encounter
 //!   that is player-visible (`player_visible` and `ready` or `live`); everyone else, and every id a caller may not see,
 //!   gets one fixed 404. Request bodies are read only after the DM check, so a malformed body changes nothing.
-//! * **One serializer for players:** [`view_for`]. Hidden creatures are not in it at all; the DM's names, notes,
-//!   element ids, stat block copies, XP and difficulty never are.
+//! * **One serializer for players:** [`view_for`]. Hidden creatures are not in it at all; revealed ones come with
+//!   their whole stat block (D20 b); the DM's names, notes, element ids and stat block copies' sources never do.
 //! * **Events:** every write tells the DM. Players hear of it only when their projection changed (hashed before and
 //!   after the write), so editing a draft or a hidden creature moves nothing a player can count or time.
+//! * **No difficulty:** there is no XP budget or rating (the user's D16); an encounter uses its party's edition (D23 b)
+//!   and only warns about creatures and characters of the other one.
+//! * **Controlled creatures** (pets, summons, mounts): a creature can belong to another one of the encounter, acting
+//!   right after it or on its own initiative. Each has its own hidden switch: revealing an owner reveals none of its
+//!   creatures.
 //!
 //! Like `parties.rs`, nothing here goes to the admin page's activity log (D40); the server log gets ids only.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{header, HeaderValue};
 use axum::Json;
-use party_encounter::creature::{
-    block_rev, challenge, group, player_view, type_word, RevealLevel, Snapshot,
-};
+use borealis_content::Element;
+use party_encounter::creature::{player_view, Snapshot};
 use party_encounter::overrides::{refresh as refresh_block, Choice, Overrides, OverridesForm};
-use party_encounter::{evaluate_encounter, Band, MonsterGroup, Ruleset as MathRuleset, Warning};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -42,8 +45,6 @@ const MAX_ADD: i64 = 20;
 const MAX_EFFECTS: i64 = 40;
 const MAX_RULES: i64 = 20;
 const MAX_FLAGS: usize = 20;
-/// Most levels `evaluate` takes in place of the members'.
-const MAX_LEVELS: usize = 12;
 const RULESETS: [&str; 2] = ["dnd2024", "dnd2014"];
 /// The event kind on `party://party`.
 const KIND: &str = "encounters";
@@ -83,7 +84,6 @@ pub(crate) fn routes_if(on: bool) -> axum::Router<AppState> {
             "/api/encounters/{encounter}",
             get(read).patch(update).delete(remove),
         )
-        .route("/api/encounters/{encounter}/evaluate", post(evaluate))
         .route("/api/encounters/{encounter}/creatures", post(add_creatures))
         .route(
             "/api/encounters/{encounter}/creatures/{creature}",
@@ -159,17 +159,18 @@ fn label_arg(v: &str) -> ApiResult<String> {
 fn notes_arg(v: &str) -> ApiResult<String> {
     text(v, 0, 4_000, true, "Notes are up to 4000 characters.")
 }
-fn ruleset_arg(v: Option<&str>) -> ApiResult<Option<String>> {
-    match v {
-        None => Ok(None),
-        Some(r) if RULESETS.contains(&r) => Ok(Some(r.to_string())),
-        Some(_) => Err(invalid("The ruleset is dnd2024 or dnd2014.")),
-    }
-}
 fn hp_mode_arg(v: &str) -> ApiResult<String> {
     match v {
         "average" | "rolled" => Ok(v.to_string()),
         _ => Err(invalid("Hit points are average or rolled.")),
+    }
+}
+fn init_mode_arg(v: &str) -> ApiResult<String> {
+    match v {
+        "after_owner" | "own" => Ok(v.to_string()),
+        _ => Err(invalid(
+            "A controlled creature acts after its owner, or on its own initiative.",
+        )),
     }
 }
 fn ranged(
@@ -213,23 +214,18 @@ struct Encounter {
     party_id: String,
     name: String,
     public_name: String,
-    ruleset: Option<String>,
     status: String,
     player_visible: bool,
     hp_mode: String,
     dm_notes: String,
     created_at: i64,
     updated_at: i64,
-    party_ruleset: String,
+    /// The party's edition, which the encounter uses (D23 b).
+    ruleset: String,
     dm_id: String,
 }
 
 impl Encounter {
-    /// The ruleset it uses: its own, else its party's (D23).
-    fn ruleset(&self) -> &str {
-        self.ruleset.as_deref().unwrap_or(&self.party_ruleset)
-    }
-
     /// Players see it exactly now.
     fn visible(&self) -> bool {
         self.player_visible && matches!(self.status.as_str(), "ready" | "live")
@@ -237,7 +233,7 @@ impl Encounter {
 }
 
 const ENCOUNTER_COLUMNS: &str =
-    "e.id, e.party_id, e.name, e.public_name, e.ruleset, e.status, e.player_visible, \
+    "e.id, e.party_id, e.name, e.public_name, e.status, e.player_visible, \
      e.hp_mode, e.dm_notes, e.created_at, e.updated_at, p.ruleset, p.dm_id";
 
 fn encounter_from(row: &sqlx::any::AnyRow) -> sqlx::Result<Encounter> {
@@ -246,15 +242,14 @@ fn encounter_from(row: &sqlx::any::AnyRow) -> sqlx::Result<Encounter> {
         party_id: row.try_get(1)?,
         name: row.try_get(2)?,
         public_name: row.try_get(3)?,
-        ruleset: row.try_get(4)?,
-        status: row.try_get(5)?,
-        player_visible: row.try_get::<i64, _>(6)? != 0,
-        hp_mode: row.try_get(7)?,
-        dm_notes: row.try_get(8)?,
-        created_at: row.try_get(9)?,
-        updated_at: row.try_get(10)?,
-        party_ruleset: row.try_get(11)?,
-        dm_id: row.try_get(12)?,
+        status: row.try_get(4)?,
+        player_visible: row.try_get::<i64, _>(5)? != 0,
+        hp_mode: row.try_get(6)?,
+        dm_notes: row.try_get(7)?,
+        created_at: row.try_get(8)?,
+        updated_at: row.try_get(9)?,
+        ruleset: row.try_get(10)?,
+        dm_id: row.try_get(11)?,
     })
 }
 
@@ -302,22 +297,21 @@ async fn run_by(state: &AppState, user: &User, id: &str) -> ApiResult<Encounter>
     }
 }
 
-/// A party the caller runs or plays in: its ruleset and how the caller sees it.
-async fn party_access(state: &AppState, user: &User, party: &str) -> ApiResult<(String, Viewer)> {
+/// How the caller sees a party they run or play in.
+async fn party_access(state: &AppState, user: &User, party: &str) -> ApiResult<Viewer> {
     if !id_ok(party) {
         return Err(no_party());
     }
-    let row = sqlx::query("SELECT dm_id, ruleset FROM parties WHERE id = $1")
+    let row = sqlx::query("SELECT dm_id FROM parties WHERE id = $1")
         .bind(party)
         .fetch_optional(state.db.pool())
         .await?
         .ok_or_else(no_party)?;
     let dm: String = row.try_get(0)?;
-    let ruleset: String = row.try_get(1)?;
     if dm == user.id {
-        Ok((ruleset, Viewer::Dm))
+        Ok(Viewer::Dm)
     } else if is_member(state, &user.id, party).await? {
-        Ok((ruleset, Viewer::Player))
+        Ok(Viewer::Player)
     } else {
         Err(no_party())
     }
@@ -337,22 +331,18 @@ struct Creature {
     hp_mode: String,
     hp_max: Option<i64>,
     hidden: bool,
-    reveal_level: RevealLevel,
     revealed_at: Option<i64>,
+    owner: Option<String>,
+    init_mode: String,
 }
 
 impl Creature {
-    /// The block the encounter uses: the copy with the overrides applied.
-    fn block(&self) -> borealis_content::MonsterData {
-        self.overrides.apply(&self.snapshot.data)
-    }
-
-    /// Its hit points at the start: a fixed number, else the block's average (rolled ones are rolled at the start of
-    /// a combat, D22).
+    /// Its hit points at the start: a number the DM typed, else the block's average (rolled ones are rolled when the
+    /// combat starts, D22).
     fn start_hp(&self) -> u32 {
         match (self.hp_mode.as_str(), self.hp_max) {
             ("fixed", Some(n)) => u32::try_from(n).unwrap_or(1),
-            _ => self.block().hp.map_or(1, |h| h.average.max(1)),
+            _ => self.snapshot.average_hp(&self.overrides),
         }
     }
 }
@@ -360,7 +350,7 @@ impl Creature {
 async fn creatures(state: &AppState, encounter: &str) -> ApiResult<Vec<Creature>> {
     let rows = sqlx::query(
         "SELECT id, sort, dm_label, public_name, element_id, pack_id, pack_rev, statblock_json, overrides_json,
-                hp_mode, hp_max, visibility, reveal_level, revealed_at
+                hp_mode, hp_max, visibility, revealed_at, owner_creature_id, init_mode
          FROM encounter_creatures WHERE encounter_id = $1 ORDER BY sort, id",
     )
     .bind(encounter)
@@ -389,8 +379,9 @@ async fn creatures(state: &AppState, encounter: &str) -> ApiResult<Vec<Creature>
             hp_mode: row.try_get(9)?,
             hp_max: row.try_get(10)?,
             hidden: row.try_get::<String, _>(11)? != "revealed",
-            reveal_level: RevealLevel::parse(&row.try_get::<String, _>(12)?).unwrap_or_default(),
-            revealed_at: row.try_get(13)?,
+            revealed_at: row.try_get(12)?,
+            owner: row.try_get(13)?,
+            init_mode: row.try_get(14)?,
         });
     }
     Ok(out)
@@ -452,21 +443,14 @@ async fn rules(state: &AppState, encounter: &str) -> ApiResult<Vec<Value>> {
         .map_err(Into::into)
 }
 
-// Difficulty.
+// Edition warnings (D23 b).
 
-/// What a party is rated against: each readable member character's level and edition.
-struct PartyLevels {
-    levels: Vec<u8>,
-    rulesets: Vec<String>,
-}
-
-async fn party_levels(state: &AppState, party: &str) -> ApiResult<PartyLevels> {
-    let rows = sqlx::query(
-        "SELECT owner_id, character_id FROM party_members WHERE party_id = $1 ORDER BY joined_at, character_id",
-    )
-    .bind(party)
-    .fetch_all(state.db.pool())
-    .await?;
+/// The editions of the party's readable member characters.
+async fn member_rulesets(state: &AppState, party: &str) -> ApiResult<Vec<String>> {
+    let rows = sqlx::query("SELECT owner_id, character_id FROM party_members WHERE party_id = $1")
+        .bind(party)
+        .fetch_all(state.db.pool())
+        .await?;
     let mut pairs = Vec::new();
     for row in &rows {
         let owner: String = row.try_get(0)?;
@@ -482,164 +466,47 @@ async fn party_levels(state: &AppState, party: &str) -> ApiResult<PartyLevels> {
     }
     let hub = std::sync::Arc::clone(&state.hub);
     tokio::task::spawn_blocking(move || {
-        let mut out = PartyLevels {
-            levels: Vec::new(),
-            rulesets: Vec::new(),
-        };
-        for (owner, character, file) in pairs {
-            let (level, ruleset) = match hub.cards.get(&owner, &character) {
-                Some(card) if card.level.is_some() => (
-                    card.level,
-                    card.ruleset.and_then(|r| r.as_str().map(str::to_string)),
-                ),
-                _ => {
-                    if !file.symlink_metadata().is_ok_and(|m| m.is_file()) {
-                        continue;
-                    }
-                    match borealis_character::Character::load(&file) {
-                        Ok(c) => (
-                            Some(c.build.level()),
-                            serde_json::to_value(c.ruleset())
-                                .ok()
-                                .and_then(|v| v.as_str().map(str::to_string)),
-                        ),
-                        Err(_) => continue,
-                    }
+        pairs
+            .into_iter()
+            .filter_map(|(owner, character, file)| {
+                if let Some(r) = hub
+                    .cards
+                    .get(&owner, &character)
+                    .and_then(|card| card.ruleset)
+                    .and_then(|r| r.as_str().map(str::to_string))
+                {
+                    return Some(r);
                 }
-            };
-            if let Some(level) = level.and_then(|l| u8::try_from(l.clamp(1, 20)).ok()) {
-                out.levels.push(level);
-                out.rulesets.extend(ruleset);
-            }
-        }
-        out
+                if !file.symlink_metadata().is_ok_and(|m| m.is_file()) {
+                    return None;
+                }
+                let c = borealis_character::Character::load(&file).ok()?;
+                serde_json::to_value(c.ruleset())
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_string))
+            })
+            .collect()
     })
     .await
     .map_err(internal)
 }
 
-fn band_word(band: Band) -> &'static str {
-    match band {
-        Band::Trivial => "trivial",
-        Band::Low => "low",
-        Band::Moderate => "moderate",
-        Band::High => "high",
-        Band::Extreme => "extreme",
-    }
-}
-
-fn warning_json(w: &Warning) -> Value {
-    match w {
-        Warning::MonsterAbovePartyLevel { cr, highest_level } => json!({
-            "kind": "monster_above_party_level", "cr": cr.to_string(), "highestLevel": highest_level,
-            "text": format!("A CR {cr} creature is above the party's highest level ({highest_level}): it can be much deadlier than its XP says."),
-        }),
-        Warning::ManyCreatures {
-            monsters,
-            party_size,
-        } => json!({
-            "kind": "many_creatures", "monsters": monsters, "partySize": party_size,
-            "text": "More than two creatures per character: the fight can take long and swing hard.",
-        }),
-        Warning::ManyStatBlocks { groups } => json!({
-            "kind": "many_stat_blocks", "groups": groups,
-            "text": "More than three kinds of creatures: a lot to run at once.",
-        }),
-        Warning::ZeroCrCreatures => json!({
-            "kind": "zero_cr",
-            "text": "CR 0 creatures are worth no XP: use them sparingly.",
-        }),
-        Warning::ActionEconomyHeuristic {
-            monsters,
-            party_size,
-        } => json!({
-            "kind": "action_economy", "monsters": monsters, "partySize": party_size, "heuristic": true,
-            "text": "The sides have very different numbers of turns (a rule of thumb, not an SRD rule).",
-        }),
-    }
-}
-
-/// XP and difficulty of `list` against `levels` under the SRD 5.2.1 budget (D16: 2014 too, with a note).
-fn evaluation(
-    ruleset: &str,
-    list: &[Creature],
-    levels: &[u8],
-    from: &str,
-    member_rulesets: &[String],
-) -> Value {
-    let mut groups: Vec<MonsterGroup> = Vec::new();
-    let mut unrated = Vec::new();
-    let mut modified = Vec::new();
-    let mut other_edition = Vec::new();
-    for c in list {
-        let block = c.block();
-        match group(&block) {
-            Some(g) => match groups.iter_mut().find(|x| x.cr == g.cr && x.xp == g.xp) {
-                Some(x) => x.count += 1,
-                None => groups.push(g),
-            },
-            None => unrated.push(c.id.clone()),
-        }
-        if c.overrides.changes_numbers() {
-            modified.push(c.id.clone());
-        }
-        let edition = c.snapshot.ruleset();
-        if RULESETS.contains(&edition) && edition != ruleset {
-            other_edition.push(
-                json!({ "creatureId": c.id, "ruleset": edition, "mapsTo": c.snapshot.maps_to }),
-            );
-        }
-    }
-    let mut warnings = Vec::new();
-    let mut out = json!({
-        "method": "srd521",
-        "ruleset": ruleset,
-        "party": { "levels": levels, "from": from },
-        "creatures": list.len(),
-        "unrated": unrated.len(),
-    });
-    if ruleset == "dnd2014" {
-        out["note"] = json!("2014 encounters are rated with the SRD 5.2.1 XP budget.");
-    }
-    let total: u64 = groups
+/// What the DM should know: creatures and characters of the other edition. No difficulty (D16).
+fn warnings(ruleset: &str, list: &[Creature], member_rulesets: &[String]) -> Vec<Value> {
+    let mut out = Vec::new();
+    let other: Vec<&Creature> = list
         .iter()
-        .map(MonsterGroup::total_xp)
-        .fold(0, u64::saturating_add);
-    match evaluate_encounter(MathRuleset::Edition2024, levels, &groups) {
-        Ok(r) => {
-            out["totalXp"] = json!(r.total_xp);
-            out["band"] = json!(band_word(r.band));
-            out["thresholds"] = json!({ "low": r.thresholds.low, "moderate": r.thresholds.moderate, "high": r.thresholds.high });
-            out["remaining"] = json!({ "low": r.remaining.low, "moderate": r.remaining.moderate, "high": r.remaining.high });
-            warnings.extend(r.warnings.iter().map(warning_json));
-        }
-        Err(_) => {
-            out["totalXp"] = json!(total);
-            out["band"] = Value::Null;
-            out["thresholds"] = json!({ "low": 0, "moderate": 0, "high": 0 });
-            out["remaining"] = json!({ "low": 0, "moderate": 0, "high": 0 });
-            warnings.push(json!({
-                "kind": "no_party",
-                "text": "No character in the party can be read: add characters, or rate against levels you type.",
-            }));
-        }
-    }
-    if !modified.is_empty() {
-        warnings.push(json!({
-            "kind": "modified", "creatureIds": modified,
-            "text": "Changed stat blocks are still rated by their CR.",
-        }));
-    }
-    if !unrated.is_empty() {
-        warnings.push(json!({
-            "kind": "unrated", "creatureIds": unrated,
-            "text": "Creatures without a CR add no XP.",
-        }));
-    }
-    if !other_edition.is_empty() {
-        let ids: Vec<&Value> = other_edition.iter().map(|o| &o["creatureId"]).collect();
-        warnings.push(json!({
-            "kind": "edition", "creatureIds": ids, "creatures": other_edition,
+        .filter(|c| {
+            RULESETS.contains(&c.snapshot.ruleset.as_str()) && c.snapshot.ruleset != ruleset
+        })
+        .collect();
+    if !other.is_empty() {
+        out.push(json!({
+            "kind": "edition",
+            "creatureIds": other.iter().map(|c| c.id.clone()).collect::<Vec<_>>(),
+            "creatures": other.iter().map(|c| json!({
+                "creatureId": c.id, "ruleset": c.snapshot.ruleset, "mapsTo": c.snapshot.maps_to,
+            })).collect::<Vec<_>>(),
             "text": "Some stat blocks are from the other edition.",
         }));
     }
@@ -648,77 +515,78 @@ fn evaluation(
         .filter(|r| RULESETS.contains(&r.as_str()) && r.as_str() != ruleset)
         .count();
     if others > 0 {
-        warnings.push(json!({
+        out.push(json!({
             "kind": "characters_edition", "count": others,
             "text": format!("{others} of the party's characters use the other edition's rules."),
         }));
     }
-    out["warnings"] = json!(warnings);
     out
 }
 
 // Views.
 
 fn creature_dm(c: &Creature) -> Value {
-    let block = c.block();
-    let printed = &c.snapshot.data;
+    let printed = c.snapshot.printed();
     json!({
         "id": c.id,
         "sort": c.sort,
+        "kind": c.snapshot.kind.as_str(),
         "dmLabel": c.dm_label,
         "publicName": c.public_name,
         "hidden": c.hidden,
-        "revealLevel": c.reveal_level.as_str(),
         "revealedAt": c.revealed_at,
+        "ownerId": c.owner,
+        "initMode": c.init_mode,
         "elementId": c.element_id,
         "packId": c.pack_id,
         "packRev": c.pack_rev,
         "name": c.snapshot.name,
         "source": c.snapshot.source,
-        "ruleset": c.snapshot.ruleset(),
+        "ruleset": c.snapshot.ruleset,
         "mapsTo": c.snapshot.maps_to,
-        "cr": challenge(&block).map(|cr| cr.to_string()),
-        "xp": group(&block).map(|g| g.xp),
-        "type": type_word(&block),
-        "size": block.size.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-        "hp": block.hp,
+        "cr": c.snapshot.challenge(),
+        "type": c.snapshot.type_word(),
+        "size": c.snapshot.sizes(),
+        "hp": c.overrides.hp.as_ref().map(|h| json!(h.value)).or_else(|| printed.hp.as_ref().map(|h| json!(h))),
         "hpMode": c.hp_mode,
         "hpMax": c.hp_max,
-        "ac": block.ac.first().map(|a| a.value),
-        "printed": {
-            "hp": printed.hp,
-            "ac": printed.ac.first().map(|a| a.value),
-            "saves": borealis_content::monster::Ability::ALL.iter()
-                .map(|a| (a.as_str().to_string(), json!(printed.save_bonus(*a))))
-                .collect::<serde_json::Map<_, _>>(),
-        },
+        "ac": c.snapshot.ac(&c.overrides),
+        "printed": printed,
         "overrides": c.overrides,
-        "modified": c.overrides.changes_numbers(),
-        "statBlock": block,
+        "modified": c.overrides.changes_block(),
+        "statBlock": c.snapshot.block(&c.overrides),
     })
 }
 
-/// The only serializer of an encounter. For a player: the public name, status and the revealed creatures at their
-/// reveal level, nothing else (callers check [`Encounter::visible`] first). For the DM: everything.
+/// The only serializer of an encounter. For a player: the public name, status and the revealed creatures with their
+/// stat blocks, nothing else (callers check [`Encounter::visible`] first). For the DM: everything.
 fn view_for(
     viewer: Viewer,
     enc: &Encounter,
     list: &[Creature],
-    dm: Option<(Vec<Value>, Vec<Value>, Value)>,
+    dm: Option<(Vec<Value>, Vec<Value>, Vec<Value>)>,
 ) -> Value {
     if viewer == Viewer::Player {
+        let revealed: BTreeSet<&str> = list
+            .iter()
+            .filter(|c| !c.hidden)
+            .map(|c| c.id.as_str())
+            .collect();
         let shown: Vec<Value> = list
             .iter()
             .filter(|c| !c.hidden)
             .map(|c| {
                 let hp = c.start_hp();
+                // An owner players can't see is never named.
+                let owner = c.owner.as_deref().filter(|o| revealed.contains(o));
                 player_view(
                     &c.id,
                     &c.public_name,
-                    c.reveal_level,
-                    &c.block(),
+                    &c.snapshot,
+                    &c.overrides,
                     (hp, hp),
                     &[],
+                    owner,
                 )
             })
             .collect();
@@ -730,15 +598,13 @@ fn view_for(
             "creatures": shown,
         });
     }
-    let (effects, rules, evaluation) = dm.unwrap_or_else(|| (Vec::new(), Vec::new(), Value::Null));
+    let (effects, rules, warnings) = dm.unwrap_or_default();
     json!({
         "id": enc.id,
         "partyId": enc.party_id,
         "name": enc.name,
         "publicName": enc.public_name,
-        "ruleset": enc.ruleset(),
-        "rulesetSet": enc.ruleset,
-        "partyRuleset": enc.party_ruleset,
+        "ruleset": enc.ruleset,
         "status": enc.status,
         "playerVisible": enc.player_visible,
         "visibleToPlayers": enc.visible(),
@@ -749,25 +615,18 @@ fn view_for(
         "creatures": list.iter().map(creature_dm).collect::<Vec<_>>(),
         "effects": effects,
         "rules": rules,
-        "evaluation": evaluation,
+        "warnings": warnings,
     })
 }
 
 async fn dm_view(state: &AppState, id: &str) -> ApiResult<Value> {
     let enc = encounter_row(state, id).await?.ok_or_else(not_found)?;
     let list = creatures(state, id).await?;
-    let party = party_levels(state, &enc.party_id).await?;
-    let evaluation = evaluation(
-        enc.ruleset(),
-        &list,
-        &party.levels,
-        "members",
-        &party.rulesets,
-    );
+    let members = member_rulesets(state, &enc.party_id).await?;
     let extra = (
         effects(state, id).await?,
         rules(state, id).await?,
-        evaluation,
+        warnings(&enc.ruleset, &list, &members),
     );
     Ok(view_for(Viewer::Dm, &enc, &list, Some(extra)))
 }
@@ -877,7 +736,7 @@ pub async fn list(
     user: User,
     Path(party): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    let (_, viewer) = party_access(&state, &user, &party).await?;
+    let viewer = party_access(&state, &user, &party).await?;
     let rows = sqlx::query(&format!(
         "SELECT {ENCOUNTER_COLUMNS} FROM encounters e JOIN parties p ON p.id = e.party_id
          WHERE e.party_id = $1 ORDER BY e.created_at DESC, e.id"
@@ -899,17 +758,9 @@ pub async fn list(
             .collect();
         return Ok(Json(json!({ "role": "player", "encounters": list })));
     }
-    let levels = party_levels(&state, &party).await?;
     let mut out = Vec::new();
     for e in &all {
         let list = creatures(&state, &e.id).await?;
-        let ev = evaluation(
-            e.ruleset(),
-            &list,
-            &levels.levels,
-            "members",
-            &levels.rulesets,
-        );
         out.push(json!({
             "id": e.id,
             "name": e.name,
@@ -919,8 +770,6 @@ pub async fn list(
             "visibleToPlayers": e.visible(),
             "creatureCount": list.len(),
             "hiddenCount": list.iter().filter(|c| c.hidden).count(),
-            "xp": ev["totalXp"],
-            "band": ev["band"],
             "updatedAt": e.updated_at,
         }));
     }
@@ -934,8 +783,6 @@ struct EncounterForm {
     name: Option<String>,
     #[serde(default)]
     public_name: Option<String>,
-    #[serde(default, deserialize_with = "some")]
-    ruleset: Option<Option<String>>,
     #[serde(default)]
     status: Option<String>,
     #[serde(default)]
@@ -953,8 +800,7 @@ pub async fn create(
     Path(party): Path<String>,
     bytes: Bytes,
 ) -> ApiResult<Json<Value>> {
-    let (_, viewer) = party_access(&state, &user, &party).await?;
-    if viewer != Viewer::Dm {
+    if party_access(&state, &user, &party).await? != Viewer::Dm {
         return Err(no_party());
     }
     let form: EncounterForm = body(&bytes)?;
@@ -966,7 +812,6 @@ pub async fn create(
         Some(p) => public_arg(p)?,
         None => public_arg(&name.chars().take(60).collect::<String>())?,
     };
-    let ruleset = ruleset_arg(form.ruleset.flatten().as_deref())?;
     let hp_mode = hp_mode_arg(form.hp_mode.as_deref().unwrap_or("average"))?;
     let notes = notes_arg(form.dm_notes.as_deref().unwrap_or_default())?;
     if count(
@@ -982,15 +827,14 @@ pub async fn create(
     let id = uuid::Uuid::new_v4().to_string();
     let at = now();
     sqlx::query(
-        "INSERT INTO encounters (id, party_id, name, public_name, ruleset, status, player_visible, hp_mode, dm_notes,
+        "INSERT INTO encounters (id, party_id, name, public_name, status, player_visible, hp_mode, dm_notes,
                                  created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, 'draft', 0, $6, $7, $8, $9)",
+         VALUES ($1, $2, $3, $4, 'draft', 0, $5, $6, $7, $8)",
     )
     .bind(&id)
     .bind(&party)
     .bind(&name)
     .bind(&public_name)
-    .bind(&ruleset)
     .bind(&hp_mode)
     .bind(&notes)
     .bind(at)
@@ -1039,10 +883,6 @@ pub async fn update(
         .map(public_arg)
         .transpose()?
         .unwrap_or_else(|| enc.public_name.clone());
-    let ruleset = match form.ruleset {
-        None => enc.ruleset.clone(),
-        Some(r) => ruleset_arg(r.as_deref())?,
-    };
     let status = match form.status.as_deref() {
         None => enc.status.clone(),
         Some(s @ ("draft" | "ready" | "ended")) => s.to_string(),
@@ -1068,12 +908,11 @@ pub async fn update(
         .transpose()?
         .unwrap_or_else(|| enc.dm_notes.clone());
     sqlx::query(
-        "UPDATE encounters SET name = $1, public_name = $2, ruleset = $3, status = $4, player_visible = $5,
-                               hp_mode = $6, dm_notes = $7 WHERE id = $8",
+        "UPDATE encounters SET name = $1, public_name = $2, status = $3, player_visible = $4, hp_mode = $5,
+                               dm_notes = $6 WHERE id = $7",
     )
     .bind(&name)
     .bind(&public_name)
-    .bind(&ruleset)
     .bind(&status)
     .bind(flag(visible))
     .bind(&hp_mode)
@@ -1101,61 +940,105 @@ pub async fn remove(
     Ok(Json(json!({ "deleted": true })))
 }
 
-#[derive(Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct LevelsForm {
-    #[serde(default)]
-    levels: Option<Vec<i64>>,
-}
-
-/// `POST /api/encounters/{encounter}/evaluate`: XP and difficulty (DM only).
-pub async fn evaluate(
-    State(state): State<AppState>,
-    user: User,
-    Path(id): Path<String>,
-    bytes: Bytes,
-) -> ApiResult<Json<Value>> {
-    let enc = run_by(&state, &user, &id).await?;
-    let form: LevelsForm = body(&bytes)?;
-    let list = creatures(&state, &id).await?;
-    let party = party_levels(&state, &enc.party_id).await?;
-    let (levels, from) = match form.levels {
-        Some(given) => {
-            if given.is_empty()
-                || given.len() > MAX_LEVELS
-                || given.iter().any(|l| !(1..=20).contains(l))
-            {
-                return Err(invalid("Give 1 to 12 character levels, each 1 to 20."));
-            }
-            (
-                given
-                    .iter()
-                    .filter_map(|l| u8::try_from(*l).ok())
-                    .collect::<Vec<_>>(),
-                "given",
-            )
-        }
-        None => (party.levels.clone(), "members"),
-    };
-    Ok(Json(evaluation(
-        enc.ruleset(),
-        &list,
-        &levels,
-        from,
-        &party.rulesets,
-    )))
-}
-
 // Creatures.
 
-/// A Monster element of the DM's own content, copied: its snapshot, the pack file's name and the block's fingerprint.
-async fn copy_monster(
+/// The setter `name` of an element, trimmed; `None` when empty.
+fn setter<'a>(el: &'a Element, name: &str) -> Option<&'a str> {
+    el.setter_value(name)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+}
+
+/// The number a setter starts with (`11 (natural armor)` -> 11).
+fn leading_u32(text: &str) -> Option<u32> {
+    let digits: String = text
+        .trim()
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    digits.parse().ok()
+}
+
+/// The hit dice in a companion's `hp` setter (`10 (3d4+3)` -> `3d4+3`).
+fn hp_formula(text: &str) -> Option<String> {
+    let inner = text.split_once('(')?.1.split_once(')')?.0;
+    let formula: String = inner.chars().filter(|c| !c.is_whitespace()).collect();
+    (formula.contains('d') && formula.chars().next().is_some_and(|c| c.is_ascii_digit()))
+        .then_some(formula)
+}
+
+const ABILITY_SETTERS: [(&str, &str); 6] = [
+    ("str", "strength"),
+    ("dex", "dexterity"),
+    ("con", "constitution"),
+    ("int", "intelligence"),
+    ("wis", "wisdom"),
+    ("cha", "charisma"),
+];
+
+/// An Aurora Companion's printed block, in the bestiary's `CompanionDetail` shape (`party/docs/bestiary-api.md`):
+/// only what its setters and linked Companion Trait/Action/Reaction elements print; anything missing is null. Read
+/// with upstream's companion reader, as the bestiary is. Once `bestiary.rs` is merged, `bestiary::monster` gives the
+/// same block and this can go.
+fn companion_block(el: &Element, store: &borealis_content::ContentStore) -> Value {
+    let block = borealis_lib::companion_block::element_block(el, &|id| store.element(id).cloned());
+    let text = |name: &str| setter(el, name).map(str::to_string);
+    let named = |list: Vec<borealis_lib::content_dto::CompanionFeature>| -> Vec<Value> {
+        list.into_iter()
+            .map(|f| json!({ "name": f.name, "text": f.text }))
+            .collect()
+    };
+    let mut speeds = serde_json::Map::new();
+    if let Some(walk) = setter(el, "speed").and_then(leading_u32) {
+        speeds.insert("walk".into(), json!(walk));
+    }
+    for (mode, feet) in ["fly", "climb", "swim", "burrow"].iter().zip(block.speeds) {
+        if feet > 0 {
+            speeds.insert((*mode).into(), json!(feet));
+        }
+    }
+    let printed = setter(el, "proficiency").is_some()
+        || setter(el, "challenge")
+            .and_then(borealis_content::Cr::parse)
+            .is_some();
+    json!({
+        "ac": setter(el, "ac").and_then(leading_u32),
+        "acText": text("ac"),
+        "hp": setter(el, "hp").and_then(leading_u32),
+        "hpText": text("hp"),
+        "hpFormula": setter(el, "hp").and_then(hp_formula),
+        "speed": text("speed"),
+        "speeds": speeds,
+        "abilities": ABILITY_SETTERS.iter()
+            .map(|(key, name)| ((*key).to_string(), json!(setter(el, name).and_then(leading_u32))))
+            .collect::<serde_json::Map<_, _>>(),
+        "saves": ABILITY_SETTERS.iter().zip(block.lines.save_bonuses)
+            .filter_map(|((key, _), bonus)| bonus.map(|b| ((*key).to_string(), json!(b))))
+            .collect::<serde_json::Map<_, _>>(),
+        "proficiency": printed.then_some(block.proficiency),
+        "skills": text("skills"),
+        "senses": text("senses"),
+        "languages": text("languages"),
+        "challenge": text("challenge"),
+        "size": text("size"),
+        "type": text("type"),
+        "alignment": text("alignment"),
+        "defenses": named(block.lines.defenses),
+        "traits": named(block.traits),
+        "actions": named(block.actions),
+        "reactions": named(block.reactions),
+    })
+}
+
+/// A typed Monster or an Aurora Companion element of the DM's own content, copied: its snapshot and the pack file's
+/// name. `None` when the DM has no such element.
+async fn copy_creature(
     state: &AppState,
     dm: &str,
     element: &str,
 ) -> ApiResult<Option<(Snapshot, String)>> {
     if element.is_empty() || element.len() > 200 || element.chars().any(char::is_control) {
-        return Err(invalid("That monster isn't in your content."));
+        return Err(invalid("That creature isn't in your content."));
     }
     let workspace = state.workspaces.get(dm).await?;
     let element = element.to_string();
@@ -1167,8 +1050,13 @@ async fn copy_monster(
             let Some(stored) = hub.store.get(&element) else {
                 return Ok(None);
             };
-            let snapshot =
-                Snapshot::from_element(&stored.element).map_err(|e| invalid(&e.to_string()))?;
+            let el = &stored.element;
+            let snapshot = if el.ty == "Companion" {
+                Snapshot::of_companion(el, companion_block(el, &hub.store))
+            } else {
+                Snapshot::of_monster(el)
+            }
+            .map_err(|e| invalid(&e.to_string()))?;
             // The pack's file name only: never a path on the server.
             let pack = std::path::Path::new(&*stored.file)
                 .file_stem()
@@ -1177,6 +1065,18 @@ async fn copy_monster(
             Ok(Some((snapshot, pack)))
         })
         .await
+}
+
+/// An owner for a controlled creature: a creature of this encounter that isn't itself controlled.
+fn owner_arg(list: &[Creature], owner: &str, itself: Option<&str>) -> ApiResult<String> {
+    let found = list.iter().find(|c| c.id == owner);
+    match found {
+        Some(c) if Some(c.id.as_str()) != itself && c.owner.is_none() => Ok(c.id.clone()),
+        Some(_) => Err(invalid(
+            "A controlled creature belongs to a creature that isn't controlled itself.",
+        )),
+        None => Err(invalid("Choose a creature of this encounter.")),
+    }
 }
 
 #[derive(Default, Deserialize)]
@@ -1192,9 +1092,14 @@ struct AddForm {
     public_name: Option<String>,
     #[serde(default)]
     hidden: Option<bool>,
+    #[serde(default)]
+    owner_id: Option<String>,
+    #[serde(default)]
+    init_mode: Option<String>,
 }
 
-/// `POST /api/encounters/{encounter}/creatures`: copy a monster from the DM's content into the encounter.
+/// `POST /api/encounters/{encounter}/creatures`: copy a creature from the DM's content into the encounter, on its
+/// own or controlled by another one (`ownerId`).
 pub async fn add_creatures(
     State(state): State<AppState>,
     user: User,
@@ -1209,37 +1114,50 @@ pub async fn add_creatures(
     }
     let label = form.dm_label.as_deref().map(label_arg).transpose()?;
     let public = form.public_name.as_deref().map(public_arg).transpose()?;
-    let have = count(
-        &state,
-        "SELECT COUNT(*) FROM encounter_creatures WHERE encounter_id = $1",
-        &id,
-    )
-    .await?;
-    if have + n > MAX_CREATURES {
+    let list = creatures(&state, &id).await?;
+    let owner = form
+        .owner_id
+        .as_deref()
+        .map(|o| owner_arg(&list, o, None))
+        .transpose()?;
+    let init_mode = init_mode_arg(form.init_mode.as_deref().unwrap_or("after_owner"))?;
+    if i64::try_from(list.len()).unwrap_or(i64::MAX) + n > MAX_CREATURES {
         return Err(invalid("An encounter can have 60 creatures."));
     }
     let element = form.element_id.unwrap_or_default();
-    let (snapshot, pack) = copy_monster(&state, &user.id, &element)
+    let (snapshot, pack) = copy_creature(&state, &user.id, &element)
         .await?
-        .ok_or_else(|| invalid("That monster isn't in your content."))?;
+        .ok_or_else(|| invalid("That creature isn't in your content."))?;
     let before = players_see(&state, &id).await?;
-    let same: i64 = sqlx::query(
-        "SELECT COUNT(*) FROM encounter_creatures WHERE encounter_id = $1 AND element_id = $2",
-    )
-    .bind(&id)
-    .bind(&element)
-    .fetch_one(state.db.pool())
-    .await?
-    .try_get(0)?;
+    let same = i64::try_from(list.iter().filter(|c| c.element_id == element).count()).unwrap_or(0);
     let base_label = label.unwrap_or_else(|| snapshot.name.chars().take(70).collect());
     // No numbers on the name players see: "Fey 2" would tell them a "Fey 1" is hiding.
-    let public = public.unwrap_or_else(|| type_word(&snapshot.data));
-    let rev = block_rev(&snapshot.data);
+    let public = public.unwrap_or_else(|| snapshot.type_word());
+    let rev = snapshot.rev();
     let block = serde_json::to_string(&snapshot).map_err(internal)?;
     let hidden = form.hidden.unwrap_or(true);
-    let mut sort = next_sort(&state, "encounter_creatures", &id).await?;
+    // A controlled creature goes right after its owner and the owner's others.
+    let mut sort = match &owner {
+        Some(o) => {
+            list.iter()
+                .filter(|c| c.id == *o || c.owner.as_deref() == Some(o))
+                .map(|c| c.sort)
+                .max()
+                .unwrap_or(0)
+                + 1
+        }
+        None => next_sort(&state, "encounter_creatures", &id).await?,
+    };
     let at = now();
     let mut tx = state.db.pool().begin().await?;
+    if owner.is_some() {
+        sqlx::query("UPDATE encounter_creatures SET sort = sort + $1 WHERE encounter_id = $2 AND sort >= $3")
+            .bind(n)
+            .bind(&id)
+            .bind(sort)
+            .execute(&mut *tx)
+            .await?;
+    }
     for i in 0..n {
         let label = if same == 0 && n == 1 {
             base_label.clone()
@@ -1247,14 +1165,15 @@ pub async fn add_creatures(
             format!("{base_label} {}", same + i + 1)
         };
         sqlx::query(
-            "INSERT INTO encounter_creatures (id, encounter_id, sort, dm_label, public_name, element_id, pack_id,
-                 pack_rev, statblock_json, overrides_json, hp_mode, visibility, reveal_level, revealed_at,
-                 created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '{}', 'encounter', $10, 'name', $11, $12, $13)",
+            "INSERT INTO encounter_creatures (id, encounter_id, sort, kind, dm_label, public_name, element_id, pack_id,
+                 pack_rev, statblock_json, overrides_json, hp_mode, visibility, revealed_at, owner_creature_id,
+                 init_mode, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, '{}', 'encounter', $11, $12, $13, $14, $15, $16)",
         )
         .bind(uuid::Uuid::new_v4().to_string())
         .bind(&id)
         .bind(sort)
+        .bind(snapshot.kind.as_str())
         .bind(&label)
         .bind(&public)
         .bind(&element)
@@ -1263,6 +1182,8 @@ pub async fn add_creatures(
         .bind(&block)
         .bind(if hidden { "hidden" } else { "revealed" })
         .bind(if hidden { None } else { Some(at) })
+        .bind(&owner)
+        .bind(&init_mode)
         .bind(at)
         .bind(at)
         .execute(&mut *tx)
@@ -1283,26 +1204,27 @@ struct CreatureForm {
     #[serde(default)]
     hidden: Option<bool>,
     #[serde(default)]
-    reveal_level: Option<String>,
-    #[serde(default)]
     hp_mode: Option<String>,
     #[serde(default, deserialize_with = "some")]
     hp_max: Option<Option<i64>>,
     #[serde(default)]
     sort: Option<i64>,
+    #[serde(default, deserialize_with = "some")]
+    owner_id: Option<Option<String>>,
+    #[serde(default)]
+    init_mode: Option<String>,
     #[serde(default)]
     overrides: Option<OverridesForm>,
 }
 
 /// One creature of an encounter the caller runs; the encounter 404 otherwise.
-async fn creature_of(state: &AppState, encounter: &str, creature: &str) -> ApiResult<Creature> {
+fn creature_in(list: &[Creature], creature: &str) -> ApiResult<Creature> {
     if !id_ok(creature) {
         return Err(not_found());
     }
-    creatures(state, encounter)
-        .await?
-        .into_iter()
+    list.iter()
         .find(|c| c.id == creature)
+        .cloned()
         .ok_or_else(not_found)
 }
 
@@ -1314,7 +1236,8 @@ pub async fn update_creature(
     bytes: Bytes,
 ) -> ApiResult<Json<Value>> {
     let enc = run_by(&state, &user, &id).await?;
-    let c = creature_of(&state, &id, &cid).await?;
+    let list = creatures(&state, &id).await?;
+    let c = creature_in(&list, &cid)?;
     let form: CreatureForm = body(&bytes)?;
     let before = players_see(&state, &id).await?;
     let label = form
@@ -1330,11 +1253,6 @@ pub async fn update_creature(
         .transpose()?
         .unwrap_or_else(|| c.public_name.clone());
     let hidden = form.hidden.unwrap_or(c.hidden);
-    let level = match form.reveal_level.as_deref() {
-        None => c.reveal_level,
-        Some(l) => RevealLevel::parse(l)
-            .ok_or_else(|| invalid("The reveal level is name, band or full."))?,
-    };
     let hp_mode = match form.hp_mode.as_deref() {
         None => c.hp_mode.clone(),
         Some(m @ ("encounter" | "fixed")) => m.to_string(),
@@ -1347,11 +1265,32 @@ pub async fn update_creature(
     if hp_mode == "fixed" && hp_max.is_none() {
         return Err(invalid("Type the hit points this creature starts with."));
     }
+    let owner = match form.owner_id {
+        None => c.owner.clone(),
+        Some(None) => None,
+        Some(Some(o)) => {
+            if list
+                .iter()
+                .any(|x| x.owner.as_deref() == Some(c.id.as_str()))
+            {
+                return Err(invalid(
+                    "A creature with controlled creatures of its own can't be controlled.",
+                ));
+            }
+            Some(owner_arg(&list, &o, Some(&c.id))?)
+        }
+    };
+    let init_mode = form
+        .init_mode
+        .as_deref()
+        .map(init_mode_arg)
+        .transpose()?
+        .unwrap_or_else(|| c.init_mode.clone());
     let overrides = match form.overrides {
         None => c.overrides.clone(),
         Some(f) => c
             .overrides
-            .edit(f, &c.snapshot.data)
+            .edit(f, &c.snapshot.printed())
             .map_err(|e| invalid(&e.to_string()))?,
     };
     let revealed_at = match (c.hidden, hidden) {
@@ -1361,34 +1300,30 @@ pub async fn update_creature(
     };
     let mut tx = state.db.pool().begin().await?;
     sqlx::query(
-        "UPDATE encounter_creatures SET dm_label = $1, public_name = $2, visibility = $3, reveal_level = $4,
-             hp_mode = $5, hp_max = $6, overrides_json = $7, revealed_at = $8, updated_at = $9 WHERE id = $10",
+        "UPDATE encounter_creatures SET dm_label = $1, public_name = $2, visibility = $3, hp_mode = $4, hp_max = $5,
+             overrides_json = $6, revealed_at = $7, owner_creature_id = $8, init_mode = $9, updated_at = $10
+         WHERE id = $11",
     )
     .bind(&label)
     .bind(&public)
     .bind(if hidden { "hidden" } else { "revealed" })
-    .bind(level.as_str())
     .bind(&hp_mode)
     .bind(hp_max)
     .bind(serde_json::to_string(&overrides).map_err(internal)?)
     .bind(revealed_at)
+    .bind(&owner)
+    .bind(&init_mode)
     .bind(now())
     .bind(&cid)
     .execute(&mut *tx)
     .await?;
     if let Some(position) = form.sort {
         // Move it to `position` among the others and number them all again.
-        let rows = sqlx::query(
-            "SELECT id FROM encounter_creatures WHERE encounter_id = $1 ORDER BY sort, id",
-        )
-        .bind(&id)
-        .fetch_all(&mut *tx)
-        .await?;
-        let mut ids: Vec<String> = rows
+        let mut ids: Vec<String> = list
             .iter()
-            .map(|r| r.try_get(0))
-            .collect::<sqlx::Result<_>>()?;
-        ids.retain(|x| *x != cid);
+            .map(|x| x.id.clone())
+            .filter(|x| *x != cid)
+            .collect();
         let at = usize::try_from(position.max(0))
             .unwrap_or(usize::MAX)
             .min(ids.len());
@@ -1405,17 +1340,23 @@ pub async fn update_creature(
     finish(&state, &enc, before).await
 }
 
-/// `DELETE /api/encounters/{encounter}/creatures/{creature}`.
+/// `DELETE /api/encounters/{encounter}/creatures/{creature}`: the creature, and the creatures it controls.
 pub async fn remove_creature(
     State(state): State<AppState>,
     user: User,
     Path((id, cid)): Path<(String, String)>,
 ) -> ApiResult<Json<Value>> {
     let enc = run_by(&state, &user, &id).await?;
-    creature_of(&state, &id, &cid).await?;
+    let list = creatures(&state, &id).await?;
+    creature_in(&list, &cid)?;
+    let gone: BTreeSet<String> = list
+        .iter()
+        .filter(|c| c.id == cid || c.owner.as_deref() == Some(cid.as_str()))
+        .map(|c| c.id.clone())
+        .collect();
     let before = players_see(&state, &id).await?;
     let mut tx = state.db.pool().begin().await?;
-    // Rule flags name creatures in JSON: drop the ones for this creature.
+    // Rule flags name creatures in JSON: drop the ones for the creatures that go.
     let rows = sqlx::query("SELECT id, flags_json FROM encounter_rules WHERE encounter_id = $1")
         .bind(&id)
         .fetch_all(&mut *tx)
@@ -1423,22 +1364,24 @@ pub async fn remove_creature(
     for row in &rows {
         let rule: String = row.try_get(0)?;
         let flags: String = row.try_get(1)?;
-        let mut list: Vec<Value> = serde_json::from_str(&flags).unwrap_or_default();
-        let n = list.len();
-        list.retain(|f| f["creatureId"] != cid.as_str());
-        if list.len() != n {
+        let mut flags: Vec<Value> = serde_json::from_str(&flags).unwrap_or_default();
+        let n = flags.len();
+        flags.retain(|f| !f["creatureId"].as_str().is_some_and(|c| gone.contains(c)));
+        if flags.len() != n {
             sqlx::query("UPDATE encounter_rules SET flags_json = $1 WHERE id = $2")
-                .bind(Value::Array(list).to_string())
+                .bind(Value::Array(flags).to_string())
                 .bind(&rule)
                 .execute(&mut *tx)
                 .await?;
         }
     }
-    sqlx::query("DELETE FROM encounter_creatures WHERE id = $1 AND encounter_id = $2")
-        .bind(&cid)
-        .bind(&id)
-        .execute(&mut *tx)
-        .await?;
+    for gone_id in &gone {
+        sqlx::query("DELETE FROM encounter_creatures WHERE id = $1 AND encounter_id = $2")
+            .bind(gone_id)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
+    }
     tx.commit().await?;
     finish(&state, &enc, before).await
 }
@@ -1459,18 +1402,22 @@ pub async fn refresh_creature(
     bytes: Bytes,
 ) -> ApiResult<Json<Value>> {
     let enc = run_by(&state, &user, &id).await?;
-    let c = creature_of(&state, &id, &cid).await?;
+    let list = creatures(&state, &id).await?;
+    let c = creature_in(&list, &cid)?;
     let form: RefreshForm = body(&bytes)?;
-    let (fresh, pack) = copy_monster(&state, &user.id, &c.element_id)
+    let (fresh, pack) = copy_creature(&state, &user.id, &c.element_id)
         .await
         .ok()
         .flatten()
-        .ok_or_else(|| ApiError::Conflict("That monster isn't in your content any more.".into()))?;
-    let outcome = refresh_block(&c.overrides, &c.snapshot.data, &fresh.data, &form.choices);
+        .ok_or_else(|| {
+            ApiError::Conflict("That creature isn't in your content any more.".into())
+        })?;
+    let changed = fresh.rev() != c.snapshot.rev();
+    let outcome = refresh_block(&c.overrides, &fresh.printed(), &form.choices);
     let conflicts = serde_json::to_value(&outcome.conflicts).map_err(internal)?;
     let Some(overrides) = outcome.overrides else {
         return Ok(Json(json!({
-            "changed": outcome.changed, "conflicts": conflicts, "applied": false,
+            "changed": changed, "conflicts": conflicts, "applied": false,
             "encounter": dm_view(&state, &id).await?,
         })));
     };
@@ -1481,7 +1428,7 @@ pub async fn refresh_creature(
     )
     .bind(serde_json::to_string(&fresh).map_err(internal)?)
     .bind(&pack)
-    .bind(block_rev(&fresh.data))
+    .bind(fresh.rev())
     .bind(serde_json::to_string(&overrides).map_err(internal)?)
     .bind(now())
     .bind(&cid)
@@ -1489,7 +1436,7 @@ pub async fn refresh_creature(
     .await?;
     let Json(view) = finish(&state, &enc, before).await?;
     Ok(Json(json!({
-        "changed": outcome.changed, "conflicts": conflicts, "applied": true, "encounter": view,
+        "changed": changed, "conflicts": conflicts, "applied": true, "encounter": view,
     })))
 }
 
@@ -1509,24 +1456,26 @@ pub async fn swap_creature(
     bytes: Bytes,
 ) -> ApiResult<Json<Value>> {
     let enc = run_by(&state, &user, &id).await?;
-    let c = creature_of(&state, &id, &cid).await?;
+    let list = creatures(&state, &id).await?;
+    let c = creature_in(&list, &cid)?;
     let form: SwapForm = body(&bytes)?;
     let element = form
         .element_id
         .or_else(|| c.snapshot.maps_to.clone())
-        .ok_or_else(|| invalid("This monster names no other edition's block."))?;
-    let (snapshot, pack) = copy_monster(&state, &user.id, &element)
+        .ok_or_else(|| invalid("This creature names no other edition's block."))?;
+    let (snapshot, pack) = copy_creature(&state, &user.id, &element)
         .await?
-        .ok_or_else(|| invalid("That monster isn't in your content."))?;
+        .ok_or_else(|| invalid("That creature isn't in your content."))?;
     let before = players_see(&state, &id).await?;
     sqlx::query(
-        "UPDATE encounter_creatures SET element_id = $1, pack_id = $2, pack_rev = $3, statblock_json = $4,
-             overrides_json = '{}', updated_at = $5 WHERE id = $6",
+        "UPDATE encounter_creatures SET element_id = $1, pack_id = $2, pack_rev = $3, statblock_json = $4, kind = $5,
+             overrides_json = '{}', updated_at = $6 WHERE id = $7",
     )
     .bind(&element)
     .bind(&pack)
-    .bind(block_rev(&snapshot.data))
+    .bind(snapshot.rev())
     .bind(serde_json::to_string(&snapshot).map_err(internal)?)
+    .bind(snapshot.kind.as_str())
     .bind(now())
     .bind(&cid)
     .execute(state.db.pool())
