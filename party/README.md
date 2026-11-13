@@ -77,6 +77,10 @@ Put passwords in variables rather than in the file.
 | `BOREALIS__INITIAL_ADMIN__PASSWORD` | | |
 | `BOREALIS__INITIAL_ADMIN__EMAIL` | | Optional |
 | `BOREALIS__LOG__LEVEL` | `info` | `error` to `trace` |
+| `BOREALIS__AI__SECRET_KEY` | | 32 random bytes in base64 (`openssl rand -base64 32`): encrypts the AI keys people save for the assistant. Without it no key is saved (models on a person's own device still work); changing it makes saved keys unreadable, and people enter theirs again. See `docs/ai-assistant.md` |
+| `BOREALIS__AI__REQUESTS_PER_MINUTE` | `20` | Assistant model calls per account per minute |
+| `BOREALIS__AI__TOKENS_PER_DAY` | `200000` | Assistant tokens per account per day (UTC), through the server |
+| `BOREALIS__FEATURES__AI` | `true` | `false` switches the assistant and Your AI off (emergency switch; the routes answer 404) |
 
 `OPEN_REGISTRATION`, `REQUIRE_APPROVAL` and `TRUSTED_PROXIES` can also be changed on the admin page while the server
 runs. What is saved there is kept in the database and wins over the file and the variables.

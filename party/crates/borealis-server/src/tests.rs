@@ -24,6 +24,8 @@ mod sync_tests;
 #[path = "jobs_tests.rs"]
 mod jobs_tests;
 
+#[path = "ai_providers_tests.rs"]
+mod ai_providers_tests;
 #[path = "bestiary_tests.rs"]
 mod bestiary_tests;
 #[path = "combat_tests.rs"]
@@ -480,6 +482,8 @@ async fn drop_all(url: &str) {
     sqlx::any::install_default_drivers();
     let pool = sqlx::AnyPool::connect(url).await.unwrap();
     for table in [
+        "ai_usage",
+        "ai_providers",
         "combat_requests",
         "combat_prompts",
         "combat_views",

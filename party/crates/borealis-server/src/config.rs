@@ -106,6 +106,16 @@ tls = "starttls"
 # Emergency switches, for this file only (no admin page toggles them). A feature switched off answers 404 on all its
 # routes and keeps its data; switch it back on and restart.
 parties = true
+# Bring your own AI: the assistant panel and each account's own AI provider (ai_providers.rs).
+ai = true
+
+[ai]
+# Keys people save for their own AI provider are encrypted with this server key: 32 random bytes in base64, from
+# `openssl rand -base64 32`. Set it as BOREALIS__AI__SECRET_KEY, not here. Without it nobody can save a key (models on
+# a person's own device still work). Changing it makes every saved key unreadable, and people enter theirs again.
+# Model calls per account per minute, and tokens per account per day (UTC).
+requests_per_minute = 20
+tokens_per_day = 200000
 
 [log]
 # error, warn, info, debug or trace. RUST_LOG, when set, wins.
@@ -134,6 +144,8 @@ pub struct Settings {
     pub import: ImportSettings,
     /// Emergency kill switches.
     pub features: FeatureSettings,
+    /// Bring your own AI (`ai_providers.rs`).
+    pub ai: AiSettings,
     /// Logging.
     pub log: LogSettings,
 }
@@ -144,12 +156,62 @@ pub struct Settings {
 pub struct FeatureSettings {
     /// Parties (`parties.rs`).
     pub parties: bool,
+    /// Bring your own AI (`ai_providers.rs`).
+    pub ai: bool,
 }
 
 impl Default for FeatureSettings {
     fn default() -> Self {
-        Self { parties: true }
+        Self {
+            parties: true,
+            ai: true,
+        }
     }
+}
+
+/// `[ai]`: bring your own AI.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct AiSettings {
+    /// The key saved provider keys are encrypted with (base64 of 32 bytes), best given as `BOREALIS__AI__SECRET_KEY`.
+    pub secret_key: Option<String>,
+    /// Model calls per account per minute.
+    pub requests_per_minute: usize,
+    /// Tokens per account per day.
+    pub tokens_per_day: i64,
+}
+
+impl Default for AiSettings {
+    fn default() -> Self {
+        Self {
+            secret_key: None,
+            requests_per_minute: 20,
+            tokens_per_day: 200_000,
+        }
+    }
+}
+
+impl std::fmt::Debug for AiSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AiSettings")
+            .field(
+                "secret_key",
+                &self.secret_key.as_ref().map(|_| "<redacted>"),
+            )
+            .field("requests_per_minute", &self.requests_per_minute)
+            .field("tokens_per_day", &self.tokens_per_day)
+            .finish()
+    }
+}
+
+static AI: std::sync::OnceLock<AiSettings> = std::sync::OnceLock::new();
+
+/// The `[ai]` settings [`Settings::load`] read at start, or the defaults with no key (tests that build the routes by
+/// hand). Tests read their own (`ai_assistant.rs`).
+#[must_use]
+#[cfg_attr(test, allow(dead_code))]
+pub fn ai() -> AiSettings {
+    AI.get().cloned().unwrap_or_default()
 }
 
 static FEATURES: std::sync::OnceLock<FeatureSettings> = std::sync::OnceLock::new();
@@ -564,6 +626,7 @@ impl Settings {
         let _ = NETWORK.set(settings.network());
         let _ = FEATURES.set(settings.features);
         let _ = IMPORT.set(settings.import.clone());
+        let _ = AI.set(settings.ai.clone());
         Ok(settings)
     }
 

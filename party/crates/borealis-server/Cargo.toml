@@ -28,6 +28,10 @@ party-encounter = { path = "../party-encounter" }
 # The combat engine (combat.rs): pure state, commands and the seeded die.
 party-combat = { path = "../party-combat" }
 axum = "0.8"
+# Bring your own AI (ai_providers.rs): provider calls with rustls like upstream's own client (no new crates), and
+# saved keys sealed with AES-256-GCM (ring is already here for sqlx and lettre).
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+ring = "0.17"
 tower-http = { version = "0.6", features = ["cors", "fs", "set-header"] }
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }

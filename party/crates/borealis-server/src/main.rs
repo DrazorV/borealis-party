@@ -18,6 +18,9 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 
 mod admin;
+mod ai_assistant;
+mod ai_providers;
+mod ai_tools;
 mod auth;
 mod backend;
 mod bestiary;
@@ -51,7 +54,10 @@ use config::Settings;
 use db::Db;
 use workspaces::Workspaces;
 
-const CSP: &str = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; \
+// `connect-src` also allows a model on the person's own computer (Ollama, LM Studio): the assistant's "On this device"
+// mode, where the browser calls it and the server never does (ai_assistant.rs).
+const CSP: &str = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; \
+                   connect-src 'self' http://localhost:* http://127.0.0.1:* http://[::1]:*; \
                    object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 #[derive(Parser)]
@@ -159,6 +165,7 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
         .merge(import_source::routes())
         .merge(pack_removal::routes())
         .merge(bestiary::routes())
+        .merge(ai_assistant::routes())
         .route("/api/{*rest}", any(no_such_route))
         .layer(DefaultBodyLimit::max(max_upload))
         .with_state(state)

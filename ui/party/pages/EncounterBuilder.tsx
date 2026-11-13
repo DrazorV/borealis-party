@@ -1,3 +1,4 @@
+import { AssistantButton } from "../assistant/AssistantButton";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { Button, IconButton } from "../../src/components/Button";
@@ -170,6 +171,7 @@ export function EncounterBuilder() {
         <Link className="btn btn-sm" to={encountersPath(partyId)} aria-label="Back to encounters">Encounters</Link>
         <h2 className="grow enc-title">{enc.name}</h2>
         <Chip tone={enc.status === "draft" ? "default" : enc.status === "live" ? "danger" : "accent"}>{STATUS_WORD[enc.status]}</Chip>
+        <AssistantButton purpose="encounter" context={{ partyId, encounterId: enc.id, label: enc.name }} onChanged={() => void load()} />
       </div>
       {error && <Alert tone="danger">{error}</Alert>}
       {activeRules.map((r) => (

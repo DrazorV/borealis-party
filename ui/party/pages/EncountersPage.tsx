@@ -1,3 +1,4 @@
+import { AssistantButton } from "../assistant/AssistantButton";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { Button } from "../../src/components/Button";
@@ -88,6 +89,7 @@ export function EncountersPage() {
       <div className="party-line enc-head">
         <Link className="btn btn-sm" to="/parties" aria-label="Back to parties">Parties</Link>
         <h2 className="grow enc-title">{party ? `${party.name}: encounters` : "Encounters"}</h2>
+        {list?.role === "dm" && <AssistantButton purpose="encounter" context={{ partyId, label: party?.name }} onChanged={() => void load()} />}
       </div>
       {error && <Alert tone="danger">{error}</Alert>}
       {list === undefined && !error && <p className="muted">Loading encounters…</p>}

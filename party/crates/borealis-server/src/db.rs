@@ -337,6 +337,33 @@ const MIGRATIONS: &[&[&str]] = &[
         )",
         "CREATE INDEX IF NOT EXISTS combat_requests_at ON combat_requests (created_at)",
     ],
+    // 7 (M-ai-providers, 0.3.1 part C; after part A's M-api-tokens, so 8 once that merges: renumber here and in
+    // MARKERS at merge). Bring your own AI (ai_providers.rs): one provider per account, its key encrypted with the
+    // server's `[ai] secret_key` (never stored in the clear, never in the account's folder, so never in a bundle or a
+    // share), and each account's tokens per day for the budget. Both go with the account.
+    &[
+        "CREATE TABLE IF NOT EXISTS ai_providers (
+            user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            provider TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            base_url TEXT,
+            model TEXT NOT NULL,
+            key_sealed TEXT,
+            key_last4 TEXT,
+            key_ring TEXT,
+            auto_apply BIGINT NOT NULL DEFAULT 0,
+            profile TEXT NOT NULL DEFAULT 'small',
+            consented_at BIGINT NOT NULL,
+            updated_at BIGINT NOT NULL
+        )",
+        "CREATE TABLE IF NOT EXISTS ai_usage (
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            day BIGINT NOT NULL,
+            requests BIGINT NOT NULL DEFAULT 0,
+            tokens BIGINT NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, day)
+        )",
+    ],
 ];
 
 /// How many steps [`MIGRATIONS`] has: the schema version a database is at after [`Db::open`].
@@ -354,6 +381,7 @@ const MARKERS: &[(usize, &str)] = &[
     (4, "monster_meta"),
     (5, "encounters"),
     (6, "combats"),
+    (7, "ai_providers"),
 ];
 
 /// A table only the versions with groups had. A database that still has it opens like any other: the table is left
