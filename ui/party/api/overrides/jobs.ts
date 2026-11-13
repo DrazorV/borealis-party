@@ -9,7 +9,7 @@ import { override, type Method } from "./registry";
  * Through Cloudflare a request that takes over about 100 s ends in a 524 while the server keeps working, and a first
  * index download takes over three minutes. So these commands start a job (`job_start`, answered at once) and ask
  * about it (`job_status`) until it ends, then answer or fail exactly like the plain call. The pages (Indexes, 5etools,
- * the Import screen) call them as before; progress still comes as the commands' own events.
+ * the Import section) call them as before; progress still comes as the commands' own events.
  * - A wait between questions grows from half a second to five seconds.
  * - A question that gets no answer (the network, a proxy, a restarting server) is asked again for a few minutes: the
  *   job goes on meanwhile.

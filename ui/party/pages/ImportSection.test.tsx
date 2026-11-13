@@ -77,14 +77,17 @@ vi.mock("../../src/pages/content/ImportPreviewDialog", async () => {
   };
 });
 
-const { ImportHub: Hub } = await import("./ImportHub");
-/** The screen in a router, as in the app; upstream's preview goes to /content after installing. */
-function ImportHub() {
+const { ImportSection } = await import("./ImportSection");
+const { ImportPreviewHost } = await import("../../src/pages/content/ImportPreviewDialog");
+/**
+ * The section on Additional Content, as in the app: upstream's GlobalImport shows the one import preview next to it,
+ * and the preview goes to /content (this same page) after installing.
+ */
+function Page() {
   return (
-    <MemoryRouter initialEntries={["/import-files"]}>
+    <MemoryRouter initialEntries={["/content"]}>
       <Routes>
-        <Route path="/import-files" element={<Hub />} />
-        <Route path="/content" element={<p>Additional Content</p>} />
+        <Route path="/content" element={<><ImportSection /><ImportPreviewHost /></>} />
       </Routes>
     </MemoryRouter>
   );
@@ -102,7 +105,7 @@ beforeEach(() => {
 });
 
 async function choose(files: File[]) {
-  render(<ImportHub />);
+  render(<Page />);
   fireEvent.change(screen.getByLabelText("Choose files to import"), { target: { files } });
   await settle();
   await settle();
@@ -125,8 +128,8 @@ describe("Choose files", () => {
     fireEvent.click(screen.getByRole("button", { name: "Install" }));
     await vi.waitFor(() => expect(within(row("brew.json")).queryByRole("button", { name: "Import 1 book" })).toBeTruthy());
     expect(within(row("srd.xml")).getByRole("status").textContent).toBe("Installed SRD sample.");
-    // Still here: the preview's trip to Additional Content is kept from leaving the Import screen.
-    expect(screen.queryByText("Additional Content")).toBeNull();
+    // The preview's trip to /content stays on this page: the results are still listed.
+    expect(screen.getByRole("list", { name: "Import results" })).toBeTruthy();
     expect(within(row("content.borealis")).getByRole("status").textContent).toBe("Imported Ana.");
     expect(within(row("content.borealis")).getByText("Also in the bundle: Bo.")).toBeTruthy();
     expect(calls.find((c) => c.name === "stage5etoolsFiles")?.args).toMatchObject({ files: [{ fileName: "brew.json" }] });
@@ -161,7 +164,7 @@ describe("Choose files", () => {
 
 describe("Paste a link", () => {
   async function paste(url: string) {
-    render(<ImportHub />);
+    render(<Page />);
     fireEvent.change(screen.getByLabelText("Link to import"), { target: { value: url } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     await settle();
@@ -209,7 +212,7 @@ describe("5etools data: the default source", () => {
   beforeEach(() => { vi.stubGlobal("localStorage", memoryStorage()); });
 
   it("offers the server's default, named with its address", async () => {
-    render(<ImportHub />);
+    render(<Page />);
     await settle();
     const card = screen.getByRole("region", { name: "Default 5etools data" });
     expect(within(card).getByText(DEFAULT_URL)).toBeTruthy();
@@ -218,7 +221,7 @@ describe("5etools data: the default source", () => {
 
   it("offers only an own source when the server sets no default", async () => {
     state.defaultUrl = null;
-    render(<ImportHub />);
+    render(<Page />);
     await settle();
     expect(screen.queryByRole("region", { name: "Default 5etools data" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Get the default 5etools data" })).toBeNull();
@@ -227,7 +230,7 @@ describe("5etools data: the default source", () => {
   });
 
   it("downloads it in one tap the first time, then offers the books", async () => {
-    render(<ImportHub />);
+    render(<Page />);
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
     await settle();
@@ -239,7 +242,7 @@ describe("5etools data: the default source", () => {
 
   it("updates the same books once it was imported", async () => {
     state.urls = [{ url: DEFAULT_URL }];
-    render(<ImportHub />);
+    render(<Page />);
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
     await settle();
@@ -259,13 +262,13 @@ describe("5etools data: my own source", () => {
   };
 
   it("says what it takes", () => {
-    render(<ImportHub />);
+    render(<Page />);
     expect(field().getAttribute("aria-describedby")).toBe("party-5et-hint");
     expect(document.getElementById("party-5et-hint")!.textContent).toMatch(/GitHub repository.*books\.json/);
   });
 
   it("downloads from the address, names it in the row and remembers it for this account", async () => {
-    render(<ImportHub />);
+    render(<Page />);
     await send("github.com/someone/my-5e-data");
     expect(calls.find((c) => c.name === "stage5etoolsUrl")?.args).toEqual({ url: "https://github.com/someone/my-5e-data" });
     expect(within(row("https://github.com/someone/my-5e-data")).getByRole("button", { name: "Import 1 book" })).toBeTruthy();
@@ -274,21 +277,21 @@ describe("5etools data: my own source", () => {
 
   it("starts with the last own source of this account", () => {
     localStorage.setItem(STORE_KEY, "https://mirror.example.com/data/");
-    render(<ImportHub />);
+    render(<Page />);
     expect(field().value).toBe("https://mirror.example.com/data/");
   });
 
   it("works when the device keeps nothing", async () => {
     const blocked = () => { throw new Error("blocked"); };
     vi.stubGlobal("localStorage", { getItem: blocked, setItem: blocked, removeItem: blocked, clear: blocked, key: blocked, length: 0 });
-    render(<ImportHub />);
+    render(<Page />);
     expect(field().value).toBe("");
     await send("https://mirror.example.com/data/");
     expect(calls.find((c) => c.name === "stage5etoolsUrl")?.args).toEqual({ url: "https://mirror.example.com/data/" });
   });
 
   it("checks the address before sending it", async () => {
-    render(<ImportHub />);
+    render(<Page />);
     await send("http://mirror.example.com/data/");
     expect(screen.getByRole("alert").textContent).toBe("Use an https:// address.");
     expect(field().getAttribute("aria-invalid")).toBe("true");
@@ -303,7 +306,7 @@ describe("5etools data: my own source", () => {
 
   it("shows the server's refusal as it is", async () => {
     state.refuse = "The server does not download from private or local network addresses (192.168.1.10).";
-    render(<ImportHub />);
+    render(<Page />);
     await send("https://192.168.1.10/data/");
     expect(within(row("https://192.168.1.10/data/")).getByRole("alert").textContent).toBe(state.refuse);
   });
@@ -315,7 +318,7 @@ describe("5etools data: imported from", () => {
       { url: DEFAULT_URL, packs: ["PHB", "MM"], sources: [], revision: "abc", lastChecked: null, lastImported: null, problem: null },
       { url: "https://mirror.example.com/data/", packs: ["Brew"], sources: [], revision: "def", lastChecked: null, lastImported: null, problem: "GitHub said no." },
     ] as never;
-    render(<ImportHub />);
+    render(<Page />);
     await settle();
     expect(screen.getByText("2 packs: PHB, MM")).toBeTruthy();
     expect(screen.getByText("GitHub said no.")).toBeTruthy();
@@ -326,7 +329,7 @@ describe("5etools data: imported from", () => {
   });
 
   it("appears once the first import from a source finished", async () => {
-    render(<ImportHub />);
+    render(<Page />);
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
     await settle();
@@ -340,13 +343,13 @@ describe("5etools data: imported from", () => {
 describe("from the other doors (../import/door.ts)", () => {
   it("imports files handed over before the screen opened", async () => {
     sendFiles([fileOf("Ana.dnd5e", AURORA_CHARACTER)]);
-    render(<ImportHub />);
+    render(<Page />);
     await settle();
     expect(within(row("Ana.dnd5e")).getByRole("status").textContent).toBe("Imported Ana.");
   });
 
   it("imports files handed over while it shows, and a pick that came while busy after the one before", async () => {
-    render(<ImportHub />);
+    render(<Page />);
     let release: () => void = () => undefined;
     const real = api.importCharacter;
     api.importCharacter = (async (args: { fileName: string }) => { await new Promise<void>((r) => { release = r; }); return real(args as never); }) as never;
@@ -365,21 +368,21 @@ describe("from the other doors (../import/door.ts)", () => {
 
   it("runs a link as what its form was for: an index", async () => {
     sendLink({ url: "example.com/list", kind: "index" });
-    render(<ImportHub />);
+    render(<Page />);
     await settle();
     expect(calls.find((c) => c.name === "addIndex")?.args).toEqual({ url: "https://example.com/list" });
   });
 
   it("runs a link as what its form was for: 5etools-format data", async () => {
     sendLink({ url: "https://example.com/list.index", kind: "fivetools" });
-    render(<ImportHub />);
+    render(<Page />);
     await settle();
     expect(calls.find((c) => c.name === "stage5etoolsUrl")?.args).toEqual({ url: "https://example.com/list.index" });
     expect(names()).not.toContain("addIndex");
   });
 
   it("puts the cursor in the link field when asked", async () => {
-    render(<ImportHub />);
+    render(<Page />);
     act(() => openImport("link"));
     await settle();
     expect(document.activeElement).toBe(screen.getByLabelText("Link to import"));
@@ -394,7 +397,7 @@ describe("5etools results", () => {
       const partial = Array.from({ length: 833 }, (_, i) => ({ element: `C${i}|SRDX`, kind: "monster", reason: "creature section: variant sidebars not imported" }));
       return { converted: 16746, replaced: 0, partial, skipped: [], packs: [{ id: "x", name: "SRD sample" }] };
     }) as never;
-    render(<ImportHub />);
+    render(<Page />);
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
     await settle();
@@ -410,7 +413,7 @@ describe("5etools results", () => {
 
   it("an import that brought nothing in warns", async () => {
     api.import5etools = (async () => ({ converted: 0, replaced: 0, partial: [], skipped: [], packs: [] })) as never;
-    render(<ImportHub />);
+    render(<Page />);
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
     await settle();

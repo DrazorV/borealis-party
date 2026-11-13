@@ -4,7 +4,7 @@ import type { Locator, Page, Route, TestInfo } from "@playwright/test";
 import { expect, measureOverflow, minTap, open, scrollIntoReach, signedInShell, smallTargets, test } from "./fixtures";
 
 /**
- * The Import screen's 5etools card: the server's default source in one tap (when its admin set one) and the account's
+ * The Import section's 5etools card: the server's default source in one tap (when its admin set one) and the account's
  * own address. Nothing here reaches GitHub, and no test sets a real default on the shared rig server:
  * - the server's default is answered in the browser (`/api/import/default-5etools`), and its download is stubbed (the job, the scan and the import answer canned data,
  *   with a report as long as a real full import's: hundreds of entries in groups);
@@ -60,7 +60,7 @@ async function expectPhoneLayout(page: Page, testInfo: TestInfo) {
   expect(o.page, "the page scrolls sideways").toBeLessThanOrEqual(0);
   expect(o.scrollers, "containers that scroll sideways").toEqual([]);
   const small = (await smallTargets(page, minTap(testInfo), ".party-import")).map((t) => `${t.label} ${t.width}x${t.height}`);
-  expect(small, `Import screen controls under ${minTap(testInfo)} px`).toEqual([]);
+  expect(small, `Import section controls under ${minTap(testInfo)} px`).toEqual([]);
 }
 
 /** A report as long as a full import's: 833 notes, worded as the importer words them, in a handful of groups. */
@@ -117,13 +117,13 @@ async function stubDefaultSource(page: Page) {
   return seen;
 }
 
-test.describe("Import screen: 5etools sources", () => {
+test.describe("Import section: 5etools sources", () => {
   test.beforeEach(async ({ signIn }) => {
     await signIn("player");
   });
 
   test("without a default from the server, only an own source is offered", async ({ page }, testInfo) => {
-    await open(page, "/import-files");
+    await open(page, "/content");
     await signedInShell(page);
     await expect(page.getByRole("region", { name: "My own 5etools source" })).toBeVisible();
     await expect(card(page).getByText(/comes with no 5etools address/)).toBeVisible();
@@ -134,7 +134,7 @@ test.describe("Import screen: 5etools sources", () => {
 
   test("shows both sources, the server's default named with its address", async ({ page }, testInfo) => {
     await stubDefault(page);
-    await open(page, "/import-files");
+    await open(page, "/content");
     await signedInShell(page);
     const def = page.getByRole("region", { name: "Default 5etools data" });
     const own = page.getByRole("region", { name: "My own 5etools source" });
@@ -153,7 +153,7 @@ test.describe("Import screen: 5etools sources", () => {
 
   test("the default source in one tap; a big import is a success with folded notes", async ({ page }, testInfo) => {
     const seen = await stubDefaultSource(page);
-    await open(page, "/import-files");
+    await open(page, "/content");
     await signedInShell(page);
     const get = page.getByRole("button", { name: "Get the default 5etools data" });
     expect(await scrollIntoReach(page, get, page.viewportSize()!.height)).toBe(true);
@@ -199,7 +199,7 @@ test.describe("Import screen: 5etools sources", () => {
   });
 
   test("an own source: checked before sending, refused by the server in its own words, remembered", async ({ page }, testInfo) => {
-    await open(page, "/import-files");
+    await open(page, "/content");
     await signedInShell(page);
     const field = page.getByLabel("Address of my 5etools source");
     const send = page.getByRole("button", { name: "Import from my source" });
@@ -241,7 +241,7 @@ test("Admin: the default 5etools source is checked, and refused in the server's 
   const box = page.locator("section.card").filter({ has: page.getByRole("heading", { name: "Default 5etools source" }) });
   await box.scrollIntoViewIfNeeded();
   await expect(box.getByText(/comes with none/)).toBeVisible();
-  await expect(box.getByText(/^None: the Import screen offers only/)).toBeVisible();
+  await expect(box.getByText(/^None: the Import section offers only/)).toBeVisible();
   const field = box.getByLabel("Default 5etools source address");
   const save = box.getByRole("button", { name: "Save" });
 
@@ -253,7 +253,7 @@ test("Admin: the default 5etools source is checked, and refused in the server's 
   await field.fill("https://127.0.0.1/data/");
   await save.tap();
   await expect(box.getByRole("alert")).toContainText("127.0.0.1");
-  await expect(box.getByText(/^None: the Import screen offers only/)).toBeVisible();
+  await expect(box.getByText(/^None: the Import section offers only/)).toBeVisible();
 
   const o = await measureOverflow(page);
   expect(o.page, "the page scrolls sideways").toBeLessThanOrEqual(0);

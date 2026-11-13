@@ -63,7 +63,7 @@ test.describe("Share codes (plan E4)", () => {
     await expectPhoneLayout(page, testInfo);
   });
 
-  test("another account enters the code on the Import screen and accepts the character", async ({ page, signIn, request, baseURL }, testInfo) => {
+  test("another account enters the code in the Import section and accepts the character", async ({ page, signIn, request, baseURL }, testInfo) => {
     const name = unique(testInfo, "Shared");
     const admin = await token(request, baseURL!, "admin");
     const id = await character(request, baseURL!, admin, name);
@@ -72,7 +72,7 @@ test.describe("Share codes (plan E4)", () => {
     const { code } = (await made.json()) as { code: string };
 
     await signIn("player");
-    await open(page, "/import-files");
+    await open(page, "/content");
     await signedInShell(page);
     const input = page.getByLabel("Share code to enter");
     await input.scrollIntoViewIfNeeded();

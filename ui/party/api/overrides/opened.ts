@@ -17,10 +17,10 @@ import { override } from "./registry";
  *   `push_opened_file`) and drop a `.borealis` without a word, so party/ios/Info.plist no longer claims `.borealis`.
  *
  * Online, the files are taken from the device and, after an app dialog ("Import X into <account>?"), handed to the
- * Import screen (../../import/door.ts), which sniffs them and lists each result, as it does for files chosen or dropped
+ * Import section (../../import/door.ts), which sniffs them and lists each result, as it does for files chosen or dropped
  * (0.1.5): characters, bundles (the Open bundle window), Aurora content (the import preview) and 5etools-format data.
  * Upstream's GlobalImport asks too, but gets none: the party drains the queue itself (`watchOpened`), so a file opened
- * while the Import screen is showing (where GlobalImport isn't mounted) is taken as well.
+ * while Additional Content is showing is taken as well.
  *
  * Offline, the page answers `take_opened_files` itself with none (../offline.ts), so the files stay in the device's
  * queue, and this module says they will be imported when the app is connected (the online page takes them on start).
@@ -38,7 +38,7 @@ export interface OpenedDeps {
   /** The device's queue (`take_opened_files` of the app's own backend). */
   take: () => Promise<OpenedFile[]>;
   ask: typeof ask;
-  /** Hand the files to the Import screen and show it. */
+  /** Hand the files to the Import section and show it. */
   toImport: (files: OpenedFile[]) => void;
   inApp: () => boolean;
 }
@@ -62,7 +62,7 @@ export function describeFiles(names: readonly string[]): string {
 }
 
 /**
- * The opened files the Import screen should take, after asking. Files no importer reads pass straight through, so the
+ * The opened files the Import section should take, after asking. Files no importer reads pass straight through, so the
  * screen says it can't import them; the rest wait for the answer, and Cancel drops them.
  */
 export async function takeOpened(session: ServerSession, deps: OpenedDeps = openedDeps): Promise<OpenedFile[]> {
@@ -81,7 +81,7 @@ export async function takeOpened(session: ServerSession, deps: OpenedDeps = open
   return [...wanted, ...others];
 }
 
-/** Takes the device's queue and hands it to the Import screen, one question at a time. */
+/** Takes the device's queue and hands it to the Import section, one question at a time. */
 export function drainOpened(session: ServerSession, deps: OpenedDeps = openedDeps): Promise<void> {
   return oneAtATime(async () => {
     const files = await takeOpened(session, deps);

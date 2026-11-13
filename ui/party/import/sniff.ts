@@ -2,7 +2,7 @@ import { readBuffer } from "../../src/lib/files";
 import { looksLikeFiveTools } from "../../src/lib/importRouting";
 
 /**
- * What a file handed to the Import screen is (plan I9), decided by its bytes first and its name only when the bytes
+ * What a file handed to the Import section is (plan I9), decided by its bytes first and its name only when the bytes
  * don't say. Phones hand over names like "document:1234" or "Download (2).txt", so the extension is a weak hint.
  * - `character`: an Aurora `.dnd5e` (XML with a `<character>` root) or a native character JSON;
  * - `bundle`: a `.borealis` file (a zip with `manifest.json` at its root);

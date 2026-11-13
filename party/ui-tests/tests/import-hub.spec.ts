@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { expect, measureOverflow, minTap, open, scrollIntoReach, signedInShell, smallTargets, test } from "./fixtures";
 
 /**
- * The Import screen (plan I9): reached from More on a phone, it takes a character, an Aurora pack and a Borealis
+ * The Import section on Additional Content (plan I9, one page since 0.2.1): reached from More on a phone, it takes a character, an Aurora pack and a Borealis
  * bundle in one pick, sends each to its importer, and lists one result per file. A pasted index link is either added
  * or refused by the server in its own words.
  */
@@ -66,7 +66,7 @@ test.describe("Import screen (plan I9)", () => {
   });
 
   test("one pick: a .dnd5e, an Aurora pack and a .borealis each go to their importer", async ({ page }, testInfo) => {
-    await open(page, "/import-files");
+    await open(page, "/content");
     await signedInShell(page);
     const chooser = page.waitForEvent("filechooser");
     const choose = page.getByRole("button", { name: "Choose files" });
@@ -99,7 +99,7 @@ test.describe("Import screen (plan I9)", () => {
       await expect(bundle, "one dialog at a time").toBeHidden();
       await report.getByRole("button", { name: "Close", exact: true }).last().tap();
     }
-    await expect(page.getByRole("button", { name: "Choose files" }), "still on the Import screen").toBeVisible();
+    await expect(page.getByRole("button", { name: "Choose files" }), "still on Additional Content").toBeVisible();
     await expect(row(page, "moonfen.xml").getByRole("status")).toHaveText(/^Installed/, { timeout: 30_000 });
 
     // The bundle: upstream's Open bundle window, after the preview closed.
@@ -116,7 +116,7 @@ test.describe("Import screen (plan I9)", () => {
   });
 
   test("a pasted index link is added, or the server's refusal is shown as it is", async ({ page }, testInfo) => {
-    await open(page, "/import-files");
+    await open(page, "/content");
     await signedInShell(page);
     const field = page.getByLabel("Link to import");
     expect(await scrollIntoReach(page, field, page.viewportSize()!.height)).toBe(true);
@@ -143,7 +143,7 @@ test.describe("Import screen (plan I9)", () => {
   });
 
   test("an address that could be either asks which it is", async ({ page }, testInfo) => {
-    await open(page, "/import-files");
+    await open(page, "/content");
     await signedInShell(page);
     await page.getByLabel("Link to import").fill("https://example.invalid/content");
     await page.getByRole("button", { name: "Import", exact: true }).tap();

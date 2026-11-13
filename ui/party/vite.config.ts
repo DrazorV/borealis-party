@@ -20,6 +20,8 @@ const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   // A NavLink the shell marks "not current" stays so (entry/shellRouter.tsx): one selected START sub-tab.
   "src/components/shell/Chrome.tsx": { "react-router": local("./entry/shellRouter.tsx") },
   "src/components/shell/MobileChrome.tsx": { "react-router": local("./entry/shellRouter.tsx") },
+  // Additional Content is the one import page: the Import section above upstream's packs (content/WithImport.tsx).
+  "src/pages/content/ContentPage.tsx": { "./PacksTab": local("./content/WithImport.tsx") },
   // Installed packs by origin, with Remove all on each group (content/PackGroups.tsx).
   "src/pages/content/PacksTab.tsx": { "./PackGroups": local("./content/PackGroups.tsx") },
   "src/pages/settings/ApplicationSettings.tsx": {

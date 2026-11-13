@@ -53,7 +53,7 @@ function at(path: string) {
       <Routes>
         <Route path="/share" element={<SharePage />} />
         <Route path="/share/receive/:code?" element={<ShareReceivePage />} />
-        <Route path="/import-files" element={<p>Import screen</p>} />
+        <Route path="/content" element={<p>Additional Content</p>} />
       </Routes>
     </MemoryRouter>,
   );

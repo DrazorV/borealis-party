@@ -5,9 +5,11 @@ import type { Locator, Page, TestInfo } from "@playwright/test";
 import { expect, measureOverflow, minTap, scrollIntoReach, signedInShell, test } from "./fixtures";
 
 /**
- * One Import screen (0.1.5): every place that starts an import leads to it (ui/party/entry/unifyImports.ts). A file
- * pick opens the screen with its file chooser, and the chosen file shows up in the screen's results; a link form takes
- * its address there; files dropped on the window go there too. Run on the three phones and a desktop window.
+ * One import page (0.2.1): the Import section at the top of Additional Content, and no other. Every place that starts
+ * an import leads there (ui/party/entry/unifyImports.ts, ui/party/import/door.ts): a file pick opens the section's file
+ * chooser and the chosen file shows up in its results; files dropped on the window go there too. Upstream's own import
+ * controls on the page are hidden, and the old Import screen address leads to the page. Run on the three phones and a
+ * desktop window.
  */
 
 const FIXTURES = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../e2e/fixtures");
@@ -29,9 +31,15 @@ async function go(page: Page, testInfo: TestInfo, route: string): Promise<void> 
 const results = (page: Page) => page.getByRole("list", { name: "Import results" });
 const row = (page: Page, title: string) => results(page).locator("li").filter({ has: page.locator(".party-import-name", { hasText: title }) });
 
+/** On Additional Content, with its Import section in view. */
 async function onImportScreen(page: Page, testInfo: TestInfo): Promise<void> {
-  await expect(page).toHaveURL(/#\/import-files/);
-  await expect(page.getByRole("button", { name: "Choose files" })).toBeVisible();
+  await expect(page).toHaveURL(/#\/content$/);
+  const section = page.locator("section#party-import");
+  await expect(section).toHaveCount(1);
+  await expect(section.getByRole("button", { name: "Choose files" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Choose files" }), "one file chooser button").toHaveCount(1);
+  const top = (await section.boundingBox())!.y;
+  expect(top, "the Import section is in view").toBeLessThan(page.viewportSize()!.height);
   const o = await measureOverflow(page);
   expect(o.page, "the page scrolls sideways").toBeLessThanOrEqual(0);
   expect(o.scrollers, "containers that scroll sideways").toEqual([]);
@@ -70,7 +78,7 @@ async function fileMenu(page: Page, testInfo: TestInfo): Promise<Locator> {
 
 const menuItem = (menu: Locator, name: string) => menu.locator(".aur-menu-item, .menu-tree-item").filter({ hasText: new RegExp(`^${name.replace(/[.]/g, "\\.")}$`) });
 
-test.describe("every import entry point leads to the Import screen", () => {
+test.describe("every import entry point leads to the Import section on Additional Content", () => {
   test.beforeEach(async ({ signIn }) => {
     await signIn("player");
   });
@@ -90,32 +98,33 @@ test.describe("every import entry point leads to the Import screen", () => {
     });
   }
 
-  for (const name of ["Import files", "Choose a .zip of a 5etools-format data/ folder", "Choose 5etools-format homebrew .json files"]) {
-    test(`Additional Content: ${name}`, async ({ page }, testInfo) => {
-      await go(page, testInfo, "/content");
-      await pickThrough(page, testInfo, page.getByRole("button", { name, exact: true }));
+  test("Additional Content is the one import page: upstream's own import controls are hidden", async ({ page }, testInfo) => {
+    await go(page, testInfo, "/content");
+    await onImportScreen(page, testInfo);
+    // The section comes first, before the installed packs.
+    const order = await page.evaluate(() => {
+      const all = Array.from(document.querySelectorAll<HTMLElement>(".v4-content section.v4-csec")).filter((s) => s.offsetParent !== null);
+      return all.map((s) => s.getAttribute("aria-label"));
     });
-  }
+    expect(order[0]).toBe("Import");
+    expect(order).toContain("Installed packs");
+    for (const name of ["Import files", "Choose a .zip of a 5etools-format data/ folder", "Choose 5etools-format homebrew .json files", "Fetch"]) {
+      await expect(page.getByRole("button", { name, exact: true }), `${name} is not offered twice`).toBeHidden();
+    }
+    await expect(page.getByLabel("Index URL")).toBeHidden();
+    await expect(page.getByLabel("Address of 5etools-format data")).toBeHidden();
+    // Management stays: the installed packs and the Update of index files.
+    await expect(page.getByRole("region", { name: "Installed packs" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Update content files" })).toBeAttached();
+    await page.screenshot({ path: testInfo.outputPath("one-import-page.png") });
+    await page.locator("section.v4-csec[aria-label='Installed packs']").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("one-import-page-management.png") });
+  });
 
-  for (const form of [
-    { name: "Index files: Fetch", field: "Index URL", button: "Fetch", url: "https://example.invalid/unify.index" },
-    { name: "5etools: Import from an address", field: "Address of 5etools-format data", button: "Import", url: "https://example.invalid/unify-data/" },
-  ]) {
-    test(`Additional Content: ${form.name}`, async ({ page }, testInfo) => {
-      await go(page, testInfo, "/content");
-      const field = page.getByLabel(form.field);
-      expect(await scrollIntoReach(page, field, page.viewportSize()!.height)).toBe(true);
-      await field.fill(form.url);
-      const button = field.locator("xpath=ancestor::form").getByRole("button", { name: form.button, exact: true });
-      if (desktop(testInfo)) await button.click();
-      else await button.tap();
-      await onImportScreen(page, testInfo);
-      // The address arrived and is being taken: the content notice or the first-download question comes first.
-      await expect(row(page, form.url)).toBeVisible();
-      const ask = page.getByRole("dialog", { name: /Add content source|Import only content you own/ });
-      await expect(ask).toBeVisible({ timeout: 30_000 });
-    });
-  }
+  test("the old Import screen address leads to Additional Content", async ({ page }, testInfo) => {
+    await go(page, testInfo, "/import-files");
+    await onImportScreen(page, testInfo);
+  });
 
   test("files dropped on the window", async ({ page }, testInfo) => {
     await go(page, testInfo, "/characters");

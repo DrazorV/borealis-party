@@ -12,7 +12,7 @@ import {
 import { contents, SHARE_ROUTE, sizeText } from "./SharePage";
 import "./party.css";
 
-/** Where the Import screen sends a code (and where a share link opens). */
+/** Where the Import section sends a code (and where a share link opens). */
 export const receiveRoute = (code?: string) => (code ? `/share/receive/${encodeURIComponent(code)}` : "/share/receive");
 
 type Stage = "open" | "accepted" | "closed" | "declined";
@@ -74,7 +74,7 @@ function Links({ share, auto }: { share: ReceivedShare; auto: boolean }) {
               <strong>{l.packs.join(", ")}</strong>
               <p className="muted small party-share-url">5etools data: {l.url}</p>
               <p className="small">
-                {l.allowed ? <>Import it on the <Link to="/import-files">Import</Link> screen: paste this address under Paste a link, then choose the books.</> : l.message}
+                {l.allowed ? <>Import it under Import on <Link to="/content">Additional Content</Link>: paste this address under Paste a link, then choose the books.</> : l.message}
               </p>
             </div>
           </li>

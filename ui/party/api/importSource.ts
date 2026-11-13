@@ -3,7 +3,7 @@ import { loadSession } from "./session";
 
 /**
  * The server's default 5etools source (party/crates/borealis-server/src/import_source.rs). The party ships none: a
- * server's admin may set one, and the Import screen then offers it in one tap.
+ * server's admin may set one, and the Import section then offers it in one tap.
  */
 
 function call<T>(method: string, path: string, body?: unknown): Promise<T> {

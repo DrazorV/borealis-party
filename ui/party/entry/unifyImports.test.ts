@@ -45,7 +45,7 @@ afterEach(() => {
 
 const click = (el: Element | null) => (el as HTMLElement).click();
 
-describe("file picks open the Import screen with its chooser", () => {
+describe("file picks open the Import section with its chooser", () => {
   const cases: [string, string, string][] = [
     ["Start > Import characters", `<button class="v4-newbtn"><span class="t">Import characters</span><span class="d">Load one or more .dnd5e files</span></button>`, "button"],
     ["File > Import Characters (desktop bar)", `<div class="aur-menu-panel"><button class="aur-menu-item"><span class="aur-menu-icon"></span><span class="aur-menu-label">Import Characters</span></button></div>`, "button"],
@@ -60,11 +60,11 @@ describe("file picks open the Import screen with its chooser", () => {
     const holder = mount(html);
     click(holder.querySelector(selector));
     expect(upstream).toEqual([]);
-    expect(went).toEqual(["/import-files"]);
+    expect(went).toEqual(["/content"]);
     expect(chooserClicks).toBe(1);
   });
 
-  it("files chosen there arrive on the Import screen", () => {
+  it("files chosen there arrive on the Import section", () => {
     mount(`<button class="v4-newbtn"><span class="t">Import characters</span></button>`);
     click(document.querySelector(".v4-newbtn"));
     const input = document.querySelector<HTMLInputElement>("[data-party-import-chooser]")!;
@@ -108,7 +108,7 @@ describe("file picks open the Import screen with its chooser", () => {
   });
 });
 
-describe("link forms take the address to the Import screen", () => {
+describe("link forms take the address to the Import section", () => {
   const form = (id: string, value: string) =>
     mount(`<form class="v4-urlrow"><input id="${id}" type="url" value="${value}"><button type="submit" class="btn">Fetch</button></form>`);
   const submit = (holder: HTMLElement) => holder.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -116,7 +116,7 @@ describe("link forms take the address to the Import screen", () => {
   it("Index files > Fetch", () => {
     submit(form("index-url", "https://example.com/srd.index"));
     expect(upstream).toEqual([]);
-    expect(went).toEqual(["/import-files"]);
+    expect(went).toEqual(["/content"]);
     expect(takeInbox().links).toEqual([{ url: "https://example.com/srd.index", kind: "index" }]);
     expect(chooserClicks).toBe(0);
   });
@@ -149,14 +149,14 @@ describe("drops", () => {
     return e;
   };
 
-  it("files dropped anywhere go to the Import screen, not to upstream's drop handler", () => {
+  it("files dropped anywhere go to the Import section, not to upstream's drop handler", () => {
     const globalImport = vi.fn();
     window.addEventListener("drop", globalImport);
     const file = new File(["x"], "Party.borealis");
     expect(drop([file]).defaultPrevented).toBe(true);
     expect(globalImport).not.toHaveBeenCalled();
     expect(takeInbox().files).toEqual([file]);
-    expect(went).toEqual(["/import-files"]);
+    expect(went).toEqual(["/content"]);
     window.removeEventListener("drop", globalImport);
   });
 
@@ -169,10 +169,10 @@ describe("drops", () => {
 describe("the desktop app's native drop", () => {
   const read = async (tokens: string[]) => tokens.map((t) => ({ fileName: `${t}.dnd5e`, contentBase64: "e30=" }));
 
-  it("reads the dropped files from the device and opens the Import screen", async () => {
+  it("reads the dropped files from the device and opens the Import section", async () => {
     await takeNativeDrop({ files: [{ token: "hero", name: "hero.dnd5e" }], folders: [], bundles: [], rejected: [] }, read);
     expect(takeInbox().files.map((f) => f.name)).toEqual(["hero.dnd5e"]);
-    expect(went).toEqual(["/import-files"]);
+    expect(went).toEqual(["/content"]);
     expect(asked).toEqual([]);
   });
 

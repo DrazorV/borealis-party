@@ -11,11 +11,11 @@ function where(s: DefaultSourceSettings): string {
   const file = s.configFile ?? "nothing";
   if (s.source === "admin") return `Saved here, which wins over config.toml (config.toml says ${file}).`;
   if (s.source === "config") return "From config.toml or BOREALIS__IMPORT__DEFAULT_5ETOOLS_URL.";
-  return "None: the Import screen offers only each account's own address.";
+  return "None: the Import section offers only each account's own address.";
 }
 
 /**
- * Admin › Settings › Default 5etools source: an address the Import screen offers every account in one tap. The party
+ * Admin › Settings › Default 5etools source: an address the Import section offers every account in one tap. The party
  * ships none; the server checks the address as it would any download (import_source.rs).
  */
 export function DefaultFiveToolsSource() {
@@ -53,7 +53,7 @@ export function DefaultFiveToolsSource() {
     <Card title="Default 5etools source">
       <form className="party-form" noValidate onSubmit={(e) => { e.preventDefault(); submit(); }}>
         <p className="muted">
-          An address of 5etools-format data the Import screen offers every account in one tap, for example a GitHub
+          An address of 5etools-format data the Import section offers every account in one tap, for example a GitHub
           repository your group is entitled to use. Borealis Party comes with none. Accounts can always import from an
           address of their own.
         </p>
@@ -66,7 +66,7 @@ export function DefaultFiveToolsSource() {
             onChange={(e) => { setEntry(e.target.value); setFieldError(null); setSaved(false); }} />
         </label>
         {fieldError && <p className="party-import-field-error" role="alert">{fieldError}</p>}
-        {saved && <Alert tone="success" role="status">{s.url ? "Saved; the Import screen offers it now." : "Saved; no default is offered now."}</Alert>}
+        {saved && <Alert tone="success" role="status">{s.url ? "Saved; the Import section offers it now." : "Saved; no default is offered now."}</Alert>}
         <div className="party-inline">
           <Button type="submit" variant="primary" disabled={busy || !entry.trim() || entry.trim() === s.url}>Save</Button>
           {s.url && <Button disabled={busy} onClick={() => void save(s.configFile === null ? null : "")}>Offer none</Button>}
