@@ -586,6 +586,17 @@ impl Db {
     }
 
     async fn open_upto(location: &Location, max_version: usize) -> Result<Self, OpenError> {
+        let db = Self::connect(location).await?;
+        db.migrate(max_version).await?;
+        Ok(db)
+    }
+
+    /// Connect without creating or updating any table, so a backup can be taken first ([`crate::backup`]); then
+    /// [`Db::upgrade`].
+    ///
+    /// # Errors
+    /// When the database can't be reached.
+    pub async fn connect(location: &Location) -> Result<Self, OpenError> {
         sqlx::any::install_default_drivers();
         let (url, sqlite, max) = match location {
             Location::Sqlite(path) => (format!("sqlite://{}?mode=rwc", path.display()), true, 4),
@@ -630,12 +641,46 @@ impl Db {
                 .execute(&pool)
                 .await?;
         }
-        let db = Self {
+        Ok(Self {
             pool,
             kind: if sqlite { "sqlite" } else { "postgres" },
-        };
-        db.migrate(max_version).await?;
-        Ok(db)
+        })
+    }
+
+    /// Create or update the tables of a database [`Db::connect`] opened.
+    ///
+    /// # Errors
+    /// When a step fails.
+    pub async fn upgrade(&self) -> Result<(), OpenError> {
+        Ok(self.migrate(MIGRATIONS.len()).await?)
+    }
+
+    /// The steps [`Db::upgrade`] would run, without running any: those after the recorded version, and recorded ones
+    /// whose marker table is missing. `None` for a database with no `schema_version` table yet (nothing in it to lose).
+    ///
+    /// # Errors
+    /// When the database can't be read.
+    pub async fn pending_steps(&self) -> sqlx::Result<Option<Vec<i64>>> {
+        if !self.has_table("schema_version").await? {
+            return Ok(None);
+        }
+        let current: i64 = sqlx::query("SELECT COALESCE(MAX(version), 0) FROM schema_version")
+            .fetch_one(&self.pool)
+            .await?
+            .try_get(0)?;
+        let mut pending = Vec::new();
+        for index in 0..MIGRATIONS.len() {
+            let version = i64::try_from(index).unwrap_or(i64::MAX) + 1;
+            let missing = match MARKERS.iter().find(|(step, _)| *step == index + 1) {
+                _ if version > current => true,
+                Some((_, marker)) => !self.has_table(marker).await?,
+                None => false,
+            };
+            if missing {
+                pending.push(version);
+            }
+        }
+        Ok(Some(pending))
     }
 
     /// True when the table `name` exists.

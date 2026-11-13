@@ -280,6 +280,16 @@ function Statistics() {
           <div><dt>Database</dt><dd>{stats.database === "postgres" ? "PostgreSQL" : "SQLite"}</dd></div>
           <div><dt>Running for</dt><dd>{duration(stats.uptimeSeconds)}</dd></div>
           <div><dt>Sign-up email</dt><dd>{stats.email ? "Set up" : "Not set up"}</dd></div>
+          {stats.backup && (
+            <div>
+              <dt>Last automatic backup</dt>
+              <dd>
+                {stats.backup.last
+                  ? `${new Date(stats.backup.last.at * 1000).toLocaleString()}, ${bytes(stats.backup.last.bytes)} (${stats.backup.count} kept)`
+                  : "None yet"}
+              </dd>
+            </div>
+          )}
         </dl>
       </Card>
     </>

@@ -24,6 +24,8 @@ mod sync_tests;
 #[path = "jobs_tests.rs"]
 mod jobs_tests;
 
+#[path = "backup_tests.rs"]
+mod backup_tests;
 #[path = "bestiary_tests.rs"]
 mod bestiary_tests;
 #[path = "combat_tests.rs"]

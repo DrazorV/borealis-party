@@ -33,6 +33,10 @@ Everything the server keeps is in `/config`: `config.toml`, the SQLite database 
 and content. Back up that folder to back up the instance. `PUID` and `PGID` choose who owns those files on the host,
 and `TZ` sets the time zone.
 
+Updating is a re-pull and restart. Before a new version changes the database, the server writes an automatic backup
+to `/config/backups` and stops without migrating if that fails; copying the backups off the host is recommended. See
+[Deploying and updating](docs/deploy.md).
+
 Every push to `main` that touches the server or web app builds the image and publishes it as `latest`, `sha-<commit>`
 and the version in `party/Cargo.toml` (`.github/workflows/party-image.yml`; start it by hand under Actions > Party
 image). To build the image yourself, from the repository root:
@@ -76,6 +80,10 @@ Put passwords in variables rather than in the file.
 | `BOREALIS__INITIAL_ADMIN__USERNAME` | | With the password, creates an admin on a server with no accounts |
 | `BOREALIS__INITIAL_ADMIN__PASSWORD` | | |
 | `BOREALIS__INITIAL_ADMIN__EMAIL` | | Optional |
+| `BOREALIS__BACKUP__DIR` | `backups` | Automatic backups before an upgrade, relative to the config folder (see [Deploying and updating](docs/deploy.md)) |
+| `BOREALIS__BACKUP__KEEP` | `10` | Automatic backups kept; `0` keeps all |
+| `BOREALIS__BACKUP__ON_UPGRADE` | `auto` | `skip` starts without the backup (emergencies only) |
+| `BOREALIS__BACKUP__POSTGRES_BIN` | the PATH | Folder with `pg_dump` and `pg_restore`; the image sets the PostgreSQL 18 client |
 | `BOREALIS__LOG__LEVEL` | `info` | `error` to `trace` |
 
 `OPEN_REGISTRATION`, `REQUIRE_APPROVAL` and `TRUSTED_PROXIES` can also be changed on the admin page while the server
@@ -546,7 +554,8 @@ After Borealis releases:
 4. Raise `version` in `party/Cargo.toml`, build once so `Cargo.lock` follows, commit, and push `main`. The push
    builds the Docker image.
 5. `bash party/release.sh` tags `party-v<version>` with the Borealis release in its message. Push the tag, then make
-   the GitHub release from it with the APK and the server archive, starting the notes with "Based on Borealis X.Y.Z".
+   the GitHub release from it with the APK and the server archive, starting the notes with "Based on Borealis X.Y.Z"
+   ([template](docs/release-notes-template.md)).
 
 A party-only fix between Borealis releases is released the same way, skipping step 1. If `main` has to carry Borealis
 work newer than its last release, `release.sh --unreleased` allows it and says so in the tag.
