@@ -1608,7 +1608,13 @@ async fn audience(state: &AppState, party: &str) -> ApiResult<Option<(String, Ve
 /// A party's view changed: tell its DM, and its players too when `players` (they see the change). `kind`: `party`
 /// (its name or ruleset), `roster` (who is in it), `card` (a member's card; `id` is the character), or for the DM
 /// only, `invites` and `offers`.
-async fn publish(state: &AppState, party: &str, kind: &str, id: Option<&str>, players: bool) {
+pub(crate) async fn publish(
+    state: &AppState,
+    party: &str,
+    kind: &str,
+    id: Option<&str>,
+    players: bool,
+) {
     if !crate::config::features().parties {
         return;
     }
@@ -1688,9 +1694,9 @@ fn snapshot_of(
 }
 
 /// Whether a party is in a combat: the other members then see each other's health band (D6, the user's choice:
-/// during combat only). There is no combat before 0.4.x, so never yet; the combat tracker switches it on here.
-pub(crate) fn in_combat(_party: &str) -> bool {
-    false
+/// during combat only). True while the party has a live combat (`combat.rs`).
+pub(crate) fn in_combat(party: &str) -> bool {
+    crate::combat::party_in_combat(party)
 }
 
 /// Read a member character's card again from its owner's workspace, keep it, and tell the party when it changed.
@@ -1729,6 +1735,7 @@ pub(crate) async fn refresh_card(
         Ok(Some((snapshot, changed))) => {
             if changed.dm {
                 publish(state, party, "card", Some(character), changed.players).await;
+                crate::combat::card_changed(state, party, owner, character).await;
             }
             Some(snapshot)
         }

@@ -25,6 +25,8 @@ borealis-character = { path = "../../../crates/borealis-character" }
 borealis-import-5etools = { path = "../../../crates/borealis-import-5etools" }
 # Encounter maths, stat block copies and overrides (encounters.rs).
 party-encounter = { path = "../party-encounter" }
+# The combat engine (combat.rs): pure state, commands and the seeded die.
+party-combat = { path = "../party-combat" }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "fs", "set-header"] }
 tokio = { version = "1", features = ["full"] }

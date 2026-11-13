@@ -31,6 +31,9 @@ use tokio::sync::{mpsc, watch};
 pub const PARTY_EVENT: &str = "party://party";
 /// The account's own party list or invites changed: `{ kind }` (`parties` or `invites`). Refetch them.
 pub const MINE_EVENT: &str = "party://mine";
+/// A combat changed (`combat.rs`): `{ party, combat, seq }` for the DM, `{ party, combat, pseq }` for a player whose
+/// own projection changed. Refetch the combat.
+pub const COMBAT_EVENT: &str = "party://combat";
 /// Events may have been missed: refetch everything shown.
 pub const RESYNC_EVENT: &str = "party://resync";
 

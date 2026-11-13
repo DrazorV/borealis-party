@@ -21,6 +21,7 @@ mod admin;
 mod auth;
 mod backend;
 mod bestiary;
+mod combat;
 mod config;
 mod db;
 mod encounters;
@@ -153,6 +154,7 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
         .merge(shares::routes())
         .merge(parties::routes())
         .merge(encounters::routes())
+        .merge(combat::routes())
         .merge(import_source::routes())
         .merge(pack_removal::routes())
         .merge(bestiary::routes())
@@ -402,6 +404,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let workspaces = Arc::new(Workspaces::new(data, content));
     tokio::spawn(Arc::clone(&workspaces).evict_loop());
     tokio::spawn(shares::sweep_loop(db.clone(), Arc::clone(&workspaces)));
+    tokio::spawn(combat::startup(db.clone()));
     config::set_upload_limits(settings.server.upload_limits());
     let state = AppState {
         db,
