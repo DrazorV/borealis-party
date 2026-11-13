@@ -9,7 +9,7 @@ const user = { id: "u1", username: "ana", email: null, admin: false, mustChangeP
 const session: ServerSession = { baseUrl: "http://server", token: "t", user };
 
 /** One open event stream the test controls. */
-interface Stream { send: (e: ServerEvent) => void; end: () => void }
+interface Stream { send: (e: ServerEvent, id?: number) => void; end: () => void }
 
 /** The server: `down` answers nothing at all; otherwise `/api/events` opens a stream and `/api/me` answers. */
 let down: boolean;
@@ -29,7 +29,7 @@ function serverFetch(url: string, init?: RequestInit): Promise<Response> {
   const body = new ReadableStream<Uint8Array>({ start: (c) => { controller = c; } });
   const bytes = new TextEncoder();
   const stream: Stream = {
-    send: (e) => controller.enqueue(bytes.encode(`data: ${JSON.stringify(e)}\n\n`)),
+    send: (e, id) => controller.enqueue(bytes.encode(`${id !== undefined ? `id: ${id}\n` : ""}data: ${JSON.stringify(e)}\n\n`)),
     end: () => { try { controller.close(); } catch { /* ended already */ } },
   };
   init?.signal?.addEventListener("abort", () => { try { controller.error(new DOMException("aborted", "AbortError")); } catch { /* closed */ } });
@@ -71,7 +71,8 @@ afterEach(() => {
   stops.forEach((s) => s());
   stops = [];
 });
-const eventTries = () => vi.mocked(fetch).mock.calls.filter(([u]) => String(u).endsWith("/api/events")).length;
+const eventTries = () => vi.mocked(fetch).mock.calls.filter(([u]) => /\/api\/events(\?|$)/.test(String(u))).length;
+const eventUrls = () => vi.mocked(fetch).mock.calls.map(([u]) => String(u)).filter((u) => u.includes("/api/events"));
 
 it("delivers the server's events and says when it opened", async () => {
   const got: ServerEvent[] = [];
@@ -184,4 +185,50 @@ it("a bad event is skipped, and stopping closes the stream for good", async () =
   await tick(120_000);
   expect(opens).toBe(1);
   expect(probes).toBe(0);
+});
+
+it("everyone listening shares one stream, and it closes when the last one stops", async () => {
+  const a: ServerEvent[] = [];
+  const b: ServerEvent[] = [];
+  const opened = vi.fn();
+  const stopA = liveEvents(session, (e) => a.push(e), { onOpen: opened });
+  const stopB = liveEvents(session, (e) => {
+    if (e.event === "boom") throw new Error("b's handler");
+    b.push(e);
+  });
+  await tick();
+  expect(opens).toBe(1);
+  expect(opened).toHaveBeenCalledWith(false);
+  streams[0]!.send({ event: "boom", payload: null });
+  streams[0]!.send({ event: "x", payload: 1 });
+  await tick();
+  // One listener's bad event doesn't keep it from the other.
+  expect(a.map((e) => e.event)).toEqual(["boom", "x"]);
+  expect(b.map((e) => e.event)).toEqual(["x"]);
+  stopA();
+  stopA();
+  streams[0]!.send({ event: "y", payload: 2 });
+  await tick();
+  expect(b.map((e) => e.event)).toEqual(["x", "y"]);
+  expect(a).toHaveLength(2);
+  stopB();
+  await tick(120_000);
+  expect(opens).toBe(1);
+  // A new listener after that opens a new stream.
+  const stopC = liveEvents(session, () => {});
+  await tick();
+  expect(opens).toBe(2);
+  stopC();
+});
+
+it("a reopened stream asks for the events after the last id it saw", async () => {
+  const stop = liveEvents(session, () => {});
+  await tick(60_000);
+  streams[0]!.send({ event: "party://party", payload: {} }, 7);
+  streams[0]!.send({ event: "party://characters-changed", payload: {} });
+  await tick();
+  streams[0]!.end();
+  await tick();
+  expect(eventUrls()).toEqual(["http://server/api/events", "http://server/api/events?after=7"]);
+  stop();
 });

@@ -379,6 +379,59 @@ async function main() {
   check("a party link opens outside the app (M5)", !!opened, opened ?? "nothing happened");
   // Back to the app (without -W: bringing a running task forward never reports a launch, so -W would wait for ever).
   adbShell(`am start -n ${ACTIVITY}`);
+  await sleep(2000);
+  await partyLive(token);
+}
+
+/** Any other route of the server's API, as the host sees it. */
+async function rest(token, method, path, body) {
+  const r = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method,
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`${method} ${path}: ${r.status} ${text.slice(0, 200)}`);
+  return text ? JSON.parse(text) : null;
+}
+
+/**
+ * The live party roster in the real app (0.2.1): the account runs a party with its own character in it (D4), the
+ * Parties page shows the character's numbers, and damage taken on the server shows there within a few seconds,
+ * through the app's own event stream (the browser rig has no Tauri). View opens the read-only sheet, which fits the
+ * phone's width.
+ */
+async function partyLive(token) {
+  const hero = (await api(token, "list_characters"))[0]?.id;
+  if (!hero) { check("the live party roster (needs the imported character)", false, "no character"); return; }
+  await rest(token, "POST", "/api/me/roles/dm", {});
+  const party = await rest(token, "POST", "/api/parties", { name: "Smoke Party" });
+  try {
+    await api(token, "load_character", { characterId: hero });
+    await rest(token, "POST", `/api/parties/${party.id}/members`, { characterId: hero });
+    await connectPage().catch(() => null);
+    await page(`location.hash = "#/parties"`);
+    const label = `(() => { const e = document.querySelector('.party-parties [aria-label^="Hit points "]'); return e ? e.getAttribute("aria-label") : null; })()`;
+    const shown = await until("the roster's hit points", () => page(label), 30000).catch(() => null);
+    check("the Parties page shows the member's numbers", !!shown, shown ?? "no hit points on the roster");
+    if (!shown) return;
+    const [, now, max] = /Hit points (\d+) of (\d+)/.exec(shown).map(Number);
+    const started = Date.now();
+    await api(token, "take_damage", { characterId: hero, amount: 1 });
+    const want = `Hit points ${now - 1} of ${max}`;
+    const followed = await until("the roster to follow the damage", async () => ((await page(label)) ?? "").startsWith(want), 5000, 200).catch(() => false);
+    check("the roster follows damage live in the app (its event stream)", !!followed, followed ? `${Date.now() - started} ms` : `still ${await page(label)}`);
+    await screenshot("09-party-roster");
+    await page(`(() => { const a = document.querySelector('.party-parties a[aria-label^="View "]'); if (a) a.click(); return !!a; })()`);
+    const sheet = await until("the read-only sheet", () => page(`document.body.innerText.includes("Read-only") && !!document.querySelector('[role="group"][aria-label^="Hit points "]')`), 30000).catch(() => false);
+    check("View opens the DM's read-only sheet", !!sheet);
+    const sideways = await page(`document.documentElement.scrollWidth - innerWidth`);
+    check("the sheet fits the phone's width", sideways <= 0, `${sideways} px too wide`);
+    await screenshot("10-party-sheet");
+  } finally {
+    await rest(token, "DELETE", `/api/parties/${party.id}`).catch(() => null);
+    await page(`location.hash = "#/characters"`).catch(() => null);
+  }
 }
 
 /**

@@ -12,6 +12,7 @@ import { AccountPage } from "../pages/AccountPage";
 import { AdminPage } from "../pages/AdminPage";
 import { ImportHub } from "../pages/ImportHub";
 import { JoinRoute, PartiesPage } from "../pages/PartiesPage";
+import { PartyCharacterView } from "../pages/PartyCharacterView";
 import { OfflinePage } from "../pages/OfflineBanner";
 import { setImportNavigate } from "../import/door";
 import { SharePage } from "../pages/SharePage";
@@ -73,6 +74,8 @@ export function App() {
         {/* Parties (plan 4.1); a join link keeps its code and opens them. */}
         <Route path="/parties" element={<AppShell>{offline ? <OfflinePage /> : <PartiesPage />}</AppShell>} />
         <Route path="/join/:code" element={<JoinRoute />} />
+        {/* The DM's read-only view of a member character (plan 3.5, 0.2.1). */}
+        <Route path="/parties/:party/view/:owner/:character" element={<AppShell>{offline ? <OfflinePage /> : <PartyCharacterView />}</AppShell>} />
         {/* Notes read a folder on the device, which a server doesn't offer. */}
         <Route path="/notes" element={<Navigate to="/" replace />} />
         <Route path="*" element={<UpstreamApp />} />

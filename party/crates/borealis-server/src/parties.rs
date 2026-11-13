@@ -28,6 +28,8 @@ use sqlx::Row;
 use crate::auth::{token_hash, ClientIp, User};
 use crate::db::now;
 use crate::error::{ApiError, ApiResult};
+use crate::hub::{card_view_for, Audience, Card, Viewer, MINE_EVENT, PARTY_EVENT};
+use crate::workspaces::Workspace;
 use crate::AppState;
 
 /// The role row that makes an account DM-capable.
@@ -85,6 +87,10 @@ pub(crate) fn routes_if(on: bool) -> axum::Router<AppState> {
         .route(
             "/api/parties/{party}/members/{owner}/{character}",
             delete(remove_member),
+        )
+        .route(
+            "/api/parties/{party}/members/{owner}/{character}/view/snapshot",
+            post(view_snapshot),
         )
         .route(
             "/api/parties/{party}/offers/{offer}/accept",
@@ -220,16 +226,7 @@ fn grouped(code: &str) -> String {
         .join("-")
 }
 
-// Roster cards, from the owner's saved file.
-
-/// What the roster shows of a character, read from its saved file.
-#[derive(Debug, Clone)]
-struct Card {
-    name: Option<String>,
-    level: Option<u32>,
-    ruleset: Option<Value>,
-    state: &'static str,
-}
+// Roster cards.
 
 fn character_file(state: &AppState, owner: &str, character: &str) -> PathBuf {
     state
@@ -239,54 +236,67 @@ fn character_file(state: &AppState, owner: &str, character: &str) -> PathBuf {
         .join(format!("{character}.json"))
 }
 
-fn read_card(path: &std::path::Path) -> Card {
-    let missing = Card {
-        name: None,
-        level: None,
-        ruleset: None,
-        state: "missing",
-    };
+/// The saved file's state (`ok`, `unreadable` or `missing`) and, when it reads, a card of what the file alone says
+/// (no numbers: those need the owner's content, [`refresh_card`]).
+fn read_card(path: &std::path::Path) -> (Card, &'static str) {
     // A regular file only: no links out of the folder.
     match path.symlink_metadata() {
         Ok(meta) if meta.is_file() => {}
-        Ok(_) => {
-            return Card {
-                state: "unreadable",
-                ..missing
-            }
-        }
-        Err(_) => return missing,
+        Ok(_) => return (Card::default(), "unreadable"),
+        Err(_) => return (Card::default(), "missing"),
     }
     match borealis_character::Character::load(path) {
-        Ok(c) => Card {
-            name: Some(c.meta.name.clone()),
-            level: Some(c.build.level()),
-            ruleset: serde_json::to_value(c.ruleset()).ok(),
-            state: "ok",
-        },
-        Err(_) => Card {
-            state: "unreadable",
-            ..missing
-        },
+        Ok(c) => (
+            Card {
+                name: Some(c.meta.name.clone()),
+                level: Some(c.build.level()),
+                ruleset: serde_json::to_value(c.ruleset()).ok(),
+                ..Card::default()
+            },
+            "ok",
+        ),
+        Err(_) => (Card::default(), "unreadable"),
     }
 }
 
-/// Cards for `(owner, character)` pairs, off the async threads.
-async fn cards(state: &AppState, pairs: &[(String, String)]) -> ApiResult<Vec<Card>> {
-    let files: Vec<PathBuf> = pairs
+/// Cards for `(owner, character)` pairs, off the async threads: the cached card when there is one and the file
+/// still reads, else what the file says.
+async fn cards(
+    state: &AppState,
+    pairs: &[(String, String)],
+) -> ApiResult<Vec<(Card, &'static str)>> {
+    let files: Vec<(String, String, PathBuf)> = pairs
         .iter()
-        .map(|(owner, character)| character_file(state, owner, character))
+        .map(|(owner, character)| {
+            (
+                owner.clone(),
+                character.clone(),
+                character_file(state, owner, character),
+            )
+        })
         .collect();
-    tokio::task::spawn_blocking(move || files.iter().map(|f| read_card(f)).collect())
-        .await
-        .map_err(internal)
+    let hub = std::sync::Arc::clone(&state.hub);
+    tokio::task::spawn_blocking(move || {
+        files
+            .iter()
+            .map(|(owner, character, file)| {
+                let (basic, file_state) = read_card(file);
+                if file_state != "ok" {
+                    return (basic, file_state);
+                }
+                (hub.cards.get(owner, character).unwrap_or(basic), file_state)
+            })
+            .collect()
+    })
+    .await
+    .map_err(internal)
 }
 
 /// The signed-in account's own saved character, or a 400 that says to pick one of theirs.
 async fn own_character(state: &AppState, user: &User, id: Option<&str>) -> ApiResult<String> {
     let id = character_arg(id)?;
     let card = cards(state, &[(user.id.clone(), id.clone())]).await?;
-    if card.first().is_some_and(|c| c.state == "ok") {
+    if card.first().is_some_and(|(_, s)| *s == "ok") {
         Ok(id)
     } else {
         Err(ApiError::Invalid("Choose one of your characters.".into()))
@@ -404,17 +414,8 @@ fn summary(party: &Party, count: i64, role: Role, mine: &[String]) -> Value {
     })
 }
 
-fn card_json(out: &mut serde_json::Map<String, Value>, card: &Card) {
-    out.insert("name".into(), json!(card.name));
-    out.insert("level".into(), json!(card.level));
-    out.insert(
-        "ruleset".into(),
-        card.ruleset.clone().unwrap_or(Value::Null),
-    );
-    out.insert("state".into(), json!(card.state));
-}
-
-/// The roster as `user` may see it.
+/// The roster as `user` may see it: each card through [`card_view_for`]. A member whose owner has the workspace open
+/// and no card yet gets one first.
 async fn members(
     state: &AppState,
     user: &User,
@@ -436,6 +437,13 @@ async fn members(
         let joined: i64 = row.try_get(3)?;
         found.push((owner, owner_name, character, joined));
     }
+    for (owner, _, character, _) in &found {
+        if valid_character_id(character) && state.hub.cards.get(owner, character).is_none() {
+            if let Some(workspace) = state.workspaces.loaded_now(owner) {
+                refresh_card(state, owner, character, &workspace, &party.id).await;
+            }
+        }
+    }
     let pairs: Vec<(String, String)> = found
         .iter()
         .filter(|(_, _, c, _)| valid_character_id(c))
@@ -444,36 +452,49 @@ async fn members(
     let mut read = cards(state, &pairs).await?.into_iter();
     let mut out = Vec::new();
     for (owner, owner_name, character, joined) in found {
-        let card = if valid_character_id(&character) {
-            read.next().unwrap_or(Card {
-                name: None,
-                level: None,
-                ruleset: None,
-                state: "unreadable",
-            })
+        let (card, file_state) = if valid_character_id(&character) {
+            read.next().unwrap_or((Card::default(), "unreadable"))
         } else {
-            Card {
-                name: None,
-                level: None,
-                ruleset: None,
-                state: "unreadable",
-            }
+            (Card::default(), "unreadable")
         };
         let mine = owner == user.id;
+        let viewer = if role == Role::Dm {
+            Viewer::Dm
+        } else if mine {
+            Viewer::Owner
+        } else {
+            Viewer::Member
+        };
         let mut member = serde_json::Map::new();
         member.insert("characterId".into(), json!(character));
         member.insert("ownerName".into(), json!(owner_name));
-        if mine || role == Role::Dm {
+        if viewer != Viewer::Member {
             member.insert("ownerId".into(), json!(owner));
+        }
+        if viewer == Viewer::Dm {
+            member.insert("online".into(), json!(state.hub.online(&owner)));
         }
         member.insert("mine".into(), json!(mine));
         member.insert("dmCharacter".into(), json!(owner == party.dm_id));
-        card_json(&mut member, &card);
+        member.extend(card_view_for(viewer, &card, file_state));
         member.insert("build".into(), Value::Null);
         member.insert("joinedAt".into(), json!(joined));
         out.push(Value::Object(member));
     }
     Ok(out)
+}
+
+/// The sequence a view of `party` for `role` is as new as: read before the view, so an event that lands while the
+/// view is read makes the client read it again rather than be missed.
+fn seq_for(state: &AppState, party: &str, role: Role) -> u64 {
+    state.hub.seq(
+        party,
+        if role == Role::Dm {
+            Audience::Dm
+        } else {
+            Audience::Players
+        },
+    )
 }
 
 /// The DM's list of open invites. Declined ones stay listed, so a username invite looks the same whatever happened.
@@ -535,16 +556,18 @@ async fn dm_offers(state: &AppState, party: &str) -> ApiResult<Vec<Value>> {
     Ok(found
         .into_iter()
         .zip(read)
-        .map(|((id, invite, owner_name, _, character, created), card)| {
-            let mut offer = serde_json::Map::new();
-            offer.insert("id".into(), json!(id));
-            offer.insert("inviteId".into(), json!(invite));
-            offer.insert("ownerName".into(), json!(owner_name));
-            offer.insert("characterId".into(), json!(character));
-            card_json(&mut offer, &card);
-            offer.insert("createdAt".into(), json!(created));
-            Value::Object(offer)
-        })
+        .map(
+            |((id, invite, owner_name, _, character, created), (card, file_state))| {
+                let mut offer = serde_json::Map::new();
+                offer.insert("id".into(), json!(id));
+                offer.insert("inviteId".into(), json!(invite));
+                offer.insert("ownerName".into(), json!(owner_name));
+                offer.insert("characterId".into(), json!(character));
+                offer.extend(card_view_for(Viewer::Dm, &card, file_state));
+                offer.insert("createdAt".into(), json!(created));
+                Value::Object(offer)
+            },
+        )
         .collect())
 }
 
@@ -555,6 +578,7 @@ async fn party_detail(
     count: i64,
     role: Role,
 ) -> ApiResult<Value> {
+    let pseq = seq_for(state, &party.id, role);
     let mine = my_characters(state, &user.id).await?;
     let mut out = summary(
         party,
@@ -563,6 +587,7 @@ async fn party_detail(
         mine.get(&party.id).map_or(&[][..], Vec::as_slice),
     );
     out["members"] = json!(members(state, user, party, role).await?);
+    out["pseq"] = json!(pseq);
     if role == Role::Dm {
         out["invites"] = json!(dm_invites(state, &party.id).await?);
         out["offers"] = json!(dm_offers(state, &party.id).await?);
@@ -722,8 +747,9 @@ pub async fn roster(
     Path(party): Path<String>,
 ) -> ApiResult<Json<Value>> {
     let (party, _, role) = viewed(&state, &user, &party).await?;
+    let pseq = seq_for(&state, &party.id, role);
     Ok(Json(
-        json!({ "members": members(&state, &user, &party, role).await? }),
+        json!({ "members": members(&state, &user, &party, role).await?, "pseq": pseq }),
     ))
 }
 
@@ -748,6 +774,7 @@ pub async fn update(
     .bind(&user.id)
     .execute(state.db.pool())
     .await?;
+    publish(&state, &party, "party", None, true).await;
     let (party, count) = run_by(&state, &user, &party).await?;
     Ok(Json(
         party_detail(&state, &user, &party, count, Role::Dm).await?,
@@ -761,6 +788,17 @@ pub async fn remove(
     Path(party): Path<String>,
 ) -> ApiResult<Json<Value>> {
     id_arg(&party)?;
+    let members = sqlx::query(
+        "SELECT m.owner_id, m.character_id FROM party_members m JOIN parties p ON p.id = m.party_id
+         WHERE m.party_id = $1 AND p.dm_id = $2",
+    )
+    .bind(&party)
+    .bind(&user.id)
+    .fetch_all(state.db.pool())
+    .await?
+    .iter()
+    .map(|r| Ok((r.try_get(0)?, r.try_get(1)?)))
+    .collect::<sqlx::Result<Vec<(String, String)>>>()?;
     let done = sqlx::query("DELETE FROM parties WHERE id = $1 AND dm_id = $2")
         .bind(&party)
         .bind(&user.id)
@@ -770,6 +808,23 @@ pub async fn remove(
         return Err(not_found());
     }
     tracing::info!("party: party_deleted {party} by {}", user.id);
+    // Its players hear only that their own list changed; nothing of this party reaches them again.
+    state.hub.forget_party(&party);
+    let hub = std::sync::Arc::clone(&state.hub);
+    let gone = members.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        for (owner, character) in &gone {
+            hub.cards.forget(owner, character);
+        }
+    })
+    .await;
+    let mut owners: Vec<String> = members.into_iter().map(|(o, _)| o).collect();
+    owners.push(user.id.clone());
+    owners.sort();
+    owners.dedup();
+    for owner in &owners {
+        tell_mine(&state, owner, "parties");
+    }
     Ok(Json(json!({ "deleted": true })))
 }
 
@@ -889,6 +944,20 @@ pub async fn invite(
         .await?;
         let invite_id: String = row.try_get(0)?;
         tracing::info!("party: invite {invite_id} kind=username party={party}");
+        publish(&state, &party, "invites", None, false).await;
+        // The invitee's own stream hears of it, later, so the DM's answer takes as long whether they exist or not.
+        let later = state.clone();
+        tokio::spawn(async move {
+            let found = sqlx::query("SELECT id FROM users WHERE lower(username) = lower($1)")
+                .bind(&name)
+                .fetch_optional(later.db.pool())
+                .await;
+            if let Ok(Some(row)) = found {
+                if let Ok(id) = row.try_get::<String, _>(0) {
+                    tell_mine(&later, &id, "invites");
+                }
+            }
+        });
         return Ok(Json(json!({
             "sent": true,
             "invite": {
@@ -916,6 +985,7 @@ pub async fn invite(
     .execute(state.db.pool())
     .await?;
     tracing::info!("party: invite {id} kind=code party={party}");
+    publish(&state, &party, "invites", None, false).await;
     Ok(Json(json!({
         "invite": { "id": id, "kind": "code", "usesLeft": uses, "createdAt": at, "expiresAt": expires },
         "code": grouped(&code),
@@ -939,6 +1009,7 @@ pub async fn revoke(
     if done.rows_affected() == 0 {
         return Err(not_found());
     }
+    publish(&state, &party, "invites", None, false).await;
     Ok(Json(json!({ "deleted": true })))
 }
 
@@ -1006,6 +1077,7 @@ pub async fn add_own(
     delete_offers_of(&mut tx, &user.id, &character).await?;
     tx.commit().await?;
     tracing::info!("party: joined party={party} owner={} (dm)", user.id);
+    joined(&state, &user.id, &character, &party).await;
     Ok(Json(
         member_json(&state, &user, &party, &user.id, &character).await?,
     ))
@@ -1048,6 +1120,7 @@ pub async fn remove_member(
     }
     let kind = if owner == user.id { "left" } else { "removed" };
     tracing::info!("party: {kind} party={party} owner={owner} by {}", user.id);
+    left(&state, &owner, &character, &party).await;
     Ok(Json(json!({ "removed": true })))
 }
 
@@ -1095,7 +1168,7 @@ pub async fn accept_offer(
     } else {
         Vec::new()
     };
-    if !card.first().is_some_and(|c| c.state == "ok") {
+    if !card.first().is_some_and(|(_, s)| *s == "ok") {
         return Err(not_found());
     }
     let mut tx = state.db.pool().begin().await?;
@@ -1108,6 +1181,7 @@ pub async fn accept_offer(
     delete_offers_of(&mut tx, &owner, &character).await?;
     tx.commit().await?;
     tracing::info!("party: joined party={party} owner={owner} (offer {offer})");
+    joined(&state, &owner, &character, &party).await;
     Ok(Json(
         member_json(&state, &user, &party, &owner, &character).await?,
     ))
@@ -1120,11 +1194,13 @@ pub async fn decline_offer(
     Path((party, offer)): Path<(String, String)>,
 ) -> ApiResult<Json<Value>> {
     run_by(&state, &user, &party).await?;
-    party_offer(&state, &party, &offer).await?;
+    let (_, owner, _) = party_offer(&state, &party, &offer).await?;
     sqlx::query("DELETE FROM party_offers WHERE id = $1")
         .bind(&offer)
         .execute(state.db.pool())
         .await?;
+    publish(&state, &party, "offers", None, false).await;
+    tell_mine(&state, &owner, "invites");
     Ok(Json(json!({ "deleted": true })))
 }
 
@@ -1243,6 +1319,7 @@ async fn join_with(
         "party: joined party={party} owner={} (invite {invite})",
         user.id
     );
+    joined(state, &user.id, character, party).await;
     let (party, count, role) = viewed(state, user, party).await?;
     let mine = my_characters(state, &user.id).await?;
     Ok(json!({
@@ -1271,7 +1348,7 @@ pub async fn offer(
     Path(invite): Path<String>,
     Json(form): Json<CharacterForm>,
 ) -> ApiResult<Json<Value>> {
-    my_invite(&state, &user, &invite).await?;
+    let (_, party) = my_invite(&state, &user, &invite).await?;
     let character = own_character(&state, &user, form.character_id.as_deref()).await?;
     let member =
         sqlx::query("SELECT 1 FROM party_members WHERE owner_id = $1 AND character_id = $2")
@@ -1302,6 +1379,7 @@ pub async fn offer(
         ));
     }
     tracing::info!("party: offer {id} invite={invite} owner={}", user.id);
+    publish(&state, &party, "offers", None, false).await;
     Ok(Json(json!({
         "offer": { "id": id, "characterId": character, "createdAt": at },
     })))
@@ -1314,6 +1392,7 @@ pub async fn withdraw_offer(
     Path(invite): Path<String>,
 ) -> ApiResult<Json<Value>> {
     id_arg(&invite)?;
+    let party = invite_party(&state, &invite).await?;
     let done = sqlx::query("DELETE FROM party_offers WHERE invite_id = $1 AND owner_id = $2")
         .bind(&invite)
         .bind(&user.id)
@@ -1322,7 +1401,22 @@ pub async fn withdraw_offer(
     if done.rows_affected() == 0 {
         return Err(not_found());
     }
+    if let Some(party) = party {
+        publish(&state, &party, "offers", None, false).await;
+    }
     Ok(Json(json!({ "deleted": true })))
+}
+
+/// The party an invite is for, if it still exists.
+async fn invite_party(state: &AppState, invite: &str) -> ApiResult<Option<String>> {
+    Ok(
+        sqlx::query("SELECT party_id FROM party_invites WHERE id = $1")
+            .bind(invite)
+            .fetch_optional(state.db.pool())
+            .await?
+            .map(|r| r.try_get(0))
+            .transpose()?,
+    )
 }
 
 /// `POST /api/invites/{invite}/decline`: it leaves the account's list. The DM's list doesn't change.
@@ -1331,7 +1425,7 @@ pub async fn decline(
     user: User,
     Path(invite): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    let (row, _) = my_invite(&state, &user, &invite).await?;
+    let (row, party) = my_invite(&state, &user, &invite).await?;
     let code: Option<String> = row.try_get(1)?;
     let mut tx = state.db.pool().begin().await?;
     if code.is_some() {
@@ -1347,12 +1441,17 @@ pub async fn decline(
             .execute(&mut *tx)
             .await?;
     }
-    sqlx::query("DELETE FROM party_offers WHERE invite_id = $1 AND owner_id = $2")
+    let withdrew = sqlx::query("DELETE FROM party_offers WHERE invite_id = $1 AND owner_id = $2")
         .bind(&invite)
         .bind(&user.id)
         .execute(&mut *tx)
-        .await?;
+        .await?
+        .rows_affected();
     tx.commit().await?;
+    // A decline itself is never told to the DM; an offer that goes with it leaves their list, as a withdrawn one does.
+    if withdrew > 0 {
+        publish(&state, &party, "offers", None, false).await;
+    }
     Ok(Json(json!({ "declined": true })))
 }
 
@@ -1483,4 +1582,468 @@ pub async fn hold_join_code(state: &AppState, user: &str, code: Option<&str>) {
         Ok(None) => {}
         Err(e) => tracing::warn!("party: reading a join code for {user}: {e:?}"),
     }
+}
+
+// Live updates (`hub.rs`): who hears of a change is read from the database when it is sent.
+
+/// The party's DM and the owners of its member characters other than the DM, now; none when it is gone.
+async fn audience(state: &AppState, party: &str) -> ApiResult<Option<(String, Vec<String>)>> {
+    let Some(row) = sqlx::query("SELECT dm_id FROM parties WHERE id = $1")
+        .bind(party)
+        .fetch_optional(state.db.pool())
+        .await?
+    else {
+        return Ok(None);
+    };
+    let dm: String = row.try_get(0)?;
+    let rows = sqlx::query(
+        "SELECT DISTINCT owner_id FROM party_members WHERE party_id = $1 AND owner_id <> $2 ORDER BY owner_id",
+    )
+    .bind(party)
+    .bind(&dm)
+    .fetch_all(state.db.pool())
+    .await?;
+    let owners = rows
+        .iter()
+        .map(|r| r.try_get(0))
+        .collect::<sqlx::Result<Vec<String>>>()?;
+    Ok(Some((dm, owners)))
+}
+
+/// A party's view changed: tell its DM, and its players too when `players` (they see the change). `kind`: `party`
+/// (its name or ruleset), `roster` (who is in it), `card` (a member's card; `id` is the character), or for the DM
+/// only, `invites` and `offers`.
+async fn publish(state: &AppState, party: &str, kind: &str, id: Option<&str>, players: bool) {
+    if !crate::config::features().parties {
+        return;
+    }
+    match audience(state, party).await {
+        Ok(Some((dm, owners))) => {
+            let (dm_seq, players_seq) = state.hub.bump(party, players);
+            state.hub.deliver(
+                &dm,
+                PARTY_EVENT,
+                &json!({ "party": party, "pseq": dm_seq, "kind": kind, "id": id }),
+            );
+            if let Some(seq) = players_seq {
+                let payload = json!({ "party": party, "pseq": seq, "kind": kind, "id": id });
+                for owner in owners {
+                    state.hub.deliver(&owner, PARTY_EVENT, &payload);
+                }
+            }
+        }
+        Ok(None) => {}
+        Err(e) => tracing::warn!("party: telling party {party} of a change: {e:?}"),
+    }
+}
+
+/// The account's own party list (`parties`) or invites (`invites`) changed.
+fn tell_mine(state: &AppState, user: &str, kind: &str) {
+    if crate::config::features().parties {
+        state
+            .hub
+            .deliver(user, MINE_EVENT, &json!({ "kind": kind }));
+    }
+}
+
+/// The party a character is in, if any.
+async fn party_of(state: &AppState, owner: &str, character: &str) -> ApiResult<Option<String>> {
+    Ok(
+        sqlx::query("SELECT party_id FROM party_members WHERE owner_id = $1 AND character_id = $2")
+            .bind(owner)
+            .bind(character)
+            .fetch_optional(state.db.pool())
+            .await?
+            .map(|r| r.try_get(0))
+            .transpose()?,
+    )
+}
+
+/// Upstream's snapshot of a character as its owner has it now: the open session's, or else the saved file read with
+/// the owner's content. Opens no session. None when there is no such character.
+fn snapshot_of(
+    app: &tauri::AppHandle,
+    id: &str,
+) -> ApiResult<Option<borealis_lib::dto::CharacterSnapshot>> {
+    use tauri::Manager;
+    let backend = app.state::<borealis_lib::state::AppState>();
+    if let Ok(snapshot) = backend.get_snapshot(id) {
+        return Ok(Some(snapshot));
+    }
+    let path = crate::sync::characters_dir(&backend)?.join(format!("{id}.json"));
+    if !path.symlink_metadata().is_ok_and(|m| m.is_file()) {
+        return Ok(None);
+    }
+    let mut character = borealis_character::Character::load(&path).map_err(internal)?;
+    let hub = backend.hub().map_err(internal)?;
+    let settings = backend.settings().map_err(internal)?;
+    let _ = borealis_lib::renamed_ids::migrate(&mut character.build, &hub.store);
+    Ok(Some(borealis_lib::snapshot_map::build_snapshot(
+        &borealis_lib::snapshot_map::MapInput {
+            id,
+            character: &character,
+            dirty: false,
+            display_path: String::new(),
+            hub: &hub,
+            settings: &settings,
+            rolls: &[],
+            warnings: &[],
+        },
+    )))
+}
+
+/// Read a member character's card again from its owner's workspace, keep it, and tell the party when it changed.
+/// Never fails: a card that can't be read stays as it was.
+async fn refresh_card(
+    state: &AppState,
+    owner: &str,
+    character: &str,
+    workspace: &Workspace,
+    party: &str,
+) -> Option<borealis_lib::dto::CharacterSnapshot> {
+    let _one = state.hub.cards.refreshing(owner).await;
+    let hub = std::sync::Arc::clone(&state.hub);
+    let (owner_id, id) = (owner.to_string(), character.to_string());
+    let read = workspace
+        .blocking(move |app| {
+            let Some(snapshot) = snapshot_of(app, &id)? else {
+                return Ok(None);
+            };
+            let changed = hub
+                .cards
+                .put(&owner_id, &id, Card::from_snapshot(&snapshot));
+            Ok(Some((snapshot, changed)))
+        })
+        .await;
+    match read {
+        Ok(Some((snapshot, changed))) => {
+            if changed.dm {
+                publish(state, party, "card", Some(character), changed.players).await;
+            }
+            Some(snapshot)
+        }
+        Ok(None) => None,
+        Err(e) => {
+            tracing::warn!("party: reading a card of {owner}: {e:?}");
+            None
+        }
+    }
+}
+
+/// A character joined: the party hears, the owner's list changes, and its card is read when its owner has the
+/// workspace open.
+async fn joined(state: &AppState, owner: &str, character: &str, party: &str) {
+    publish(state, party, "roster", Some(character), true).await;
+    tell_mine(state, owner, "parties");
+    if let Some(workspace) = state.workspaces.loaded_now(owner) {
+        refresh_card(state, owner, character, &workspace, party).await;
+    }
+}
+
+/// A character that left its party: its card goes, the party hears, the owner's list changes.
+async fn left(state: &AppState, owner: &str, character: &str, party: &str) {
+    let hub = std::sync::Arc::clone(&state.hub);
+    let (o, c) = (owner.to_string(), character.to_string());
+    let _ = tokio::task::spawn_blocking(move || hub.cards.forget(&o, &c)).await;
+    publish(state, party, "roster", Some(character), true).await;
+    tell_mine(state, owner, "parties");
+}
+
+/// Upstream commands that change what a card shows, besides those that write character files (`sync.rs`): they
+/// change only the open session. A test checks each is a command the server offers.
+pub const PLAY_COMMANDS: [&str; 10] = [
+    "take_damage",
+    "regain_hit_points",
+    "set_temp_hit_points",
+    "spend_hit_die",
+    "restore_hit_die",
+    "short_rest",
+    "long_rest",
+    "set_concentration",
+    "spend_spell_slot",
+    "set_exhaustion",
+];
+
+/// Commands that name a character but change nothing about it: no card is read after them.
+const READS: [&str; 13] = [
+    "get_snapshot",
+    "get_slot_options",
+    "list_character_options",
+    "explain_stat",
+    "render_sheet",
+    "export_sheet",
+    "export_character",
+    "get_element",
+    "list_added_pick_options",
+    "preview_source_restrictions",
+    "preview_convert_to_2024",
+    "get_compatibility_report",
+    "party_sync_get",
+];
+
+/// What a command's success means for the cards.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CardTarget {
+    /// Nothing.
+    None,
+    /// This character may have changed.
+    Character(String),
+    /// This character was deleted: it leaves its party.
+    Deleted(String),
+    /// Any of the account's characters may have changed.
+    All,
+}
+
+/// Which cards a command may change, from its name and arguments (taken before it runs). Every command that names
+/// one character and isn't a read counts, the [`PLAY_COMMANDS`] among them.
+pub fn card_target(command: &str, args: &serde_json::Map<String, Value>) -> CardTarget {
+    if matches!(command, "bundle_accept" | "recheck_missing_content") {
+        return CardTarget::All;
+    }
+    if READS.contains(&command) && !PLAY_COMMANDS.contains(&command) {
+        return CardTarget::None;
+    }
+    let key = if command == "party_sync_push" {
+        "id"
+    } else {
+        "characterId"
+    };
+    let Some(id) = args
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|id| valid_character_id(id))
+    else {
+        return CardTarget::None;
+    };
+    if command == "delete_character" {
+        CardTarget::Deleted(id.to_string())
+    } else {
+        CardTarget::Character(id.to_string())
+    }
+}
+
+/// After a command of `owner`'s worked (`rpc.rs`): refresh the cards it may have changed, and take a deleted
+/// character out of its party. Never fails the command.
+pub async fn after_command(
+    state: &AppState,
+    owner: &str,
+    workspace: &Workspace,
+    target: CardTarget,
+) {
+    if !crate::config::features().parties || target == CardTarget::None {
+        return;
+    }
+    let result: ApiResult<()> = async {
+        match target {
+            CardTarget::None => {}
+            CardTarget::Character(id) => {
+                if let Some(party) = party_of(state, owner, &id).await? {
+                    refresh_card(state, owner, &id, workspace, &party).await;
+                }
+            }
+            CardTarget::Deleted(id) => {
+                let Some(party) = party_of(state, owner, &id).await? else {
+                    return Ok(());
+                };
+                sqlx::query("DELETE FROM party_members WHERE owner_id = $1 AND character_id = $2")
+                    .bind(owner)
+                    .bind(&id)
+                    .execute(state.db.pool())
+                    .await?;
+                sqlx::query("DELETE FROM party_offers WHERE owner_id = $1 AND character_id = $2")
+                    .bind(owner)
+                    .bind(&id)
+                    .execute(state.db.pool())
+                    .await?;
+                tracing::info!("party: left party={party} owner={owner} (deleted)");
+                left(state, owner, &id, &party).await;
+            }
+            CardTarget::All => {
+                let rows = sqlx::query(
+                    "SELECT character_id, party_id FROM party_members WHERE owner_id = $1",
+                )
+                .bind(owner)
+                .fetch_all(state.db.pool())
+                .await?;
+                for row in rows {
+                    let (id, party): (String, String) = (row.try_get(0)?, row.try_get(1)?);
+                    if valid_character_id(&id) {
+                        refresh_card(state, owner, &id, workspace, &party).await;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    .await;
+    if let Err(e) = result {
+        tracing::warn!("party: after a command of {owner}: {e:?}");
+    }
+}
+
+// The DM's read-only view of a member character.
+
+/// Views one DM may have under way at once, and workspaces of offline players a view may open in ten minutes.
+const VIEWS_AT_ONCE: usize = 2;
+const OPENS: usize = 4;
+
+static VIEWING: LazyLock<Mutex<HashMap<String, usize>>> = LazyLock::new(Mutex::default);
+
+/// One view under way; counted down when dropped.
+struct Viewing(String);
+
+impl Viewing {
+    fn start(dm: &str) -> Option<Self> {
+        let mut map = VIEWING.lock().ok()?;
+        let n = map.entry(dm.to_string()).or_insert(0);
+        if *n >= VIEWS_AT_ONCE {
+            return None;
+        }
+        *n += 1;
+        Some(Self(dm.to_string()))
+    }
+}
+
+impl Drop for Viewing {
+    fn drop(&mut self) {
+        if let Ok(mut map) = VIEWING.lock() {
+            if let Some(n) = map.get_mut(&self.0) {
+                *n = n.saturating_sub(1);
+                if *n == 0 {
+                    map.remove(&self.0);
+                }
+            }
+        }
+    }
+}
+
+/// What a view leaves out of upstream's snapshot: where the owner keeps things, and their library's own marks.
+const VIEW_HIDES: [&str; 5] = ["displayPath", "dirty", "vaultNote", "group", "favorite"];
+
+/// `POST /api/parties/{party}/members/{owner}/{character}/view/snapshot`: the DM reads a member character, as its
+/// owner has it now, without opening a session or writing anything. Owner and character come from the member row;
+/// nothing else of the request is used.
+pub async fn view_snapshot(
+    State(state): State<AppState>,
+    user: User,
+    Path((party, owner, character)): Path<(String, String, String)>,
+) -> ApiResult<Json<Value>> {
+    run_by(&state, &user, &party).await?;
+    id_arg(&owner)?;
+    if !valid_character_id(&character) {
+        return Err(not_found());
+    }
+    let row = sqlx::query(
+        "SELECT m.owner_id, m.character_id, u.username FROM party_members m JOIN users u ON u.id = m.owner_id
+         WHERE m.party_id = $1 AND m.owner_id = $2 AND m.character_id = $3",
+    )
+    .bind(&party)
+    .bind(&owner)
+    .bind(&character)
+    .fetch_optional(state.db.pool())
+    .await?
+    .ok_or_else(not_found)?;
+    let (owner, character, owner_name): (String, String, String) =
+        (row.try_get(0)?, row.try_get(1)?, row.try_get(2)?);
+    let _viewing = Viewing::start(&user.id).ok_or(ApiError::TooMany)?;
+    let workspace = match state.workspaces.loaded_now(&owner) {
+        Some(workspace) => workspace,
+        None => {
+            if !take(&format!("view-open:{}", user.id), OPENS, TEN_MINUTES) {
+                return Err(ApiError::TooMany);
+            }
+            state.workspaces.get(&owner).await?
+        }
+    };
+    let pseq = seq_for(&state, &party, Role::Dm);
+    let snapshot = refresh_card(&state, &owner, &character, &workspace, &party)
+        .await
+        .ok_or_else(not_found)?;
+    let mut snapshot = serde_json::to_value(&snapshot).map_err(internal)?;
+    if let Some(map) = snapshot.as_object_mut() {
+        for key in VIEW_HIDES {
+            map.remove(key);
+        }
+    }
+    crate::rpc::scrub_paths(&mut snapshot);
+    let (card, file_state) = cards(&state, &[(owner, character)])
+        .await?
+        .pop()
+        .unwrap_or((Card::default(), "unreadable"));
+    let mut card = card_view_for(Viewer::Dm, &card, file_state);
+    card.insert("ownerName".into(), json!(owner_name));
+    Ok(Json(json!({
+        "snapshot": snapshot,
+        "card": card,
+        "pseq": pseq,
+    })))
+}
+
+// An account being deleted (`admin.rs`): its parties go with it, and so do its characters in other parties.
+
+/// What a deleted account's parties need to hear, read before the delete.
+pub struct Departing {
+    /// Parties it ran: each with the members that go with it.
+    ran: Vec<(String, Vec<(String, String)>)>,
+    /// Other parties it had characters in.
+    played: Vec<String>,
+}
+
+/// Read who must hear of an account's delete, before it happens.
+pub async fn before_account_delete(state: &AppState, user: &str) -> ApiResult<Departing> {
+    let mut ran = Vec::new();
+    for row in sqlx::query("SELECT id FROM parties WHERE dm_id = $1")
+        .bind(user)
+        .fetch_all(state.db.pool())
+        .await?
+    {
+        let party: String = row.try_get(0)?;
+        let members =
+            sqlx::query("SELECT owner_id, character_id FROM party_members WHERE party_id = $1")
+                .bind(&party)
+                .fetch_all(state.db.pool())
+                .await?
+                .iter()
+                .map(|r| Ok((r.try_get(0)?, r.try_get(1)?)))
+                .collect::<sqlx::Result<Vec<(String, String)>>>()?;
+        ran.push((party, members));
+    }
+    let played = sqlx::query(
+        "SELECT DISTINCT m.party_id FROM party_members m JOIN parties p ON p.id = m.party_id
+         WHERE m.owner_id = $1 AND p.dm_id <> $1",
+    )
+    .bind(user)
+    .fetch_all(state.db.pool())
+    .await?
+    .iter()
+    .map(|r| r.try_get(0))
+    .collect::<sqlx::Result<Vec<String>>>()?;
+    Ok(Departing { ran, played })
+}
+
+/// After the delete: the parties it ran are gone for their players, the others have lost its characters.
+pub async fn after_account_delete(state: &AppState, user: &str, departing: Departing) {
+    for (party, members) in departing.ran {
+        state.hub.forget_party(&party);
+        let hub = std::sync::Arc::clone(&state.hub);
+        let gone = members.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            for (owner, character) in &gone {
+                hub.cards.forget(owner, character);
+            }
+        })
+        .await;
+        let mut owners: Vec<String> = members.into_iter().map(|(o, _)| o).collect();
+        owners.sort();
+        owners.dedup();
+        for owner in owners.iter().filter(|o| *o != user) {
+            tell_mine(state, owner, "parties");
+        }
+    }
+    for party in departing.played {
+        publish(state, &party, "roster", None, true).await;
+    }
+    let hub = std::sync::Arc::clone(&state.hub);
+    let owner = user.to_string();
+    let _ = tokio::task::spawn_blocking(move || hub.cards.forget_owner(&owner)).await;
 }

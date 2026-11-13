@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router";
 import type { CharacterSummary } from "../../src/api/contract";
 import { Button } from "../../src/components/Button";
@@ -8,9 +8,10 @@ import { useToast } from "../../src/components/Toast";
 import { useApi } from "../../src/state/ApiContext";
 import { errorMessage } from "../../src/state/useAsync";
 import {
-  acceptInvite, addOwnCharacter, cancelInvite, CONFLICT, charactersInParties, createParty, declineInvite, deleteParty,
-  keepJoinCode, keptJoinCode, listMyInvites, loadParties, MAX_PARTIES, onPartiesChanged, redeemJoinCode, removeMember,
-  renameParty, type MyInvite, type Party, type PartyMember, type Ruleset,
+  acceptInvite, addOwnCharacter, BAND_LABEL, cancelInvite, classLine, CONFLICT, charactersInParties, createParty,
+  declineInvite, deleteParty, keepJoinCode, keptJoinCode, listMyInvites, loadParties, loadParty, MAX_PARTIES,
+  onPartiesChanged, redeemJoinCode, removeMember, renameParty, watchParties, type CardStats, type HealthBand,
+  type MyInvite, type Party, type PartyMember, type Ruleset,
 } from "../api/overrides/parties";
 import { InviteDialog, NameDialog, PickCharacterDialog } from "./PartiesDialogs";
 import "./party.css";
@@ -37,14 +38,57 @@ const day = (at: number) => new Date(at).toLocaleDateString();
 const EDITION: Record<Ruleset, string> = { dnd2024: "2024 rules", dnd2014: "2014 rules" };
 const memberName = (m: PartyMember) => m.name || (m.state === "missing" ? "A deleted character" : "An unreadable character");
 
+const signed = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
+const BAND_TONE: Record<HealthBand, "success" | "warning" | "danger"> = { unhurt: "success", bloodied: "warning", down: "danger" };
+
+/** The band the DM's numbers put a character in, so the DM's card reads like the players' at a glance. */
+export function bandOf(stats: CardStats): HealthBand | null {
+  if (stats.hpMax === 0) return null;
+  if (stats.hp === 0) return "down";
+  return stats.hp * 2 <= stats.hpMax ? "bloodied" : "unhurt";
+}
+
+/** The numbers a DM needs at the table: hit points first, then AC, initiative, passive Perception, spell DCs. */
+function StatLine({ stats }: { stats: CardStats }) {
+  const band = bandOf(stats);
+  const dcs = stats.spellDcs.map((d) => d.dc);
+  return (
+    <>
+      <div className="party-stats" role="list" aria-label="Numbers">
+        <span role="listitem" className={`party-stat party-stat-hp ${band ?? ""}`} aria-label={`Hit points ${stats.hp} of ${stats.hpMax}${stats.tempHp ? `, ${stats.tempHp} temporary` : ""}`}>
+          <span className="party-stat-label">HP</span>
+          <span className="party-stat-value">{stats.hp}<span className="muted">/{stats.hpMax}</span>{stats.tempHp > 0 && <span className="party-stat-temp"> +{stats.tempHp}</span>}</span>
+        </span>
+        <span role="listitem" className="party-stat" aria-label={`Armor class ${stats.armorClass}`}><span className="party-stat-label">AC</span><span className="party-stat-value">{stats.armorClass}</span></span>
+        <span role="listitem" className="party-stat" aria-label={`Initiative ${signed(stats.initiative)}`}><span className="party-stat-label">Init</span><span className="party-stat-value">{signed(stats.initiative)}</span></span>
+        <span role="listitem" className="party-stat" aria-label={`Passive Perception ${stats.passivePerception}`}><span className="party-stat-label">PP</span><span className="party-stat-value">{stats.passivePerception}</span></span>
+        {dcs.length > 0 && (
+          <span role="listitem" className="party-stat" aria-label={`Spell save DC ${dcs.join(", ")}`}><span className="party-stat-label">DC</span><span className="party-stat-value">{dcs.join("/")}</span></span>
+        )}
+      </div>
+      {(stats.concentration || stats.exhaustion > 0 || stats.inspiration) && (
+        <div className="party-conditions">
+          {stats.concentration && <Chip tone="info">Concentrating: {stats.concentration}</Chip>}
+          {stats.exhaustion > 0 && <Chip tone="warning">Exhaustion {stats.exhaustion}</Chip>}
+          {stats.inspiration && <Chip tone="gold">Inspiration</Chip>}
+        </div>
+      )}
+    </>
+  );
+}
+
 /**
- * A member's roster card: what the server reads from the saved file (plan 3.5), read-only. Class and the numbers
- * (AC, HP, passive Perception, spell DC) come with 0.2.1's card cache.
+ * A member's roster card, as the server projects it for this account (plan 3.5, D6): the DM and the owner see the
+ * numbers, live as the owner plays; another member sees the name, class, level and a health band. Read-only.
  */
-function MemberRow({ member, dm, onRemove, onLeave }: { member: PartyMember; dm: boolean; onRemove: () => void; onLeave: () => void }) {
+function MemberRow({ member, dm, partyId, onRemove, onLeave }: {
+  member: PartyMember; dm: boolean; partyId: string; onRemove: () => void; onLeave: () => void;
+}) {
   const who = member.mine ? "your character" : member.dmCharacter ? `the DM's character (${member.ownerName})` : member.ownerName;
-  const facts = [member.build, member.level != null ? `Level ${member.level}` : null, member.ruleset ? EDITION[member.ruleset] : null, who]
+  const classes = classLine(member.classes);
+  const facts = [classes || (member.level != null ? `Level ${member.level}` : null), member.ruleset ? EDITION[member.ruleset] : null, who]
     .filter(Boolean).join(" · ");
+  const band = member.band ?? (member.stats ? bandOf(member.stats) : null);
   return (
     <li className="party-member" aria-label={memberName(member)}>
       <div className="party-member-head">
@@ -52,11 +96,22 @@ function MemberRow({ member, dm, onRemove, onLeave }: { member: PartyMember; dm:
           <strong>{memberName(member)}</strong>
           <span className="muted party-note">{facts}</span>
         </span>
+        {band && <Chip tone={BAND_TONE[band]}>{BAND_LABEL[band]}</Chip>}
+        {dm && !member.mine && member.online === false && <Chip title="The player doesn't have the app open: these are the last numbers seen">Offline</Chip>}
         {member.state === "unreadable" && <Chip tone="warning" title="The file is there but can't be read">Unreadable</Chip>}
         {member.state === "missing" && <Chip tone="warning" title="The character's file is gone">Missing</Chip>}
-        {member.mine && member.ownerId && <Button small onClick={onLeave}>Leave</Button>}
-        {dm && !member.mine && member.ownerId && <Button small variant="danger" onClick={onRemove}>Remove</Button>}
       </div>
+      {member.stats && <StatLine stats={member.stats} />}
+      {(member.ownerId && (dm || member.mine)) && (
+        <div className="party-member-actions">
+          {dm && member.state === "ok" && (
+            <Link className="btn btn-sm" to={`/parties/${encodeURIComponent(partyId)}/view/${encodeURIComponent(member.ownerId)}/${encodeURIComponent(member.characterId)}`}
+              aria-label={`View ${memberName(member)}`}>View</Link>
+          )}
+          {member.mine && <Button small onClick={onLeave}>Leave</Button>}
+          {dm && !member.mine && <Button small variant="danger" onClick={onRemove}>Remove</Button>}
+        </div>
+      )}
     </li>
   );
 }
@@ -112,7 +167,7 @@ function PartyCard({ party, act, open }: {
         : (
           <ul className="party-list">
             {party.members.map((m) => (
-              <MemberRow key={`${m.ownerName}/${m.characterId}`} member={m} dm={dm} onRemove={() => void remove(m)} onLeave={() => void leave(m)} />
+              <MemberRow key={`${m.ownerName}/${m.characterId}`} member={m} dm={dm} partyId={party.id} onRemove={() => void remove(m)} onLeave={() => void leave(m)} />
             ))}
           </ul>
         )}
@@ -142,6 +197,9 @@ function PartyCard({ party, act, open }: {
  * Parties (plan 4.1): the ones this account runs as DM and the ones its characters are in, the invites waiting for it,
  * and a join code box. DM tools appear once the account turns them on (Account page, plan D2). Party data is
  * online-only: the app shows the offline page instead (entry/App.tsx).
+ *
+ * It is live (plan 3.7): a party event refetches that party when its `pseq` is newer than the one shown, a change to
+ * the account's own list or a resync (or a stream that reopened) reloads the page.
  */
 export function PartiesPage() {
   const api = useApi();
@@ -162,7 +220,27 @@ export function PartiesPage() {
   }, [api]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => onPartiesChanged(() => { void load(); }), [load]);
-  // No live roster before 0.2.1: catch up when the page is looked at again.
+
+  const shown = useRef<Loaded | null>(null);
+  shown.current = data;
+  /** One party read again; an answer older than what is shown is dropped, one for a party now gone removes it. */
+  const refreshParty = useCallback(async (id: string) => {
+    try {
+      const fresh = await loadParty(id);
+      setData((d) => {
+        if (!d) return d;
+        if (!fresh) return { ...d, parties: d.parties.filter((p) => p.id !== id) };
+        return { ...d, parties: d.parties.map((p) => (p.id === id && (p.pseq ?? -1) <= (fresh.pseq ?? 0) ? fresh : p)) };
+      });
+    } catch { /* the next event or a reload catches up */ }
+  }, []);
+  useEffect(() => watchParties((e) => {
+    if (e.type !== "party") { void load(); return; }
+    const known = shown.current?.parties.find((p) => p.id === e.party);
+    if (!known) { void load(); return; }
+    if ((known.pseq ?? -1) < e.pseq) void refreshParty(e.party);
+  }), [load, refreshParty]);
+  // Catch up when the page is looked at again (a phone that slept may have missed events).
   useEffect(() => {
     const seen = () => { if (document.visibilityState === "visible") void load(); };
     document.addEventListener("visibilitychange", seen);

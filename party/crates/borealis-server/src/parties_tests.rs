@@ -213,6 +213,11 @@ async fn role_matrix(router: Router, db: Db) {
     let offer = out["offer"]["id"].as_str().unwrap().to_string();
     let (code_invite, code) = invite_code(&cast.dm, &party, 3).await;
     let before = cast.dm.get(&format!("/api/parties/{party}")).await.1;
+    let players_before = cast
+        .other
+        .get(&format!("/api/parties/{party}/roster"))
+        .await
+        .1;
 
     let m = &cast.member.id;
     let o = &cast.other.id;
@@ -245,6 +250,19 @@ async fn role_matrix(router: Router, db: Db) {
             format!("/api/parties/{party}/roster"),
             Value::Null,
             [ok, ok, ok, nf, nf, unauth, unauth],
+        ),
+        // The DM's read-only view of a member character (0.2.1): the DM only, its owner included.
+        (
+            "POST",
+            format!("/api/parties/{party}/members/{m}/{member_pc}/view/snapshot"),
+            json!({}),
+            [ok, nf, nf, nf, nf, unauth, unauth],
+        ),
+        (
+            "POST",
+            format!("/api/parties/{party}/members/{o}/{other_pc}/view/snapshot"),
+            json!({ "characterId": outsider_pc, "path": "../x" }),
+            [ok, nf, nf, nf, nf, unauth, unauth],
         ),
         (
             "GET",
@@ -392,8 +410,23 @@ async fn role_matrix(router: Router, db: Db) {
             }
         }
     }
-    // Nothing the matrix refused changed the party.
+    // Nothing the matrix refused changed the party, nor moved what its players see. The DM's view moved once: the
+    // one invite the matrix lets the DM send.
     let after = cast.dm.get(&format!("/api/parties/{party}")).await.1;
+    assert_eq!(
+        after["pseq"].as_u64().unwrap(),
+        before["pseq"].as_u64().unwrap() + 1,
+        "only the allowed invite moved the DM's view"
+    );
+    let players_after = cast
+        .other
+        .get(&format!("/api/parties/{party}/roster"))
+        .await
+        .1;
+    assert_eq!(
+        players_after["pseq"], players_before["pseq"],
+        "a refused call moved the players' view"
+    );
     assert_eq!(
         strip_times(before.clone()),
         strip_times(after),
@@ -508,6 +541,7 @@ fn client_name(cast: &Cast, client: &Client) -> String {
 /// A party detail without the times and renewed invites the matrix's allowed calls touch.
 fn strip_times(mut detail: Value) -> Value {
     detail["updatedAt"] = Value::Null;
+    detail["pseq"] = Value::Null;
     if let Some(invites) = detail["invites"].as_array_mut() {
         invites.retain(|i| i["username"] != "nobody-here");
         for i in invites {
@@ -789,16 +823,16 @@ async fn party_flow(router: Router, data: &Path) {
         .rpc("delete_character", json!({ "characterId": mira }))
         .await;
     assert_eq!(status, StatusCode::OK);
+    // Deleting a character takes it out of its party (0.2.1; it showed as missing before).
     let (_, detail) = dm.get(&format!("/api/parties/{other}/roster")).await;
-    let gone = detail["members"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|m| m["characterId"] == mira.as_str())
-        .unwrap()
-        .clone();
-    assert_eq!(gone["state"], "missing", "{gone}");
-    assert!(gone["name"].is_null());
+    assert!(
+        detail["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|m| m["characterId"] != mira.as_str()),
+        "{detail}"
+    );
 
     // Renaming, the DM capability that can't go while parties run, and deleting.
     let (status, out) = dm
