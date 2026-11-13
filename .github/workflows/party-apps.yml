@@ -542,8 +542,12 @@ jobs:
           if [ "$IOS_BUILT" != "true" ]; then ios="no iOS app (the iOS build did not run)"
           elif [ "$SIGNED_IOS" = "true" ]; then ios="the iOS app"
           else ios="an unsigned iOS app to sideload with AltStore, SideStore or Sideloadly"; fi
+          # A release is published (and marked latest) only once its files are on it: the desktop apps read their
+          # update feed from releases/latest, which answers 404 for a latest release without files. Make the release
+          # with its notes as a draft (gh release create --draft); a missing one is created as a draft here.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --verify-tag --latest --title "Borealis Party $VERSION" \
+            gh release create "$TAG" --verify-tag --draft --title "Borealis Party $VERSION" \
               --notes "Borealis Party $VERSION: the Android app (arm64 for phones, x86_64 for emulators), the Windows and Linux apps (unsigned), and $ios. Verify downloads against borealis-party-SHA256SUMS.txt."
           fi
           gh release upload "$TAG" assets/* --clobber
+          gh release edit "$TAG" --draft=false --latest
