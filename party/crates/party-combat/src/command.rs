@@ -361,7 +361,9 @@ pub enum Command {
         /// Ready.
         ready: bool,
     },
-    /// Creates or replaces a legendary pool and its members (C16).
+    /// Creates or replaces a legendary pool and its members (C16). Each legendary creature has its own pool; a
+    /// pool with several members is the DM's link (one multi-headed creature), opt-in only. Its members leave
+    /// the pools they were in, and a pool left empty goes.
     SetLegendaryPool {
         /// The pool id.
         pool: String,

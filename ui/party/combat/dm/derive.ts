@@ -176,10 +176,16 @@ export function speedText(s: Speeds): string {
 
 export const sameSpeeds = (a: Speeds, b: Speeds): boolean => speedText(a) === speedText(b);
 
-/** The legendary pool it belongs to (C16: several creatures may share one). */
+/** The legendary pool it belongs to (C16: its own, or one the DM linked several creatures into). */
 export function poolOf(state: CombatState, id: string): [string, LegendaryPool] | null {
   for (const [key, pool] of Object.entries(state.legendary_pools ?? {})) if (pool.members.includes(id)) return [key, pool];
   return null;
+}
+
+/** Who a pool is for: the creature's label, or the linked members' labels. */
+export function poolTitle(state: CombatState, pool: LegendaryPool): string {
+  const names = pool.members.map((m) => byId(state, m)).filter((c) => c && !c.removed).map((c) => c!.label);
+  return names.length ? names.join(" + ") : "Legendary actions";
 }
 
 /** The member whose turn start refills the pool: the first not defeated. */

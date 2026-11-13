@@ -222,10 +222,10 @@ describe("CombatClient", () => {
       return real(session, method, path, body);
     };
     c.send({ command: "use_ability", id: "dragon", ability: "tail" });
-    expect(c.snapshot.shown?.state.legendary_pools.court!.remaining).toBe(2);
+    expect(c.snapshot.shown?.state.legendary_pools.dragon!.remaining).toBe(2);
     await settle();
     expect(reports.at(-1)).toBe("Needs recharge");
-    expect(c.snapshot.shown?.state.legendary_pools.court!.remaining).toBe(3);
+    expect(c.snapshot.shown?.state.legendary_pools.dragon!.remaining).toBe(3);
   });
 
   it("ignores events it has already seen, and turns a burst or a gap into one reload", async () => {

@@ -171,10 +171,13 @@ export interface Effect extends EffectSpec {
   origin?: "command" | "dying";
 }
 
+/** A legendary pool (C16): one per legendary creature; several members only when the DM linked them. */
 export interface LegendaryPool {
   max: number;
   remaining: number;
   members: string[];
+  /** The stat block printed no count: `max` is the default 3, a guess the DM can change. */
+  guessed?: boolean;
 }
 
 export type RuleTarget = { kind: "combatant"; id: string } | { kind: "group"; id: string };
@@ -215,6 +218,8 @@ export interface CombatState {
   combatants: Combatant[];
   effects: Effect[];
   legendary_pools: Record<string, LegendaryPool>;
+  /** Pools are per creature (false only in a combat 0.3.0 saved; the server brings it forward on load). */
+  legendary_per_creature?: boolean;
   rules: EncounterRule[];
   group_limits: Record<string, GroupLimit>;
   next_effect?: number;

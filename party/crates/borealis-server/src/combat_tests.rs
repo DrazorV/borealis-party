@@ -2337,6 +2337,7 @@ fn a_hidden_pool_member_changes_no_player_byte() {
                 max: 3,
                 remaining: 3,
                 members: vec![CombatantId::new("hidden-0"), CombatantId::new("seen-0")],
+                guessed: false,
             },
         },
     );
@@ -2356,6 +2357,169 @@ fn a_hidden_pool_member_changes_no_player_byte() {
         !text.contains("legendary_actions") && !text.contains("\"remaining\""),
         "{text}"
     );
+}
+
+// Legendary actions per creature (C16, user 2026-11-13).
+
+fn pools_of(v: &Value) -> BTreeMap<String, (u64, u64, Vec<String>)> {
+    v["state"]["legendary_pools"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(k, p)| {
+            let members = p["members"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|m| m.as_str().unwrap().to_string())
+                .collect();
+            (
+                k.clone(),
+                (
+                    p["max"].as_u64().unwrap(),
+                    p["remaining"].as_u64().unwrap(),
+                    members,
+                ),
+            )
+        })
+        .collect()
+}
+
+/// Each legendary creature has its own pool, a copy added mid-fight too; a combat 0.3.0 saved with one pool for
+/// two creatures loads as one pool each; players never see a count.
+async fn legendary_per_creature(t: &Table) {
+    let f = fight(t).await;
+    let v = act_ok(
+        &t.dm,
+        &f.combat,
+        "add_creature",
+        json!({ "copyOf": f.dragon, "count": 1 }),
+    )
+    .await;
+    let copy = combatants_of(&v)
+        .into_iter()
+        .map(|c| c["id"].as_str().unwrap().to_string())
+        .find(|id| id != &f.dragon && v["creatures"][id]["statBlock"]["legendary"].is_object())
+        .expect("the dragon's copy");
+    // Sizes come from each block: its own count, else its preamble's "can take N", else 3.
+    let block = v["creatures"][&f.dragon]["statBlock"].clone();
+    let variant = |per_round: Option<u8>, preamble: &str| {
+        let mut b = block.clone();
+        b["legendary"]["preamble"] = json!(preamble);
+        match per_round {
+            Some(n) => b["legendary"]["per_round"] = json!(n),
+            None => {
+                b["legendary"].as_object_mut().unwrap().remove("per_round");
+            }
+        }
+        Member {
+            kind: "creature".into(),
+            block: Some(b),
+            ..Member::default()
+        }
+    };
+    let roster = BTreeMap::from([
+        (
+            "a".to_string(),
+            variant(None, "It can take 2 legendary actions."),
+        ),
+        (
+            "b".to_string(),
+            variant(Some(1), "It can take 3 legendary actions."),
+        ),
+        ("c".to_string(), variant(None, "")),
+        ("pc".to_string(), pc_member(0)),
+    ]);
+    assert_eq!(
+        crate::combat::legendary_sizes(&roster),
+        BTreeMap::from([
+            ("a".to_string(), (2, false)),
+            ("b".to_string(), (1, false)),
+            ("c".to_string(), (3, true)),
+        ])
+    );
+    let pools = pools_of(&v);
+    assert_eq!(
+        pools[&f.dragon],
+        (3, 3, vec![f.dragon.clone()]),
+        "{pools:?}"
+    );
+    assert_eq!(pools[&copy], (3, 3, vec![copy.clone()]), "{pools:?}");
+    assert_eq!(pools.len(), 2, "{pools:?}");
+
+    // As 0.3.0 might have saved it: one pool for both, no per-creature mark.
+    let row = sqlx::query("SELECT state_json FROM combats WHERE id = $1")
+        .bind(&f.combat)
+        .fetch_one(t.state.db.pool())
+        .await
+        .unwrap();
+    let mut old: Value = serde_json::from_str(&row.try_get::<String, _>(0).unwrap()).unwrap();
+    old.as_object_mut()
+        .unwrap()
+        .remove("legendary_per_creature");
+    old["legendary_pools"] = json!({
+        "shared": { "max": 3, "remaining": 1, "members": [f.dragon, copy] }
+    });
+    sqlx::query("UPDATE combats SET state_json = $1 WHERE id = $2")
+        .bind(old.to_string())
+        .bind(&f.combat)
+        .execute(t.state.db.pool())
+        .await
+        .unwrap();
+    let v = ok(
+        &t.dm,
+        "GET",
+        &format!("/api/combats/{}", f.combat),
+        json!(null),
+    )
+    .await;
+    let pools = pools_of(&v);
+    assert_eq!(
+        pools[&f.dragon],
+        (3, 1, vec![f.dragon.clone()]),
+        "{pools:?}"
+    );
+    assert_eq!(pools[&copy], (3, 3, vec![copy.clone()]), "{pools:?}");
+    assert_eq!(pools.len(), 2, "{pools:?}");
+    // It writes on as usual and stays split.
+    act_ok(
+        &t.dm,
+        &f.combat,
+        "adjust_legendary",
+        json!({ "pool": copy, "delta": -2 }),
+    )
+    .await;
+    let v = ok(
+        &t.dm,
+        "GET",
+        &format!("/api/combats/{}", f.combat),
+        json!(null),
+    )
+    .await;
+    let pools = pools_of(&v);
+    assert_eq!((pools[&f.dragon].1, pools[&copy].1), (1, 1), "{pools:?}");
+
+    // D20 b: reveal both; players still see no live count (the printed traits' text and keys may show).
+    for id in [&f.dragon, &copy] {
+        act_ok(&t.dm, &f.combat, "reveal", json!({ "id": id })).await;
+    }
+    let (status, seen) = t.player.get(&format!("/api/combats/{}", f.combat)).await;
+    assert_eq!(status, StatusCode::OK, "{seen}");
+    let text = seen.to_string();
+    for dm_only in [
+        "\"legendary_pools\":",
+        "\"legendary_resistance\":",
+        "\"legendary_per_creature\":",
+        "\"guessed\":",
+    ] {
+        assert!(!text.contains(dm_only), "{dm_only} in {text}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn legendary_actions_are_per_creature_and_old_shared_pools_split() {
+    let dir = tempfile::tempdir().unwrap();
+    legendary_per_creature(&memory_table(dir.path()).await).await;
 }
 
 // Companions from an encounter (D17 b): their printed HP and AC, and rolled HP from their formula.

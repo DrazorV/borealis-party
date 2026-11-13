@@ -377,17 +377,54 @@ async fn load(conn: &mut AnyConnection, id: &str) -> Res<Option<Loaded>> {
     };
     let state: String = row.try_get(5)?;
     let die: String = row.try_get(6)?;
+    let mut state: CombatState = serde_json::from_str(&state).map_err(internal)?;
+    if !state.legendary_per_creature {
+        // Saved by 0.3.0: one legendary pool per legendary creature, from their own blocks (C16).
+        let sizes = legendary_sizes(&roster(&mut *conn, id).await?);
+        party_combat::legendary::per_creature_pools(&mut state, &sizes);
+    }
     Ok(Some(Loaded {
         id: row.try_get(0)?,
         party: row.try_get(1)?,
         encounter: row.try_get(2)?,
         status: row.try_get(3)?,
         seq: row.try_get(4)?,
-        state: serde_json::from_str(&state).map_err(internal)?,
+        state,
         die: serde_json::from_str(&die).map_err(internal)?,
         started_at: row.try_get(7)?,
         ended_at: row.try_get(8)?,
     }))
+}
+
+/// Each legendary creature's own legendary actions per round and whether that is a guess, by combatant id, from
+/// the blocks they fight with.
+pub(crate) fn legendary_sizes(roster: &BTreeMap<String, Member>) -> BTreeMap<String, (u32, bool)> {
+    roster
+        .iter()
+        .filter_map(|(id, m)| {
+            let data: MonsterData = serde_json::from_value(m.block.clone()?).ok()?;
+            legendary_pool(id, Some(&data)).map(|p| (id.clone(), (p.max, p.guessed)))
+        })
+        .collect()
+}
+
+/// Gives each newly added legendary creature its own full legendary pool, unless it already is in one (C16).
+pub(crate) fn give_new_pools(state: &mut CombatState, new_members: &[(String, Member)]) {
+    for (id, m) in new_members {
+        let cid = CombatantId::new(id.clone());
+        if state.combatant(&cid).is_none_or(|c| c.removed)
+            || party_combat::derive::pool_of(state, &cid).is_some()
+        {
+            continue;
+        }
+        let data = m
+            .block
+            .clone()
+            .and_then(|b| serde_json::from_value::<MonsterData>(b).ok());
+        if let Some(pool) = legendary_pool(id, data.as_ref()) {
+            state.legendary_pools.insert(id.clone(), pool);
+        }
+    }
 }
 
 /// Who a combatant id is.
@@ -1596,6 +1633,8 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
             out.players = o.events.players;
         }
     }
+    // A legendary creature added mid-fight (a copy, an encounter creature, an element, a summon) gets its own pool.
+    give_new_pools(&mut out.state, &out.new_members);
     let ended = matches!(w.op, Op::End);
     let seq = c.seq + 1;
     let at = now();
@@ -2056,6 +2095,12 @@ fn build_creature(
                         ability.uses = Some(resource);
                     }
                 }
+                // "Legendary Resistance (3/Day)" whose usage wasn't parsed: read it from the name or text (C17).
+                None if f.name.to_lowercase().starts_with("legendary resistance") => {
+                    if let Some(n) = party_combat::legendary::resistance_uses(&f.name, &f.text) {
+                        c.legendary_resistance = Some(Pool::full(n));
+                    }
+                }
                 _ => {}
             }
             c.abilities.push(ability);
@@ -2080,17 +2125,19 @@ fn build_creature(
     c
 }
 
-/// A creature's legendary pool, when its block has legendary actions (C16, one pool per creature to start with).
+/// A creature's own legendary pool, when its block has legendary actions (C16): sized from its own block, refilled
+/// at the start of its own turn.
 fn legendary_pool(id: &str, d: Option<&MonsterData>) -> Option<LegendaryPool> {
     let l = d?.legendary.as_ref()?;
     if l.actions.is_empty() {
         return None;
     }
-    let max = u32::from(l.per_round.unwrap_or(3));
+    let (max, guessed) = party_combat::legendary::legendary_count(l.per_round, &l.preamble);
     Some(LegendaryPool {
         max,
         remaining: max,
         members: vec![CombatantId::new(id)],
+        guessed,
     })
 }
 

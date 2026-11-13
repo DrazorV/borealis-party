@@ -943,7 +943,7 @@ pub struct Effect {
     pub origin: EffectOrigin,
 }
 
-/// A legendary action pool, which several combatants can share (C16).
+/// A legendary action pool (C16): one per legendary creature, or several creatures the DM linked into one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LegendaryPool {
     /// Actions per round.
@@ -953,6 +953,9 @@ pub struct LegendaryPool {
     /// The members, in reset order: the pool refills at the start of the turn of the first member that isn't
     /// defeated.
     pub members: Vec<CombatantId>,
+    /// The block printed no count, so `max` is the default 3: the DM's tracker shows it as a guess to change.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub guessed: bool,
 }
 
 /// Which abilities an encounter rule switches.
@@ -1073,6 +1076,10 @@ pub struct CombatState {
     /// Legendary action pools by id.
     #[serde(default)]
     pub legendary_pools: BTreeMap<String, LegendaryPool>,
+    /// Pools are per creature, so a pool with several members is a DM link. False in combats saved by 0.3.0,
+    /// which [`crate::legendary::per_creature_pools`] brings forward once.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub legendary_per_creature: bool,
     /// Encounter rules.
     #[serde(default)]
     pub rules: Vec<EncounterRule>,
@@ -1101,6 +1108,7 @@ impl CombatState {
             combatants: vec![],
             effects: vec![],
             legendary_pools: BTreeMap::new(),
+            legendary_per_creature: true,
             rules: vec![],
             group_limits: BTreeMap::new(),
             next_effect: 1,

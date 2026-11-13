@@ -146,6 +146,8 @@
 .cb-res-title .chip { margin-left: 6px; }
 .cb-pips { display: flex; gap: 4px; margin: 6px 0; color: var(--gold); font-size: 16px; }
 .cb-pips span:not(.on) { opacity: 0.35; }
+.cb-la-count { display: inline-flex; align-items: center; gap: 4px; }
+.cb-la-mini { color: var(--gold); font-weight: 700; letter-spacing: 1px; white-space: nowrap; }
 .cb-legend-opts { display: grid; grid-template-columns: 1fr; gap: 4px; }
 .cb-legend-opt { text-align: left; padding: 6px 8px; border: var(--border-w) solid var(--border); border-radius: var(--radius); background: var(--surface-2, var(--bg)); color: inherit; cursor: pointer; font-size: var(--fs-xs); min-height: 40px; }
 .cb-legend-opt strong { display: block; font-size: var(--fs-xs); }

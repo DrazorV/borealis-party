@@ -1,4 +1,4 @@
-//! Action economy (C5), Use (C14), recharge (C15), shared legendary pools (C16), Legendary Resistance (C17), slots
+//! Action economy (C5), Use (C14), recharge (C15), per-creature and DM-linked legendary pools (C16), Legendary Resistance (C17), slots
 //! and resources (C18), encounter rules (C20) and group limits (C21).
 
 mod common;
@@ -224,9 +224,10 @@ fn with_auto_recharge_off_the_dm_types_the_d6() {
     );
 }
 
-/// C16: two creatures spend one pool, which refills at the start of the first living member's turn.
+/// C16: a DM link (one multi-headed creature, opt-in): two creatures spend one pool, which refills at the start
+/// of the first living member's turn. Unlinked, each legendary creature has its own pool (tests/legendary.rs).
 #[test]
-fn a_shared_legendary_pool_across_two_creatures() {
+fn a_dm_linked_legendary_pool_across_two_creatures() {
     let mut combat = Combat::new(Edition::Srd521, 1);
     add(&mut combat, adult_red_dragon("d1"));
     add(&mut combat, adult_red_dragon("d2"));
@@ -238,6 +239,7 @@ fn a_shared_legendary_pool_across_two_creatures() {
         max: 3,
         remaining: 3,
         members: vec![id("d2"), id("d1")],
+        guessed: false,
     };
     dm(
         &mut combat,

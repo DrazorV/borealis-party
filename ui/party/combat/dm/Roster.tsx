@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Button, IconButton } from "../../../src/components/Button";
 import { HpBar } from "./HpBar";
 import { conditionWord } from "./common";
-import { conditionsOf, effectiveAc, effectiveInitiative, effectsOn, followDepth, isCharacter, isDefeated, leader, rosterOrder, byId } from "./derive";
+import { conditionsOf, effectiveAc, effectiveInitiative, effectsOn, followDepth, isCharacter, isDefeated, leader, poolOf, rosterOrder, byId } from "./derive";
 import type { Combatant, Command, CombatState } from "./types";
 
 /**
@@ -70,6 +70,7 @@ function Row({ c, state, selected, onSelect, send, disabled }: {
   const dead = isDefeated(c);
   const depth = Math.min(followDepth(state, c), 3);
   const owner = byId(state, c.owner_id);
+  const pool = pc ? null : poolOf(state, c.id)?.[1];
   const cls = [`cb-row cb-depth-${depth}`, c.owner_id && "pet", pc && "pc", selected && "selected", current && "active", dead && "dead", out && "out", c.absent && "out"].filter(Boolean).join(" ");
   return (
     <li className={cls} data-combatant={c.id} aria-current={current ? "true" : undefined}>
@@ -84,6 +85,12 @@ function Row({ c, state, selected, onSelect, send, disabled }: {
         <span className="cb-row-meta">
           {pc ? <span>Player · {c.absent ? "absent" : out ? "no initiative" : "PC"}</span> : <span>AC <b>{effectiveAc(state, c).total ?? "—"}</b></span>}
           {owner && <span>↳ {owner.label}</span>}
+          {pool && (
+            <span className="cb-la-mini" aria-label={`${c.label} legendary actions: ${pool.remaining} of ${pool.max} left`}
+              title={pool.members.length > 1 ? "Legendary actions (linked pool)" : "Legendary actions"}>
+              LA {Array.from({ length: pool.max }, (_, i) => (i < pool.remaining ? "●" : "○")).join("")}
+            </span>
+          )}
           {conds.length > 0 && <span className="cb-row-conds">{conds.map(conditionWord).join(", ")}</span>}
         </span>
       </button>
