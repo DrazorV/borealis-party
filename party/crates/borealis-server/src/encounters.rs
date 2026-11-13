@@ -1032,7 +1032,7 @@ fn companion_block(el: &Element, store: &borealis_content::ContentStore) -> Valu
 
 /// A typed Monster or an Aurora Companion element of the DM's own content, copied: its snapshot and the pack file's
 /// name. `None` when the DM has no such element.
-async fn copy_creature(
+pub(crate) async fn copy_creature(
     state: &AppState,
     dm: &str,
     element: &str,

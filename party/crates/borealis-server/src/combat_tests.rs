@@ -534,6 +534,19 @@ async fn role_matrix(t: &Table) {
         "a player gets the projection: {v}"
     );
     assert_eq!(v["me"][0]["id"], f.pc_player.as_str());
+    assert!(
+        v["me"][0]["characterId"]
+            .as_str()
+            .is_some_and(|c| c.starts_with("c_")),
+        "the open character is known: {v}"
+    );
+    // The last write was the player's: the DM's undo says so with its own code.
+    let (status, out) = act(&t.dm, c, "undo", json!({})).await;
+    assert_eq!(
+        (status, out["code"].as_str()),
+        (StatusCode::CONFLICT, Some("undo_player")),
+        "{out}"
+    );
     assert_eq!(v["me"][0]["prompts"], json!([]));
     let (_, log) = t.dm.get(&format!("/api/combats/{c}/log")).await;
     assert!(!log["entries"].as_array().unwrap().is_empty(), "{log}");
@@ -1049,6 +1062,23 @@ async fn retries_and_cas(t: &Table) {
     assert_eq!(status, StatusCode::OK, "{again}");
     assert_eq!(again["replayed"], true);
     assert_eq!(again["seq"], first["seq"], "done once");
+    // Later writes don't change what a retry answers: the first try's answer.
+    act_ok(
+        &t.dm,
+        &f.combat,
+        "set_notes",
+        json!({ "id": f.owlbear, "notes": "later" }),
+    )
+    .await;
+    let (_, late) = t
+        .dm
+        .post(
+            &path,
+            json!({ "requestId": "same-request-1", "args": { "target": f.owlbear, "parts": [{ "amount": typed(4) }] } }),
+        )
+        .await;
+    assert_eq!(late["seq"], first["seq"], "the original answer: {late}");
+    assert_eq!(late["replayed"], true);
     assert_eq!(hp_of(&again, &f.owlbear), hp_of(&first, &f.owlbear));
     // The same id from the player is the player's own.
     let pbody =
@@ -1202,6 +1232,47 @@ async fn export_import(t: &Table) {
         t.dm.post(&import, json!({ "requestId": request_id(), "file": newer }))
             .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+    // An encounter pet comes into the fight with its owner, acting right after it.
+    let e = ok(
+        &t.dm,
+        "POST",
+        &format!("/api/parties/{}/encounters", t.party),
+        json!({ "name": "Pets" }),
+    )
+    .await;
+    let e = e["id"].as_str().unwrap().to_string();
+    let path = format!("/api/encounters/{e}/creatures");
+    let v = ok(
+        &t.dm,
+        "POST",
+        &path,
+        json!({ "elementId": OWLBEAR, "dmLabel": "Rider", "hidden": false }),
+    )
+    .await;
+    let rider = last_creature(&v);
+    ok(
+        &t.dm,
+        "POST",
+        &path,
+        json!({ "elementId": GOBLIN, "dmLabel": "Pet", "hidden": false, "ownerId": rider }),
+    )
+    .await;
+    let v = ok(
+        &t.dm,
+        "POST",
+        &format!("/api/encounters/{e}/start"),
+        json!({ "requestId": request_id() }),
+    )
+    .await;
+    let owner = find_by_label(&v, "Rider");
+    let pet = combatants_of(&v)
+        .into_iter()
+        .find(|c| c["label"] == "Pet")
+        .unwrap();
+    assert_eq!(pet["owner_id"], owner.as_str(), "{pet}");
+    assert_eq!(pet["initiative_mode"], "after_owner");
+    let combat = v["id"].as_str().unwrap().to_string();
+    act_ok(&t.dm, &combat, "end", json!({})).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1358,6 +1429,7 @@ fn snapshot_of(state: CombatState, roster: BTreeMap<String, Member>) -> Snapshot
         roster,
         prompts: vec![],
         rolls: vec![],
+        offers: vec![],
         encounter: Some(EncounterInfo {
             id: "enc-1".into(),
             name: "DM name".into(),
@@ -1385,6 +1457,7 @@ fn creature_member(text: &str) -> Member {
         owner: None,
         character: None,
         block: Some(json!({ "actions": [{ "name": "Bite", "text": format!("{words} {text}") }] })),
+        ..Member::default()
     }
 }
 
@@ -1395,6 +1468,7 @@ fn pc_member(i: u64) -> Member {
         owner: Some(format!("acct-{i}")),
         character: Some(format!("c_{i}")),
         block: None,
+        ..Member::default()
     }
 }
 
@@ -1483,6 +1557,15 @@ fn hidden_creatures_change_nothing_a_player_sees() {
             c.public_name = format!("SECRET PUBLIC {i}");
             hidden = add_to(&hidden, c);
             hidden_roster.insert(id.clone(), creature_member(&id));
+            // A villain's pet, hidden like its owner, acting right after it.
+            if rng.below(2) == 0 {
+                let pet = format!("hidden-pet-{i}-{}", rng.next());
+                let mut p = Combatant::creature(&pet, format!("SECRET PET {i}"), 10, 12, 1);
+                p.public_name = format!("SECRET PET PUBLIC {i}");
+                p.owner_id = Some(CombatantId::new(id.clone()));
+                hidden = add_to(&hidden, p);
+                hidden_roster.insert(pet.clone(), creature_member(&pet));
+            }
             hidden_ids.push(id);
         }
         // Initiative: the same for the visible ones in both (no ties among them); random for the hidden.
@@ -1870,5 +1953,371 @@ async fn combats_on_postgres() {
     retries_and_cas(&postgres_table(&url, &dir.path().join("cas")).await).await;
     export_import(&postgres_table(&url, &dir.path().join("export")).await).await;
     add_sweep_and_limits(&postgres_table(&url, &dir.path().join("add")).await).await;
+    summons_and_companions(&postgres_table(&url, &dir.path().join("summons")).await).await;
+    live_and_unblocked(&postgres_table(&url, &dir.path().join("live")).await).await;
     drop_all(&url).await;
+}
+
+// Summons and companions (controlled creatures).
+
+async fn summons_and_companions(t: &Table) {
+    let f = fight(t).await;
+    let (_, dm_view) = t.dm.get(&format!("/api/combats/{}", f.combat)).await;
+    let character = dm_view["characters"][&f.pc_player]["characterId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(dm_view["creatures"][&f.dragon]["origin"], "encounter");
+    assert!(dm_view["creatures"][&f.dragon]["name"]
+        .as_str()
+        .is_some_and(|n| !n.is_empty()));
+    // A companion on the player's sheet is offered, to the DM and to its owner only.
+    let mut card = t
+        .state
+        .hub
+        .cards
+        .get(&t.player.id, &character)
+        .unwrap_or_default();
+    card.companions = vec![crate::hub::CompanionCard {
+        key: "granted".into(),
+        name: "Owl".into(),
+        element_id: None,
+        hp: 1,
+        ac: 11,
+        initiative: 3,
+        speed: 5,
+    }];
+    t.state.hub.cards.put(&t.player.id, &character, card, true);
+    let (_, mine) = t.player.get(&format!("/api/combats/{}", f.combat)).await;
+    let offers = mine["me"][0]["offers"].as_array().unwrap().clone();
+    assert_eq!(offers.len(), 1, "{mine}");
+    assert_eq!(offers[0]["name"], "Owl");
+    let (_, theirs) = t.member2.get(&format!("/api/combats/{}", f.combat)).await;
+    assert!(
+        !theirs.to_string().contains("Owl"),
+        "another player sees no offer: {theirs}"
+    );
+    // The player brings it in: a server id, controlled by their PC, shown to the party.
+    let v = act_ok(
+        &t.player,
+        &f.combat,
+        "summon",
+        json!({ "owner": f.pc_player, "companion": "granted" }),
+    )
+    .await;
+    let owl = v["me"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["kind"] == "creature")
+        .unwrap_or_else(|| panic!("the owl is mine: {v}"))["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(uuid::Uuid::parse_str(&owl).is_ok());
+    assert!(
+        v["me"][0]["offers"].as_array().unwrap().is_empty(),
+        "offered once: {v}"
+    );
+    let (_, dm_view) = t.dm.get(&format!("/api/combats/{}", f.combat)).await;
+    assert_eq!(dm_view["creatures"][&owl]["origin"], "companion");
+    act_ok(
+        &t.dm,
+        &f.combat,
+        "set_initiative",
+        json!({ "id": f.pc_player, "roll": typed(14) }),
+    )
+    .await;
+    let (_, seen) = t.member2.get(&format!("/api/combats/{}", f.combat)).await;
+    let row = seen["order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["id"] == owl.as_str())
+        .cloned()
+        .unwrap_or_else(|| panic!("a PC's summon is seen by the party: {seen}"));
+    assert_eq!(
+        row["ownerId"],
+        f.pc_player.as_str(),
+        "it acts after its owner"
+    );
+    assert_eq!(row["mine"], false);
+    // A creature from the player's own content.
+    let v = act_ok(
+        &t.player,
+        &f.combat,
+        "summon",
+        json!({ "owner": f.pc_player, "elementId": GOBLIN }),
+    )
+    .await;
+    assert_eq!(
+        v["me"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["kind"] == "creature")
+            .count(),
+        2,
+        "{v}"
+    );
+    // Not for another player's PC, and copyOf is the DM's.
+    let (status, _) = act(
+        &t.member2,
+        &f.combat,
+        "summon",
+        json!({ "owner": f.pc_player, "elementId": GOBLIN }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = act(
+        &t.player,
+        &f.combat,
+        "summon",
+        json!({ "owner": f.pc_player, "copyOf": f.owlbear }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // A villain's hidden pet: summoned by the DM to a hidden creature, it leaves no trace for players.
+    let (_, before) = t.player.get(&format!("/api/combats/{}", f.combat)).await;
+    let v = act_ok(
+        &t.dm,
+        &f.combat,
+        "summon",
+        json!({ "owner": f.dragon, "copyOf": f.goblin, "name": "SECRET-PET" }),
+    )
+    .await;
+    let pet = combatants_of(&v)
+        .into_iter()
+        .find(|c| c["label"] == "SECRET-PET")
+        .unwrap_or_else(|| panic!("{v}"));
+    assert_eq!(pet["visible"], false, "a hidden owner's pet starts hidden");
+    let (_, after) = t.player.get(&format!("/api/combats/{}", f.combat)).await;
+    assert_eq!(before, after, "byte for byte, pseq included");
+    assert!(!after.to_string().contains(pet["id"].as_str().unwrap()));
+    // The player may act for their owl, not for the DM's creatures.
+    let v = act_ok(
+        &t.player,
+        &f.combat,
+        "damage",
+        json!({ "target": owl, "parts": [{ "amount": typed(1) }] }),
+    )
+    .await;
+    let me_owl = v["me"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == owl.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(me_owl["hp"]["current"], 0, "{me_owl}");
+    act_ok(&t.player, &f.combat, "dismiss", json!({ "id": owl })).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn players_bring_in_companions_and_summons_and_hidden_pets_stay_hidden() {
+    let dir = tempfile::tempdir().unwrap();
+    summons_and_companions(&memory_table(dir.path()).await).await;
+}
+
+// Live: push latency, the heartbeat, and writes that never wait for a workspace.
+
+async fn next_combat_event(sub: &mut Subscription, within: std::time::Duration) -> Option<Value> {
+    let deadline = tokio::time::Instant::now() + within;
+    loop {
+        let left = deadline.checked_duration_since(tokio::time::Instant::now())?;
+        match tokio::time::timeout(left, sub.rx.recv()).await {
+            Ok(Some(m)) if m.event == crate::hub::COMBAT_EVENT => return Some(m.payload),
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => return None,
+        }
+    }
+}
+
+#[allow(clippy::cast_precision_loss)]
+async fn live_and_unblocked(t: &Table) {
+    let f = fight(t).await;
+    roll_in(t, &f).await;
+    let mut dm_sub = t.state.hub.subscribe(&t.dm.id, "lat-dm", None);
+    let mut sub = t.state.hub.subscribe(&t.player.id, "lat-player", None);
+    // Push latency: write to event, for the DM and a player, 40 reveals and hides.
+    let mut times = Vec::new();
+    let mut last_seq = None;
+    let mut last_pseq = None;
+    for i in 0..40 {
+        let action = if i % 2 == 0 { "reveal" } else { "hide" };
+        let start = std::time::Instant::now();
+        act_ok(&t.dm, &f.combat, action, json!({ "id": f.goblin })).await;
+        let dm_event = next_combat_event(&mut dm_sub, std::time::Duration::from_secs(2))
+            .await
+            .expect("the DM hears every write");
+        let event = next_combat_event(&mut sub, std::time::Duration::from_secs(2))
+            .await
+            .expect("the player hears a reveal and a hide");
+        times.push(start.elapsed().as_secs_f64() * 1000.0);
+        // Gapless: the DM's seq and the player's pseq go up by one each time.
+        let seq = dm_event["seq"].as_i64().unwrap();
+        let pseq = event["pseq"].as_i64().unwrap();
+        if let (Some(a), Some(b)) = (last_seq, last_pseq) {
+            assert_eq!((seq, pseq), (a + 1, b + 1), "no gaps");
+        }
+        last_seq = Some(seq);
+        last_pseq = Some(pseq);
+    }
+    times.sort_by(f64::total_cmp);
+    let p95 = times[(times.len() * 95 / 100).min(times.len() - 1)];
+    eprintln!(
+        "combat push latency ({}): p50 {:.1} ms, p95 {:.1} ms, max {:.1} ms",
+        t.state.db.kind(),
+        times[times.len() / 2],
+        p95,
+        times[times.len() - 1]
+    );
+    assert!(p95 < 300.0, "p95 {p95} ms");
+    // No blocking: a slow job in the DM's and the player's workspaces doesn't hold up combat writes, and neither do
+    // the account's combat job slots being taken.
+    let dm_ws = t.state.workspaces.get(&t.dm.id).await.unwrap();
+    let player_ws = t.state.workspaces.get(&t.player.id).await.unwrap();
+    let slow = |ws: std::sync::Arc<crate::workspaces::Workspace>| {
+        tokio::spawn(async move {
+            ws.blocking(|_| {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                Ok(())
+            })
+            .await
+        })
+    };
+    let jobs = [slow(dm_ws), slow(player_ws)];
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    for _ in 0..5 {
+        let start = std::time::Instant::now();
+        act_ok(
+            &t.dm,
+            &f.combat,
+            "damage",
+            json!({ "target": f.owlbear, "parts": [{ "amount": typed(1) }] }),
+        )
+        .await;
+        act_ok(
+            &t.player,
+            &f.combat,
+            "set_initiative",
+            json!({ "id": f.pc_player, "roll": typed(15) }),
+        )
+        .await;
+        let (status, _) = t.player.get(&format!("/api/combats/{}", f.combat)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(1500),
+            "{:?}",
+            start.elapsed()
+        );
+    }
+    assert!(
+        jobs.iter().all(|j| !j.is_finished()),
+        "the slow jobs were still running"
+    );
+    for j in jobs {
+        j.await.unwrap().unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn changes_reach_everyone_within_300_ms_and_never_wait_for_a_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    live_and_unblocked(&memory_table(dir.path()).await).await;
+}
+
+/// The account's event stream pings at least every 20 s (Cloudflare drops an idle stream at about 100 s).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_event_stream_pings() {
+    assert!(crate::hub::PING_EVERY <= std::time::Duration::from_secs(20));
+    let dir = tempfile::tempdir().unwrap();
+    let state = state_in(dir.path(), Db::open(&Location::Memory).await.unwrap());
+    let router = router_of(state, Setup::default().max_upload);
+    sign_up(&router, "ping-admin").await;
+    let client = sign_up(&router, "ping-user").await;
+    let request = Request::builder()
+        .uri("/api/events")
+        .header("authorization", format!("Bearer {}", client.token))
+        .body(Body::empty())
+        .unwrap();
+    let response = router.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = response.into_body();
+    let start = std::time::Instant::now();
+    let mut seen = String::new();
+    while start.elapsed() < std::time::Duration::from_secs(25) {
+        let Ok(Some(Ok(frame))) =
+            tokio::time::timeout(std::time::Duration::from_secs(25), body.frame()).await
+        else {
+            break;
+        };
+        if let Some(bytes) = frame.data_ref() {
+            seen.push_str(&String::from_utf8_lossy(bytes));
+        }
+        if seen.contains(crate::hub::PING_EVENT) {
+            break;
+        }
+    }
+    assert!(
+        seen.contains(crate::hub::PING_EVENT),
+        "no ping in {:?}: {seen}",
+        start.elapsed()
+    );
+    assert!(start.elapsed() <= std::time::Duration::from_secs(21));
+}
+
+/// A hidden creature's use of a legendary pool it shares with a revealed one leaves the player projection
+/// byte-identical: the counts are DM only (user, 2026-11-13).
+#[test]
+fn a_hidden_pool_member_changes_no_player_byte() {
+    let mut state = CombatState::new(Edition::Srd521);
+    let mut roster = BTreeMap::new();
+    let hp = Hp {
+        current: 20,
+        max: 20,
+        temp: 0,
+    };
+    state = add_to(
+        &state,
+        Combatant::character("pc-0", "acct-0", "Hero", hp, 15, 2),
+    );
+    roster.insert("pc-0".to_string(), pc_member(0));
+    state = add_to(&state, Combatant::creature("seen-0", "Seen", 90, 18, 2));
+    state = run(
+        &state,
+        &Command::Reveal {
+            id: CombatantId::new("seen-0"),
+        },
+    );
+    roster.insert("seen-0".to_string(), creature_member("seen-0"));
+    state = add_to(&state, Combatant::creature("hidden-0", "SECRET", 90, 18, 2));
+    roster.insert("hidden-0".to_string(), creature_member("hidden-0"));
+    state = run(
+        &state,
+        &Command::SetLegendaryPool {
+            pool: "pair".into(),
+            value: party_combat::LegendaryPool {
+                max: 3,
+                remaining: 3,
+                members: vec![CombatantId::new("hidden-0"), CombatantId::new("seen-0")],
+            },
+        },
+    );
+    let before = project(&state, &roster);
+    for delta in [-1, -1, 2, -3] {
+        state = run(
+            &state,
+            &Command::AdjustLegendary {
+                pool: "pair".into(),
+                delta,
+            },
+        );
+        assert_eq!(project(&state, &roster), before, "delta {delta}");
+    }
+    let text = String::from_utf8(before).unwrap();
+    assert!(
+        !text.contains("legendary_actions") && !text.contains("\"remaining\""),
+        "{text}"
+    );
 }

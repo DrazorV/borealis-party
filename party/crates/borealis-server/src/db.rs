@@ -251,6 +251,8 @@ const MIGRATIONS: &[&[&str]] = &[
             owner_id TEXT,
             character_id TEXT,
             statblock_json TEXT,
+            name TEXT,
+            origin TEXT,
             created_at BIGINT NOT NULL,
             PRIMARY KEY (combat_id, id)
         )",
@@ -301,6 +303,7 @@ const MIGRATIONS: &[&[&str]] = &[
             account_id TEXT NOT NULL,
             request_id TEXT NOT NULL,
             result TEXT NOT NULL,
+            response_json TEXT,
             created_at BIGINT NOT NULL,
             PRIMARY KEY (scope, account_id, request_id)
         )",

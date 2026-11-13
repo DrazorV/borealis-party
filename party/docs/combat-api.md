@@ -16,7 +16,7 @@ the server config (`BOREALIS__FEATURES__PARTIES`).
 | Caller | What they get |
 |---|---|
 | The party's DM (`parties.dm_id`, read on every request) | the **DM view**, and every action |
-| A player in the party (owns a member character, checked on every request) | the **projection** only, and the few player actions below, for **their own PC** only |
+| A player in the party (owns a member character, checked on every request) | the **projection** only, and the player actions below, for **their own PC and the creatures it controls** only |
 | Anyone else, a wrong id, a malformed id | 404 |
 
 - **One 404 for players and outsiders:** `{ "code": "not_found", "message": "There is no such combat here." }`, word
@@ -32,10 +32,14 @@ the server config (`BOREALIS__FEATURES__PARTIES`).
 Body `{ "requestId": "…" }` (see [Writes](#writes)). Starts a combat from the encounter and answers the **DM view**.
 
 - The edition is always the party's (D23 b).
-- Creatures: one combatant per encounter creature, with a **new random UUID** (never the encounter creature's id).
-  Hidden creatures start hidden; revealed ones start revealed. HP: the creature's fixed HP if set (a typed roll,
-  D43), otherwise the printed average (D22 a), or rolled from the formula when the encounter's `hpMode` is `rolled`.
+- Creatures: one combatant per encounter creature (monsters and Aurora companions, D17 b), with a **new random
+  UUID** (never the encounter creature's id). Hidden creatures start hidden; revealed ones start revealed. HP: the
+  creature's fixed HP if set (a typed roll, D43), otherwise the printed average (D22 a), or rolled from the formula
+  when the encounter's `hpMode` is `rolled`. AC: the printed (or overridden) one; none for a thin companion block.
   The stat block (overrides applied) is copied into the combat, so later encounter edits don't change a running fight.
+- Controlled creatures (pets, mounts, summons): an encounter creature with an `ownerId` comes in with `owner_id` set to
+  its owner's combatant, `controller` DM, and its `initMode` (`after_owner`: right after the owner; `own`). Owners are
+  added before their pets. A pet keeps its own visibility (a hidden owner's pet usually starts hidden too).
 - PCs: every member character of the party, from its roster card (HP, AC, initiative bonus). A PC's HP stays the
   player's own (D7 a): the server never writes a player's file.
 - The encounter's status becomes `live`; the combat is in `setup` until the DM sends `start`.
@@ -81,10 +85,14 @@ Every answer a player gets, every player event and every player error is built b
     { "id": "…", "kind": "creature", "name": "Owlbear", "mine": false, "band": "unhurt", "life": { "state": "alive" },
       "conditions": [], "exhaustion": 0, "concentration": null,
       "view": { …player_view_of: exact hp, ac, speed, defenses, effects, abilities with their text, economy… },
-      "statBlock": { …MonsterData, overrides applied, without xp / xp_lair… } }
+      "statBlock": { …MonsterData, overrides applied, without xp / xp_lair… } },
+    { "id": "…", "kind": "creature", "name": "Owl", "mine": true, "ownerId": "…Aria's combatant id…", "…": "…" }
   ],
   "me": [
     { "id": "…my PC, or a creature it controls…", "kind": "character",
+      "characterId": "c_…",                // my PC's character id (null for a creature): which `me` is the open sheet
+      "offers": [{ "key": "granted", "name": "Owl", "hp": 1, "ac": 11, "initiative": 3 }],
+                                           // companions on this PC's sheet not in the fight yet (summon with `companion`)
       "hp": { "current": 20, "max": 24, "temp": 0 },
       "life": { "state": "alive" },        // the engine's Life: alive | stable | dead | { "state": "dying", "successes": 1, "failures": 0 }
       "absent": false,                     // C1: not in this fight
@@ -109,6 +117,8 @@ Every answer a player gets, every player event and every player error is built b
 - **Revealed creatures (D20 b):** `view` plus the full `statBlock`. There are no reveal levels. A creature's
   initiative isn't sent (a follower's would give away a hidden leader's), and neither is a PC's owning account
   (`view.kind`) except for my own.
+- **`ownerId`** (any row): the combatant a creature acts for and right after (a pet, a summon), only when that owner
+  is visible. A hidden villain's hidden pet leaves no trace at all: no row, no id, no turn, no count.
 - **Other PCs:** name, band (`unhurt` / `bloodied` / `down`), life, conditions, exhaustion, concentration, initiative;
   no `view`, no HP numbers (D6). **Mine** (`mine: true`, and the `me` list): my PCs that are members of the party and
   the creatures they control (summons, pets, companions): full HP, death saves, concentration checks waiting, open
@@ -125,9 +135,12 @@ Every answer a player gets, every player event and every player error is built b
   "seq": 12,                     // the CAS counter: send it back as expectSeq
   "status": "active",
   "state": { …party-combat CombatState, as combat-engine.md describes… },
-  "creatures": { "<combatant id>": { "encounterCreatureId": "…" | null, "statBlock": { …MonsterData… } } },
+  "creatures": { "<combatant id>": { "encounterCreatureId": "…" | null, "statBlock": { …MonsterData or companion… },
+                                       "name": "Goblin Warrior",        // the element's name (null for a typed summon)
+                                       "origin": "encounter" | "copy" | "element" | "companion" | "summon" } },
   "characters": { "<combatant id>": { "ownerId": "…", "characterId": "c_…", "member": true, "online": true } },
   "prompts": [{ "id", "combatantId", "kind": "damage" | "heal", "amount", "parts", "criticalHit", "at" }],
+  "offers": [{ "pc": "<combatant id>", "key", "name", "hp", "ac", "initiative", "elementId" }],   // PCs' sheet companions
   "undo": ["damage", "next turn", …],      // newest first (the engine's labels)
   "startedAt", "endedAt"
 }
@@ -145,8 +158,8 @@ no longer sees the combat.
 ```
 
 - **`requestId`** (required, 1–64 characters of `A-Z a-z 0-9 _ -`): one per user action. Sending the same id again
-  (a retry after a timeout, or the ~60 s offline buffer replaying, D44) does the write **at most once** and answers the
-  caller's current view with `"replayed": true`. Ids are kept for a day.
+  (a retry after a timeout, or the ~60 s offline buffer replaying, D44) does the write **at most once** and answers
+  **the answer the first try got**, with `"replayed": true`. Ids are kept for a day.
 - **`expectSeq`** (DM only, optional): the `seq` the DM's view showed. When it isn't the current `seq` the write is
   refused with 409 `{ "code": "stale", "message": "The combat changed. Refresh and try again.", "seq": <current> }`.
   Without it, the write applies to the newest state (commands are intents like "7 slashing to X", so a queued write
@@ -177,14 +190,27 @@ Every engine command by its tag (`set_initiative`, `damage`, `heal`, `set_hp`, `
 | `condition_add` / `condition_remove` | as `add_condition` / `remove_condition` | aliases |
 | `remove_creature` | `{ id }` | `remove_combatant` (a tombstone; undo restores it) |
 | `add_creature` | `{ copyOf: "<combatant id>" }` or `{ encounterCreatureId }`, plus `count` (1–10, default 1), `rollInitiative` (default true), `hidden` (default: like the source) | C7: new copies with new random ids, the stat block copied, labels numbered |
-| `undo` | `{ force?: bool }` | C8: revert the DM's last write (50 steps). `force` is needed when the last write was a player's |
+| `undo` | `{ force?: bool }` | C8: revert the last write (50 steps). When it was a player's: 409 `{ "code": "undo_player" }` unless `force` |
 | `end` | – | ends the combat; the encounter becomes `ended`; the D6 health band switches off |
 | `export` | – | D45: answers `{ "format": "borealis-party-combat", "schema_version": 1, "state", "log", "server": { "creatures", "characters" } }` (no `requestId` needed; it writes nothing) |
 
-The engine's newer commands work the same way: `roll`, `attack`, `roll_hp`, `summon`, `dismiss`,
-`set_initiative_mode`. `add_combatant` and `sync_player_hp` are not offered: the server builds combatants itself and
-syncs PC HP itself. A summon from a stat block in the bestiary isn't offered yet (`summon` takes the combatant as the
-engine shapes it).
+The engine's newer commands work the same way: `roll`, `attack`, `roll_hp`, `dismiss`, `set_initiative_mode`.
+`add_combatant` and `sync_player_hp` are not offered: the server builds combatants itself and syncs PC HP itself.
+
+### Summons (DM and players)
+
+`summon` takes `{ owner, initiative?, visible? }` (as the engine) plus **one** of:
+
+| Field | The creature |
+|---|---|
+| `companion: "<key>"` | a companion on the owning PC's sheet (`offers`); offered once while it's in the fight |
+| `elementId` | a typed Monster or an Aurora Companion element of the **caller's own** content |
+| `copyOf: "<combatant id>"` (DM) | a fresh copy of a creature in this fight |
+| `combatant` | an engine-shaped block the client typed: `{ "kind": "creature", "label", "public_name", "hp": { "current", "max" }, "ac"? }` |
+
+Optional `name` / `publicName` rename an `elementId` or `copyOf` summon. The server **always** mints the id (a random
+UUID), builds the block, and adds the creature to the DM view's `creatures`. A PC's summon is controlled by that PC's
+player and is always visible; a DM creature's pet starts as its owner is.
 
 ### Player actions
 
@@ -199,7 +225,7 @@ and still a member of the party. Plus:
 |---|---|
 | `resolve_prompt` | `{ promptId, applied: bool, hp?: { current, max, temp } }` |
 
-- `summon` (DM or player): the server replaces `combatant.id` with a random UUID, whatever the client sent.
+- `summon` for their own PC (see [Summons](#summons-dm-and-players)); not `copyOf`.
 - Anything else, another player's PC or creature, a DM creature, a hidden or unknown id, a server action (`undo`,
   `end`, `add_creature`, `remove_creature`, `export`), a malformed body: the one 404.
 - A refusal about the player's own PC answers 409 with a fixed message: "Not making death saves.", "Dead: set HP to
@@ -233,8 +259,25 @@ On the account's existing event stream (`party/docs/parties-api.md`), never a se
 - `party://party` with `{ "party", "pseq", "kind": "combat", "id": "<combat id>" }` to the DM and the players when a
   combat starts or ends: refetch `GET /api/parties/{party}/combat` and the roster (the health band, D6, shows only
   while a combat is live).
-- Payloads are invalidations only: refetch `GET /api/combats/{combat}`. A reveal reaches online players within about
-  2 s. "Your turn" is in the projection (`turn.id` is one of my PCs); vibrate when it becomes so.
+- `party://ping` with `{}` and no id, every 15 s on every stream (plus SSE keep-alive comments for proxies;
+  Cloudflare drops an idle stream at about 100 s). No ping for about 45 s means the stream is dead: reconnect.
+- Payloads are invalidations only: refetch `GET /api/combats/{combat}`. "Your turn" is in the projection (`turn.id`
+  is one of my `me` ids: a PC or a creature it controls); vibrate when it becomes so.
+
+### Guarantees (tested)
+
+- **Latency:** a write reaches every connected DM and player stream within 300 ms locally (tested: p95 is logged; on
+  SQLite about 30 ms).
+- **Gapless, resync in one request:** the DM's `seq` goes up by exactly 1 per write; a player's `pseq` by exactly 1
+  per change of their view. A client that sees a jump, reconnects (`?after=<last event id>` gives a
+  `party://resync` when it missed anything), or comes back from the background fetches `GET /api/combats/{combat}`
+  once: that answer is the whole current state, with its `seq` / `pseq`.
+- **Compare-and-set:** two writers never overwrite each other; a stale `expectSeq` gets 409 `stale` with the current
+  `seq` (two-writer tests on SQLite and PostgreSQL).
+- **Idempotent:** a repeated `requestId` applies nothing and answers the first answer.
+- **Never blocked by content work:** combat writes and reads use only the database and the in-memory roster cards,
+  never the account's workspace, so a slow content reload or index job doesn't hold them up (tested with a 3 s job
+  running in both the DM's and the player's workspaces).
 
 ## Storage (`M-combat`)
 
@@ -242,12 +285,12 @@ Migration step 6 (after 4 = monster_meta and 5 = encounters; numbers are fixed a
 
 - `combats`: the party, the encounter, `status`, `seq` (CAS), the engine state and die as JSON, times.
 - `combatants`: one row per combatant id: `kind`, the encounter creature it came from, the PC's owner and character,
-  and the stat block a creature fights with.
+  the stat block a creature fights with, its element's `name` and its `origin`.
 - `combat_journal`: undo steps (the state before each write, 50 kept per combat).
 - `combat_log`: the DM-only log.
 - `combat_views`: each player's last projection hash and `pseq`.
-- `combat_prompts`: open and resolved damage and heal prompts.
-- `combat_requests`: request ids already done (a day).
+- `combat_prompts`: open and resolved damage and heal prompts, and players' roll results.
+- `combat_requests`: request ids already done, with the first answer (a day).
 
 Everything cascades from the party. Log, journal and requests of combats ended more than 90 days ago are deleted
 (D32 a).

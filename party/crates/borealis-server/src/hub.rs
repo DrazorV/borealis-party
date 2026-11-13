@@ -34,6 +34,11 @@ pub const MINE_EVENT: &str = "party://mine";
 /// A combat changed (`combat.rs`): `{ party, combat, seq }` for the DM, `{ party, combat, pseq }` for a player whose
 /// own projection changed. Refetch the combat.
 pub const COMBAT_EVENT: &str = "party://combat";
+/// A heartbeat on every stream, `{}` with no id, every [`PING_EVERY`]: a client that hears nothing for a few of them
+/// reconnects (and refetches). The SSE keep-alive comments go on too, for proxies; this one is for the app.
+pub const PING_EVENT: &str = "party://ping";
+/// How often [`PING_EVENT`] goes out: well under the ~100 s a proxy (Cloudflare) waits on an idle stream.
+pub const PING_EVERY: std::time::Duration = std::time::Duration::from_secs(15);
 /// Events may have been missed: refetch everything shown.
 pub const RESYNC_EVENT: &str = "party://resync";
 
@@ -316,6 +321,27 @@ pub struct Stats {
     pub inspiration: bool,
 }
 
+/// A companion on a character's sheet (a familiar, a beast companion, a steed), as the sheet computes it: offered as a
+/// summon when its owner's party fights (`combat.rs`). Never shown to other members ([`card_view_for`]).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompanionCard {
+    /// The sheet's key for it (`granted`, `companion-2`).
+    pub key: String,
+    /// Its name on the sheet.
+    pub name: String,
+    /// The creature element it is, if any.
+    pub element_id: Option<String>,
+    /// Hit points.
+    pub hp: i32,
+    /// Armor class.
+    pub ac: i32,
+    /// Initiative bonus.
+    pub initiative: i32,
+    /// Walking speed in feet.
+    pub speed: i32,
+}
+
 /// A member character's card: the identity everyone in the party may see, and the stats only the DM and the owner
 /// may.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -333,6 +359,9 @@ pub struct Card {
     pub stats: Option<Stats>,
     /// When these were read, in seconds.
     pub read_at: Option<i64>,
+    /// The companions on its sheet (combat summons; never in a card view).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub companions: Vec<CompanionCard>,
 }
 
 impl Card {
@@ -398,6 +427,19 @@ impl Card {
                 inspiration: play.inspiration,
             }),
             read_at: Some(crate::db::now()),
+            companions: snap
+                .companions
+                .iter()
+                .map(|c| CompanionCard {
+                    key: c.id.clone(),
+                    name: c.name.clone(),
+                    element_id: c.creature.as_ref().map(|e| e.id.clone()),
+                    hp: c.hp,
+                    ac: c.armor_class,
+                    initiative: c.initiative,
+                    speed: c.speed,
+                })
+                .collect(),
         }
     }
 
@@ -620,6 +662,7 @@ mod tests {
                 ..Stats::default()
             }),
             read_at: Some(1),
+            companions: vec![],
         }
     }
 
