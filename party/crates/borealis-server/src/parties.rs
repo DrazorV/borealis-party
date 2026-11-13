@@ -1934,7 +1934,8 @@ pub async fn view_snapshot(
         return Err(not_found());
     }
     let row = sqlx::query(
-        "SELECT owner_id, character_id FROM party_members WHERE party_id = $1 AND owner_id = $2 AND character_id = $3",
+        "SELECT m.owner_id, m.character_id, u.username FROM party_members m JOIN users u ON u.id = m.owner_id
+         WHERE m.party_id = $1 AND m.owner_id = $2 AND m.character_id = $3",
     )
     .bind(&party)
     .bind(&owner)
@@ -1942,7 +1943,8 @@ pub async fn view_snapshot(
     .fetch_optional(state.db.pool())
     .await?
     .ok_or_else(not_found)?;
-    let (owner, character): (String, String) = (row.try_get(0)?, row.try_get(1)?);
+    let (owner, character, owner_name): (String, String, String) =
+        (row.try_get(0)?, row.try_get(1)?, row.try_get(2)?);
     let _viewing = Viewing::start(&user.id).ok_or(ApiError::TooMany)?;
     let workspace = match state.workspaces.loaded_now(&owner) {
         Some(workspace) => workspace,
@@ -1968,9 +1970,11 @@ pub async fn view_snapshot(
         .await?
         .pop()
         .unwrap_or((Card::default(), "unreadable"));
+    let mut card = card_view_for(Viewer::Dm, &card, file_state);
+    card.insert("ownerName".into(), json!(owner_name));
     Ok(Json(json!({
         "snapshot": snapshot,
-        "card": card_view_for(Viewer::Dm, &card, file_state),
+        "card": card,
         "pseq": pseq,
     })))
 }

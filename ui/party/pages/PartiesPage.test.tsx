@@ -77,6 +77,7 @@ beforeEach(() => {
   vi.stubGlobal("localStorage", memoryStorage());
   server = fakePartiesServer(ACCOUNTS(), "pl1");
   partiesDeps.fetch = server.fetch;
+  partiesDeps.events = server.listen;
   state.confirm = "confirm";
   state.toasts = [];
 });

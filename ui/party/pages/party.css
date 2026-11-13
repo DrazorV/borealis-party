@@ -191,3 +191,46 @@ html.phone .party-parties .input, html.phone .party-form .input { font-size: 16p
 html.phone .party-parties .party-inline > .btn, html.phone .party-actions > .btn { flex: 1 1 auto; justify-content: center; }
 .party-dm-offer .btn { text-decoration: none; }
 html.phone .party .party-note a, html.phone .party-dm-offer .btn { display: inline-flex; align-items: center; justify-content: center; min-height: var(--ph-hit); min-width: var(--ph-hit); }
+
+/*
+ * The live roster (0.2.1): a member's numbers as small tiles that wrap, a health band chip, and the DM's read-only
+ * sheet (PartyCharacterView). Phone first (384 px): tiles wrap, nothing widens the page.
+ */
+.party-parties .party-member { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.party-member-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.party-member-actions .btn { text-decoration: none; }
+.party-stats, .party-sheet-slots { display: flex; flex-wrap: wrap; gap: var(--sp-1); min-width: 0; }
+.party-stat { display: inline-flex; align-items: baseline; gap: 0.35em; padding: 2px var(--sp-2); border: var(--border-w) solid var(--border);
+  border-radius: var(--radius); background: var(--surface-2, var(--surface)); font-variant-numeric: tabular-nums; }
+.party-stat-label { font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.75; }
+.party-stat-value { font-weight: 600; }
+.party-stat-temp { color: var(--info, var(--accent, inherit)); }
+.party-stat-hp { border-left: 3px solid var(--success, var(--border)); }
+.party-stat-hp.bloodied { border-left-color: var(--warning, #b8860b); }
+.party-stat-hp.down { border-left-color: var(--danger, #b22222); }
+.party-conditions { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.party-sheet { max-width: 760px; }
+.party-sheet .card p { margin: 0 0 var(--sp-1); }
+.party-sheet-hp { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-2) 0; }
+.party-sheet-hp-now { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.party-sheet-hp-bar { flex: 1 0 100%; height: 6px; border-radius: 3px; background: var(--surface-2, var(--border)); overflow: hidden; }
+.party-sheet-hp-bar > span { display: block; height: 100%; background: var(--success, var(--accent, #4a6fa5)); transition: width 0.3s ease; }
+.party-sheet-hp-bar > span.bloodied { background: var(--warning, #b8860b); }
+.party-sheet-hp-bar > span.down { background: var(--danger, #b22222); }
+.party-sheet-boxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr)); gap: var(--sp-2); }
+.party-sheet-box, .party-sheet-ability { display: flex; flex-direction: column; align-items: center; padding: var(--sp-2); border: var(--border-w) solid var(--border);
+  border-radius: var(--radius); background: var(--surface-2, var(--surface)); min-width: 0; text-align: center; }
+.party-sheet-box.wide { grid-column: span 2; }
+.party-sheet-box-label { font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.75; overflow-wrap: anywhere; }
+.party-sheet-box-value { font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.party-sheet-abilities { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.party-sheet-save { font-size: var(--fs-sm); }
+.party-sheet .party-line { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.party-sheet .party-line > .grow { flex: 1 1 10em; min-width: 0; overflow-wrap: anywhere; }
+.party-sheet-bonus { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.party-sheet-tags { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.party-sheet-tags li { padding: 2px var(--sp-2); border: var(--border-w) solid var(--border); border-radius: var(--radius); overflow-wrap: anywhere; }
+.party-sheet-tags li.equipped { border-color: var(--accent, var(--border)); }
+html.phone .party-member-actions > .btn { flex: 1 1 auto; justify-content: center; min-height: var(--ph-hit); }
+html.phone .party-sheet .party-line > .btn { min-height: var(--ph-hit); display: inline-flex; align-items: center; }
+@media (min-width: 640px) { .party-sheet-abilities { grid-template-columns: repeat(6, minmax(0, 1fr)); } }

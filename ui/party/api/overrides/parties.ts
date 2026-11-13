@@ -1,12 +1,15 @@
-import { serverFetch } from "../http";
+import type { CharacterSnapshot } from "../../../src/api/contract";
+import { serverFetch, type ServerEvent } from "../http";
+import { liveEvents } from "../liveEvents";
 import { loadSession, type ServerSession } from "../session";
 import { override } from "./registry";
 
 /**
- * Parties (plan 3.3-3.5, 4.1; release 0.2.0): the server's `/api/parties`, `/api/invites` and `/api/join` routes, and
- * the DM switch, as party/docs/parties-api.md describes them. Characters never move: a party is rows on the server,
- * and a member character stays in its owner's folder. What a DM sees of a member is the server's read-only roster
- * card, read from the saved file, never the owner's files or session.
+ * Parties (plan 3.3-3.7, 4.1; releases 0.2.0 and 0.2.1): the server's `/api/parties`, `/api/invites` and `/api/join`
+ * routes, the DM switch, the DM's read-only view of a member character and the party events on the account's event
+ * stream, as party/docs/parties-api.md describes them. Characters never move: a party is rows on the server, and a
+ * member character stays in its owner's folder. What anyone sees of a member is the server's projection of its card
+ * for them (`card_view_for`): the DM and the owner get the numbers, other members a name, class, level and health band.
  *
  * Every call goes through {@link partiesDeps}, so tests answer them from a fake server (../../test/partiesServer.ts).
  * Times from the server are seconds since the epoch; the functions here turn them into milliseconds.
@@ -29,7 +32,31 @@ export interface PartySummary {
   updatedAt: number;
 }
 
-/** A roster card. 0.2.0 has name, level and edition; class and the numbers come in 0.2.1. */
+/** One class of a member character. */
+export interface ClassLine {
+  name: string;
+  level: number;
+}
+
+/** What the DM (and the owner) see of a member character at the table. */
+export interface CardStats {
+  hp: number;
+  hpMax: number;
+  tempHp: number;
+  armorClass: number;
+  initiative: number;
+  speed: number;
+  passivePerception: number;
+  spellDcs: { class: string; dc: number }[];
+  exhaustion: number;
+  concentration: string | null;
+  inspiration: boolean;
+}
+
+/** How hurt a member looks to the rest of the party (plan D6). */
+export type HealthBand = "unhurt" | "bloodied" | "down";
+
+/** A roster card, as the server projects it for the signed-in account. */
 export interface PartyMember {
   characterId: string;
   ownerName: string;
@@ -42,6 +69,16 @@ export interface PartyMember {
   name: string | null;
   level: number | null;
   ruleset: Ruleset | null;
+  /** Main class first; empty until the server read the character with its content. */
+  classes?: ClassLine[];
+  /** The DM and the owner only: null until the owner played it or the DM viewed it. */
+  stats?: CardStats | null;
+  /** When `stats` were read (ms). */
+  readAt?: number | null;
+  /** Other members only. */
+  band?: HealthBand | null;
+  /** The DM only: the owner has the app open. */
+  online?: boolean;
   build: string | null;
   state: "ok" | "unreadable" | "missing";
   joinedAt: number;
@@ -61,7 +98,23 @@ export interface PartyInvite {
 export interface Party extends PartySummary {
   members: PartyMember[];
   invites?: PartyInvite[];
+  /** How new this view is: a party event with a higher `pseq` means it changed since. */
+  pseq?: number;
 }
+
+/** The DM's read-only view of a member character: upstream's snapshot as its owner has it now, and its card. */
+export interface MemberView {
+  snapshot: CharacterSnapshot;
+  card: PartyMember;
+  pseq: number;
+}
+
+/** A party event from the account's event stream (party/docs/parties-api.md). */
+export type PartyEvent =
+  | { type: "party"; party: string; pseq: number; kind: string; id: string | null }
+  | { type: "mine"; kind: string }
+  /** Events may have been missed (a resync, or the stream reopened after a drop): reload everything shown. */
+  | { type: "resync" };
 
 /** A join code just made. The code itself is shown this once: the server keeps only its hash. */
 export interface JoinCode {
@@ -87,11 +140,17 @@ export interface CodePreview {
 
 export interface PartiesDeps {
   fetch: (session: Pick<ServerSession, "baseUrl" | "token">, method: string, path: string, body?: unknown) => Promise<unknown>;
+  /** The account's event stream: events, and opens (`again` after a drop). Answers a stop. */
+  events: (onEvent: (e: ServerEvent) => void, onOpen: (again: boolean) => void) => () => void;
 }
 
 const DEFAULT_DEPS: PartiesDeps = {
   // Late-bound: ../http.ts imports this module before its own exports are set.
   fetch: (session, method, path, body) => serverFetch(session, method, path, body),
+  events: (onEvent, onOpen) => {
+    const session = loadSession();
+    return session ? liveEvents(session, onEvent, { onOpen }) : () => {};
+  },
 };
 
 export const partiesDeps: PartiesDeps = { ...DEFAULT_DEPS };
@@ -115,7 +174,9 @@ const seg = (id: string) => encodeURIComponent(id);
 const ms = (seconds: number) => seconds * 1000;
 
 const summary = <T extends PartySummary>(p: T): T => ({ ...p, createdAt: ms(p.createdAt), updatedAt: ms(p.updatedAt) });
-const member = (m: PartyMember): PartyMember => ({ ...m, joinedAt: ms(m.joinedAt) });
+const member = (m: PartyMember): PartyMember => ({
+  ...m, joinedAt: ms(m.joinedAt), ...(m.readAt != null ? { readAt: ms(m.readAt) } : {}),
+});
 const invite = (i: PartyInvite): PartyInvite => ({ ...i, createdAt: ms(i.createdAt), expiresAt: ms(i.expiresAt) });
 const detail = (p: Party): Party => ({
   ...summary(p), members: (p.members ?? []).map(member), ...(p.invites ? { invites: p.invites.map(invite) } : {}),
@@ -162,16 +223,55 @@ export async function loadParties(): Promise<{ dm: boolean; parties: Party[]; of
     if (notFound(e)) return { dm: false, parties: [], off: true };
     throw e;
   }
-  const parties = await Promise.all(list.parties.map(async (p) => {
-    try {
-      return detail(await call<Party>("GET", `/api/parties/${seg(p.id)}`));
-    } catch (e) {
-      // Gone since the list (deleted, or the last character left): left out.
-      if (notFound(e)) return null;
-      throw e;
-    }
-  }));
+  const parties = await Promise.all(list.parties.map((p) => loadParty(p.id)));
   return { dm: list.dm, parties: parties.filter((p): p is Party => p !== null) };
+}
+
+/** One party with its roster, or null when it's gone or no longer yours to see. */
+export async function loadParty(id: string): Promise<Party | null> {
+  try {
+    return detail(await call<Party>("GET", `/api/parties/${seg(id)}`));
+  } catch (e) {
+    if (notFound(e)) return null;
+    throw e;
+  }
+}
+
+/** The DM's read-only view of a member character. Null when it isn't in the party (any more). */
+export async function viewMember(partyId: string, ownerId: string, characterId: string): Promise<MemberView | null> {
+  try {
+    const out = await call<MemberView>("POST", `/api/parties/${seg(partyId)}/members/${seg(ownerId)}/${seg(characterId)}/view/snapshot`, {});
+    return { ...out, card: member({ ...out.card, characterId, joinedAt: 0 } as PartyMember) };
+  } catch (e) {
+    if (notFound(e)) return null;
+    throw e;
+  }
+}
+
+const PARTY_EVENT = "party://party";
+const MINE_EVENT = "party://mine";
+const RESYNC_EVENT = "party://resync";
+
+/** Party events, as they come; a reopened stream counts as a resync. Answers a stop. */
+export function watchParties(listener: (e: PartyEvent) => void): () => void {
+  return partiesDeps.events((e) => {
+    const p = (e.payload ?? {}) as Record<string, unknown>;
+    if (e.event === PARTY_EVENT && typeof p.party === "string") {
+      listener({ type: "party", party: p.party, pseq: Number(p.pseq ?? 0), kind: String(p.kind ?? ""), id: typeof p.id === "string" ? p.id : null });
+    } else if (e.event === MINE_EVENT) {
+      listener({ type: "mine", kind: String(p.kind ?? "") });
+    } else if (e.event === RESYNC_EVENT) {
+      listener({ type: "resync" });
+    }
+  }, (again) => { if (again) listener({ type: "resync" }); });
+}
+
+/** Human words for a health band. */
+export const BAND_LABEL: Record<HealthBand, string> = { unhurt: "Unhurt", bloodied: "Bloodied", down: "Down" };
+
+/** "Fighter 3 / Wizard 2", or "" when the classes aren't known. */
+export function classLine(classes: ClassLine[] | undefined): string {
+  return (classes ?? []).map((c) => `${c.name} ${c.level}`).join(" / ");
 }
 
 export const createParty = (name: string) => changing(call<Party>("POST", "/api/parties", { name }).then(detail));

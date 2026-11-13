@@ -1,4 +1,5 @@
-import type { MyInvite, Party, PartyInvite, PartyMember, PartySummary } from "../api/overrides/parties";
+import type { ServerEvent } from "../api/http";
+import type { CardStats, ClassLine, MyInvite, Party, PartyInvite, PartyMember, PartySummary } from "../api/overrides/parties";
 
 /**
  * An in-memory parties server for tests. It answers the routes in party/docs/parties-api.md the way the server does:
@@ -6,13 +7,16 @@ import type { MyInvite, Party, PartyInvite, PartyMember, PartySummary } from "..
  * - a username invite is always "sent";
  * - a character is in at most one party (409 `conflict`);
  * - a code's uses are taken only when a character joins;
- * - times are in seconds.
+ * - times are in seconds;
+ * - a member's card is projected for the viewer (plan D6): stats for the DM and the owner, a health band for others;
+ * - `emit` sends an event on the account's stream (`listen` is what `partiesDeps.events` calls).
  */
 
 interface Row { id: string; name: string; dmId: string; createdAt: number }
 interface Invite { id: string; partyId: string; username?: string; code?: string; usesLeft: number; expiresAt: number }
 interface Member { ownerId: string; characterId: string; partyId: string; joinedAt: number }
-interface Account { id: string; username: string; dm: boolean; characters: { id: string; name: string; level: number }[] }
+interface Character { id: string; name: string; level: number; classes?: ClassLine[]; stats?: CardStats | null }
+interface Account { id: string; username: string; dm: boolean; online?: boolean; characters: Character[] }
 
 export interface FakeServer {
   accounts: Account[];
@@ -28,8 +32,31 @@ export interface FakeServer {
   /** Parties switched off in the server's config: every route answers 404. */
   off: boolean;
   calls: { method: string; path: string; body?: unknown }[];
+  /** Each party's sequence (the tests move it with the events they send). */
+  pseq: Map<string, number>;
   fetch: (session: unknown, method: string, path: string, body?: unknown) => Promise<unknown>;
+  /** For `partiesDeps.events`. */
+  listen: (onEvent: (e: ServerEvent) => void, onOpen: (again: boolean) => void) => () => void;
+  /** Send an event to the listening page. */
+  emit: (e: ServerEvent) => void;
+  /** The stream dropped and reopened. */
+  reopen: () => void;
+  /** Streams open now. */
+  listening: () => number;
 }
+
+/** Stats for a test character. */
+export function stats(hp: number, hpMax: number, more: Partial<CardStats> = {}): CardStats {
+  return {
+    hp, hpMax, tempHp: 0, armorClass: 16, initiative: 2, speed: 30, passivePerception: 13, spellDcs: [], exhaustion: 0,
+    concentration: null, inspiration: false, ...more,
+  };
+}
+
+const band = (st: CardStats | null | undefined) => {
+  if (!st || st.hpMax === 0) return null;
+  return st.hp === 0 ? "down" : st.hp * 2 <= st.hpMax ? "bloodied" : "unhurt";
+};
 
 const err = (code: string, message: string) => ({ code, message });
 const notFound = () => err("not_found", "Not found.");
@@ -42,16 +69,32 @@ export const charId = (n: number) => `c_${String(n).padStart(32, "0")}`;
 export function fakePartiesServer(accounts: Account[], me: string): FakeServer {
   const s: FakeServer = {
     accounts, parties: [], invites: [], redeemed: new Map(), declined: new Set(), members: [], me, off: false, calls: [],
-    fetch: async () => null,
+    pseq: new Map(),
+    fetch: async () => null, listen: () => () => {}, emit: () => {}, reopen: () => {}, listening: () => 0,
   };
+  const streams = new Set<{ onEvent: (e: ServerEvent) => void; onOpen: (again: boolean) => void }>();
+  s.listen = (onEvent, onOpen) => {
+    const stream = { onEvent, onOpen };
+    streams.add(stream);
+    onOpen(false);
+    return () => { streams.delete(stream); };
+  };
+  s.emit = (e) => { for (const st of [...streams]) st.onEvent(e); };
+  s.reopen = () => { for (const st of [...streams]) st.onOpen(true); };
+  s.listening = () => streams.size;
   const account = (uid: string) => s.accounts.find((a) => a.id === uid)!;
   const memberView = (m: Member, party: Row): PartyMember => {
     const owner = account(m.ownerId);
     const c = owner.characters.find((x) => x.id === m.characterId);
     const mine = m.ownerId === s.me;
+    const dm = party.dmId === s.me;
+    const full = dm || mine;
     return {
-      characterId: m.characterId, ownerName: owner.username, ...(party.dmId === s.me || mine ? { ownerId: m.ownerId } : {}),
+      characterId: m.characterId, ownerName: owner.username, ...(full ? { ownerId: m.ownerId } : {}),
+      ...(dm ? { online: Boolean(owner.online) } : {}),
       mine, dmCharacter: m.ownerId === party.dmId, name: c?.name ?? null, level: c?.level ?? null, ruleset: c ? "dnd2024" : null,
+      classes: c?.classes ?? [],
+      ...(full ? { stats: c?.stats ?? null, readAt: c?.stats ? now() : null } : { band: band(c?.stats) }),
       build: null, state: c ? "ok" : "missing", joinedAt: m.joinedAt,
     };
   };
@@ -69,6 +112,7 @@ export function fakePartiesServer(accounts: Account[], me: string): FakeServer {
     : { id: i.id, kind: "code", usesLeft: i.usesLeft, createdAt: now(), expiresAt: i.expiresAt });
   const detail = (p: Row): Party => ({
     ...summary(p),
+    pseq: s.pseq.get(p.id) ?? 0,
     members: s.members.filter((m) => m.partyId === p.id).map((m) => memberView(m, p)),
     ...(p.dmId === s.me ? { invites: s.invites.filter((i) => i.partyId === p.id && open(i)).map(dmInvite) } : {}),
   });
@@ -94,7 +138,7 @@ export function fakePartiesServer(accounts: Account[], me: string): FakeServer {
     if (s.off) throw notFound();
     const b = (body ?? {}) as Record<string, unknown>;
     const parts = path.split("/").slice(2).map(decodeURIComponent); // after "/api"
-    const fixed = ["me", "roles", "dm", "parties", "invites", "members", "accept", "decline", "join", "preview"];
+    const fixed = ["me", "roles", "dm", "parties", "invites", "members", "accept", "decline", "join", "preview", "view", "snapshot"];
     const route = `${method} /${parts.map((p, i) => (i > 0 && !fixed.includes(p) ? ":" : p)).join("/")}`;
     switch (route) {
       case "GET /me/roles": return { dm: account(s.me).dm };
@@ -177,8 +221,44 @@ export function fakePartiesServer(accounts: Account[], me: string): FakeServer {
         s.members = s.members.filter((x) => x !== m);
         return { removed: true };
       }
+      case "POST /parties/:/members/:/:/view/snapshot": {
+        const m = s.members.find((x) => x.partyId === party.id && x.ownerId === parts[3] && x.characterId === parts[4]);
+        if (!m || !isDm) throw notFound();
+        const card = memberView(m, party);
+        const c = account(m.ownerId).characters.find((x) => x.id === m.characterId)!;
+        return { snapshot: fakeSnapshot(c), card, pseq: s.pseq.get(party.id) ?? 0 };
+      }
       default: throw err("not_found", "The server does not offer that.");
     }
   };
   return s;
+}
+
+/** Enough of upstream's snapshot for the read-only sheet. */
+export function fakeSnapshot(c: Character): unknown {
+  const st = c.stats ?? stats(10, 10);
+  const scores = { str: 16, dex: 14, con: 14, int: 10, wis: 12, cha: 8 };
+  const mod = (n: number) => Math.floor((n - 10) / 2);
+  const record = <T,>(f: (k: keyof typeof scores) => T) =>
+    Object.fromEntries(Object.keys(scores).map((k) => [k, f(k as keyof typeof scores)])) as Record<keyof typeof scores, T>;
+  return {
+    id: c.id, name: c.name, ruleset: "dnd2024", portrait: null,
+    level: { total: c.level, classes: (c.classes ?? []).map((x, i) => ({ slotId: i ? `multi-${i}` : "main", name: x.name, level: x.level, isMain: i === 0, subclass: null })) },
+    abilities: { final: scores, modifier: record((k) => mod(scores[k])), save: record((k) => ({ bonus: mod(scores[k]) + (k === "str" ? 2 : 0), proficient: k === "str" })) },
+    stats: {
+      proficiencyBonus: 2, armorClass: st.armorClass, initiative: st.initiative, speed: st.speed, hpMax: st.hpMax,
+      passivePerception: st.passivePerception, languages: ["Common"], proficiencies: [{ label: "Armor", values: ["Light", "Medium"] }],
+      features: [{ name: "Second Wind", source: "Fighter" }],
+      skills: [{ key: "athletics", name: "Athletics", ability: "str", bonus: 5, proficiency: "proficient" }],
+    },
+    attacks: [{ id: "a1", name: "Longsword", range: "5 ft.", attackBonus: "+5", damage: "1d8+3 slashing", description: "" }],
+    spellcasting: { classes: [], slots: [], multiclassSlots: null },
+    inventory: { items: [{ id: "i1", itemId: "x", name: "Longsword", displayName: "Longsword", quantity: 1, equipped: "primary" }], coins: { cp: 0, sp: 0, ep: 0, gp: 15, pp: 0 } },
+    play: {
+      hitPoints: { current: st.hp, max: st.hpMax, temp: st.tempHp }, hitDice: [], spellSlots: [], pactSlots: null,
+      concentration: st.concentration ? { id: "s", name: st.concentration, level: 1 } : null,
+      exhaustion: { level: st.exhaustion }, inspiration: st.inspiration, speeds: {},
+    },
+    details: {},
+  };
 }

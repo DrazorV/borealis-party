@@ -133,6 +133,7 @@ test.describe("Parties on a phone (plan 4.1)", () => {
     const code = (await invite.getByLabel("Join code").textContent())!.trim();
     expect(code).toMatch(/^[0-9A-Z]{4}(-[0-9A-Z]{4}){3}$/);
     await noSidewaysScroll(page);
+    await settled(page.getByRole("dialog"));
     await bigEnough(page, testInfo, "[role=dialog]");
     await shot(page, testInfo, "dm-join-code");
     await invite.getByRole("button", { name: "Done" }).tap();
@@ -175,6 +176,7 @@ test.describe("Parties on a phone (plan 4.1)", () => {
     await expect(pick).toBeVisible();
     await pick.locator(`input[value="${character}"]`).check();
     await noSidewaysScroll(page);
+    await settled(page.getByRole("dialog"));
     await bigEnough(page, testInfo, "[role=dialog]");
     await shot(page, testInfo, "player-pick");
     const joinButton = pick.getByRole("button", { name: "Join with this character" });
