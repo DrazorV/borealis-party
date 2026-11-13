@@ -537,7 +537,7 @@ async function playerCombat(token) {
     const pane = await until("the Combat sub-tab", () => page(`!!document.querySelector('[data-testid="combat-pane"]') && [...document.querySelectorAll('[role="tab"]')].some((t) => t.innerText.trim() === "Combat" && t.getAttribute("aria-selected") === "true")`), 30000).catch(() => false);
     check("the Live chip opens the Play tab's Combat sub-tab", !!pane);
     if (!pane) return;
-    const shown = await page(`(() => { const t = document.querySelector('[data-testid="combat-pane"]').innerText; return ["Round 2", "Goblin", "Take 2 slashing damage?"].filter((w) => !t.includes(w)); })()`);
+    const shown = await page(`(() => { const t = document.querySelector('[data-testid="combat-pane"]').textContent; return ["Round 2", "Goblin", "Take 2 slashing damage?"].filter((w) => !t.includes(w)); })()`);
     check("the sub-tab shows the round, the turn order and the damage prompt", shown.length === 0, shown.length ? `missing ${shown.join(", ")}` : "");
     const sideways = await page(`document.documentElement.scrollWidth - innerWidth`);
     check("the Combat sub-tab fits the phone's width", sideways <= 0, `${sideways} px too wide`);
@@ -556,7 +556,8 @@ async function playerCombat(token) {
     await until("the Summon dialog", () => page(`!!document.querySelector("#summon-name")`), 10000);
     await smoke(`fill("#summon-name", "Spirit Wolf")`);
     await smoke(`fill("#summon-hp", "11")`);
-    await smoke("clickIn('A quick stat block', 'Summon')");
+    // innerText is as the CSS shows it (headings in capitals), so the dialog is found by its name field.
+    await page(`(() => { const d = document.querySelector("#summon-name").closest('[role="dialog"]'); const b = [...d.querySelectorAll("button")].find((x) => x.textContent.trim() === "Summon"); if (!b || b.disabled) return false; b.click(); return true; })()`);
     const order = `[...document.querySelectorAll('[data-testid="combat-pane"] .combat-row .combat-row-name')].map((e) => e.textContent)`;
     const summoned = await until("the summon in the turn order", async () => {
       const names = await page(order);
@@ -573,7 +574,7 @@ async function playerCombat(token) {
     adbShell(`am start -n ${ACTIVITY}`);
     await sleep(1500);
     await connectPage().catch(() => null);
-    const woke = await until("the view after coming back", () => page(`(() => { const p = document.querySelector('[data-testid="combat-pane"]'); return !!p && p.innerText.includes("Round 4") && p.innerText.includes("Your turn"); })()`), 15000, 500).catch(() => false);
+    const woke = await until("the view after coming back", () => page(`(() => { const p = document.querySelector('[data-testid="combat-pane"]'); return !!p && p.textContent.includes("Round 4") && p.textContent.includes("Your turn"); })()`), 15000, 500).catch(() => false);
     check("back from the background, the Combat sub-tab shows what changed meanwhile", !!woke, woke ? "" : (await page(`(document.querySelector('[data-testid="combat-pane"]') || document.body).innerText.slice(0, 120)`).catch(() => "")));
     await screenshot("14-combat-after-background");
   } finally {
