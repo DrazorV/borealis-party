@@ -228,6 +228,7 @@ Party events come on the account's existing event stream (no second connection),
 | `party://party` | `{ party, pseq, kind, id }` | A party's view changed. `kind`: `party` (name or ruleset), `roster`, `card` (`id` = the character), and for the DM only `invites`, `offers` |
 | `party://mine` | `{ kind }` | Your own list changed: `parties` (you joined, left, were removed, a party was deleted) or `invites` |
 | `party://resync` | `{}` | Events may have been missed: refetch everything shown |
+| `party://content-changed` | `{ account, kind, command }` | (0.2.3) Your own content changed and the change is complete: refetch the content lists. `kind`: `packs`, `indexes` or `fivetools`; `command`: what changed it (`remove_packs` for the bulk removal, `add_share_links`, a job's command when it ends). Only your own streams get it |
 
 - **Two audiences per party,** each with its own `pseq`: the DM's, and the players'. The players' only moves when what
   players see changes (a member joins or leaves, a rename, a name, class or level; a health band only in a combat), never for an invite,

@@ -18,6 +18,7 @@ import "./overrides/parties";
 import "./overrides/playerName";
 import "./overrides/personality";
 import "./overrides/sourceRemoval";
+import "./overrides/contentRefresh"; // last: wraps the jobs and the source-removal question
 
 function fail(code: string, message: string): ApiError {
   return { code, message } as ApiError;

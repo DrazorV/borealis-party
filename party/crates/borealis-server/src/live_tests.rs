@@ -793,3 +793,139 @@ async fn content_changes_refresh_cards_and_a_late_refresh_writes_none() {
     let db = Db::open(&Location::Memory).await.unwrap();
     content_and_late_refreshes(state_with(dir.path().join("data"), db, Setup::default())).await;
 }
+
+impl Events {
+    /// The next `party://content-changed` within `wait`; every other event is skipped.
+    async fn content(&mut self, wait: Duration) -> Option<Sse> {
+        let until = Instant::now() + wait;
+        loop {
+            let left = until.saturating_duration_since(Instant::now());
+            let e = self.next(left).await?;
+            if e.event == crate::content_events::CONTENT_CHANGED {
+                return Some(e);
+            }
+        }
+    }
+}
+
+/// `party://content-changed` (0.2.3): after every change of an account's content (rpc, the bulk removal route), on
+/// each of the account's streams (another device's too), once the change can be read; never to another account,
+/// never for a read or a refused command.
+async fn content_changes_reach_the_owner_only(state: AppState) {
+    let router = router_of(state.clone(), 64 * 1024 * 1024);
+    let owner = sign_up(&router, "content-owner").await;
+    let other = sign_up(&router, "content-other").await;
+    // The same account signed in on a second device.
+    let phone = sign_in(&router, "content-owner").await;
+    let mut here = open_events(&router, &owner.token, None).await;
+    let mut there = open_events(&router, &phone.token, None).await;
+    let mut theirs = open_events(&router, &other.token, None).await;
+
+    let expect = |e: Option<Sse>, kind: &str, command: &str| {
+        let e = e.unwrap_or_else(|| panic!("no content-changed after {command}"));
+        assert_eq!(
+            e.payload,
+            json!({ "account": owner.id, "kind": kind, "command": command }),
+            "{command}"
+        );
+        assert!(e.id.is_some(), "a hub event, with an id: {command}");
+        e
+    };
+
+    // A pack imported: both of the owner's streams hear it, after it is listed.
+    let (status, imported) = owner.rpc("import_pack", super::spell_pack()).await;
+    assert_eq!(status, StatusCode::OK, "{imported}");
+    let pack = imported["pack"]["id"].as_str().unwrap().to_string();
+    expect(here.content(ARRIVES).await, "packs", "import_pack");
+    expect(there.content(ARRIVES).await, "packs", "import_pack");
+
+    // An index file added and removed: no content reload, an event all the same.
+    let url = "https://example.invalid/o/r/master/content-events.index";
+    let (status, out) = owner.rpc("add_index", json!({ "url": url })).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    expect(here.content(ARRIVES).await, "indexes", "add_index");
+    let (status, out) = owner.rpc("remove_index", json!({ "url": url })).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    expect(here.content(ARRIVES).await, "indexes", "remove_index");
+
+    // A read, and a refused removal: nothing.
+    let (status, _) = owner.rpc("list_packs", json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = owner
+        .rpc("remove_pack", json!({ "packId": "no-such-pack" }))
+        .await;
+    assert_ne!(status, StatusCode::OK);
+    assert!(here.content(QUIET).await.is_none(), "a read or a refusal");
+
+    // The bulk removal route: the event comes once the pack is gone from the list.
+    let (status, out) = owner
+        .post("/api/content/remove-packs", json!({ "packIds": [pack] }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    expect(here.content(ARRIVES).await, "packs", "remove_packs");
+    let (_, list) = owner.rpc("list_packs", json!({})).await;
+    assert!(
+        !list
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["id"] == json!(pack)),
+        "{list}"
+    );
+    // The second device heard everything too, in order.
+    let heard: Vec<String> = [
+        there.content(ARRIVES).await,
+        there.content(ARRIVES).await,
+        there.content(ARRIVES).await,
+    ]
+    .into_iter()
+    .map(|e| e.expect("the other device"))
+    .map(|e| e.payload["command"].as_str().unwrap().to_string())
+    .collect();
+    assert_eq!(heard, ["add_index", "remove_index", "remove_packs"]);
+
+    // A background job (an index update) tells when it ends.
+    let (status, out) = owner
+        .rpc("job_start", json!({ "command": "update_indexes" }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    expect(here.content(ARRIVES * 5).await, "indexes", "update_indexes");
+
+    // The other account's own content still reaches it, and nothing of the owner's ever did.
+    let (status, out) = other.rpc("import_pack", super::spell_pack()).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let e = theirs.content(ARRIVES).await.expect("its own change");
+    assert_eq!(e.payload["account"], json!(other.id), "{:?}", e.payload);
+    assert_eq!(e.payload["command"], "import_pack");
+    assert!(
+        theirs.content(QUIET).await.is_none(),
+        "another account's change leaked"
+    );
+    assert!(
+        here.content(QUIET).await.is_none(),
+        "another account's change leaked"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn content_changes_reach_the_owners_streams_and_no_one_else() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(&Location::Memory).await.unwrap();
+    content_changes_reach_the_owner_only(state_with(dir.path().join("data"), db, Setup::default()))
+        .await;
+}
+
+/// The same on PostgreSQL. Runs when `BOREALIS_TEST_POSTGRES_URL` names a database it may wipe.
+#[tokio::test(flavor = "multi_thread")]
+async fn content_changes_reach_the_owner_only_on_postgres() {
+    let Ok(url) = std::env::var("BOREALIS_TEST_POSTGRES_URL") else {
+        eprintln!("skipped: set BOREALIS_TEST_POSTGRES_URL to run against PostgreSQL");
+        return;
+    };
+    let _one = super::POSTGRES.lock().await;
+    drop_all(&url).await;
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(&Location::Postgres(url)).await.unwrap();
+    content_changes_reach_the_owner_only(state_with(dir.path().join("data"), db, Setup::default()))
+        .await;
+}

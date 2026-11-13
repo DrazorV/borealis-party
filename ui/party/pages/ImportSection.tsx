@@ -26,6 +26,7 @@ import { receiveRoute } from "./ShareReceivePage";
 import "./party.css";
 import { FiveToolsResult } from "./FiveToolsResult";
 import "./importSource.css";
+import { contentSync } from "../content/contentSync";
 
 /**
  * The one Import section, at the top of Additional Content (plan I9, one page since 0.2.1): every kind of file and link
@@ -287,6 +288,8 @@ export function ImportSection() {
     try {
       await api.addIndex({ url });
       const r = await api.updateIndexes();
+      // Index files below shows the downloaded index now (it leaves alone the updates it did not start).
+      contentSync.changed(true);
       const list = await api.listIndexes().catch(() => []);
       const text = describeIndexUpdate(r, list, checkedText(new Date().toISOString()));
       const problem = list.find((i) => sameUrl(i.url, url))?.problem;

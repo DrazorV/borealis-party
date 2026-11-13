@@ -21,6 +21,7 @@ mod admin;
 mod auth;
 mod backend;
 mod config;
+mod content_events;
 mod db;
 mod error;
 mod hub;

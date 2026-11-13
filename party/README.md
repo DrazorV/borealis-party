@@ -439,6 +439,13 @@ each thing: Import files, the 5etools .zip and homebrew .json buttons, the 5etoo
 the index Fetch form. The lists below stay for managing what is installed: packs (with Remove all per group on a
 phone), index files, Update content files and the 5etools addresses (Update, Remove; removing one can remove its packs).
 
+Since 0.2.3 those lists follow every change without a reload (`ui/party/content/contentSync.ts`). A removed pack,
+index file or 5etools address leaves its list at once, with a "Removing…" row above it while the server reloads the
+content, and comes back with the server's message if it refuses. Additions and downloads get an "Adding…" or
+"Downloading…" row with their progress. When a change is complete the server sends `party://content-changed
+{ account, kind, command }` on `/api/events`, to that account's streams only (`content_events.rs`), and every open
+Additional Content page of the account, on any tab or device, fetches its lists again once.
+
 Every other way to start an import leads to the Import section (`ui/party/import/door.ts`; upstream's buttons are
 caught by `ui/party/entry/unifyImports.ts`, matched by their text):
 

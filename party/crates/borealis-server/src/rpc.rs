@@ -20,7 +20,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::hub::{Subscription, RESYNC_EVENT};
 use crate::workspaces::WorkspaceEvent;
 use crate::AppState;
-use crate::{jobs, parties, settings, sync};
+use crate::{content_events, jobs, parties, settings, sync};
 
 /// Server paths are nobody's business: the commands report them for the desktop app's benefit.
 pub(crate) fn scrub_paths(value: &mut Value) {
@@ -63,10 +63,22 @@ pub async fn command(
         }
         name if sync::COMMANDS.contains(&name) => sync::call(&workspace, name, &args).await?,
         name if jobs::COMMANDS.contains(&name) => {
-            jobs::call(state.workspaces.jobs(), &user.id, &workspace, name, &args).await?
+            jobs::call(
+                state.workspaces.jobs(),
+                &state.hub,
+                &user.id,
+                &workspace,
+                name,
+                &args,
+            )
+            .await?
         }
         _ => sync::call_upstream(&workspace, &command, args).await?,
     };
+    // Sent before the cards are read again, which can take a while: the content lists are ready to fetch now.
+    if let Some(kind) = content_events::kind_of(&command) {
+        content_events::changed(&state.hub, &user.id, kind, &command);
+    }
     parties::after_command(&state, &user.id, &workspace, target).await;
     if settings::COMMANDS.contains(&command.as_str()) {
         result = settings::shown(result, &state.workspaces.dir(&user.id));

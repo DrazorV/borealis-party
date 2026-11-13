@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContentIndex, ContentPack } from "../../src/api/contract";
 import type { PackSource } from "../api/packRemoval";
@@ -24,7 +24,11 @@ vi.mock("../../src/components/Confirm", () => ({
   useConfirm: () => async (q: { title: string; body: string }) => { state.asked.push(q); return state.confirm; },
 }));
 vi.mock("../../src/components/Toast", () => ({ useToast: () => ({ push: (m: string) => state.toasts.push(m) }) }));
-vi.mock("../api/packRemoval", () => ({ packSources: async () => state.sources }));
+vi.mock("../api/packRemoval", () => ({
+  packSources: async () => state.sources,
+  removePacks: async () => ({ removed: 0, skipped: [], packs: [] }),
+  packsFrom: () => [],
+}));
 /** Upstream's list, as the server answers it: names come from the server (index_subs.rs). */
 vi.mock("../../src/pages/content/IndexesTab", () => ({
   sourceConsentText: (host: string) => `consent ${host}`,
@@ -41,12 +45,14 @@ const api = vi.hoisted(() => ({
   },
   subscribe: () => () => undefined,
 }));
-vi.mock("../../src/state/ApiContext", () => ({ useApi: () => api }));
+vi.mock("../../src/state/ApiContext", () => ({ useApi: () => api, ApiProvider: ({ children }: { children: unknown }) => children }));
 
 const { IndexesTab, unfollowed } = await import("./WithUnfollowed");
+const { resetContentSync } = await import("./contentSync");
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 beforeEach(() => {
+  resetContentSync();
   Object.assign(state, {
     confirm: "confirm", asked: [], added: [], toasts: [],
     sources: [
@@ -92,7 +98,8 @@ describe("IndexesTab with Packs without their index", () => {
     await settle();
     expect(state.asked).toEqual([{ title: "Add content source", body: "consent raw.githubusercontent.com", confirmLabel: "Add source" }]);
     expect(state.added).toEqual([THIRD]);
-    expect(screen.queryByRole("list", { name: "Packs without their index" })).toBeNull();
+    // Both lists are fetched again once the content-change settles (contentSync.ts), with nothing mounted again.
+    await waitFor(() => expect(screen.queryByRole("list", { name: "Packs without their index" })).toBeNull());
     const names = within(screen.getByRole("list", { name: "Indexes" })).getAllByRole("listitem").map((li) => li.textContent);
     expect(names).toEqual(["Aurora Legacy", "Third Party"]);
     expect(state.toasts[0]).toMatch(/Press Update/);

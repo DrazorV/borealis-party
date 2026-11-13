@@ -14,7 +14,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ACCOUNTS, SERVER_FILE, type ServerFile } from "../tests/accounts";
+import { ACCOUNTS, SEEDED, SERVER_FILE, type ServerFile } from "../tests/accounts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "../../..");
@@ -78,6 +78,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     child = spawn("wsl.exe", [
       "-e", "bash", wslPath(join(here, "wsl-server.sh")), wslBin, String(port), wslPath(web), wslPath(content),
       ACCOUNTS.admin.password, ACCOUNTS.player.password,
+      ...SEEDED.flatMap((a) => [a.name, a.email, a.password]),
     ], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
   } else {
     const bin = nativeBinary();
@@ -104,6 +105,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       if (r.status !== 0) {
         cleanup();
         throw new Error(`add-user ${name} failed: ${r.stderr || r.stdout || r.error}`);
+      }
+    }
+    for (const a of SEEDED) {
+      const r = spawnSync(bin, ["add-user", a.name, "--email", a.email], { env, input: `${a.password}\n`, encoding: "utf8" });
+      if (r.status !== 0) {
+        cleanup();
+        throw new Error(`add-user ${a.name} failed: ${r.stderr || r.stdout || r.error}`);
       }
     }
     child = spawn(bin, [], { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
