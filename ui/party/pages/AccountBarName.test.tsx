@@ -5,6 +5,9 @@ import { saveSession } from "../api/session";
 import { memoryStorage } from "../test/memoryStorage";
 import { AccountBar } from "./AccountBar";
 
+// The Live chip (0.3.0) reads the open character, which needs the app's CharacterProvider; this test is about the name.
+vi.mock("../combat/player/LiveChip", () => ({ LiveChip: () => null }));
+
 beforeEach(() => {
   vi.stubGlobal("localStorage", memoryStorage());
   vi.stubGlobal("sessionStorage", memoryStorage());

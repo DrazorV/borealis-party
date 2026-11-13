@@ -14,6 +14,7 @@ import {
   type EncounterFields, type Rule,
 } from "../api/overrides/encounters";
 import type { Ruleset } from "../api/overrides/parties";
+import { LiveCombatLink, StartCombatButton } from "../combat/dm/StartCombatButton";
 import { CreatureDialog, DetailsDialog, EffectDialog, RefreshDialog, RuleDialog, WarningsDialog } from "./EncounterDialogs";
 import { EncounterPicker } from "./EncounterPicker";
 import { encountersPath } from "./EncountersPage";
@@ -187,6 +188,9 @@ export function EncounterBuilder() {
           </span>
           <ToggleSwitch checked={enc.visibleToPlayers} label="Shown to players" onLabel="Shown" offLabel="Hidden"
             disabled={enc.status === "ended"} onChange={(on) => void showToPlayers(on)} />
+        </div>
+        <div className="party-line">
+          {enc.status === "live" ? <LiveCombatLink partyId={partyId} /> : <StartCombatButton encounterId={enc.id} disabled={enc.status !== "ready"} />}
         </div>
         <div className="party-line">
           <span className="grow muted party-note">Players see it as "{enc.publicName}".</span>

@@ -4,7 +4,8 @@ import { App as UpstreamApp } from "../../src/App";
 import { AppShell } from "../../src/components/shell/AppShell";
 import { isTauri } from "../../src/lib/tauri";
 import { isOffline } from "../api/connectivity";
-import { startCombatWatch } from "../combat/player/store";
+import { registerDmLiveCombats, startCombatWatch } from "../combat/player/store";
+import { dmLiveCombats } from "../api/overrides/combat";
 import { watchOpened } from "../api/overrides/opened";
 import { fetchMe } from "../api/party";
 import { loadSession, updateUser } from "../api/session";
@@ -34,6 +35,9 @@ hideUnofferedRows();
 startPhoneBrowser();
 // Every import button, menu item, drop and "Open with" leads to the one Import section on Additional Content (0.2.1).
 unifyImports();
+// The Live chip also shows the DM's own live combat and opens its tracker (/combat/<id>). Registered here, not in
+// overrides/combat.ts, which would make an import cycle through api/http.
+registerDmLiveCombats(dmLiveCombats);
 
 /** Upstream's app with the account bar above it and the account and admin pages in front of it. */
 export function App() {
