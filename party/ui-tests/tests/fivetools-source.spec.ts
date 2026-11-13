@@ -63,12 +63,19 @@ async function expectPhoneLayout(page: Page, testInfo: TestInfo) {
   expect(small, `Import screen controls under ${minTap(testInfo)} px`).toEqual([]);
 }
 
-/** A report as long as a full import's: 833 entries in a handful of groups. */
+/** A report as long as a full import's: 833 notes, worded as the importer words them, in a handful of groups. */
 function bigReport() {
-  const note = (i: number, reason: string) => ({ element: `Entry ${i}`, kind: "spell", reason });
-  const partial = Array.from({ length: 520 }, (_, i) => note(i, i % 3 === 0 ? `Uses table "T${i}" that is not supported` : `Option ${i} could not be converted`));
-  const skipped = Array.from({ length: 313 }, (_, i) => note(i, i % 2 === 0 ? "Vehicles are not imported" : `Needs source "X${i}"`));
-  return { converted: 4210, replaced: 0, partial, skipped, packs: [{ id: "p1", name: "SRD Sample" }, { id: "p2", name: "More" }] };
+  const notes = (n: number, reason: string) => Array.from({ length: n }, (_, i) => ({ element: `Creature ${i}|SRDX`, kind: "monster", reason }));
+  const partial = [
+    ...notes(411, "creature section: variant sidebars not imported"),
+    ...notes(21, "creature section: mythic actions not imported"),
+    ...notes(20, "creature section: the reactions' introduction not imported"),
+    ...notes(11, "the challenge rating in a coven not imported"),
+    ...notes(10, "creature field: fly speeds not imported"),
+    ...notes(355, "character option (Gift) kept as text: no builder choice offers it"),
+  ];
+  const skipped = notes(5, "creature stat block: the creature type is a choice");
+  return { converted: 16746, replaced: 0, partial, skipped, packs: [{ id: "p1", name: "SRD Sample" }, { id: "p2", name: "More" }] };
 }
 
 /** The default source's download, scan and import answered in the browser; the rest goes to the real server. */
@@ -125,7 +132,7 @@ test.describe("Import screen: 5etools sources", () => {
     await expectPhoneLayout(page, testInfo);
   });
 
-  test("the default source in one tap, and a long report stays usable", async ({ page }, testInfo) => {
+  test("the default source in one tap; a big import is a success with folded notes", async ({ page }, testInfo) => {
     const seen = await stubDefaultSource(page);
     await open(page, "/import-files");
     await signedInShell(page);
@@ -139,30 +146,36 @@ test.describe("Import screen: 5etools sources", () => {
     const importBooks = r.getByRole("button", { name: "Import 1 book" });
     await expect(importBooks).toBeVisible({ timeout: 30_000 });
     await importBooks.tap();
-    await expect(r).toHaveAttribute("data-tone", "warning");
+    // It worked: a success, with one calm line about the notes and the details folded.
+    await expect(r).toHaveAttribute("data-tone", "success");
     expect(seen).toEqual([`stage ${DEFAULT_URL}`, "import"]);
-
-    // The summary first, then the groups, folded.
     const report = r.locator(".party-import-report");
-    await expect(report.getByText(/4210 elements converted into 2 pack/)).toBeVisible();
+    await expect(r.locator(".party-import-msg")).toHaveText("Imported 16746 elements into 2 content packs.");
+    await expect(report.getByText("828 details couldn't be carried over. They don't stop anything from working. 5 entries couldn't be read and were left out.", { exact: false })).toBeVisible();
+    await expect(report.getByText(/Local import — not redistributable/)).toBeVisible();
+    await expect(report.locator(".aur-expander-toggle")).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath("5etools-result.png") });
+    await testInfo.attach("5etools-result", { path: testInfo.outputPath("5etools-result.png"), contentType: "image/png" });
+    await expectPhoneLayout(page, testInfo);
+
+    // Show details: groups in sentence case with their counts, each folded; one opens to say what it means.
+    await report.getByRole("button", { name: "Show details" }).tap();
     const groups = report.locator(".aur-expander-toggle");
-    expect(await groups.count()).toBeGreaterThan(2);
+    await expect(groups.first()).toHaveText("411 Variant sidebars");
+    expect(await groups.count()).toBeGreaterThan(4);
     for (const g of await groups.all()) await expect(g).toHaveAttribute("aria-expanded", "false");
-    const summaryTop = (await report.getByText(/elements converted/).boundingBox())!.y;
-    const firstGroupTop = (await groups.first().boundingBox())!.y;
-    expect(summaryTop).toBeLessThan(firstGroupTop);
-    // A group opens on a tap and lists its entries; the box scrolls, the page doesn't go sideways.
     await groups.first().tap();
     await expect(groups.first()).toHaveAttribute("aria-expanded", "true");
-    await expect(report.locator(".v4-5et-notes li").first()).toBeVisible();
+    await expect(report.getByText(/the creature's stats are complete/i)).toBeVisible();
+    await expect(report.getByText("Creature 0 (SRDX)").first()).toBeVisible();
     const box = (await report.boundingBox())!;
     expect(box.height).toBeLessThanOrEqual(page.viewportSize()!.height * 0.5 + 1);
+    await page.screenshot({ path: testInfo.outputPath("5etools-details.png") });
+    await testInfo.attach("5etools-details", { path: testInfo.outputPath("5etools-details.png"), contentType: "image/png" });
 
     // The card now lists where the packs came from, with an Update for that source.
     await expect(card(page).getByRole("button", { name: "Update from Default 5etools data" })).toBeVisible();
     await expect(card(page).getByText("2 packs: SRD Sample, More")).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath("5etools-report.png"), fullPage: true });
-    await testInfo.attach("5etools-report", { path: testInfo.outputPath("5etools-report.png"), contentType: "image/png" });
     await expectPhoneLayout(page, testInfo);
   });
 

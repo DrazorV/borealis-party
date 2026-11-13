@@ -369,3 +369,35 @@ describe("from the other doors (../import/door.ts)", () => {
     expect(document.activeElement).toBe(screen.getByLabelText("Link to import"));
   });
 });
+
+describe("5etools results", () => {
+  it("a finished import with notes is a success row, its details folded", async () => {
+    const real = api.import5etools;
+    api.import5etools = (async (args: unknown) => {
+      await real(args as never);
+      const partial = Array.from({ length: 833 }, (_, i) => ({ element: `C${i}|SRDX`, kind: "monster", reason: "creature section: variant sidebars not imported" }));
+      return { converted: 16746, replaced: 0, partial, skipped: [], packs: [{ id: "x", name: "SRD sample" }] };
+    }) as never;
+    render(<ImportHub />);
+    fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
+    await settle();
+    fireEvent.click(within(row("Default 5etools data")).getByRole("button", { name: "Import 1 book" }));
+    await settle();
+    const r = row("Default 5etools data");
+    expect(r.getAttribute("data-tone")).toBe("success");
+    expect(within(r).getAllByRole("status")[0]!.textContent).toBe("Imported 16746 elements into 1 content pack.");
+    expect(within(r).getByText(/833 details couldn't be carried over/)).toBeTruthy();
+    expect(within(r).getByRole("button", { name: "Show details" })).toBeTruthy();
+    expect(within(r).queryByText("Variant sidebars")).toBeNull();
+  });
+
+  it("an import that brought nothing in warns", async () => {
+    api.import5etools = (async () => ({ converted: 0, replaced: 0, partial: [], skipped: [], packs: [] })) as never;
+    render(<ImportHub />);
+    fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
+    await settle();
+    fireEvent.click(within(row("Default 5etools data")).getByRole("button", { name: "Import 1 book" }));
+    await settle();
+    expect(row("Default 5etools data").getAttribute("data-tone")).toBe("warning");
+  });
+});

@@ -8,7 +8,6 @@ import { Check } from "../../src/components/Fields";
 import { Icon, type IconName } from "../../src/components/Icon";
 import { useImportNotice } from "../../src/components/ImportNotice";
 import { fileToBase64, filesToInputs } from "../../src/lib/files";
-import { FiveToolsReport } from "../../src/pages/content/FiveToolsReport";
 import { FiveToolsSources } from "../../src/pages/content/FiveToolsSources";
 import { describeUrlUpdate } from "../../src/pages/content/FiveToolsUrlSection";
 import { ImportPreviewHost } from "../../src/pages/content/ImportPreviewDialog";
@@ -21,9 +20,11 @@ import { openBundleFromImport } from "../api/bundles";
 import { loadSession } from "../api/session";
 import { inboxEmpty, onInbox, sendFiles, takeFocus, takeInbox } from "../import/door";
 import { KIND_LABEL, needsNotice, planImport, sentence } from "../import/plan";
+import { viewReport } from "../import/reportNotes";
 import { checkFiveToolsSource, classifyLink, DEFAULT_5ETOOLS, type LinkKind } from "../import/sniff";
 import { receiveRoute } from "./ShareReceivePage";
 import "./party.css";
+import { FiveToolsResult } from "./FiveToolsResult";
 import "./importSource.css";
 
 /**
@@ -210,14 +211,9 @@ export function ImportHub() {
 
   const booksDone = (id: number, report: FiveToolsImportReport | null, error?: string) => {
     if (!report) { patch(id, { tone: "error", message: sentence(error ?? "Nothing was imported."), staged: undefined }); return; }
-    const notes = report.partial.length + report.skipped.length;
-    patch(id, {
-      tone: notes > 0 ? "warning" : "success",
-      message: `Imported ${plural(report.converted, "element")} into ${plural(report.packs.length, "content pack")}.`,
-      details: notes > 0 ? [`${plural(notes, "entry", "entries")} imported in part or skipped:`] : [],
-      report: notes > 0 ? report : undefined,
-      staged: undefined,
-    });
+    // A finished import is a success, its notes calm details; only an import that brought nothing in warns.
+    const view = viewReport(report);
+    patch(id, { tone: view.tone, message: view.headline, details: [], report, staged: undefined });
     refreshSources();
   };
 
@@ -317,7 +313,8 @@ export function ImportHub() {
       if (known) {
         // Imported from here before: Update re-imports the same books into the same packs.
         const r = await api.update5etoolsUrl({ url: known.url });
-        patch(id, { tone: "success", message: describeUrlUpdate(r.upToDate, r.report) });
+        const view = r.report && !r.upToDate ? viewReport(r.report) : null;
+        patch(id, { tone: view?.tone ?? "success", message: describeUrlUpdate(r.upToDate, r.report), report: view ? r.report ?? undefined : undefined });
       } else await offerBooks(id, (await api.stage5etoolsUrl({ url })).token);
     } catch (e) { fail(id, e); }
     if (known) refreshSources();
@@ -493,7 +490,7 @@ export function ImportHub() {
                     <Button disabled={busy} onClick={() => void take("fivetools", r.id, r.choose!)}>Import as 5etools data</Button>
                   </div>
                 )}
-                {r.report && <div className="party-import-report"><FiveToolsReport report={r.report} /></div>}
+                {r.report && <div className="party-import-report"><FiveToolsResult report={r.report} headline={false} /></div>}
                 {r.staged && <StagedBooks api={api} staged={r.staged} onDone={(report, error) => booksDone(r.id, report, error)} />}
               </li>
             ))}

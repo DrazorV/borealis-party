@@ -18,3 +18,13 @@ html.phone .party-import-known-row > .btn { flex: 0 0 auto; }
 .party-import-report .v4-5et-notes { overflow-wrap: anywhere; }
 html.phone .party-import-report .aur-expander-toggle, html.phone .party-import-report .aur-expander-chev { min-height: var(--ph-hit); }
 html.phone .party-import-report .aur-expander-chev { min-width: var(--ph-hit); }
+/* A 5etools import's result (FiveToolsResult.tsx): a success with calm notes, details folded until asked for. */
+.party-report { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.party-import .party-report p { margin: 0; overflow-wrap: anywhere; }
+.party-report-toggle { display: flex; }
+.party-report-details { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-1); }
+.party-report-groups { display: flex; flex-direction: column; gap: var(--sp-1); }
+.party-import .party-report .party-report-label { font-weight: 600; }
+.party-report-count { display: inline-block; min-width: 2.5em; color: var(--muted, inherit); font-variant-numeric: tabular-nums; }
+.party-import .party-report .party-report-meaning { margin-bottom: var(--sp-1); }
+.party-report-examples { margin: 0; padding-left: 1.2em; overflow-wrap: anywhere; }
