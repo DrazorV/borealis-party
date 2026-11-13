@@ -1,5 +1,7 @@
 import { COMMANDS, type Api, type ApiError, type ApiMethods, type CharacterSummary, type CommandName } from "../../src/api/contract";
 import { LOCAL, unavailable } from "./http";
+import { wrapPersonality } from "./personality";
+import type { Method } from "./overrides/registry";
 
 /** What an action that needs the server says offline. */
 export const OFFLINE_MESSAGE = "Needs the server. Connect and try again.";
@@ -90,6 +92,8 @@ export function createOfflineApi(local: Api, serverToLocal: ReadonlyMap<string, 
     for (const k of DEVICE_SETTINGS) delete patch[k];
     return save({ ...args, patch });
   };
+  // The selection flow skips the personality lists offline too, as the account chose online.
+  wrapPersonality(methods as Record<string, Method>, false);
 
   return {
     ...(methods as unknown as ApiMethods),

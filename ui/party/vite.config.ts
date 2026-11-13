@@ -24,6 +24,8 @@ const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     "./settingsTabs": local("./settings/settingsTabs.ts"),
     "./BorealisTabs": local("./settings/BorealisTabs.tsx"),
     "./DataFilesTab": local("./settings/DataFilesTab.tsx"),
+    // BUILD gains the account's "Skip Personality Choices" (api/personality.ts).
+    "./GeneralBuildTabs": local("./settings/GeneralBuildTabs.tsx"),
   },
 };
 
