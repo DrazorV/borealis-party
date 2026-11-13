@@ -28,7 +28,7 @@
 //! for `ai_providers::complete_json`, when the server may call it (`server` mode; a device model is the app's).
 //!
 //! **Limits.** Model calls per account per minute (`[ai] requests_per_minute`), tokens per account per day (`[ai]
-//! tokens_per_day`, kept in `ai_usage`), and tool calls per account per minute.
+//! tokens_per_day`, kept in `ai_usage`); the shared tool registry limits tool calls per account.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock, PoisonError};
@@ -60,8 +60,6 @@ pub const SCOPES: [&str; 7] = [
     "homebrew:write",
 ];
 
-/// Tool calls per account per minute.
-const TOOL_CALLS_PER_MINUTE: usize = 60;
 /// Turns in one conversation.
 const MAX_TURNS: usize = 60;
 /// Characters in one typed or answered text.
@@ -221,11 +219,6 @@ impl Window {
 }
 
 fn model_calls() -> &'static Window {
-    static W: OnceLock<Window> = OnceLock::new();
-    W.get_or_init(Window::new)
-}
-
-fn tool_calls() -> &'static Window {
     static W: OnceLock<Window> = OnceLock::new();
     W.get_or_init(Window::new)
 }
@@ -731,10 +724,10 @@ pub fn system_prompt(purpose: Purpose) -> String {
 }
 
 /// The tools the assistant may use for `purpose`, as the model is told.
-fn tools_for(purpose: Purpose) -> Vec<&'static ai_tools::Tool> {
+fn tools_for(purpose: Purpose) -> Vec<ai_tools::Tool> {
     ai_tools::all()
-        .iter()
-        .filter(|t| t.purposes.contains(&purpose) && SCOPES.contains(&t.scope))
+        .into_iter()
+        .filter(|t| t.purposes.contains(&purpose))
         .collect()
 }
 
@@ -742,7 +735,7 @@ fn spec(t: &ai_tools::Tool) -> ToolSpec {
     ToolSpec {
         name: t.name.into(),
         description: t.description.into(),
-        schema: (t.schema)(),
+        schema: t.schema.clone(),
     }
 }
 
@@ -768,7 +761,7 @@ async fn tools(
         .into_iter()
         .map(|t| {
             json!({
-                "name": t.name, "description": t.description, "inputSchema": (t.schema)(),
+                "name": t.name, "description": t.description, "inputSchema": t.schema,
                 "scope": t.scope, "effect": t.effect.as_str(),
             })
         })
@@ -815,7 +808,7 @@ async fn chat(
     let saved = load(&state, &user.id).await?.ok_or_else(not_set_up)?;
     let ep = endpoint(&user, &saved)?;
     admit(&state, &user).await?;
-    let specs: Vec<ToolSpec> = tools_for(purpose).into_iter().map(spec).collect();
+    let specs: Vec<ToolSpec> = tools_for(purpose).iter().map(spec).collect();
     let reply = ai_providers::complete(&ep, &system_prompt(purpose), &form.turns, &specs)
         .await
         .map_err(|e| ApiError::Refused("ai_provider_error", e.message))?;
@@ -866,7 +859,6 @@ async fn run_tool(
     let saved = load(&state, &user.id).await?;
     // A tool outside the assistant's scopes is as unknown as one that doesn't exist.
     let tool = ai_tools::find(&name)
-        .filter(|t| SCOPES.contains(&t.scope))
         .ok_or_else(|| ApiError::NotFound("The assistant has no such tool.".into()))?;
     let auto = saved.as_ref().is_some_and(|s| s.auto_apply) && tool.effect == Effect::Draft;
     if tool.effect != Effect::Read && !form.confirmed && !auto {
@@ -875,11 +867,7 @@ async fn run_tool(
             "Confirm this change in the app first.".into(),
         ));
     }
-    if !tool_calls().take(&user.id, TOOL_CALLS_PER_MINUTE) {
-        return Err(too_many(
-            "The assistant used a lot of tools in the last minute.",
-        ));
-    }
+    // The registry limits the calls per account (60 a minute) and the heavy ones at a time.
     if tool.effect != Effect::Read {
         tracing::info!("ai: account {} ran {}", user.id, tool.name);
     }
@@ -891,31 +879,10 @@ async fn run_tool(
                 .or_insert_with(|| json!(request_id(form.call_id.as_deref())));
         }
     }
-    match ai_tools::call(&state, &user, tool.name, &args).await {
+    // Every refusal answers in words, for the model to read and the panel to show.
+    match ai_tools::call(&state, &user, tool.name, args).await {
         Ok(result) => Ok(Json(json!({ "ok": true, "result": result }))),
-        Err(e) => {
-            let (code, message) = match e {
-                ApiError::Internal(detail) => return Err(ApiError::Internal(detail)),
-                ApiError::Invalid(m) => ("invalid_argument", m),
-                ApiError::NotFound(m) => ("not_found", m),
-                ApiError::Forbidden(m) | ApiError::Unauthorized(m) => ("forbidden", m),
-                ApiError::Refused(c, m) => (c, m),
-                ApiError::Conflict(m) => ("conflict", m),
-                ApiError::TooMany => ("too_many_requests", "Too many at once.".into()),
-                // An engine refusal (part D's `invalid_homebrew` with its report) goes to the model whole, so it can fix the
-                // element and try again.
-                ApiError::Command(v) => {
-                    return Ok(Json(json!({ "ok": false, "error": {
-                        "code": v["code"].as_str().unwrap_or("refused"),
-                        "message": v["message"].as_str().unwrap_or("The app refused that."),
-                        "details": v,
-                    } })));
-                }
-            };
-            Ok(Json(
-                json!({ "ok": false, "error": { "code": code, "message": message } }),
-            ))
-        }
+        Err(e) => Ok(Json(json!({ "ok": false, "error": e.to_value() }))),
     }
 }
 
