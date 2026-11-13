@@ -1,0 +1,13 @@
+[package]
+name = "party-combat"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The Borealis Party combat engine: pure, serializable combat state and commands (no I/O)"
+
+[dependencies]
+party-dice = { path = "../party-dice" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
