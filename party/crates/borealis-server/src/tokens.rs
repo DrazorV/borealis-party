@@ -10,15 +10,6 @@
 //!   sessions), so `bpt_`/`bpa_` reach only the routes that take [`TokenAuth`].
 //! - `BOREALIS__FEATURES__AI=false` (server config, D40) turns all of it off: 404 everywhere.
 
-// The extractor's only callers until the MCP server lands (part B) are the tests.
-#![cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "TokenAuth is used by the MCP server (0.3.1 part B)"
-    )
-)]
-
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::{LazyLock, Mutex, OnceLock};
@@ -489,6 +480,13 @@ impl TokenAuth {
     }
 
     /// Whether the token has `scope` (write includes read).
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "/api/mcp checks scopes in party-tools; these serve token routes that check one scope themselves"
+        )
+    )]
     #[must_use]
     pub fn has(&self, scope: Scope) -> bool {
         self.scopes.has(scope)
@@ -498,6 +496,13 @@ impl TokenAuth {
     ///
     /// # Errors
     /// The refusal to return.
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "/api/mcp checks scopes in party-tools; these serve token routes that check one scope themselves"
+        )
+    )]
     pub fn require(&self, scope: Scope) -> Result<(), TokenRejection> {
         if self.has(scope) {
             Ok(())

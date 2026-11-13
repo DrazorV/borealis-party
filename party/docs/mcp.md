@@ -197,7 +197,7 @@ only start local servers use the bridge.
 |---|---|
 | `party/crates/party-tools` | specs, scopes, arguments, limits, idempotency, the JSON-RPC envelope (`mcp.rs`) |
 | `party/crates/borealis-server/src/tools_backend.rs` | `ServerTools`: each tool calls the API's handler as the caller; `external` / `external_specs` for part D's and the simulator's tools |
-| `party/crates/borealis-server/src/mcp.rs` | the HTTP endpoint, auth (`TokenVerifier`, filled by part A), Origin, metadata |
+| `party/crates/borealis-server/src/mcp.rs` | the HTTP endpoint on part A's `TokenAuth` (`tokens.rs`), Origin, the scope challenge |
 | `party/crates/party-mcp-bridge` | the stdio bridge |
 
 **Upstream proposal (not opened):**
