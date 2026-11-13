@@ -733,6 +733,7 @@ async function sheetPreview(token) {
   await api(token, "save_character", { characterId: hero.id });
   await api(token, "close_character", { characterId: hero.id, discard: false });
   const original = adbShell("settings get system font_scale");
+  fontScaleToRestore = original && original !== "null" ? original : "1.0";
   try {
     for (const scale of ["1.0", "1.15"]) {
       adbShell(`settings put system font_scale ${scale}`);
@@ -776,7 +777,8 @@ async function sheetPreview(token) {
       await smoke("click('Close', true)").catch(() => false);
     }
   } finally {
-    adbShell(`settings put system font_scale ${original && original !== "null" ? original : "1.0"}`);
+    adbShell(`settings put system font_scale ${fontScaleToRestore}`);
+    fontScaleToRestore = null;
   }
 }
 
@@ -847,6 +849,8 @@ async function phoneLayout() {
 
 let failed = false;
 let limit;
+/** The device's own font size while sheetPreview has changed it (restored even when the run is stopped). */
+let fontScaleToRestore = null;
 try {
   await Promise.race([
     main(),
@@ -859,6 +863,8 @@ try {
 } finally {
   clearTimeout(limit);
   ws?.close();
+  // sheetPreview puts the device's font size back itself; a run stopped by --max-minutes never reaches its finally.
+  if (fontScaleToRestore) run(adbPath, ["shell", `settings put system font_scale ${fontScaleToRestore}`], { allowFail: true });
   if (!args.keep) {
     stopServer();
     for (const name of ["Smoke-Hero.dnd5e", "smoke-feats.xml", "smoke-homebrew.json", "Smoke-Party.borealis"]) {
@@ -867,8 +873,6 @@ try {
     run(adbPath, ["shell", `pm clear ${PACKAGE}`], { allowFail: true });
     run(adbPath, ["shell", "wm size reset"], { allowFail: true });
     run(adbPath, ["shell", "wm density reset"], { allowFail: true });
-    // sheetPreview restores the font size itself, but a run stopped by --max-minutes never reaches its finally.
-    run(adbPath, ["shell", "settings put system font_scale 1.0"], { allowFail: true });
     run(adbPath, ["forward", "--remove", `tcp:${devtoolsPort}`], { allowFail: true });
   }
   const bad = results.filter((r) => !r.ok);
