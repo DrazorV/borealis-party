@@ -178,9 +178,26 @@ async function page(expression) {
   return r.result.value;
 }
 
+/**
+ * A screenshot for the output folder. A web view that is not in front draws no frames, so its screenshot never
+ * answers (seen after the system browser opened a party link): the app is brought to the front, the page reconnected
+ * and the screenshot tried once more. A screenshot is evidence, not a check: if it still fails, the run goes on.
+ */
 async function screenshot(name) {
-  const r = await cdp("Page.captureScreenshot", { format: "png" });
-  writeFileSync(join(out, `${name}.png`), Buffer.from(r.data, "base64"));
+  for (const attempt of [1, 2]) {
+    try {
+      const r = await cdp("Page.captureScreenshot", { format: "png" }, attempt === 1 ? 60000 : 30000);
+      writeFileSync(join(out, `${name}.png`), Buffer.from(r.data, "base64"));
+      return;
+    } catch (e) {
+      log(`      screenshot ${name}: ${e?.message ?? e}${attempt === 1 ? "; bringing the app to the front and trying once more" : "; skipped"}`);
+      if (attempt === 1) {
+        run(adbPath, ["shell", `am start -n ${ACTIVITY}`], { allowFail: true });
+        await sleep(2000);
+        await connectPage().catch(() => null);
+      }
+    }
+  }
 }
 
 /** Helpers put into the page once per load. */
