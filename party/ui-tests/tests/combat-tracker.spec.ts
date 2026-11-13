@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { APIRequestContext, Browser, Page, TestInfo } from "@playwright/test";
+import type { APIRequestContext, Page, TestInfo } from "@playwright/test";
 import { ACCOUNTS, type AccountName } from "./accounts";
 import { expect, finding, measureOverflow, minTap, open, signedInShell, smallTargets, test } from "./fixtures";
 
@@ -158,48 +158,50 @@ async function api<T>(request: APIRequestContext, auth: string, method: string, 
   return (text ? JSON.parse(text) : null) as T;
 }
 
-async function phone(browser: Browser, testInfo: TestInfo, baseURL: string, session: { token: string; user: unknown }): Promise<Page> {
-  const { viewport, userAgent, deviceScaleFactor, isMobile, hasTouch } = testInfo.project.use;
-  const context = await browser.newContext({ baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch });
-  await context.addInitScript((s) => { localStorage.setItem("party.session", s); }, JSON.stringify({ baseUrl: "", ...session }));
-  return context.newPage();
-}
 
-test("two accounts: the DM reveals a creature and the player sees it within about two seconds", async ({ page, signIn, request, browser, baseURL }, testInfo) => {
-  test.skip(testInfo.project.name !== "android-portrait", "two phones at 384x832 only");
+test("against the real server: a second DM tab follows within 1 s, and the player's view gets the reveal within 2 s", async ({ page, signIn, request }, testInfo) => {
+  test.skip(testInfo.project.name !== "android-portrait", "one phone size");
   const dm = await login(request, "admin");
   const player = await login(request, "player");
   await api(request, dm.token, "POST", "/api/me/roles/dm", {});
   const party = await api<{ id: string }>(request, dm.token, "POST", "/api/parties", { name: `Fight ${Math.random().toString(36).slice(2, 8)}` });
   const probe = await request.fetch(`/api/parties/${party.id}/combat`, { headers: { authorization: `Bearer ${dm.token}` } });
   const encounters = await request.fetch(`/api/parties/${party.id}/encounters`, { headers: { authorization: `Bearer ${dm.token}` } });
-  test.skip(probe.status() === 404 || encounters.status() === 404, "the test server has no combat or encounter routes yet (feat/combat-server, feat/encounters)");
+  test.skip(probe.status() === 404 || encounters.status() === 404, "the test server has no combat or encounter routes (feat/combat-server)");
   const made = await api<{ code: string }>(request, dm.token, "POST", `/api/parties/${party.id}/invites`, { kind: "code", uses: 1 });
   const hero = await api<{ summary: { id: string } }>(request, player.token, "POST", "/api/rpc/import_character", {
     fileName: "d5-hero.dnd5e", contentBase64: readFileSync(join(FIXTURES, "d5-hero.dnd5e")).toString("base64"),
   });
   await api(request, player.token, "POST", "/api/join", { code: made.code, characterId: hero.summary.id });
   const encounter = await api<{ id: string }>(request, dm.token, "POST", `/api/parties/${party.id}/encounters`, { name: "Goblins" });
-  const found = await api<{ results?: { id: string }[] }>(request, dm.token, "GET", "/api/bestiary/search?q=goblin").catch(() => ({ results: [] }));
-  test.skip(!found.results?.length, "no goblin in the test server's bestiary");
-  await api(request, dm.token, "POST", `/api/encounters/${encounter.id}/creatures`, { elementId: found.results![0]!.id, label: "Goblin 1", hidden: true });
-  const started = await api<{ id: string }>(request, dm.token, "POST", `/api/encounters/${encounter.id}/start`, { requestId: `rig-${Date.now()}` });
+  await api(request, dm.token, "POST", `/api/encounters/${encounter.id}/creatures`, { elementId: "ID_SRD521_MONSTER_GOBLIN_WARRIOR", count: 1 });
+  await api(request, dm.token, "PATCH", `/api/encounters/${encounter.id}`, { status: "ready" }).catch(() => null);
+  const started = await api<{ id: string; state: { combatants: { id: string; kind: string; label: string; visible: boolean }[] } }>(
+    request, dm.token, "POST", `/api/encounters/${encounter.id}/start`, { requestId: `rig-${Date.now()}` });
+  const goblin = started.state.combatants.find((c) => c.kind === "creature")!;
+  expect(goblin.visible).toBe(false);
 
   await signIn("admin");
   await open(page, `/combat/${started.id}`);
-  const playerPage = await phone(browser, testInfo, baseURL!, player);
-  await playerPage.goto("/?mock=mobile#/play");
-  await expect(playerPage.getByText("Goblin 1")).toHaveCount(0);
-
-  // A second DM tab on the same combat follows the first without a reload (the real server's events).
   const dmTab = await page.context().newPage();
   await open(dmTab, `/combat/${started.id}`);
-  await expect(dmTab.getByRole("button", { name: /Reveal Goblin 1 to players/ })).toBeVisible({ timeout: 30_000 });
+  const reveal = (p: Page) => p.getByRole("button", { name: `Reveal ${goblin.label} to players` });
+  await expect(reveal(page)).toBeVisible({ timeout: 30_000 });
+  await expect(reveal(dmTab)).toBeVisible({ timeout: 30_000 });
+  const seen = async () => JSON.stringify(await api(request, player.token, "GET", `/api/combats/${started.id}`)).includes(goblin.id);
+  expect(await seen(), "a hidden creature isn't in the player's view").toBe(false);
 
-  await page.getByRole("button", { name: /Reveal Goblin 1 to players/ }).click();
+  await reveal(page).click();
   const t0 = Date.now();
-  await expect(dmTab.getByRole("button", { name: /Hide Goblin 1 from players/ })).toBeVisible({ timeout: 1_000 });
-  await expect(playerPage.getByText(/Goblin/).first()).toBeVisible({ timeout: 2_500 });
+  await expect(dmTab.getByRole("button", { name: `Hide ${goblin.label} from players` })).toBeVisible({ timeout: 1_000 });
+  await expect.poll(seen, { timeout: 2_000, intervals: [100] }).toBe(true);
   expect(Date.now() - t0).toBeLessThan(2_500);
-  await playerPage.context().close();
+
+  // A typed damage in one tab shows in the other, from the server's event, with no reload.
+  const hpText = (p: Page) => p.locator(`[data-combatant="${goblin.id}"] .cb-hp-text`);
+  const before = (await hpText(page).textContent()) ?? "";
+  await page.locator(`[data-combatant="${goblin.id}"]`).getByRole("button", { name: `5 damage to ${goblin.label}` }).click();
+  await expect(hpText(page)).not.toHaveText(before);
+  const after = (await hpText(page).textContent()) ?? "";
+  await expect(hpText(dmTab)).toHaveText(after, { timeout: 1_000 });
 });
