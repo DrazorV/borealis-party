@@ -21,7 +21,11 @@ const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "src/components/shell/Chrome.tsx": { "react-router": local("./entry/shellRouter.tsx") },
   "src/components/shell/MobileChrome.tsx": { "react-router": local("./entry/shellRouter.tsx") },
   // Additional Content is the one import page: the Import section above upstream's packs (content/WithImport.tsx).
-  "src/pages/content/ContentPage.tsx": { "./PacksTab": local("./content/WithImport.tsx") },
+  // Index files with "Packs without their index" above them, each with Add its index (content/WithUnfollowed.tsx).
+  "src/pages/content/ContentPage.tsx": {
+    "./PacksTab": local("./content/WithImport.tsx"),
+    "./IndexesTab": local("./content/WithUnfollowed.tsx"),
+  },
   // Installed packs by origin, with Remove all on each group (content/PackGroups.tsx).
   "src/pages/content/PacksTab.tsx": { "./PackGroups": local("./content/PackGroups.tsx") },
   "src/pages/settings/ApplicationSettings.tsx": {

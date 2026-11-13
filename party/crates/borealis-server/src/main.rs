@@ -25,6 +25,7 @@ mod db;
 mod error;
 mod hub;
 mod import_source;
+mod index_subs;
 mod jobs;
 mod mail;
 mod migrate;

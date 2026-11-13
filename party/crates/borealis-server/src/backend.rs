@@ -102,31 +102,12 @@ fn bundle_export(
     })
 }
 
-/// Each pack in the library with the index it was downloaded from: its id, that index's address and its whole
-/// `pack-meta.json`, which changes whenever the pack is installed again.
-fn index_packs(state: &AppState) -> std::collections::BTreeMap<String, (String, String)> {
-    use borealis_lib::content_packs::PACK_META_FILE;
-    std::fs::read_dir(state.paths.library())
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| {
-            let text = std::fs::read_to_string(entry.path().join(PACK_META_FILE)).ok()?;
-            let meta: Value = serde_json::from_str(&text).ok()?;
-            let url = meta["indexUrl"].as_str()?.to_string();
-            Some((
-                entry.file_name().to_string_lossy().into_owned(),
-                (url, text),
-            ))
-        })
-        .collect()
-}
-
-/// Accept, as upstream does, then keep the packs that came from indexes up to date: a pack this bundle added or
-/// replaced records the index it was downloaded from (`indexUrl` in its `pack-meta.json`, which travels in the
-/// bundle), and this account now follows that index too, as the one who exported it does. Packs the bundle left as
-/// they were (identical, or newer here) add nothing, so an index this account removed stays removed unless the
-/// bundle brings its content back. An index that can't be added (not HTTPS) leaves the pack as a snapshot.
+/// Accept, as upstream does, then keep the packs that came from indexes up to date: a pack of this bundle records
+/// the index it was downloaded from (`indexUrl` in its `pack-meta.json`, which travels in the bundle), and this
+/// account now follows that index too, as the one who exported it does. That includes packs this account already had
+/// (identical, or newer here). Only an index this account removed itself stays removed, unless the bundle changed its
+/// pack ([`crate::index_subs::indexes_to_follow`]). An index that can't be added (not HTTPS, or refused by the guard)
+/// leaves the pack as a snapshot; Additional Content then offers to add it.
 ///
 /// A bundle from another player (made by another account, or `from_another_player` when the user says so) goes
 /// through [`accept_foreign`] instead, so nothing this account already has is replaced.
@@ -140,7 +121,12 @@ fn bundle_accept(
 ) -> ApiResult<LinkSummary> {
     let opened = lock(&received.open).remove(&bundle_id);
     let foreign = from_another_player == Some(true) || opened.as_ref().is_some_and(|o| o.foreign);
-    let before = index_packs(&state);
+    // Read before the accept, which moves or removes the file.
+    let in_bundle = opened
+        .as_ref()
+        .map(|o| crate::index_subs::bundle_pack_ids(&o.path))
+        .unwrap_or_default();
+    let before = crate::index_subs::index_packs(&state);
     let summary = match (foreign, opened) {
         (false, _) => sync.accept_bundle(&bundle_id)?,
         (true, Some(opened)) => accept_foreign(&state, &sync, &bundle_id, &opened.path)?,
@@ -152,11 +138,12 @@ fn bundle_accept(
             ));
         }
     };
-    let urls: std::collections::BTreeSet<String> = index_packs(&state)
-        .into_iter()
-        .filter(|(id, now)| before.get(id) != Some(now))
-        .map(|(_, (url, _))| url)
-        .collect();
+    let urls = crate::index_subs::indexes_to_follow(
+        &before,
+        &crate::index_subs::index_packs(&state),
+        &in_bundle,
+        &crate::index_subs::removed(&state),
+    );
     for url in urls {
         // The address comes from someone else's file: it is checked as if this account had typed it.
         if let Err(e) = guarded_add_index(&state, &url) {
@@ -170,13 +157,30 @@ fn bundle_accept(
 fn guarded_add_index(state: &AppState, url: &str) -> ApiResult<Vec<ContentIndex>> {
     crate::net_guard::check_url(&borealis_lib::content_index::raw_file_url(url))
         .map_err(ApiError::invalid)?;
-    state.add_index(url)
+    let list = state.add_index(url)?;
+    crate::index_subs::set_removed(state, url, false);
+    Ok(crate::index_subs::described(state, list))
 }
 
 /// Remember an index address: upstream's, for addresses on the internet only.
 #[tauri::command(async)]
 fn add_index(state: tauri::State<'_, AppState>, url: String) -> ApiResult<Vec<ContentIndex>> {
     guarded_add_index(&state, &url)
+}
+
+/// Upstream's, with an index not downloaded here named after its installed pack ([`crate::index_subs::described`]).
+#[tauri::command(async)]
+fn list_indexes(state: tauri::State<'_, AppState>) -> Vec<ContentIndex> {
+    crate::index_subs::described(&state, state.list_indexes())
+}
+
+/// Upstream's (its packs stay), remembered so that a bundle bringing the same pack again does not follow the index
+/// again ([`crate::index_subs`]).
+#[tauri::command(async)]
+fn remove_index(state: tauri::State<'_, AppState>, url: String) -> ApiResult<Vec<ContentIndex>> {
+    let list = state.remove_index(&url)?;
+    crate::index_subs::set_removed(&state, &url, true);
+    Ok(crate::index_subs::described(&state, list))
 }
 
 /// Run `f` on a blocking thread, as upstream's private `commands_content::blocking` does.
@@ -596,7 +600,7 @@ fn offered(name: &str, invocation: &Invocation) -> Option<Result<Value, Value>> 
         commands_content::get_compatibility_report,
         commands_content::list_packs,
         commands_content::list_sources,
-        commands_content::list_indexes,
+        list_indexes,
         commands_content::list_5etools_urls,
         commands_settings::content_update_status,
         commands_play::preview_convert_to_2024,
@@ -690,7 +694,7 @@ fn offered(name: &str, invocation: &Invocation) -> Option<Result<Value, Value>> 
         commands_content::remove_pack,
         commands_content::set_source_edition,
         add_index,
-        commands_content::remove_index,
+        remove_index,
         update_indexes,
         commands_content::clear_downloaded_content,
         commands_settings::clear_caches,
