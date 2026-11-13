@@ -17,11 +17,12 @@ import { useApi } from "../../src/state/ApiContext";
 import { startImportPreview, useImportPreviewState } from "../../src/state/importPreview";
 import { errorMessage } from "../../src/state/useAsync";
 import { openBundleFromImport } from "../api/bundles";
+import { defaultFiveToolsSource } from "../api/importSource";
 import { loadSession } from "../api/session";
 import { inboxEmpty, onInbox, sendFiles, takeFocus, takeInbox } from "../import/door";
 import { KIND_LABEL, needsNotice, planImport, sentence } from "../import/plan";
 import { viewReport } from "../import/reportNotes";
-import { checkFiveToolsSource, classifyLink, DEFAULT_5ETOOLS, type LinkKind } from "../import/sniff";
+import { checkFiveToolsSource, classifyLink, type LinkKind } from "../import/sniff";
 import { receiveRoute } from "./ShareReceivePage";
 import "./party.css";
 import { FiveToolsResult } from "./FiveToolsResult";
@@ -156,8 +157,6 @@ function saveCustom(url: string) {
   try { const k = customKey(); if (k) localStorage.setItem(k, url); } catch { /* storage off: nothing to remember */ }
 }
 
-/** How a 5etools source is named: the default by its name, any other by its address. */
-const sourceTitle = (url: string) => (sameUrl(url, DEFAULT_5ETOOLS.url) ? "Default 5etools data" : url);
 
 export function ImportHub() {
   const api = useApi();
@@ -176,10 +175,18 @@ export function ImportHub() {
   const customRef = useRef<HTMLInputElement>(null);
   /** The 5etools addresses this account imported from, each with its packs (Update re-imports the same books). */
   const [sources, setSources] = useState<FiveToolsUrl[]>([]);
+  /** Pack names by id: a source lists its packs by id. */
+  const [packNames, setPackNames] = useState<Record<string, string>>({});
   const refreshSources = useCallback(() => {
     void api.list5etoolsUrls().then((l) => setSources(Array.isArray(l) ? l : []), () => undefined);
+    void api.listPacks().then((l) => setPackNames(Object.fromEntries((Array.isArray(l) ? l : []).map((p) => [p.id, p.name]))), () => undefined);
   }, [api]);
   useEffect(refreshSources, [refreshSources]);
+  /** The server's default 5etools source, set by its admin; none ships with the party. */
+  const [defaultUrl, setDefaultUrl] = useState<string | null>(null);
+  useEffect(() => { let live = true; void defaultFiveToolsSource().then((u) => { if (live) setDefaultUrl(u); }); return () => { live = false; }; }, []);
+  /** How a 5etools source is named: the server's default by that name, any other by its address. */
+  const sourceTitle = (url: string) => (defaultUrl && sameUrl(url, defaultUrl) ? "Default 5etools data" : url);
   const nav = useNavigate();
   const [busy, setBusyState] = useState(false);
   // Read by work that outlives a render (the inbox is emptied in a loop).
@@ -426,16 +433,21 @@ export function ImportHub() {
         <p className="muted small">An Aurora or Borealis .index file, or a GitHub repository (or https:// data/ folder) of 5etools-format data. The server downloads it.</p>
       </Card>
       <Card title="5etools data" id={FIVETOOLS_CARD}>
-        <p className="muted">Choose where the server downloads 5etools-format data from, then choose the books. Doing it again later re-imports the same books when they changed. Only use content you are entitled to use.</p>
+        <p className="muted">{defaultUrl
+          ? "Use the source your server offers, or your own, then choose the books."
+          : "Borealis Party comes with no 5etools address. Give the address of 5etools-format data, then choose the books."}{" "}
+          Doing it again later re-imports the same books when they changed. Only use content you are entitled to use.</p>
         <div className="party-import-sources">
-          <section className="party-import-source" aria-labelledby="party-5et-default">
-            <h3 id="party-5et-default">Default 5etools data</h3>
-            <p className="party-import-source-name">{DEFAULT_5ETOOLS.name}</p>
-            <p className="muted small party-import-url">{DEFAULT_5ETOOLS.url}</p>
-            <div className="party-import-actions">
-              <Button variant="primary" icon="download" disabled={busy} onClick={() => void fromSource(DEFAULT_5ETOOLS.url)}>Get the default 5etools data</Button>
-            </div>
-          </section>
+          {defaultUrl && (
+            <section className="party-import-source" aria-labelledby="party-5et-default">
+              <h3 id="party-5et-default">Default 5etools data</h3>
+              <p className="party-import-source-name">Set by your server</p>
+              <p className="muted small party-import-url">{defaultUrl}</p>
+              <div className="party-import-actions">
+                <Button variant="primary" icon="download" disabled={busy} onClick={() => void fromSource(defaultUrl)}>Get the default 5etools data</Button>
+              </div>
+            </section>
+          )}
           <section className="party-import-source" aria-labelledby="party-5et-custom">
             <h3 id="party-5et-custom">My own 5etools source</h3>
             <form className="party-import-link" noValidate onSubmit={(e) => void submitCustom(e)}>
@@ -458,7 +470,7 @@ export function ImportHub() {
                   <div className="party-import-known-text">
                     <strong className="party-import-url">{sourceTitle(s.url)}</strong>
                     {sourceTitle(s.url) !== s.url && <span className="muted small party-import-url">{s.url}</span>}
-                    {(s.packs ?? []).length > 0 && <span className="muted small">{plural(s.packs.length, "pack")}: {s.packs.join(", ")}</span>}
+                    {(s.packs ?? []).length > 0 && <span className="muted small">{plural(s.packs.length, "pack")}: {s.packs.map((id) => packNames[id] ?? id).join(", ")}</span>}
                     {s.problem && <span className="small party-import-field-error">{s.problem}</span>}
                   </div>
                   <Button disabled={busy} aria-label={`Update from ${sourceTitle(s.url)}`} onClick={() => void fromSource(s.url)}>Update</Button>

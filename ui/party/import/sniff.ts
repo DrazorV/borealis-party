@@ -192,15 +192,6 @@ export function classifyLink(text: string): Link | null {
 }
 
 /**
- * Where "Get the default 5etools data" downloads from: the public 5etools source repository on GitHub. The server's
- * importer resolves its newest commit and downloads only the files it reads; Update later re-imports the same packs.
- */
-export const LATEST_5ETOOLS_URL = "https://github.com/5etools-mirror-3/5etools-src";
-
-/** The default 5etools source as the Import screen names it. */
-export const DEFAULT_5ETOOLS = { name: "5etools-src on GitHub (5etools-mirror-3)", url: LATEST_5ETOOLS_URL } as const;
-
-/**
  * What the server takes as a 5etools source (`parse_location` in src-tauri/src/content_fivetools_remote.rs): an
  * https:// address of a GitHub repository (`github.com/owner/repo`), a branch or folder in one (`…/tree/branch/folder`),
  * the same on raw.githubusercontent.com, or any https:// folder that holds `books.json` (a file in it stands for the

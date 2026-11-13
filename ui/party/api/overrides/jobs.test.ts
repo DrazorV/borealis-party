@@ -73,10 +73,10 @@ describe("long downloads as background jobs", () => {
       [STATUS]: [{ jobId: "j1", command: "stage_5etools_url", state: "done", result: { token: "x" } }],
     });
     const api = createHttpApi(session);
-    const answer = api.stage5etoolsUrl({ url: "https://github.com/5etools-mirror-3/5etools-src" });
+    const answer = api.stage5etoolsUrl({ url: "https://github.com/example/srd-data" });
     await run(1000);
     await expect(answer).resolves.toEqual({ token: "x" });
-    expect(calls[0]!.body).toEqual({ command: "stage_5etools_url", args: { url: "https://github.com/5etools-mirror-3/5etools-src" } });
+    expect(calls[0]!.body).toEqual({ command: "stage_5etools_url", args: { url: "https://github.com/example/srd-data" } });
 
     const update = server({
       [START]: [{ ...started(), command: "update_5etools_url" }],

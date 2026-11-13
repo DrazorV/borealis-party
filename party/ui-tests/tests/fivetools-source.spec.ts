@@ -4,15 +4,15 @@ import type { Locator, Page, Route, TestInfo } from "@playwright/test";
 import { expect, measureOverflow, minTap, open, scrollIntoReach, signedInShell, smallTargets, test } from "./fixtures";
 
 /**
- * The Import screen's 5etools card: two sources to choose from, the default one in one tap and the account's own
- * address. Nothing here reaches GitHub:
- * - the default source's download is stubbed in the browser (the job, the scan and the import answer canned data,
+ * The Import screen's 5etools card: the server's default source in one tap (when its admin set one) and the account's
+ * own address. Nothing here reaches GitHub, and no test sets a real default on the shared rig server:
+ * - the server's default is answered in the browser (`/api/import/default-5etools`), and its download is stubbed (the job, the scan and the import answer canned data,
  *   with a report as long as a real full import's: hundreds of entries in groups);
  * - an own source is a 5etools-format folder on a local web server, which the server refuses to download from (a
  *   loopback address), and the screen shows that refusal in the server's words.
  */
 
-const DEFAULT_URL = "https://github.com/5etools-mirror-3/5etools-src";
+const DEFAULT_URL = "https://github.com/example/srd-data";
 
 /** A 5etools-format data folder (books.json and one book), as someone's own mirror would serve it. */
 let dataServer: Server;
@@ -78,8 +78,15 @@ function bigReport() {
   return { converted: 16746, replaced: 0, partial, skipped, packs: [{ id: "p1", name: "SRD Sample" }, { id: "p2", name: "More" }] };
 }
 
+/** The server's default source, as an admin would have set it, answered in the browser. */
+async function stubDefault(page: Page) {
+  await page.route(/\/api\/import\/default-5etools$/, (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ url: DEFAULT_URL }) }));
+}
+
 /** The default source's download, scan and import answered in the browser; the rest goes to the real server. */
 async function stubDefaultSource(page: Page) {
+  await stubDefault(page);
   const seen: string[] = [];
   let imported = false;
   const json = (route: Route, body: unknown) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
@@ -115,12 +122,24 @@ test.describe("Import screen: 5etools sources", () => {
     await signIn("player");
   });
 
-  test("shows both sources, the default one named with its address", async ({ page }, testInfo) => {
+  test("without a default from the server, only an own source is offered", async ({ page }, testInfo) => {
+    await open(page, "/import-files");
+    await signedInShell(page);
+    await expect(page.getByRole("region", { name: "My own 5etools source" })).toBeVisible();
+    await expect(card(page).getByText(/comes with no 5etools address/)).toBeVisible();
+    await expect(page.getByRole("region", { name: "Default 5etools data" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Get the default 5etools data" })).toHaveCount(0);
+    await expectPhoneLayout(page, testInfo);
+  });
+
+  test("shows both sources, the server's default named with its address", async ({ page }, testInfo) => {
+    await stubDefault(page);
     await open(page, "/import-files");
     await signedInShell(page);
     const def = page.getByRole("region", { name: "Default 5etools data" });
     const own = page.getByRole("region", { name: "My own 5etools source" });
     await expect(def.getByText(DEFAULT_URL)).toBeVisible();
+    await expect(def.getByText("Set by your server")).toBeVisible();
     await expect(def.getByRole("button", { name: "Get the default 5etools data" })).toBeVisible();
     await expect(own.getByLabel("Address of my 5etools source")).toBeVisible();
     await expect(own.getByText(/GitHub repository of 5etools data/)).toBeVisible();
@@ -212,4 +231,33 @@ test.describe("Import screen: 5etools sources", () => {
     await signedInShell(page);
     await expect(page.getByLabel("Address of my 5etools source")).toHaveValue(dataUrl);
   });
+});
+
+test("Admin: the default 5etools source is checked, and refused in the server's words", async ({ page, signIn }, testInfo) => {
+  await signIn("admin");
+  await open(page, "/admin");
+  await signedInShell(page);
+  await page.getByRole("tab", { name: "Settings" }).tap();
+  const box = page.locator("section.card").filter({ has: page.getByRole("heading", { name: "Default 5etools source" }) });
+  await box.scrollIntoViewIfNeeded();
+  await expect(box.getByText(/comes with none/)).toBeVisible();
+  await expect(box.getByText(/^None: the Import screen offers only/)).toBeVisible();
+  const field = box.getByLabel("Default 5etools source address");
+  const save = box.getByRole("button", { name: "Save" });
+
+  // Checked on the phone first; nothing is saved (the rig server is shared, so no test saves a real default).
+  await field.fill("http://mirror.example.com/data/");
+  await save.tap();
+  await expect(box.getByRole("alert")).toHaveText("Use an https:// address.");
+  // The server refuses a loopback address in its own words.
+  await field.fill("https://127.0.0.1/data/");
+  await save.tap();
+  await expect(box.getByRole("alert")).toContainText("127.0.0.1");
+  await expect(box.getByText(/^None: the Import screen offers only/)).toBeVisible();
+
+  const o = await measureOverflow(page);
+  expect(o.page, "the page scrolls sideways").toBeLessThanOrEqual(0);
+  const small = (await smallTargets(page, minTap(testInfo), ".party-admin")).filter((t) => /Save|Offer none|config\.toml|5etools/.test(t.label));
+  expect(small, `controls under ${minTap(testInfo)} px`).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath("admin-default-source.png") });
 });

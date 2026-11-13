@@ -97,6 +97,11 @@ tls = "starttls"
 # Set BOREALIS__INITIAL_ADMIN__USERNAME and BOREALIS__INITIAL_ADMIN__PASSWORD, and optionally
 # BOREALIS__INITIAL_ADMIN__EMAIL.
 
+[import]
+# A 5etools-format source the Import screen offers in one tap ("Default 5etools data"), for example a GitHub
+# repository of 5etools data your group is entitled to use. None by default. The admin page's setting wins over this.
+# default_5etools_url = ""
+
 [features]
 # Emergency switches, for this file only (no admin page toggles them). A feature switched off answers 404 on all its
 # routes and keeps its data; switch it back on and restart.
@@ -125,6 +130,8 @@ pub struct Settings {
     pub smtp: SmtpSettings,
     /// The first account.
     pub initial_admin: InitialAdmin,
+    /// Imports (`import_source.rs`).
+    pub import: ImportSettings,
     /// Emergency kill switches.
     pub features: FeatureSettings,
     /// Logging.
@@ -146,6 +153,22 @@ impl Default for FeatureSettings {
 }
 
 static FEATURES: std::sync::OnceLock<FeatureSettings> = std::sync::OnceLock::new();
+
+/// `[import]`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct ImportSettings {
+    /// The 5etools-format source offered as the default on the Import screen; blank or absent is none.
+    pub default_5etools_url: Option<String>,
+}
+
+static IMPORT: std::sync::OnceLock<ImportSettings> = std::sync::OnceLock::new();
+
+/// The `[import]` settings [`Settings::load`] read at start, or none (tests that build the routes by hand).
+#[must_use]
+pub fn import() -> ImportSettings {
+    IMPORT.get().cloned().unwrap_or_default()
+}
 
 /// The switches [`Settings::load`] read at start, or all on (tests that build the routes by hand).
 #[must_use]
@@ -540,6 +563,7 @@ impl Settings {
         // Read by the sign-in routes and the download check, which have no settings of their own. Once per process.
         let _ = NETWORK.set(settings.network());
         let _ = FEATURES.set(settings.features);
+        let _ = IMPORT.set(settings.import.clone());
         Ok(settings)
     }
 
@@ -587,6 +611,13 @@ impl Settings {
     fn check(&self) -> Result<(), ConfigError> {
         for proxy in &self.server.trusted_proxies {
             Cidr::parse(proxy).map_err(|e| ConfigError(format!("server.trusted_proxies: {e}")))?;
+        }
+        if let Some(url) = self.import.default_5etools_url.as_deref().map(str::trim) {
+            if !url.is_empty() && !url.starts_with("https://") {
+                return Err(ConfigError(
+                    "import.default_5etools_url must start with https://".into(),
+                ));
+            }
         }
         if !["disable", "prefer", "require"].contains(&self.postgres.sslmode.as_str()) {
             return Err(ConfigError(

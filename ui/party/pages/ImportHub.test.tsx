@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
   indexes: [] as { url: string; name: string; lastChecked: string | null; problem: string | null }[],
   refuse: null as string | null,
   confirm: "confirm" as string,
+  defaultUrl: null as string | null,
 }));
 
 function fakeApi(): Api {
@@ -50,6 +51,7 @@ let api: Api;
 vi.mock("../../src/state/ApiContext", () => ({ useApi: () => api }));
 vi.mock("../../src/components/Confirm", () => ({ useConfirm: () => async () => state.confirm }));
 vi.mock("../../src/components/ImportNotice", () => ({ useImportNotice: () => ({ ensure: async () => true, read: () => undefined }) }));
+vi.mock("../api/importSource", () => ({ defaultFiveToolsSource: async () => state.defaultUrl }));
 vi.mock("../api/session", () => ({ loadSession: () => ({ baseUrl: "http://server", token: "t", user: { username: "ana" } }) }));
 vi.mock("../api/bundles", () => ({
   openBundleFromImport: async (_s: unknown, fileName: string) => {
@@ -95,7 +97,7 @@ const row = (title: string | RegExp) => screen.getByText(title, { selector: ".pa
 beforeEach(() => {
   resetDoor();
   calls.length = 0;
-  Object.assign(state, { packs: [], urls: [], indexes: [], refuse: null, confirm: "confirm" });
+  Object.assign(state, { packs: [], urls: [], indexes: [], refuse: null, confirm: "confirm", defaultUrl: "https://github.com/example/srd-data" });
   api = fakeApi();
 });
 
@@ -200,21 +202,33 @@ describe("Paste a link", () => {
   });
 });
 
-const DEFAULT_URL = "https://github.com/5etools-mirror-3/5etools-src";
+const DEFAULT_URL = "https://github.com/example/srd-data";
 const STORE_KEY = "borealis-party:5etools-source:http://server:ana";
 
 describe("5etools data: the default source", () => {
   beforeEach(() => { vi.stubGlobal("localStorage", memoryStorage()); });
 
-  it("names the source it uses", () => {
+  it("offers the server's default, named with its address", async () => {
     render(<ImportHub />);
+    await settle();
     const card = screen.getByRole("region", { name: "Default 5etools data" });
     expect(within(card).getByText(DEFAULT_URL)).toBeTruthy();
-    expect(within(card).getByText(/5etools-src on GitHub/)).toBeTruthy();
+    expect(within(card).getByText("Set by your server")).toBeTruthy();
+  });
+
+  it("offers only an own source when the server sets no default", async () => {
+    state.defaultUrl = null;
+    render(<ImportHub />);
+    await settle();
+    expect(screen.queryByRole("region", { name: "Default 5etools data" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Get the default 5etools data" })).toBeNull();
+    expect(screen.getByRole("region", { name: "My own 5etools source" })).toBeTruthy();
+    expect(screen.getByText(/comes with no 5etools address/)).toBeTruthy();
   });
 
   it("downloads it in one tap the first time, then offers the books", async () => {
     render(<ImportHub />);
+    await settle();
     fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
     await settle();
     expect(calls.find((c) => c.name === "stage5etoolsUrl")?.args).toEqual({ url: DEFAULT_URL });
@@ -226,6 +240,7 @@ describe("5etools data: the default source", () => {
   it("updates the same books once it was imported", async () => {
     state.urls = [{ url: DEFAULT_URL }];
     render(<ImportHub />);
+    await settle();
     fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
     await settle();
     expect(names()).toContain("update5etoolsUrl");
@@ -312,6 +327,7 @@ describe("5etools data: imported from", () => {
 
   it("appears once the first import from a source finished", async () => {
     render(<ImportHub />);
+    await settle();
     fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
     await settle();
     state.urls = [{ url: DEFAULT_URL, packs: ["SRD sample"] }] as never;
@@ -379,6 +395,7 @@ describe("5etools results", () => {
       return { converted: 16746, replaced: 0, partial, skipped: [], packs: [{ id: "x", name: "SRD sample" }] };
     }) as never;
     render(<ImportHub />);
+    await settle();
     fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
     await settle();
     fireEvent.click(within(row("Default 5etools data")).getByRole("button", { name: "Import 1 book" }));
@@ -394,6 +411,7 @@ describe("5etools results", () => {
   it("an import that brought nothing in warns", async () => {
     api.import5etools = (async () => ({ converted: 0, replaced: 0, partial: [], skipped: [], packs: [] })) as never;
     render(<ImportHub />);
+    await settle();
     fireEvent.click(screen.getByRole("button", { name: "Get the default 5etools data" }));
     await settle();
     fireEvent.click(within(row("Default 5etools data")).getByRole("button", { name: "Import 1 book" }));
