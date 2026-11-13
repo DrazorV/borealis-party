@@ -1862,6 +1862,17 @@ fn card_hp(card: &Card) -> Option<Hp> {
 
 // Building combatants from stat blocks.
 
+/// A stat block from a combat file without what a creature is worth in XP: an edited file never brings XP back into
+/// the DM's view or an export (D16).
+fn without_xp(mut block: Value) -> Value {
+    if let Some(map) = block.as_object_mut() {
+        for key in party_encounter::creature::HIDDEN_KEYS {
+            map.remove(key);
+        }
+    }
+    block
+}
+
 /// A creature as its encounter copy has it: the block it fights with (overrides applied, no XP), its typed
 /// `MonsterData` when it is a monster, its name (the DM's), and its HP and AC.
 pub(crate) struct Fighter {
@@ -3201,7 +3212,8 @@ async fn import_inner(state: &AppState, user: &User, party: &str, body: &[u8]) -
                     block: info
                         .and_then(|i| i.get("statBlock"))
                         .filter(|b| b.is_object())
-                        .cloned(),
+                        .cloned()
+                        .map(without_xp),
                     name: info
                         .and_then(|i| i.get("name"))
                         .and_then(Value::as_str)

@@ -1232,6 +1232,41 @@ async fn export_import(t: &Table) {
         t.dm.post(&import, json!({ "requestId": request_id(), "file": newer }))
             .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+    // A hand-edited file's XP never comes back, in the DM's view or an export (D16).
+    let mut with_xp = file.clone();
+    for c in with_xp["server"]["creatures"]
+        .as_object_mut()
+        .unwrap()
+        .values_mut()
+    {
+        if let Some(block) = c["statBlock"].as_object_mut() {
+            block.insert("xp".into(), json!(1800));
+            block.insert("xp_lair".into(), json!(2000));
+        }
+    }
+    let v = ok(
+        &t.dm,
+        "POST",
+        &import,
+        json!({ "requestId": request_id(), "file": with_xp }),
+    )
+    .await;
+    let edited = v["id"].as_str().unwrap().to_string();
+    let exported = act_ok(&t.dm, &edited, "export", json!({})).await;
+    for (what, creatures) in [
+        ("view", &v["creatures"]),
+        ("export", &exported["server"]["creatures"]),
+    ] {
+        let creatures = creatures.as_object().unwrap();
+        assert!(!creatures.is_empty(), "{what}");
+        for c in creatures.values() {
+            assert!(
+                c["statBlock"].get("xp").is_none() && c["statBlock"].get("xp_lair").is_none(),
+                "no XP in the {what}: {c}"
+            );
+        }
+    }
+    act_ok(&t.dm, &edited, "end", json!({})).await;
     // An encounter pet comes into the fight with its owner, acting right after it.
     let e = ok(
         &t.dm,
