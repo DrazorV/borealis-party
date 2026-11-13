@@ -23,3 +23,13 @@ html.phone .v4-pack-groups .party-remove-all { min-height: var(--ph-hit); min-wi
 /* The Import section inside upstream's page: its cards stack in the section body. */
 .v4-content .party-import > .body { display: flex; flex-direction: column; gap: var(--sp-3); }
 html.phone .v4-content .party-import { padding: 0; }
+
+/* Bestiary coverage (BestiaryCoverage.tsx): one row per source, the summary line under its name. */
+.party-bestiary { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.party-bestiary-pack .party-bestiary-line { margin: var(--sp-1) 0 0; overflow-wrap: anywhere; }
+.party-bestiary-pack .aur-expander-title { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }
+.party-bestiary-label { margin: var(--sp-2) 0 var(--sp-1); font-weight: 600; }
+.party-bestiary-counts ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.party-bestiary-notes ul { margin: 0; padding-left: var(--sp-3); }
+.party-bestiary-notes li { overflow-wrap: anywhere; }
+html.phone .party-bestiary-pack .aur-expander-toggle { min-height: var(--ph-hit); }

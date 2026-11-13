@@ -146,6 +146,34 @@ const MIGRATIONS: &[&[&str]] = &[
         )",
         "CREATE INDEX IF NOT EXISTS party_members_party ON party_members (party_id)",
     ],
+    // 4 (M-monster-meta, 0.3.0), after M-parties: the creature details the 5etools import drops (D15), and what each
+    // 5etools book's import converted, skipped or kept in part (bestiary.rs). Derived from the account's own imports;
+    // a row is replaced whole when its pack is imported again, and rows of another pack revision are ignored.
+    &[
+        "CREATE TABLE IF NOT EXISTS monster_meta (
+            owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            element_id TEXT NOT NULL,
+            pack_id TEXT NOT NULL,
+            pack_rev TEXT NOT NULL,
+            environment_json TEXT NOT NULL,
+            page BIGINT,
+            extras_json TEXT NOT NULL,
+            captured_at BIGINT NOT NULL,
+            PRIMARY KEY (owner_id, element_id)
+        )",
+        "CREATE INDEX IF NOT EXISTS monster_meta_pack ON monster_meta (owner_id, pack_id)",
+        "CREATE TABLE IF NOT EXISTS bestiary_imports (
+            owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            pack_id TEXT NOT NULL,
+            pack_rev TEXT NOT NULL,
+            source TEXT NOT NULL,
+            in_data BIGINT NOT NULL,
+            skipped_json TEXT NOT NULL,
+            partial_json TEXT NOT NULL,
+            captured_at BIGINT NOT NULL,
+            PRIMARY KEY (owner_id, pack_id)
+        )",
+    ],
 ];
 
 /// How many steps [`MIGRATIONS`] has: the schema version a database is at after [`Db::open`].
@@ -157,7 +185,7 @@ pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
 /// database they left at version 3 would otherwise skip these steps. Every such step must be idempotent (`CREATE ...
 /// IF NOT EXISTS`). Step 1 has none: every database has its tables. A new step adds its own line here, with its
 /// main table.
-const MARKERS: &[(usize, &str)] = &[(2, "shares"), (3, "parties")];
+const MARKERS: &[(usize, &str)] = &[(2, "shares"), (3, "parties"), (4, "monster_meta")];
 
 /// A table only the versions with groups had. A database that still has it opens like any other: the table is left
 /// alone and a warning is logged, so an instance that ran those versions (or rolls back to one) still boots.

@@ -20,6 +20,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 mod admin;
 mod auth;
 mod backend;
+mod bestiary;
 mod config;
 mod db;
 mod error;
@@ -151,6 +152,7 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
         .merge(parties::routes())
         .merge(import_source::routes())
         .merge(pack_removal::routes())
+        .merge(bestiary::routes())
         .route("/api/{*rest}", any(no_such_route))
         .layer(DefaultBodyLimit::max(max_upload))
         .with_state(state)
