@@ -712,12 +712,12 @@ fn the_schema_version_file_matches_the_migrations() {
     );
 }
 
-/// The versions recorded in `schema_version`, in order.
 /// Every step this version has, as `schema_version` records them: 1 to [`Db::schema_version`].
 fn every_step() -> Vec<i64> {
     (1..=i64::try_from(Db::schema_version()).unwrap()).collect()
 }
 
+/// The versions recorded in `schema_version`, in order.
 async fn versions(db: &Db) -> Vec<i64> {
     sqlx::query_scalar("SELECT version FROM schema_version ORDER BY version")
         .fetch_all(db.pool())
