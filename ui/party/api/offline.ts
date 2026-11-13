@@ -1,6 +1,8 @@
 import { COMMANDS, type Api, type ApiError, type ApiMethods, type CharacterSummary, type CommandName } from "../../src/api/contract";
 import { LOCAL, unavailable } from "./http";
 import { wrapPersonality } from "./personality";
+import { wrapPlayerName } from "./playerName";
+import { loadSession } from "./session";
 import type { Method } from "./overrides/registry";
 
 /** What an action that needs the server says offline. */
@@ -92,6 +94,8 @@ export function createOfflineApi(local: Api, serverToLocal: ReadonlyMap<string, 
     for (const k of DEVICE_SETTINGS) delete patch[k];
     return save({ ...args, patch });
   };
+  // An opened character with no player name gets the account's username offline too (./playerName.ts).
+  wrapPlayerName(methods as Record<string, Method>, () => loadSession()?.user.username);
   // The selection flow skips the personality lists offline too, as the account chose online.
   wrapPersonality(methods as Record<string, Method>, false);
 

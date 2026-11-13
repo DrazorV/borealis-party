@@ -37,7 +37,10 @@ test.describe("sign-in page", () => {
       expect(reach, `Sign in is on screen above a ${keyboardHeight(page)} px keyboard, or can be scrolled there`).toBe(true);
       await button.tap();
       await signedInShell(page);
-      await expect(page.locator(".party-bar")).toContainText("player");
+      // The bar names no account (0.2.2); More's Account row says who is signed in.
+      for (const text of await page.locator(".party-bar").allTextContents()) expect(text).not.toContain("player");
+      await open(page, "/more"); // not a tap: the bottom tabs may be under the keyboard
+      await expect(page.locator(".party-more")).toContainText("Account · player");
     });
   }
 

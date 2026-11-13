@@ -13,8 +13,7 @@
 .party-bar-host { flex: none; }
 .party-offline { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; padding: var(--sp-1) var(--sp-3); background: var(--surface-2, var(--surface)); border-bottom: var(--border-w) solid var(--border); font-size: var(--fs-sm); }
 .party-update.floating { position: fixed; top: 0; left: 0; right: 0; z-index: 20; }
-.party-bar .party-bar-name, .party-bar .party-sync-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.party-bar .party-bar-name { flex-shrink: 0; max-width: 35%; }
+.party-bar .party-sync-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .party-bar .spacer, .party-member-head .spacer, .party-line .spacer, .party-inline .spacer { flex: 1; }
 /*
  * The sign-in and new-password screens scroll themselves (base.css never lets the window scroll), so the card can be
@@ -95,7 +94,6 @@ html.phone.android:root {
  */
 html.phone .party-bar { gap: var(--sp-1); padding: 2px var(--sp-2) 2px var(--ph-gutter); }
 html.phone .party-bar > .btn { flex-shrink: 0; min-height: var(--ph-hit); padding: 0 12px; }
-html.phone .party-bar .party-bar-name { display: none; }
 html.phone .party-bar:not(:has(> .btn)), html.phone.kb-open .party-bar { display: none; }
 /* The Android app in a wide window (no phone layer): the account rows are on More, so an empty bar takes no room. */
 .party-bar.party-bar-compact:not(:has(> .btn)) { display: none; }

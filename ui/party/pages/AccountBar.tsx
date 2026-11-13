@@ -145,7 +145,8 @@ function MoreRows({ admin, exit }: { admin: boolean; exit: ReturnType<typeof use
 }
 
 /**
- * Who is signed in, with the ways to the account page, the admin page and out. On a phone the bar keeps only the Sync
+ * The ways to the account page, the admin page and out. The bar names no account (0.2.2): the Account page, the Account
+ * button's title and More's Account row say who is signed in. On a phone the bar keeps only the Sync
  * chip (and nothing at all in a browser, which keeps no copy) and the rest is on the More page (plan D10).
  */
 export function AccountBar() {
@@ -168,14 +169,13 @@ export function AccountBar() {
       {host && createPortal(
         <>
           <div className={compact ? "party-bar party-bar-compact" : "party-bar"}>
-            <span className="muted party-bar-name">{session.user.username}</span>
             <span className="spacer" />
             {chip && <SyncChip phone={compact} />}
             {!compact && (
               <>
                 <Button small onClick={() => nav(IMPORT_ROUTE)}>Import</Button>
                 <Button small onClick={() => nav(PARTIES_ROUTE)}>Parties</Button>
-                <Button small onClick={() => nav("/account")}>Account</Button>
+                <Button small onClick={() => nav("/account")} title={`Signed in as ${session.user.username}`}>Account</Button>
                 {admin && <Button small onClick={() => nav("/admin")}>Admin</Button>}
                 <Button small onClick={exit.start} disabled={exit.busy}>{exit.busy ? "Signing out…" : "Sign out"}</Button>
               </>
