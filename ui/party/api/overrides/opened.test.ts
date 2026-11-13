@@ -111,7 +111,7 @@ describe("through the page's API", () => {
     const dialog = await screen.findByRole("dialog");
     expect(dialog.textContent).toContain("Import Hero.dnd5e into alice?");
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
-    await waitFor(() => expect(went).toEqual(["/import-files"]));
+    await waitFor(() => expect(went).toEqual(["/content"]));
     expect(takeInbox().files.map((f) => f.name)).toEqual(["Hero.dnd5e"]);
     expect(invoked.filter((c) => !c.startsWith("plugin:"))).toEqual(["take_opened_files"]);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

@@ -3,3 +3,23 @@
 html.phone .v4-pack-groups .party-remove-all { min-height: var(--ph-hit); min-width: var(--ph-hit); }
 /* The Remove source dialog (api/overrides/sourceRemoval.ts). */
 .party-remove-source p { margin: 0 0 var(--sp-2); overflow-wrap: anywhere; }
+/*
+ * One import page: upstream's own import controls on Additional Content are hidden; the party Import section at the
+ * top (pages/ImportSection.tsx) does each of these. Upstream's sections name themselves in aria-label (Section.tsx).
+ * - Custom content: only "Import files" (and the desktop folder import): the whole section.
+ * - 5etools-format import: the .zip / homebrew / folder choosers, and the books and report of upstream's own flow.
+ * - Import from an address: the form and its intro; its list of addresses (Update, Remove) stays, the section with it.
+ * - Index files: the Fetch form; the list (Remove) stays.
+ */
+.v4-content section.v4-csec[aria-label="Custom content"],
+.v4-content section.v4-csec[aria-label="5etools-format import"],
+.v4-content section.v4-csec[aria-label="Source books found"],
+.v4-content section.v4-csec[aria-label="Import report"],
+.v4-content section.v4-csec[aria-label="Import from an address"]:not(:has(ul[aria-label="Data addresses"])),
+.v4-content form.v4-urlrow:has(#fivetools-url),
+.v4-content p:has(+ form.v4-urlrow #fivetools-url),
+.v4-content form.v4-urlrow:has(#index-url) { display: none !important; }
+
+/* The Import section inside upstream's page: its cards stack in the section body. */
+.v4-content .party-import > .body { display: flex; flex-direction: column; gap: var(--sp-3); }
+html.phone .v4-content .party-import { padding: 0; }

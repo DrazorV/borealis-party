@@ -2,8 +2,8 @@ import { expect, open, scrollIntoReach, signedInShell, test } from "./fixtures";
 
 /**
  * The ways out of an account on a phone (plan 2.2) can be found and tapped. Nothing is exported here: the entry point
- * only has to open its dialog. The ways in (Import characters, Import files, Open bundle... and the rest) all lead to
- * the Import screen since 0.1.5: unify-imports.spec.ts.
+ * only has to open its dialog. The ways in (Import characters, Open bundle... and the rest) all lead to the Import
+ * section on Additional Content (0.2.1): unify-imports.spec.ts.
  */
 test.describe("export entry points", () => {
   test.beforeEach(async ({ page, signIn }) => {

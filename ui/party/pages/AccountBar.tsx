@@ -11,6 +11,7 @@ import { AppOffer } from "./AppOffer";
 import { DesktopUpdate } from "./DesktopUpdate";
 import { OfflineBanner } from "./OfflineBanner";
 import { useSignOut } from "./SignOut";
+import { IMPORT_PATH } from "../import/door";
 
 /**
  * A host element placed in upstream's page, in front of the element `before` selects, for as long as that element
@@ -40,8 +41,8 @@ function useHost(className: string, before: string): HTMLElement | null {
   return placed ? host : null;
 }
 
-/** The Import screen (ImportHub, plan I9). */
-const IMPORT_ROUTE = "/import-files";
+/** Imports: the Import section at the top of Additional Content (0.2.1). */
+const IMPORT_ROUTE = IMPORT_PATH;
 /** The Parties page (plan 4.1). */
 const PARTIES_ROUTE = "/parties";
 

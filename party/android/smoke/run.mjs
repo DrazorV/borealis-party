@@ -329,13 +329,19 @@ async function main() {
   const routed = await until("the 5etools import", async () => /smoke-homebrew\.json/.test(await smoke("text()")), 20000).catch(() => false);
   check("the .json goes to the 5etools-format import", !!routed);
   await screenshot("07-json-routed");
-  // The Import screen's 5etools card: the account's own source, and the server's default only when its admin set one
-  // (this throwaway server sets none).
-  const sources = await until("the 5etools sources on the Import screen", async () => {
+  // One import page (0.2.1): "Open with" lands on Additional Content's Import section, and there is no other.
+  const where = await page(`({ hash: location.hash, sections: document.querySelectorAll("section#party-import").length,
+    first: [...document.querySelectorAll(".v4-content section.v4-csec")].filter((s) => s.offsetParent !== null)[0]?.getAttribute("aria-label") ?? "",
+    upstream: [...document.querySelectorAll(".v4-content button")].filter((b) => b.offsetParent !== null && b.textContent.trim() === "Import files").length })`);
+  check("Open with lands on Additional Content's Import section (one import page)",
+    where.hash === "#/content" && where.sections === 1 && where.first === "Import" && where.upstream === 0, JSON.stringify(where));
+  // Its 5etools card: the account's own source, and the server's default only when its admin set one (this throwaway
+  // server sets none).
+  const sources = await until("the 5etools sources in the Import section", async () => {
     const s = await page(`[...document.querySelectorAll(".party-import-source h3")].map((h) => h.textContent.trim())`);
     return s.length ? s : null;
   }, 15000).catch(() => []);
-  check("the Import screen offers an own 5etools source (and no default the server didn't set)",
+  check("the Import section offers an own 5etools source (and no default the server didn't set)",
     sources.join("|") === "My own 5etools source", sources.join(" | "));
 
   // 5. A .borealis made by the server from the imported character: Android hands it over with the other files

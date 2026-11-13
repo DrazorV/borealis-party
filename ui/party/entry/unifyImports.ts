@@ -10,18 +10,18 @@ import { ask } from "../api/ask";
 import { openImport, sendFiles, sendLink, type ImportFocus, type LinkFor } from "../import/door";
 
 /**
- * Every place upstream starts an import leads to the one Import screen (plan I9, 0.1.5), so each kind of file and link
+ * Every place upstream starts an import leads to the one Import section, at the top of Additional Content (plan I9; one page since 0.2.1), so each kind of file and link
  * is read, sniffed and reported the same way. Upstream's buttons and menu items stay where they are and look the same;
- * a click on one (capturing phase, before upstream's handler) opens the Import screen instead, with the file chooser
+ * a click on one (capturing phase, before upstream's handler) opens the Import section instead, with the file chooser
  * open for a file pick. Upstream's rows carry no attribute to match, so they are matched by their text, as
  * ./hideTransfer.ts does. If upstream rewords one, it falls back to upstream's own import, which still works.
  *
  * Kept where they are: the Additional Content page's lists, Update, Remove, enable and Clear (management).
  * Not redirected: "Import my content folder" and "Scan folder..." (desktop-only rows upstream hides in the party, which
- * the server reports as mobile; the Import screen takes files, not folders).
+ * the server reports as mobile; the Import section takes files, not folders).
  */
 
-/** A file pick that opens the Import screen's chooser instead. */
+/** A file pick that opens the Import section's chooser instead. */
 interface ClickRule {
   /** What the rule is, for tests and the docs. */
   name: string;
@@ -48,7 +48,7 @@ export const CLICK_RULES: readonly ClickRule[] = [
   { name: "content-5etools-files", selector: ".v4-content .btn", labels: [ZIP_BUTTON, HOMEBREW_BUTTON], focus: "files" },
 ];
 
-/** A link form whose Fetch / Import takes the typed address to the Import screen. */
+/** A link form whose Fetch / Import takes the typed address to the Import section. */
 export const LINK_FORMS: readonly { name: string; input: string; kind: LinkFor }[] = [
   // Additional Content > Index files: "Remote .index file URL" + Fetch.
   { name: "content-index-link", input: "#index-url", kind: "index" },
@@ -102,7 +102,7 @@ function onDragOver(e: DragEvent): void {
 }
 
 /**
- * Files dropped anywhere on the page go to the Import screen. Listening on the document runs after errors.ts's size
+ * Files dropped anywhere on the page go to the Import section. Listening on the document runs after errors.ts's size
  * guard (window, capturing), which stops a drop that is too large, and before upstream's GlobalImport (window, bubbling).
  */
 function onDrop(e: DragEvent): void {
@@ -121,7 +121,7 @@ export const DROP_LIMIT_TITLE = "Not imported from the drop";
  * The desktop app: the window takes drops natively (Tauri) and its backend tells this page, which the server's event
  * stream doesn't relay, so the page listens to the device itself. Files are read from the device and go to the Import
  * screen. A dropped `.borealis` or folder can't be read into the page (upstream opens those by path on the device), so
- * the user is told to choose it on the Import screen instead.
+ * the user is told to choose it on the Import section instead.
  */
 export async function takeNativeDrop(drop: FileDrop, read = (tokens: string[]) => createTauriApi().takePickedFiles({ purpose: "dropped-file", tokens })): Promise<void> {
   const left = [...drop.bundles.map((b) => b.name), ...drop.folders.map((f) => f.name)];
@@ -135,7 +135,7 @@ export async function takeNativeDrop(drop: FileDrop, read = (tokens: string[]) =
   if (files.length > 0 || left.length > 0 || error || drop.rejected.length > 0) openImport(null);
   const notes: string[] = [];
   if (error) notes.push(error);
-  if (left.length > 0) notes.push(`${left.join(", ")}: a bundle or folder can't be dropped here. Choose its files with Choose files on the Import screen.`);
+  if (left.length > 0) notes.push(`${left.join(", ")}: a bundle or folder can't be dropped here. Choose its files with Choose files in the Import section of Additional Content.`);
   if (drop.rejected.length > 0) notes.push(`${drop.rejected.join(", ")}: nothing here reads ${drop.rejected.length === 1 ? "this file" : "these files"}.`);
   if (notes.length > 0) await ask(DROP_LIMIT_TITLE, notes.join(" "), [{ id: "ok", label: "OK" }]);
 }

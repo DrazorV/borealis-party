@@ -1,5 +1,5 @@
-import { type FormEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { type Navigator, type To, UNSAFE_NavigationContext, useNavigate } from "react-router";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import type { Api, ContentProgress, FiveToolsImportReport, FiveToolsSource, FiveToolsUrl, ImportReport } from "../../src/api/contract";
 import { Button } from "../../src/components/Button";
 import { Card } from "../../src/components/Card";
@@ -10,7 +10,6 @@ import { useImportNotice } from "../../src/components/ImportNotice";
 import { fileToBase64, filesToInputs } from "../../src/lib/files";
 import { FiveToolsSources } from "../../src/pages/content/FiveToolsSources";
 import { describeUrlUpdate } from "../../src/pages/content/FiveToolsUrlSection";
-import { ImportPreviewHost } from "../../src/pages/content/ImportPreviewDialog";
 import { sourceConsentText } from "../../src/pages/content/IndexesTab";
 import { describeIndexUpdate } from "../../src/pages/content/indexUpdateText";
 import { useApi } from "../../src/state/ApiContext";
@@ -19,7 +18,7 @@ import { errorMessage } from "../../src/state/useAsync";
 import { openBundleFromImport } from "../api/bundles";
 import { defaultFiveToolsSource } from "../api/importSource";
 import { loadSession } from "../api/session";
-import { inboxEmpty, onInbox, sendFiles, takeFocus, takeInbox } from "../import/door";
+import { doorCount, inboxEmpty, onInbox, sendFiles, takeFocus, takeInbox } from "../import/door";
 import { KIND_LABEL, needsNotice, planImport, sentence } from "../import/plan";
 import { viewReport } from "../import/reportNotes";
 import { checkFiveToolsSource, classifyLink, type LinkKind } from "../import/sniff";
@@ -29,18 +28,20 @@ import { FiveToolsResult } from "./FiveToolsResult";
 import "./importSource.css";
 
 /**
- * One Import screen (plan I9): every kind of file and link the account can take in, so nobody has to know which of
- * Start, Additional Content (Packs, Indexes, 5etools) or File > Open bundle reads what. Files are told apart by their
- * bytes (../import/sniff.ts) and handed to the same commands those tabs use, which keep working unchanged:
+ * The one Import section, at the top of Additional Content (plan I9, one page since 0.2.1): every kind of file and link
+ * the account can take in, so nobody has to know which importer reads what. Files are told apart by their bytes
+ * (../import/sniff.ts) and handed to the same commands upstream's controls use:
  * - characters (.dnd5e, native JSON): `import_character`;
  * - Borealis bundles: `stage_bundle`, then upstream's Open bundle window;
  * - Aurora content (.xml, .index, .zip): `preview_import_pack`, then upstream's import preview, which installs;
- * - 5etools-format data (.zip, .json) and 5etools GitHub links: `stage_5etools_*`, then the books to import.
+ * - 5etools-format data (.zip, .json) and 5etools links: `stage_5etools_*`, then the books to import.
  * Index links go to `add_index` and `update_indexes`. Each file and link gets a row in one list. Failures keep the
  * server's own words (a refused private address, a too-large file as ../api/overrides/errors.ts words it).
  *
- * Every other place that starts an import (upstream's buttons and menu items, drops on the window, "Open with") opens
- * this screen through ../import/door.ts and hands over its files or link, which are taken here one pick at a time.
+ * Upstream's own import controls on the page are hidden (../content/content.css), and every other place that starts
+ * an import (the Start page, the account bar, More, File menu items, drops, "Open with") comes here through
+ * ../import/door.ts and hands over its files or link, taken one pick at a time. Upstream's import preview is the one
+ * GlobalImport already shows on every upstream page, so this section renders none of its own.
  */
 
 type Tone = "working" | "success" | "warning" | "error" | "info";
@@ -101,25 +102,6 @@ function usePreviewOutcome(): () => Promise<"installed" | "closed"> {
   return useCallback(() => new Promise((resolve) => { waiter.current = { installing: false, resolve }; }), []);
 }
 
-/**
- * Upstream's import preview goes to Additional Content once it installed (or added an index). Opened from here, it
- * stays on this screen instead, so the result lands in this list and the next file's dialog can follow.
- */
-function StayOnImport({ children }: { children: ReactNode }) {
-  const context = useContext(UNSAFE_NavigationContext);
-  const value = useMemo(() => {
-    if (!context) return context;
-    const away = (to: To) => (typeof to === "string" ? to : to.pathname ?? "").split(/[?#]/)[0] === "/content";
-    const base = context.navigator;
-    const navigator: Navigator = Object.assign(Object.create(base) as Navigator, {
-      push: (to: To, state?: unknown, opts?: unknown) => { if (!away(to)) base.push(to, state, opts as never); },
-      replace: (to: To, state?: unknown, opts?: unknown) => { if (!away(to)) base.replace(to, state, opts as never); },
-    });
-    return { ...context, navigator };
-  }, [context]);
-  return <UNSAFE_NavigationContext.Provider value={value}>{children}</UNSAFE_NavigationContext.Provider>;
-}
-
 /** The books of staged 5etools-format data, to choose and import (as the 5etools tab does). */
 function StagedBooks({ api, staged, onDone }: { api: Api; staged: Staged; onDone: (report: FiveToolsImportReport | null, error?: string) => void }) {
   const [picked, setPicked] = useState(() => staged.sources.map((s) => s.abbr));
@@ -142,7 +124,10 @@ function StagedBooks({ api, staged, onDone }: { api: Api; staged: Staged; onDone
   );
 }
 
-/** The 5etools card, which a door can ask to show. */
+/** The section, and its 5etools card, which a door can ask to show. */
+export const IMPORT_SECTION = "party-import";
+/** The door the section last scrolled into view for: a visit without a door (the sub-tab) doesn't scroll. */
+let scrolledFor = 0;
 const FIVETOOLS_CARD = "party-import-5etools";
 
 /** This device remembers the last own 5etools source per server and account (a convenience: losing it is fine). */
@@ -158,7 +143,7 @@ function saveCustom(url: string) {
 }
 
 
-export function ImportHub() {
+export function ImportSection() {
   const api = useApi();
   const confirm = useConfirm();
   const notice = useImportNotice();
@@ -394,6 +379,9 @@ export function ImportHub() {
     const focus = takeFocus();
     if (focus === "link") { linkRef.current?.scrollIntoView?.({ block: "center" }); linkRef.current?.focus(); }
     else if (focus === "fivetools") document.getElementById(FIVETOOLS_CARD)?.scrollIntoView?.({ block: "start" });
+    // Any door: the section in view (the page may have been scrolled down to the packs).
+    else if (focus !== null || scrolledFor !== doorCount()) document.getElementById(IMPORT_SECTION)?.scrollIntoView?.({ block: "start" });
+    scrolledFor = doorCount();
   };
   const arrived = useRef(() => undefined as void);
   arrived.current = () => { showFocus(); void drain(); };
@@ -406,8 +394,10 @@ export function ImportHub() {
 
   return (
     // Drops anywhere on the page come in through the inbox (../entry/unifyImports.ts).
-    <div className="party party-import">
-      <Card title="Import">
+    <section className="v4-csec party party-import" id={IMPORT_SECTION} aria-label="Import">
+      <header><h2>Import</h2></header>
+      <div className="body">
+      <Card title="Files">
         <p className="muted">Characters (.dnd5e), Borealis bundles (.borealis), Aurora content (.xml, .index or .zip) and 5etools-format data (.zip or .json). Choose several at once: each file goes where it belongs.</p>
         <div className="party-import-actions">
           <Button variant="primary" icon="upload" disabled={busy} onClick={() => fileRef.current?.click()}>Choose files</Button>
@@ -509,7 +499,7 @@ export function ImportHub() {
           </ul>
         </Card>
       )}
-      <StayOnImport><ImportPreviewHost /></StayOnImport>
-    </div>
+      </div>
+    </section>
   );
 }

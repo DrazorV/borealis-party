@@ -1,5 +1,6 @@
 /**
- * The one way into the Import screen (`/import-files`, ../pages/ImportHub.tsx), for every place that starts an import:
+ * The one way into the Import section at the top of Additional Content (`/content`, ../pages/ImportSection.tsx), for
+ * every place that starts an import:
  * upstream's buttons and menu items (../entry/unifyImports.ts), drops on the window and "Open with"
  * (../api/overrides/opened.ts). Each hands over what it has, and the screen sniffs and lists it the same way.
  *
@@ -8,7 +9,9 @@
  * - `focus` says which part of the screen to show: the file chooser, the link field, or the 5etools card.
  */
 
-export const IMPORT_PATH = "/import-files";
+export const IMPORT_PATH = "/content";
+/** Where the separate Import screen of 0.1.5 to 0.2.0 was: it leads to IMPORT_PATH now. */
+export const OLD_IMPORT_PATH = "/import-files";
 
 export type ImportFocus = "files" | "link" | "fivetools";
 export type LinkFor = "index" | "fivetools";
@@ -23,21 +26,21 @@ let links: InboxLink[] = [];
 const listeners = new Set<() => void>();
 const changed = () => listeners.forEach((l) => l());
 
-/** Hand files to the Import screen. */
+/** Hand files to the Import section. */
 export function sendFiles(list: readonly File[]): void {
   if (list.length === 0) return;
   files = [...files, ...list];
   changed();
 }
 
-/** Hand a link to the Import screen. */
+/** Hand a link to the Import section. */
 export function sendLink(link: InboxLink): void {
   if (!link.url.trim()) return;
   links = [...links, { url: link.url.trim(), kind: link.kind }];
   changed();
 }
 
-/** What waits for the Import screen, emptied. */
+/** What waits for the Import section, emptied. */
 export function takeInbox(): { files: File[]; links: InboxLink[] } {
   const out = { files, links };
   files = [];
@@ -80,7 +83,7 @@ function fileChooser(): HTMLInputElement {
   input.multiple = true;
   input.hidden = true;
   // No accept filter: Android's web view fails on extensions it has no type for, and the files are sniffed anyway.
-  input.setAttribute("aria-label", "Choose files for the Import screen");
+  input.setAttribute("aria-label", "Choose files for the Import section");
   input.setAttribute("data-party-import-chooser", "");
   input.addEventListener("change", () => {
     const list = Array.from(input.files ?? []);
@@ -93,7 +96,7 @@ function fileChooser(): HTMLInputElement {
 }
 
 /**
- * Opens the Import screen. With `focus: "files"` the file chooser opens at once: call it from the tap itself (a web
+ * Opens the Import section. With `focus: "files"` the file chooser opens at once: call it from the tap itself (a web
  * view ignores a chooser opened later), and the chosen files arrive on the screen.
  */
 export function openImport(focus: ImportFocus | null = null): void {

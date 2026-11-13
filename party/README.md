@@ -57,7 +57,7 @@ Put passwords in variables rather than in the file.
 | `BOREALIS__SERVER__PUBLIC_UPLOAD_MB` | `95` | Largest upload through the public address, in MB (see [Upload size](#upload-size)) |
 | `BOREALIS__SERVER__APP_DOWNLOAD` | the latest GitHub release | Folder URL the website offers the apps from; `off` offers none |
 | `BOREALIS__SERVER__TRUSTED_PROXIES` | | Reverse proxies allowed to name the client, such as `172.20.20.100`; commas between entries (see [Security and proxies](#security-and-proxies)) |
-| `BOREALIS__IMPORT__DEFAULT_5ETOOLS_URL` | | A 5etools-format source the Import screen offers every account in one tap (an https:// GitHub repository or data folder you are entitled to use). None ships with the server; Admin › Settings › Default 5etools source wins over this |
+| `BOREALIS__IMPORT__DEFAULT_5ETOOLS_URL` | | A 5etools-format source the Import section offers every account in one tap (an https:// GitHub repository or data folder you are entitled to use). None ships with the server; Admin › Settings › Default 5etools source wins over this |
 | `BOREALIS__DATABASE__TYPE` | `sqlite` | `sqlite` or `postgres` |
 | `BOREALIS__SQLITE__PATH` | `party.db` | SQLite file, relative to the config folder |
 | `BOREALIS__POSTGRES__HOST` | `localhost` | PostgreSQL server |
@@ -388,7 +388,7 @@ A player shares characters and content packs with another player from any device
   packs. The server builds the bundle from the account's own folder, with the same builder as Export to bundle, and
   keeps it in `data/users/<id>/sync/outgoing/`. The sender gets a code like `ABCD-EFGH-JKMN-PQRS` (80 random bits,
   only its hash is stored) and, when `server.public_url` is set, a link to `#/share/receive/<code>`.
-- **Enter a share code** (on the Import screen, or by opening the link) stages the bundle in the recipient's own
+- **Enter a share code** (in the Import section of Additional Content, or by opening the link) stages the bundle in the recipient's own
   `sync/incoming` and opens Borealis's own preview. It is received as another player's bundle: nothing the recipient
   already has is replaced (see above). The recipient can decline, and decline and block the sender.
 - **Links first.** Packs downloaded from an index, or imported from a 5etools address, travel as that address: the
@@ -412,9 +412,9 @@ A player shares characters and content packs with another player from any device
 ## Open with, and web links, in the apps
 
 - **Open with / Share to Borealis Party** (Android and iOS): the app asks first, in its own dialog, "Import
-  Hero.dnd5e into alice?", and Import opens the Import screen with the file, as if it had been chosen there (see
-  "One Import screen" below). Cancel drops it. The upload size limits above apply, with the same messages.
-- A `.borealis` opened on Android goes to the Import screen too, which uploads it and opens the Open bundle window.
+  Hero.dnd5e into alice?", and Import opens the Import section with the file, as if it had been chosen there (see
+  "One import page" below). Cancel drops it. The upload size limits above apply, with the same messages.
+- A `.borealis` opened on Android goes to the Import section too, which uploads it and opens the Open bundle window.
   The party apps are built without device transfer, and without it iOS (and the desktop app) would drop an
   opened `.borealis` without a word, so the iOS app doesn't offer to open `.borealis` files: use File > Open bundle....
 - Offline, an opened file stays on the device and the app says it will import it when it is connected; the online
@@ -423,30 +423,34 @@ A player shares characters and content packs with another player from any device
   downloads, a link on a party page) in the system browser. If the device can't, a dialog shows the address with
   Copy link.
 
-## One Import screen
+## One import page
 
-Since 0.1.5 every way to start an import leads to the Import screen (`#/import-files`), which tells files apart by
-their content and lists one result per file or link. The main doors are More > Import on a phone and Import in the
-desktop account bar. Upstream's own buttons stay where they are and look the same; the party catches their tap
-(`ui/party/entry/unifyImports.ts`, matched by their text) and opens the Import screen instead:
+Since 0.2.1 Additional Content (`#/content`) is the one import page. Its **Import** section, at the top
+(`ui/party/pages/ImportSection.tsx`), takes every kind of file and link: Choose files (told apart by their content),
+a share code, Paste a link, and 5etools data (the server's default source when its admin set one, or the account's own
+address). It lists one result per file or link. The separate Import screen of 0.1.5 to 0.2.0 (`#/import-files`) now
+leads there.
+
+Upstream's own import controls on that page are hidden (`ui/party/content/content.css`), so there is one way to do
+each thing: Import files, the 5etools .zip and homebrew .json buttons, the 5etools "Import from an address" form and
+the index Fetch form. The lists below stay for managing what is installed: packs (with Remove all per group on a
+phone), index files, Update content files and the 5etools addresses (Update, Remove; removing one can remove its packs).
+
+Every other way to start an import leads to the Import section (`ui/party/import/door.ts`; upstream's buttons are
+caught by `ui/party/entry/unifyImports.ts`, matched by their text):
 
 | Where | What it does now |
 |---|---|
-| Start > Import characters | Import screen, file chooser open |
-| File menu > Load Character, Open bundle... (desktop bar and phone Menu) | Import screen, file chooser open; the menu closes |
-| File menu > Import Characters, the floating "+" | the same; upstream shows them only with its AI import, so not in the party |
-| Additional Content > Import files | Import screen, file chooser open (the content notice comes there, once content is chosen) |
-| Additional Content > 5etools: the .zip and homebrew .json buttons | Import screen, file chooser open |
-| Additional Content > Index files: Fetch | Import screen, the typed address added as an index there |
-| Additional Content > 5etools: Import from an address | Import screen, the typed address imported as 5etools-format data there |
-| Files dropped on the window (browsers) | Import screen with the files, `.borealis` included |
-| Files dropped on the desktop app's window | Import screen with the files, read from the device |
-| Open with / Share (apps) | after "Import X into alice?", Import screen with the files, `.borealis` included |
+| Start > Import characters | Additional Content, Import section, file chooser open |
+| File menu > Load Character, Open bundle... (desktop bar and phone Menu) | the same; the menu closes |
+| File menu > Import Characters, the floating "+" | the same; upstream shows them only with its AI import |
+| More > Import (phone), Import in the desktop account bar | Additional Content, Import section |
+| Files dropped on the window (browsers) | Import section with the files, `.borealis` included |
+| Files dropped on the desktop app's window | Import section with the files, read from the device |
+| Open with / Share (apps) | after "Import X into alice?", Import section with the files, `.borealis` included |
 
-Additional Content still lists, updates, enables and removes packs, indexes and 5etools addresses. Not redirected:
-"Import my content folder" and "Scan folder..." (upstream shows them only on a desktop backend, never with the server,
-and the Import screen takes files, not folders). If upstream rewords a button, it falls back to upstream's own import,
-which still works.
+Not offered: "Import my content folder" and "Scan folder..." (upstream shows them only on a desktop backend, never
+with the server; the Import section takes files, not folders).
 
 Known limit: a `.borealis` or a folder dropped on the **desktop app's** window can't be read into the page (upstream's
 backend opens those by path and keeps the bytes on the device), so the app says to choose it with Choose files instead.
