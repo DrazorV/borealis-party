@@ -46,6 +46,8 @@ function useHost(className: string, before: string): HTMLElement | null {
 const IMPORT_ROUTE = IMPORT_PATH;
 /** The Parties page (plan 4.1). */
 const PARTIES_ROUTE = "/parties";
+/** Homebrew authoring and published indexes (0.3.1, pages/HomebrewPage.tsx). */
+const HOMEBREW_ROUTE = "/homebrew";
 
 function syncLabel(status: SyncStatus): string {
   switch (status.state) {
@@ -132,6 +134,7 @@ function MoreRows({ admin, exit }: { admin: boolean; exit: ReturnType<typeof use
       <li><Link className="v5-row" to={IMPORT_ROUTE} style={{ textDecoration: "none" }}><Icon name="upload" /><span className="grow">Import</span><Icon name="chevron" /></Link></li>
       <li><Link className="v5-row" to="/share" style={{ textDecoration: "none" }}><Icon name="send" /><span className="grow">Share with a code</span><Icon name="chevron" /></Link></li>
       <li><Link className="v5-row" to={PARTIES_ROUTE} style={{ textDecoration: "none" }}><Icon name="swords" /><span className="grow">Parties</span><Icon name="chevron" /></Link></li>
+      <li><Link className="v5-row" to={HOMEBREW_ROUTE} style={{ textDecoration: "none" }}><Icon name="hammer" /><span className="grow">Homebrew</span><Icon name="chevron" /></Link></li>
       {admin && (
         <li><Link className="v5-row" to="/admin" style={{ textDecoration: "none" }}><Icon name="shield" /><span className="grow">Admin</span><Icon name="chevron" /></Link></li>
       )}
@@ -181,6 +184,7 @@ export function AccountBar() {
               <>
                 <Button small onClick={() => nav(IMPORT_ROUTE)}>Import</Button>
                 <Button small onClick={() => nav(PARTIES_ROUTE)}>Parties</Button>
+                <Button small onClick={() => nav(HOMEBREW_ROUTE)}>Homebrew</Button>
                 <Button small onClick={() => nav("/account")} title={`Signed in as ${session.user.username}`}>Account</Button>
                 {admin && <Button small onClick={() => nav("/admin")}>Admin</Button>}
                 <Button small onClick={exit.start} disabled={exit.busy}>{exit.busy ? "Signing out…" : "Sign out"}</Button>

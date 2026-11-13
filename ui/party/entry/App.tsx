@@ -18,6 +18,8 @@ import { JoinRoute, PartiesPage } from "../pages/PartiesPage";
 import { PartyCharacterView } from "../pages/PartyCharacterView";
 import { EncounterBuilder } from "../pages/EncounterBuilder";
 import { EncountersPage } from "../pages/EncountersPage";
+import { HomebrewEditor } from "../pages/HomebrewEditor";
+import { HomebrewPackPage, HomebrewPage } from "../pages/HomebrewPage";
 import { OfflinePage } from "../pages/OfflineBanner";
 import { IMPORT_PATH, OLD_IMPORT_PATH, setImportNavigate } from "../import/door";
 import { SharePage } from "../pages/SharePage";
@@ -95,6 +97,11 @@ export function App() {
         <Route path="/parties/:party/encounters/:encounter" element={<AppShell>{offline ? <OfflinePage /> : <EncounterBuilder />}</AppShell>} />
         {/* The DM's live combat tracker (plan 4.4, 0.3.0); the Live chip in the top bar leads back to it. */}
         <Route path="/combat/:id" element={<AppShell>{offline ? <OfflinePage /> : <CombatTracker />}</AppShell>} />
+        {/* Homebrew (0.3.1): the account's own packs, a form or XML per element, and publishing as an index. */}
+        <Route path="/homebrew" element={<AppShell>{offline ? <OfflinePage /> : <HomebrewPage />}</AppShell>} />
+        <Route path="/homebrew/:pack" element={<AppShell>{offline ? <OfflinePage /> : <HomebrewPackPage />}</AppShell>} />
+        <Route path="/homebrew/:pack/e/:element" element={<AppShell>{offline ? <OfflinePage /> : <HomebrewEditor />}</AppShell>} />
+        <Route path="/homebrew/:pack/new/:type" element={<AppShell>{offline ? <OfflinePage /> : <HomebrewEditor />}</AppShell>} />
         {/* Notes read a folder on the device, which a server doesn't offer. */}
         <Route path="/notes" element={<Navigate to="/" replace />} />
         <Route path="*" element={<UpstreamApp />} />

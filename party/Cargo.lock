@@ -877,6 +877,7 @@ dependencies = [
  "borealis-character",
  "borealis-content",
  "borealis-import-5etools",
+ "borealis-migrate",
  "clap",
  "http-body-util",
  "lettre",
@@ -901,6 +902,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "zip",
 ]
 
 [[package]]
