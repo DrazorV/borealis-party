@@ -46,6 +46,10 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  # The toolchain every job installs (dtolnay/rust-toolchain@stable, with the Android and iOS targets). Upstream's
+  # rust-toolchain.toml pins its own version, which would otherwise win and has none of those targets installed;
+  # Party CI and the image (party/docker/Dockerfile) choose stable the same way.
+  RUSTUP_TOOLCHAIN: stable
   NDK_VERSION: 27.2.12479018
 
 jobs:
