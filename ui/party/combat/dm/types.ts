@@ -71,6 +71,37 @@ export interface Ability {
   uses?: string;
   group_limit?: string;
   requires_effect?: string;
+  /** The spell this entry casts (0.3.2). DM only. */
+  spell?: SpellLink;
+  /** What it does, compiled on the server: a spell, or a stat block attack or save (0.3.2). DM only. */
+  mech?: CastSpec;
+}
+
+/** Ability modifiers and saves, STR..CHA order (0.3.2). DM only. */
+export interface CombatStats {
+  mods: [number, number, number, number, number, number];
+  saves: [number, number, number, number, number, number];
+  magic_resistance?: boolean;
+  /** Lowercase ("humanoid"), for target filters. */
+  creature_type?: string;
+  /** What the printed AC comes from ("leather armor"): wearing armor blocks Mage Armor. */
+  armor?: string;
+}
+
+export interface Casting {
+  ability: AbilityName;
+  dc?: number;
+  attack?: number;
+  caster_level?: number;
+  cantrip_tier?: number;
+}
+
+export interface SpellTurn {
+  round: number;
+  turn: string;
+  slot_spent?: boolean;
+  bonus_spell?: boolean;
+  leveled_action_spell?: boolean;
 }
 
 export interface ConcentrationCheck {
@@ -126,6 +157,10 @@ export interface Combatant {
   resources?: Record<string, Resource>;
   group?: string;
   notes?: string;
+  /** 0.3.2, DM only. */
+  stats?: CombatStats;
+  casting?: Casting[];
+  spell_turn?: SpellTurn;
 }
 
 export type Boundary = "start" | "end";
@@ -143,7 +178,15 @@ export type Modifier =
   | { kind: "speed_multiply"; value: number }
   | { kind: "speed_halve" }
   | { kind: "speed_zero" }
-  | { kind: "cover"; value: Cover };
+  | { kind: "cover"; value: Cover }
+  // 0.3.2
+  | { kind: "ac_base"; value: { base: number; add_dex: boolean } }
+  | { kind: "ac_min"; value: number }
+  | { kind: "roll_dice"; value: { on: RollOn; ability?: AbilityName; term: DiceTerm } }
+  | { kind: "roll_mode"; value: { on: ModeOn; ability?: AbilityName; mode: AdvDis } }
+  | { kind: "defense"; value: { defense: DefenseKind; damage_type: DamageType } }
+  | { kind: "max_hp"; value: number }
+  | { kind: "speed_set_mode"; value: { mode: SpeedMode; ft: number } };
 
 export interface RepeatSave {
   ability: AbilityName;
@@ -164,6 +207,10 @@ export interface EffectSpec {
   repeat_save?: RepeatSave;
   ends_on_defeat_of?: string[];
   follow_up?: EffectSpec;
+  /** The spell it comes from (0.3.2). DM only. */
+  spell?: SpellTag;
+  /** Its target is dismissed when it ends (a creature bound to the caster's concentration). */
+  dismiss_on_end?: boolean;
 }
 
 export interface Effect extends EffectSpec {
@@ -224,7 +271,170 @@ export interface CombatState {
   group_limits: Record<string, GroupLimit>;
   next_effect?: number;
   next_tiebreak?: number;
+  /** Casts waiting for rolls (0.3.2). DM only. */
+  casts?: PendingCast[];
+  next_cast?: number;
 }
+
+// --- Spells (0.3.2): party_combat::spell ---
+
+/** A number or dice expression over slot, slot_above, mod and cantrip_tier ("8d6+(slot_above)d6"). */
+export type Formula = string;
+export type Tier = "auto" | "partial" | "utility" | "ruling" | "uncurated";
+export type CastTime = "action" | "bonus" | "reaction" | "minute";
+export type TargetFilter =
+  | { kind: "any" } | { kind: "willing" } | { kind: "ally" } | { kind: "enemy" }
+  | { kind: "type"; types: string[] };
+export type AreaShape = "sphere" | "cube" | "cone" | "line" | "cylinder" | "emanation";
+export type Targeting =
+  | { kind: "self" }
+  | { kind: "creatures"; max: Formula; filter?: TargetFilter; include_self?: boolean }
+  | { kind: "area"; shape: AreaShape; size_ft: number };
+export type SaveSuccess = "half" | "none";
+export type Delivery =
+  | { kind: "auto" }
+  | { kind: "attack"; attack: "melee" | "ranged"; rays?: Formula }
+  | { kind: "save"; ability: AbilityName; success: SaveSuccess };
+export type RollOn = "attacks" | "saves" | "checks";
+export type ModeOn = "attacks_by" | "attacks_against" | "saves" | "checks";
+export type AdvDis = "advantage" | "disadvantage";
+export interface DiceTerm { count: number; sides: number; sign?: "plus" | "minus" }
+export type DefenseKind = "resist" | "immune" | "vuln";
+export type SpeedMode = "walk" | "fly" | "swim" | "climb" | "burrow";
+export type SpeedChange =
+  | { op: "add"; ft: number } | { op: "mult"; n: number } | { op: "halve" }
+  | { op: "set_mode"; mode: SpeedMode; ft: number } | { op: "zero" };
+export interface ZoneSpec {
+  save?: { ability: AbilityName; success: SaveSuccess };
+  damage?: Formula;
+  damage_type?: DamageType;
+  choice?: DamageType[];
+  conditions?: Condition[];
+}
+/** A summon's options: info for Add creature only, nothing spawns in 0.3.2. */
+export interface SummonInfo {
+  creature_types?: string[];
+  max_cr?: string;
+  by_cr?: { cr: string; count: number }[];
+  per_slot?: { slot: number; times: number }[];
+  initiative?: "after_owner" | "own_group";
+}
+export type RulingAction =
+  | { kind: "log" }
+  | { kind: "cancel_target_cast"; refund: boolean }
+  | { kind: "roll_check"; dc?: Formula }
+  | { kind: "ask_save"; ability: AbilityName };
+export interface RulingButton { label: string; action?: RulingAction }
+export type SpellDuration =
+  | { kind: "instant" }
+  | { kind: "source_turns"; n: number; at: Boundary }
+  | { kind: "target_turns"; n: number; at: Boundary }
+  | { kind: "minutes"; n: number }
+  | { kind: "long" }
+  | { kind: "until_dispelled" };
+export type Primitive =
+  | { kind: "damage"; dice: Formula; damage_type?: DamageType; choice?: DamageType[] }
+  | { kind: "heal"; dice: Formula; add_mod?: boolean }
+  | { kind: "temp_hp"; dice: Formula; add_mod?: boolean }
+  | { kind: "condition"; condition: Condition; repeat_save?: { ability: AbilityName; at: Boundary }; ends_on_damage?: boolean }
+  | { kind: "ac_base"; base: number; add_dex?: boolean }
+  | { kind: "ac_bonus"; n: number }
+  | { kind: "ac_min"; n: number }
+  | { kind: "roll_dice"; on: RollOn; ability?: AbilityName; term: DiceTerm }
+  | { kind: "roll_mode"; on: ModeOn; ability?: AbilityName; mode: AdvDis }
+  | { kind: "defense"; defense: DefenseKind; types: DamageType[] }
+  | { kind: "max_hp"; n: Formula }
+  | { kind: "speed"; change: SpeedChange }
+  | { kind: "zone"; zone: ZoneSpec }
+  | { kind: "summon"; info: SummonInfo }
+  | { kind: "follow_up"; effect: { name: string; duration?: SpellDuration; apply?: Primitive[] } }
+  | { kind: "end_effects"; max_level: Formula }
+  | { kind: "ruling"; question: string; buttons: RulingButton[] }
+  | { kind: "note"; text: string };
+/** One spell in one edition (closed, v 1). */
+export interface SpellMech {
+  v: 1;
+  key: string;
+  edition: Edition;
+  name: string;
+  rev?: number;
+  level: number;
+  concentration?: boolean;
+  cast: CastTime;
+  targeting: Targeting;
+  delivery: Delivery;
+  on_land?: Primitive[];
+  on_resist?: Primitive[];
+  always?: Primitive[];
+  duration?: SpellDuration;
+  tier: Tier;
+  notes?: string[];
+}
+export type MechOrigin =
+  | { kind: "srd"; key: string; rev: number }
+  | { kind: "def"; id: string; rev: number }
+  | { kind: "statblock" }
+  | { kind: "ruling" };
+export interface CastChoices { damage_type?: DamageType }
+/** A SpellMech compiled on the server for one caster; embedded in cast_spell. */
+export interface CastSpec {
+  v: 1;
+  origin: MechOrigin;
+  mech: SpellMech;
+  dc?: number;
+  attack?: number;
+  mod?: number;
+  cantrip_tier?: number;
+  baked_in?: boolean;
+}
+export interface SpellLink {
+  key?: string;
+  level: number;
+  frequency?: "slot" | "at_will" | "per_day";
+  fixed_slot?: number;
+  baked_in?: boolean;
+}
+export interface FormulaVars { slot: number; slot_above: number; mod: number; cantrip_tier: number }
+export interface SpellTag {
+  key: string;
+  level: number;
+  slot?: number;
+  cast?: string;
+  dc?: number;
+  zone?: ZoneSpec;
+  vars?: FormulaVars;
+  baked_in?: boolean;
+}
+export type RowOutcome = "failed" | "saved" | "hit" | "crit" | "miss" | "lands";
+export interface CastRow {
+  target: string;
+  ray?: number;
+  outcome?: RowOutcome;
+  roll?: D20Result;
+  used_lr?: boolean;
+}
+export interface PendingCast {
+  id: string;
+  caster: string;
+  ability?: string;
+  spec: CastSpec;
+  slot?: number;
+  vars?: FormulaVars;
+  choices?: CastChoices;
+  rows: CastRow[];
+  round?: number;
+  zone_of?: number;
+  statblock?: boolean;
+}
+/** Typed first (D21); "app" rolls with the save bonus, Bless dice and advantage the engine derives. */
+export type RowRoll =
+  | { kind: "typed"; total: number; natural?: number }
+  | { kind: "app" }
+  | { kind: "outcome"; outcome: RowOutcome };
+export interface RowInput { target: string; ray?: number; roll: RowRoll; use_lr?: boolean }
+/** An amount (damage, healing, temp HP), in the order of the definition's amount primitives. */
+export type AmountRoll = { kind: "typed"; total: number } | { kind: "app" };
+export type StandardActionKind = "dodge" | "dash" | "disengage" | "help";
 
 export interface DamagePart {
   amount: DiceInput;
@@ -285,7 +495,19 @@ export type Command =
   | ({ command: "summon"; owner: string; initiative?: D20Input; visible?: boolean }
       & ({ combatant: Combatant } | { copyOf: string } | { companion: string } | { elementId: string }))
   | { command: "dismiss"; id: string }
-  | { command: "set_initiative_mode"; id: string; mode: "after_owner" | "own"; roll?: D20Input };
+  | { command: "set_initiative_mode"; id: string; mode: "after_owner" | "own"; roll?: D20Input }
+  // 0.3.2: spells and stat block actions
+  | { command: "cast_spell"; caster: string; ability?: string; spec?: CastSpec; slot?: number; targets?: string[];
+      rows?: RowInput[]; amounts?: AmountRoll[]; crit_amounts?: AmountRoll[]; choices?: CastChoices;
+      precast?: boolean; force?: boolean; id?: string }
+  | { command: "resolve_cast_row"; cast: string; target: string; ray?: number; roll: RowRoll; use_lr?: boolean }
+  | { command: "apply_cast"; cast: string; amounts?: AmountRoll[]; crit_amounts?: AmountRoll[]; force?: boolean }
+  | { command: "cancel_cast"; cast: string; refund?: boolean }
+  | { command: "apply_zone"; effect: number; targets: string[]; rows?: RowInput[]; amounts?: AmountRoll[]; id?: string }
+  | { command: "perform_statblock"; id: string; ability: string; spec?: CastSpec; targets?: string[];
+      rows?: RowInput[]; amounts?: AmountRoll[]; crit_amounts?: AmountRoll[]; force?: boolean; cast_id?: string }
+  | { command: "standard_action"; id: string; action: StandardActionKind; target?: string; bonus?: boolean }
+  | { command: "bind_to_concentration"; id: string };
 
 export type CommandName = Command["command"];
 
@@ -313,6 +535,11 @@ export interface DmEvent {
   dc?: number;
   ready?: boolean;
   was_seen?: boolean;
+  /*
+   * 0.3.2 events: cast_started {cast, spell, slot?, pending, notes?}, cast_row {cast, target, outcome, roll?},
+   * cast_applied {cast, amounts}, cast_cancelled {cast, refunded}, summon_options {caster, spell, slot?, info,
+   * concentration}, ruling_needed {cast, question, buttons}, standard_action {action}.
+   */
   [key: string]: unknown;
 }
 
