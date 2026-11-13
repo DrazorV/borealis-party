@@ -116,10 +116,12 @@ export const incapacitated = (state: CombatState, id: string): boolean =>
   conditionsOf(state, id).some((k) => INCAPACITATING.includes(k));
 
 export interface AcBreakdown {
-  base: number;
+  /** Null when the stat block prints none (a thin Aurora companion, D17 b). */
+  base: number | null;
   effects: number;
   cover: number;
-  total: number;
+  /** Null with an unknown base: effects can't make a number out of nothing. */
+  total: number | null;
 }
 
 /** AC from the stat block, effects and the best cover (C13). */
@@ -132,7 +134,8 @@ export function effectiveAc(state: CombatState, c: Combatant): AcBreakdown {
       if (m.kind === "cover") cover = Math.max(cover, m.value === "half" ? 2 : 5);
     }
   }
-  return { base: c.ac, effects, cover, total: c.ac + effects + cover };
+  const base = c.ac ?? null;
+  return { base, effects, cover, total: base === null ? null : base + effects + cover };
 }
 
 /** Speeds with effect modifiers, conditions and exhaustion applied (C13). */

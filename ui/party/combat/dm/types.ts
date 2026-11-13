@@ -109,7 +109,8 @@ export interface Combatant {
   hp_authority?: "engine" | "player";
   zero_hp?: "dies" | "death_saves";
   life?: Life;
-  ac: number;
+  /** Null when the stat block prints none (a thin Aurora companion, D17 b). */
+  ac: number | null;
   speed?: Speeds;
   defenses?: Defenses;
   exhaustion?: number;
@@ -399,7 +400,14 @@ export interface DmCombat {
   status?: "setup" | "active" | "ended";
   state: CombatState;
   /** Per creature: the stat block it fights with (overrides applied). PCs have none. */
-  creatures: Record<string, { encounterCreatureId: string | null; statBlock: StatBlock; name?: string }>;
+  creatures: Record<string, {
+    encounterCreatureId: string | null;
+    statBlock: StatBlock;
+    /** The element's name (DM only; null for a typed summon). */
+    name?: string | null;
+    /** Where it came from: an encounter, a copy, an element of the DM's content, a PC's companion, or a typed summon. */
+    origin?: "encounter" | "copy" | "element" | "companion" | "summon" | null;
+  }>;
   /** Per PC: its owner and character; `member: false` once it left the party mid-fight. */
   characters?: Record<string, { ownerId: string; characterId: string; member: boolean; online?: boolean }>;
   /** Open damage and heal prompts. */
@@ -422,6 +430,8 @@ export interface CompanionOffer {
   hp: number;
   ac: number;
   initiative: number;
+  /** The companion element it is, if any. */
+  elementId?: string | null;
 }
 
 /** One row of the DM log (`GET /api/combats/{id}/log`). */

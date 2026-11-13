@@ -101,7 +101,7 @@ export function CombatantCard({ state, c, block, blockName, offers, send, disabl
         </div>
         <div className="cb-statline">
           <span title={ac.total !== ac.base ? `Base ${ac.base}${ac.effects ? `, effects ${signed(ac.effects)}` : ""}${ac.cover ? `, cover +${ac.cover}` : ""}` : undefined}>
-            <b>AC {ac.total}</b>{ac.total !== ac.base && <span className="muted"> (base {ac.base})</span>}
+            <b>AC {ac.total ?? "—"}</b>{ac.total !== ac.base && <span className="muted"> (base {ac.base ?? "—"})</span>}
           </span>
           <span><b>{c.hp.current}/{c.hp.max} HP</b>{c.hp.temp ? ` +${c.hp.temp}` : ""}</span>
           <span>Init {effectiveInitiative(state, c) ?? "–"}{!pc && <span className="muted"> ({initiativeText(block, c.initiative_bonus)})</span>}</span>
