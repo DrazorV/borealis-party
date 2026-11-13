@@ -27,6 +27,9 @@ borealis-import-5etools = { path = "../../../crates/borealis-import-5etools" }
 party-encounter = { path = "../party-encounter" }
 # The combat engine (combat.rs): pure state, commands and the seeded die.
 party-combat = { path = "../party-combat" }
+# Homebrew authoring (homebrew.rs): the Aurora XML reader the importer uses, and the zip a pack exports as.
+borealis-migrate = { path = "../../../crates/borealis-migrate" }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "fs", "set-header"] }
 tokio = { version = "1", features = ["full"] }

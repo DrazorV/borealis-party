@@ -1,0 +1,40 @@
+/*
+ * Homebrew (0.3.1): the pack list, a pack's elements and publishing, and the element editor (form and XML tabs).
+ * Phone first (384x832): one column, tap targets are --ph-hit on phones, long ids and addresses wrap, nothing scrolls
+ * sideways. Aurora's look: the app's cards, chips, tabs and inputs.
+ */
+.hb-page { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; padding: var(--sp-3); }
+.hb-head { flex-wrap: nowrap; }
+.hb-title { margin: 0; font-size: var(--fs-lg, 18px); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hb-row { display: flex; gap: var(--sp-2); align-items: center; padding: var(--sp-2) var(--sp-3); border: var(--border-w) solid var(--border);
+  border-radius: var(--radius); background: var(--surface); color: inherit; text-decoration: none; min-height: 44px; }
+.hb-row:hover, .hb-row:focus-visible { border-color: var(--accent, currentColor); }
+.hb-row .grow { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.hb-mono { font-family: var(--font-mono, monospace); overflow-wrap: anywhere; }
+.hb-group { margin-top: var(--sp-3); }
+.hb-group-title { margin: 0 0 var(--sp-1); font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.75; }
+.hb-add { flex-wrap: nowrap; }
+.hb-add .input { min-width: 0; }
+.hb-form { margin-top: var(--sp-3); }
+.hb-fieldset { border: var(--border-w) solid var(--border); border-radius: var(--radius); padding: var(--sp-2) var(--sp-3); margin: 0;
+  display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.hb-fieldset legend { padding: 0 var(--sp-1); font-size: var(--fs-sm); opacity: 0.8; }
+.hb-check { display: flex; align-items: center; gap: var(--sp-2); min-height: 32px; }
+.hb-check input { width: 20px; height: 20px; margin: 0; }
+.hb-pair { align-items: flex-end; flex-wrap: nowrap; }
+.hb-pair .grow { min-width: 0; }
+.hb-rule { border-bottom: var(--border-w) solid var(--border); padding-bottom: var(--sp-2); }
+.hb-rule:last-child { border-bottom: 0; }
+.hb-rule-attrs { display: grid; grid-template-columns: repeat(auto-fit, minmax(9em, 1fr)); gap: var(--sp-2); margin-top: var(--sp-2); }
+.hb-xml { font-family: var(--font-mono, monospace); font-size: 13px; line-height: 1.4; white-space: pre; overflow: auto; min-height: 16em; tab-size: 2; }
+.hb-xml-view { font-family: var(--font-mono, monospace); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow-y: auto;
+  margin: 0; padding: var(--sp-2); background: var(--surface-2, var(--surface)); border: var(--border-w) solid var(--border); border-radius: var(--radius); }
+.hb-actions { margin-top: var(--sp-3); }
+.hb-report { margin-top: var(--sp-3); }
+.hb-issues .hb-issue { display: block; padding: var(--sp-1) 0; overflow-wrap: anywhere; }
+html.phone .hb-page { padding: var(--sp-3) var(--ph-gutter); }
+html.phone .hb-page .btn, html.phone .hb-page .input, html.phone .hb-row { min-height: var(--ph-hit); }
+html.phone .hb-page .input { font-size: 16px; }
+html.phone .hb-actions > .btn { flex: 1 1 auto; justify-content: center; }
+html.phone .hb-check { min-height: var(--ph-hit); }
+html.phone .hb-page [role="tab"] { min-height: var(--ph-hit); min-width: var(--ph-hit); }

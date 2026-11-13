@@ -27,6 +27,7 @@ mod content_events;
 mod db;
 mod encounters;
 mod error;
+mod homebrew;
 mod hub;
 mod import_source;
 mod index_subs;
@@ -159,6 +160,7 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
         .merge(import_source::routes())
         .merge(pack_removal::routes())
         .merge(bestiary::routes())
+        .merge(homebrew::routes())
         .route("/api/{*rest}", any(no_such_route))
         .layer(DefaultBodyLimit::max(max_upload))
         .with_state(state)
