@@ -17,6 +17,10 @@ export interface FakeCombatServer {
   combats: Map<string, WireProjection | null>;
   calls: { method: string; path: string; body?: unknown }[];
   down: boolean;
+  /** The next write is refused with this, as the server's 409 would. */
+  refuseNext: { code: string; message: string } | null;
+  /** Writes done, by requestId: a repeated id is done once (combat-api.md). */
+  done: Set<string>;
   fetch: (session: unknown, method: string, path: string, body?: unknown) => Promise<unknown>;
   listen: (onEvent: (e: ServerEvent) => void, onOpen: (again: boolean) => void) => () => void;
   emit: (event: string, payload: unknown) => void;
@@ -30,15 +34,15 @@ const fail = (code: string, message: string) => Object.assign(new Error(message)
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 export function pc(id: string, name: string, mine: boolean, extra: Partial<WireCombatant> = {}): WireCombatant {
-  return { id, kind: "character", name, mine, initiative: 12, band: "unhurt", life: "alive", conditions: [], exhaustion: 0, concentration: null, ...extra };
+  return { id, kind: "character", name, mine, initiative: 12, band: "unhurt", life: { state: "alive" }, conditions: [], exhaustion: 0, concentration: null, ...extra };
 }
 
 export function creature(id: string, name: string, extra: Partial<WireCombatant> = {}): WireCombatant {
-  return { id, kind: "creature", name, band: "unhurt", life: "alive", conditions: [], exhaustion: 0, hp: { current: 7, max: 7 }, ac: 15, ...extra };
+  return { id, kind: "creature", name, band: "unhurt", life: { state: "alive" }, conditions: [], exhaustion: 0, hp: { current: 7, max: 7 }, ac: 15, ...extra };
 }
 
 export function mine(id: string, characterId: string | null, extra: Partial<WireMine> = {}): WireMine {
-  return { id, ...(characterId ? { characterId } : {}), hp: { current: 20, max: 24, temp: 0 }, life: "alive", concentration: null, concentrationChecks: [], prompts: [], ...extra };
+  return { id, ...(characterId ? { characterId } : {}), hp: { current: 20, max: 24, temp: 0 }, life: { state: "alive" }, concentration: null, concentrationChecks: [], prompts: [], ...extra };
 }
 
 export function projection(partyId: string, order: WireCombatant[], me: WireMine[], extra: Partial<WireProjection> = {}): WireProjection {
@@ -58,6 +62,8 @@ export function fakeCombatServer(parties: FakeCombatServer["parties"]): FakeComb
     combats: new Map(),
     calls: [],
     down: false,
+    refuseNext: null,
+    done: new Set(),
     async fetch(_session, method, path, body) {
       server.calls.push({ method, path, body });
       if (server.down) throw fail("network", "The server can't be reached. Check your connection.");
@@ -85,6 +91,9 @@ export function fakeCombatServer(parties: FakeCombatServer["parties"]): FakeComb
         const [party, c] = entry;
         const { requestId, args } = (body ?? {}) as { requestId?: string; args?: { id?: string; roll?: D20Input; promptId?: string; applied?: boolean } };
         if (!requestId || !args) throw fail("not_found", NOT_FOUND);
+        if (server.refuseNext) { const no = server.refuseNext; server.refuseNext = null; throw fail(no.code, no.message); }
+        if (server.done.has(requestId)) return { ...clone(c), replayed: true };
+        server.done.add(requestId);
         const own = c.me.find((x) => x.id === args.id);
         const row = c.order.find((x) => x.id === args.id);
         switch (m[2]) {
@@ -94,13 +103,13 @@ export function fakeCombatServer(parties: FakeCombatServer["parties"]): FakeComb
             break;
           case "death_save": {
             if (!own || !row) throw fail("not_found", NOT_FOUND);
-            if (typeof own.life !== "object") throw fail("conflict", "Not making death saves.");
-            const saves = own.life.dying;
-            if (rolled(args.roll!) >= 10) saves.successes += 1;
-            else saves.failures += 1;
-            if (saves.successes >= 3) own.life = "stable";
-            if (saves.failures >= 3) own.life = "dead";
-            row.life = typeof own.life === "string" ? own.life : "alive";
+            const l = own.life;
+            if (typeof l !== "object" || !("state" in l) || l.state !== "dying") throw fail("conflict", "Not making death saves.");
+            if (rolled(args.roll!) >= 10) l.successes += 1;
+            else l.failures += 1;
+            if (l.successes >= 3) own.life = { state: "stable" };
+            if (l.failures >= 3) own.life = { state: "dead" };
+            row.life = own.life;
             break;
           }
           case "resolve_concentration":

@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App as UpstreamApp } from "../../../src/App";
 import { AppProviders } from "../../../src/AppProviders";
@@ -98,12 +98,15 @@ beforeEach(async () => {
   server = fakeCombatServer([{ id: "p1", name: "The Company", myCharacters: [hero] }]);
   combatPlayerDeps.fetch = server.fetch;
   combatPlayerDeps.events = server.listen;
-  combatPlayerDeps.requestId = () => "req-1";
+  let ids = 0;
+  combatPlayerDeps.requestId = () => `req-${++ids}`;
   buzz.mockReset();
   locks.taken = 0;
   locks.released = 0;
   store.deviceDeps.vibrate = buzz;
   store.deviceDeps.staleMs = 60_000;
+  store.deviceDeps.reconnectingMs = 0;
+  store.writeDeps.sleep = async () => {};
   store.deviceDeps.wakeLock = async () => { locks.taken += 1; return { release: async () => { locks.released += 1; } }; };
 });
 
@@ -247,7 +250,7 @@ describe("the damage prompt (D7 a)", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog", { name: /Take 7/ })).toBeNull());
     expect(await hp()).toBe(before - 7);
     expect(server.calls.at(-1)).toMatchObject({ method: "POST", path: "/api/combats/c-p1/resolve_prompt",
-      body: { requestId: "req-1", args: { promptId: "pr1", applied: true, hp: { current: before - 7 } } } });
+      body: { requestId: expect.stringMatching(/^req-/), args: { promptId: "pr1", applied: true, hp: { current: before - 7 } } } });
     const pane = screen.getByTestId("combat-pane");
     expect(within(pane).getByRole("status", { name: new RegExp(`Hit points: ${before - 7} of`) })).toBeTruthy();
   });
@@ -258,7 +261,7 @@ describe("the damage prompt (D7 a)", () => {
     await userEvent.setup().click(within(prompt).getByRole("button", { name: "Not now" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog", { name: /Take 7/ })).toBeNull());
     expect(await hp()).toBe(before);
-    expect(server.calls.at(-1)?.body).toEqual({ requestId: "req-1", args: { promptId: "pr1", applied: false } });
+    expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { promptId: "pr1", applied: false } });
   });
 });
 
@@ -277,7 +280,7 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     await user.type(field, "17");
     await user.click(within(prompt).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog", { name: "Roll initiative" })).toBeNull());
-    expect(server.calls.at(-1)).toEqual({ method: "POST", path: "/api/combats/c-p1/set_initiative", body: { requestId: "req-1", args: { id: "me1", roll: { kind: "typed", total: 17 } } } });
+    expect(server.calls.at(-1)).toEqual({ method: "POST", path: "/api/combats/c-p1/set_initiative", body: { requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "typed", total: 17 } } } });
     expect(screen.getByLabelText("Initiative 17")).toBeTruthy();
   });
 
@@ -291,12 +294,12 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     const prompt = await screen.findByRole("alertdialog", { name: "Roll initiative" });
     await user.click(within(prompt).getByRole("button", { name: "Roll in app" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog", { name: "Roll initiative" })).toBeNull());
-    expect(server.calls.at(-1)?.body).toEqual({ requestId: "req-1", args: { id: "me1", roll: { kind: "roll", modifier: init, mode: "normal" } } });
+    expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "roll", modifier: init, mode: "normal" } } });
   });
 
   it("death saves: the pips, a typed save and an in-app one, then stable", async () => {
     const user = userEvent.setup();
-    const dying = liveWith({}, { hp: { current: 0, max: 24, temp: 0 }, life: { dying: { successes: 1, failures: 2 } } });
+    const dying = liveWith({}, { hp: { current: 0, max: 24, temp: 0 }, life: { state: "dying", successes: 1, failures: 2 } });
     dying.order[1]!.conditions = ["unconscious"];
     server.combats.set("p1", dying);
     await start();
@@ -309,24 +312,26 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     await user.type(within(saves).getByLabelText("Death save total"), "12");
     await user.click(within(saves).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(within(screen.getByRole("group", { name: "Death saves" })).getByRole("img", { name: "Successes: 2 of 3" })).toBeTruthy());
-    expect(server.calls.at(-1)?.body).toEqual({ requestId: "req-1", args: { id: "me1", roll: { kind: "typed", total: 12 } } });
+    expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "typed", total: 12 } } });
     await user.click(within(screen.getByRole("group", { name: "Death saves" })).getByRole("button", { name: "Roll in app" }));
     await waitFor(() => expect(screen.getByText("Stable")).toBeTruthy());
-    expect(server.calls.at(-1)?.body).toEqual({ requestId: "req-1", args: { id: "me1", roll: { kind: "roll", modifier: 0, mode: "normal" } } });
+    expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "roll", modifier: 0, mode: "normal" } } });
     expect(within(screen.getByRole("group", { name: "Death saves" })).queryByRole("button", { name: "Roll in app" })).toBeNull();
   });
 
-  it("a refused save shows the server's words", async () => {
+  it("a refused save is taken back to what the server says (no stale state)", async () => {
     const user = userEvent.setup();
-    const dying = liveWith({}, { life: { dying: { successes: 0, failures: 0 } } });
+    const dying = liveWith({}, { life: { state: "dying", successes: 0, failures: 0 } });
     server.combats.set("p1", dying);
     await start();
     renderPlay();
     await openCombatTab();
     // The server already took the PC out of dying (the DM healed it): its 409 reaches the player as it is.
-    server.combats.get("p1")!.me[0]!.life = "alive";
+    server.combats.get("p1")!.me[0]!.life = { state: "alive" };
     await user.click(within(await screen.findByRole("group", { name: "Death saves" })).getByRole("button", { name: "Roll in app" }));
-    expect(await screen.findByText("Not making death saves.")).toBeTruthy();
+    // The refusal (409) refetches the projection: the PC isn't dying, so the saves go.
+    await waitFor(() => expect(screen.queryByRole("group", { name: "Death saves" })).toBeNull());
+    expect(server.calls.at(-1)?.path).toBe("/api/combats/c-p1");
   });
 
   it("a concentration save asked by the server", async () => {
@@ -340,7 +345,7 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     await user.type(within(prompt).getByLabelText("Concentration save total"), "15");
     await user.click(within(prompt).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog", { name: /Concentration save/ })).toBeNull());
-    expect(server.calls.at(-1)).toEqual({ method: "POST", path: "/api/combats/c-p1/resolve_concentration", body: { requestId: "req-1", args: { id: "me1", roll: { kind: "typed", total: 15 } } } });
+    expect(server.calls.at(-1)).toEqual({ method: "POST", path: "/api/combats/c-p1/resolve_concentration", body: { requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "typed", total: 15 } } } });
   });
 });
 
@@ -402,7 +407,7 @@ describe("what else the sub-tab shows", () => {
     expect(fromWire(w, { myCharacters: [hero] }).combatants[1]).toMatchObject({ mine: true, characterId: hero });
     expect(fromWire(w, { myCharacters: [hero, "other"] }).combatants[1]?.characterId).toBeNull();
     // Life, conditions and exhaustion; creatures' HP and AC (D20 b); a prompt with two damage types.
-    const d = liveWith({}, { life: { dying: { successes: 2, failures: 1 } },
+    const d = liveWith({}, { life: { dying: { successes: 2, failures: 1 } }, /* an earlier draft's shape, still read */
       prompts: [{ id: "p", kind: "damage", amount: 9, parts: [{ amount: 5, damage_type: "fire" }, { amount: 4, damage_type: "cold" }], criticalHit: true }] });
     d.order[2]!.exhaustion = 2;
     const v = fromWire(d);
@@ -421,14 +426,27 @@ describe("what else the sub-tab shows", () => {
     const pane = await openCombatTab();
     server.down = true;
     act(() => server.change("p1", (c) => ({ ...c, turn: { kind: "combatant", id: "ally1", round: 3 } })));
-    expect(await screen.findByText("Offline")).toBeTruthy();
+    expect(await screen.findByText("Reconnecting…")).toBeTruthy();
     expect(within(pane).getByText("Round 2")).toBeTruthy();
     expect(tab("Combat")).toBeTruthy();
     expect(holds).toEqual(["combat"]);
     server.down = false;
     await act(async () => { server.reopen(); });
     await waitFor(() => expect(within(screen.getByTestId("combat-pane")).getByText("Round 3")).toBeTruthy());
-    expect(screen.queryByText("Offline")).toBeNull();
+    expect(screen.queryByText("Reconnecting…")).toBeNull();
+  });
+
+  it("a blip shows nothing; Reconnecting… only after a few seconds without an answer", async () => {
+    server.combats.set("p1", liveWith());
+    await start();
+    renderPlay();
+    await openCombatTab();
+    store.deviceDeps.reconnectingMs = 300;
+    server.down = true;
+    act(() => server.change("p1", (c) => c));
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+    expect(screen.queryByText("Reconnecting…")).toBeNull();
+    expect(await screen.findByText("Reconnecting…", undefined, { timeout: 3000 })).toBeTruthy();
   });
 
   it("offline for over a minute: the chip says the state may be old", async () => {
@@ -439,7 +457,7 @@ describe("what else the sub-tab shows", () => {
     store.deviceDeps.staleMs = 300;
     server.down = true;
     act(() => server.change("p1", (c) => c));
-    expect(await screen.findByText("Offline")).toBeTruthy();
+    expect(await screen.findByText("Reconnecting…")).toBeTruthy();
     expect(await screen.findByText("Offline · may be old", undefined, { timeout: 3000 })).toBeTruthy();
   });
 
@@ -448,5 +466,120 @@ describe("what else the sub-tab shows", () => {
     server.combats.set("p1", null);
     await start();
     expect(server.calls.map((c) => c.path)).toEqual(["/api/parties", "/api/parties/p1/combat"]);
+  });
+});
+
+describe("no stale states: order, gaps, waking, and the player's own writes", () => {
+  it("a gap in pseq fetches the whole projection once and replaces what's shown", async () => {
+    server.combats.set("p1", liveWith());
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    const asked = server.calls.length;
+    // Three changes the phone never heard about, then one event: one fetch, the newest state.
+    const c = server.combats.get("p1")!;
+    server.combats.set("p1", { ...c, pseq: c.pseq + 3, turn: { kind: "combatant", id: "ally1", round: 4 } });
+    act(() => server.emit("party://combat", { party: "p1", combat: c.id, pseq: c.pseq + 3 }));
+    await waitFor(() => expect(within(pane).getByText("Round 4")).toBeTruthy());
+    expect(server.calls.slice(asked).map((x) => x.path)).toEqual(["/api/parties/p1/combat", "/api/combats/c-p1"]);
+    // An older event after it changes nothing.
+    act(() => server.emit("party://combat", { party: "p1", combat: c.id, pseq: c.pseq + 1 }));
+    await act(async () => { await Promise.resolve(); });
+    expect(server.calls.length).toBe(asked + 2);
+  });
+
+  it("an answer older than what's shown never takes it back", () => {
+    const newer = fromWire({ ...liveWith(), pseq: 9 });
+    const older = fromWire({ ...liveWith({ turn: { kind: "combatant", id: "me1", round: 2 } }), pseq: 4 });
+    store.adopt(newer);
+    store.adopt(older);
+    expect(store.combatStore().combats[0]!.pointer).toEqual(newer.pointer);
+  });
+
+  it("waking up (the app back from the background) asks again and shows the newest", async () => {
+    server.combats.set("p1", liveWith());
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    // Missed while asleep: no event reached the phone.
+    const c = server.combats.get("p1")!;
+    server.combats.set("p1", { ...c, pseq: c.pseq + 1, turn: { kind: "combatant", id: "ally1", round: 5 } });
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    await waitFor(() => expect(within(pane).getByText("Round 5")).toBeTruthy());
+  });
+
+  it("a typed initiative shows at once, and a 409 takes it back", async () => {
+    const user = userEvent.setup();
+    server.combats.set("p1", liveWith({}, {}, null));
+    await start();
+    renderPlay();
+    await openCombatTab();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    const real = server.fetch;
+    combatPlayerDeps.fetch = async (session, method, path, body) => {
+      if (method === "POST") await gate;
+      return real(session, method, path, body);
+    };
+    server.refuseNext = { code: "conflict", message: "The combat isn't running." };
+    const prompt = await screen.findByRole("alertdialog", { name: "Roll initiative" });
+    await user.click(within(prompt).getByRole("button", { name: "Type my table roll" }));
+    await user.type(within(prompt).getByLabelText("Initiative total"), "19");
+    await user.click(within(prompt).getByRole("button", { name: "Send" }));
+    // Optimistic: shown before the server answers.
+    expect(await screen.findByLabelText("Initiative 19")).toBeTruthy();
+    await act(async () => { release(); });
+    // Refused: back to no initiative, with the server's words.
+    await waitFor(() => expect(screen.queryByLabelText("Initiative 19")).toBeNull());
+    expect(await screen.findByText("The combat isn't running.")).toBeTruthy();
+    expect(screen.getByRole("alertdialog", { name: "Roll initiative" })).toBeTruthy();
+  });
+
+  it("a write through a lost signal is retried with the same requestId and done once", async () => {
+    const user = userEvent.setup();
+    let n = 0;
+    combatPlayerDeps.requestId = () => `req-${++n}`;
+    server.combats.set("p1", liveWith({}, {}, null));
+    await start();
+    renderPlay();
+    await openCombatTab();
+    server.down = true;
+    store.writeDeps.sleep = async () => { server.down = false; };
+    const prompt = await screen.findByRole("alertdialog", { name: "Roll initiative" });
+    await user.click(within(prompt).getByRole("button", { name: "Type my table roll" }));
+    await user.type(within(prompt).getByLabelText("Initiative total"), "11");
+    await user.click(within(prompt).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog", { name: "Roll initiative" })).toBeNull());
+    const writes = server.calls.filter((c) => c.method === "POST").map((c) => (c.body as { requestId: string }).requestId);
+    expect(writes).toEqual(["req-1", "req-1"]);
+    expect(server.done.size).toBe(1);
+    expect(screen.getByLabelText("Initiative 11")).toBeTruthy();
+  });
+});
+
+describe("the DM's own live combat", () => {
+  it("the Live chip leads to the DM tracker's route", async () => {
+    const seen: string[] = [];
+    function Where() { seen.push(useLocation().pathname); return null; }
+    server.combats.set("p1", null);
+    let changed: () => void = () => {};
+    let list = [{ id: "dm-c1", partyName: "My table" }];
+    store.registerDmLiveCombats({ list: async () => list, watch: (f) => { changed = f; return () => {}; }, path: (id) => `/combat/${id}` });
+    await start();
+    render(
+      <AppProviders api={api}>
+        <MemoryRouter initialEntries={["/characters"]}>
+          <Where />
+          <LiveChip />
+          <UpstreamApp />
+        </MemoryRouter>
+      </AppProviders>,
+    );
+    await userEvent.setup().click(await screen.findByRole("button", { name: /^Live$/ }));
+    expect(seen).toContain("/combat/dm-c1");
+    // The tracker says it ended: the chip goes.
+    list = [];
+    await act(async () => { changed(); await Promise.resolve(); });
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Live$/ })).toBeNull());
   });
 });

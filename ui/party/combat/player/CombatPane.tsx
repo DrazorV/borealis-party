@@ -5,7 +5,7 @@ import { Alert, Chip } from "../../../src/components/Card";
 import { Modal } from "../../../src/components/Modal";
 import { useConnectivity } from "../../api/connectivity";
 import {
-  actingId, deathSave, myCombatant, resolveConcentration, resolvePrompt, setInitiative,
+  actingId, myCombatant,
   type CombatPrompt, type D20Input, type PlayerCombat, type PlayerCombatant,
 } from "./api";
 import { usePlayMutate } from "../../../src/pages/play/playQueue";
@@ -13,7 +13,7 @@ import { ConditionChips } from "../shared/ConditionChips";
 import { HealthBand } from "../shared/HealthBand";
 import { RollOrType } from "../shared/RollOrType";
 import { StatBlockView } from "../shared/StatBlockView";
-import { adopt, contextFor, deviceDeps, useCombatStore } from "./store";
+import { deviceDeps, playerWrite, useCombatStore } from "./store";
 import "../shared/combat.css";
 
 /** How many revealed events the log shows. */
@@ -36,24 +36,32 @@ function nowText(c: PlayerCombat, me: PlayerCombatant | null): string {
   }
 }
 
+/**
+ * The link to the server, as the sub-tab says it (D44): nothing for a blip; "Reconnecting…" once about 3 s have gone
+ * by without an answer (a request failed, or the stream is being reopened); "Offline · may be old" after a minute.
+ * The last state stays on screen throughout.
+ */
 function Offline() {
   const { offline, offlineSince } = useCombatStore();
   const link = useConnectivity().link;
   const away = offline || link === "down" || link === "checking";
-  const [seen] = useState(() => deviceDeps.now());
-  const since = offlineSince ?? (away ? seen : null);
+  const [awaySince, setAwaySince] = useState<number | null>(null);
   const [, tick] = useState(0);
-  const stale = since != null && deviceDeps.now() - since >= deviceDeps.staleMs;
-  // Say "may be old" once a minute has gone by with no answer (D44).
+  useEffect(() => { setAwaySince(away ? (offlineSince ?? deviceDeps.now()) : null); }, [away, offlineSince]);
+  const gone = awaySince == null ? 0 : deviceDeps.now() - awaySince;
+  const stale = gone >= deviceDeps.staleMs;
+  const shown = gone >= deviceDeps.reconnectingMs;
+  // Look again when the next threshold comes.
   useEffect(() => {
-    if (!away || stale || since == null) return undefined;
-    const timer = setTimeout(() => tick((n) => n + 1), Math.max(0, deviceDeps.staleMs - (deviceDeps.now() - since)) + 20);
+    if (awaySince == null || stale) return undefined;
+    const next = shown ? deviceDeps.staleMs : deviceDeps.reconnectingMs;
+    const timer = setTimeout(() => tick((n) => n + 1), Math.max(0, next - (deviceDeps.now() - awaySince)) + 20);
     return () => clearTimeout(timer);
-  }, [away, stale, since]);
-  if (!away) return null;
+  }, [awaySince, stale, shown]);
+  if (awaySince == null || !shown) return null;
   return (
     <span className="combat-offline" role="status" title={stale ? "This may be out of date" : "Showing the last state seen"}>
-      <Chip tone="danger">{stale ? "Offline · may be old" : "Offline"}</Chip>
+      <Chip tone="danger">{stale ? "Offline · may be old" : "Reconnecting…"}</Chip>
     </span>
   );
 }
@@ -68,7 +76,6 @@ function PromptCard({ combat, prompt, me, modifier }: { combat: PlayerCombat; pr
     setError(null);
     try { await work(); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
-  const ctx = contextFor(combat.partyId);
   const answer = (applied: boolean) => go(async () => {
     let hp: { current: number; max: number; temp: number } | undefined;
     if (applied && prompt.kind === "damage") {
@@ -82,9 +89,11 @@ function PromptCard({ combat, prompt, me, modifier }: { combat: PlayerCombat; pr
       hp = done.play.hitPoints;
     }
     // The sheet's HP after it, so the server needn't wait for the roster card (combat-api.md "resolve_prompt").
-    adopt(await resolvePrompt(combat.id, prompt.id, applied, hp && { current: hp.current, max: hp.max, temp: hp.temp }, ctx));
+    await playerWrite(combat, "resolve_prompt", { promptId: prompt.id, applied, ...(hp ? { hp: { current: hp.current, max: hp.max, temp: hp.temp } } : {}) },
+      (c) => ({ ...c, prompts: c.prompts.filter((p) => p.id !== prompt.id) }));
   });
-  const roll = (input: D20Input) => go(async () => adopt(await resolveConcentration(combat.id, me.id, input, ctx)));
+  const roll = (input: D20Input) => go(() => playerWrite(combat, "resolve_concentration", { id: me.id, roll: input },
+    (c) => ({ ...c, prompts: c.prompts.filter((p) => p.id !== prompt.id) })));
   if (prompt.kind === "damage" || prompt.kind === "heal") {
     const what = prompt.kind === "damage"
       ? `Take ${prompt.amount}${prompt.damageType ? ` ${prompt.damageType}` : ""} damage${prompt.critical ? " (critical hit)" : ""}?`
@@ -121,6 +130,19 @@ function Pips({ label, filled, tone }: { label: string; filled: number; tone: "s
   );
 }
 
+/** What a typed death save does (combat-engine.md), shown before the server answers. */
+function guessSave(c: PlayerCombat, id: string, total: number): PlayerCombat {
+  return {
+    ...c, combatants: c.combatants.map((x) => {
+      if (x.id !== id) return x;
+      const s = { ...(x.deathSaves ?? { successes: 0, failures: 0 }) };
+      if (total >= 20) return { ...x, life: "alive" as const, deathSaves: { successes: 0, failures: 0 } };
+      if (total >= 10) s.successes += 1; else s.failures += total <= 1 ? 2 : 1;
+      return { ...x, deathSaves: s, life: s.successes >= 3 ? "stable" as const : s.failures >= 3 ? "dead" as const : x.life };
+    }),
+  };
+}
+
 /** The player's own character: HP and temp HP (their own, D7), concentration, death saves. */
 function Me({ combat, me, s }: { combat: PlayerCombat; me: PlayerCombatant; s: CharacterSnapshot }) {
   const hp = s.play.hitPoints;
@@ -131,7 +153,7 @@ function Me({ combat, me, s }: { combat: PlayerCombat; me: PlayerCombatant; s: C
   const save = async (input: D20Input) => {
     setBusy(true);
     setError(null);
-    try { adopt(await deathSave(combat.id, me.id, input, contextFor(combat.partyId))); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+    try { await playerWrite(combat, "death_save", { id: me.id, roll: input }, input.kind === "typed" ? (c) => guessSave(c, me.id, input.total) : undefined); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
   const share = hp.max > 0 ? Math.max(0, Math.min(1, hp.current / hp.max)) : 0;
   const tone = hp.current <= 0 ? "down" : hp.current * 2 <= hp.max ? "bloodied" : "";
@@ -170,7 +192,10 @@ function Initiative({ combat, me, modifier }: { combat: PlayerCombat; me: Player
   const roll = async (input: D20Input) => {
     setBusy(true);
     setError(null);
-    try { adopt(await setInitiative(combat.id, me.id, input, contextFor(combat.partyId))); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+    try {
+      await playerWrite(combat, "set_initiative", { id: me.id, roll: input },
+        input.kind === "typed" ? (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id === me.id ? { ...x, initiative: input.total } : x)) }) : undefined);
+    } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
   return (
     <section className="combat-prompt" role="alertdialog" aria-label="Roll initiative">

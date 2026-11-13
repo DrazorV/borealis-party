@@ -3,7 +3,7 @@ import "../shared/combat.css";
 import { Button } from "../../../src/components/Button";
 import { useCharacter } from "../../../src/state/CharacterContext";
 import { actingId, myCombatant, type PlayerCombat } from "./api";
-import { contextFor, myTurn, useCombatStore } from "./store";
+import { contextFor, dmCombatPath, myTurn, useCombatStore } from "./store";
 import { selectCombatTab, useCombatTabSelected } from "./tabState";
 
 export const PLAY_ROUTE = "/play";
@@ -33,9 +33,20 @@ export function useOpenCombat(): (combat: PlayerCombat, characterId?: string | n
 export function LiveChip({ mode = "auto" }: { mode?: "auto" | "chip" | "banner" }) {
   const store = useCombatStore();
   const openCombat = useOpenCombat();
+  const nav = useNavigate();
   const { pathname } = useLocation();
   const onCombat = useCombatTabSelected() && pathname === PLAY_ROUTE;
   const first = store.combats[0];
+  const dm = store.dmCombats[0];
+  // The DM's own live combat (registered by the DM tracker) leads to the tracker.
+  if (!first && dm && mode !== "banner") {
+    const to = dmCombatPath(dm.id);
+    return to ? (
+      <Button small variant="danger" className="combat-live-chip" onClick={() => void nav(to)} title="Your combat is live: open the tracker">
+        <span className="combat-live-dot" aria-hidden="true" />Live
+      </Button>
+    ) : null;
+  }
   if (!first) return null;
   const turn = myTurn(store);
   if (turn && !onCombat && mode !== "chip") {

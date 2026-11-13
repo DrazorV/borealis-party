@@ -67,14 +67,14 @@ export function StatBlockView({ name, block }: { name: string; block: StatBlock 
       {senses && <Line label="Senses">{senses}</Line>}
       {block.languages && <Line label="Languages">{block.languages.length ? block.languages.join(", ") : "—"}</Line>}
       {(block.cr || block.cr_note) && <Line label="Challenge">{block.cr ?? block.cr_note}</Line>}
-      <Section title="Traits" items={block.traits} />
+      <Section title="Traits" items={block.traits?.filter((t) => !/^legendary resistance/i.test(t.name))} />
       <Section title="Actions" items={block.actions} />
       <Section title="Bonus Actions" items={block.bonus_actions} />
       <Section title="Reactions" items={block.reactions} />
       {block.legendary && (
         <section className="combat-sb-section" aria-label="Legendary Actions">
           <h3>Legendary Actions</h3>
-          {block.legendary.preamble && <p>{block.legendary.preamble}</p>}
+          {/* The actions' text only: how many the creature has, and Legendary Resistance, are the DM's (user, 2026-11-13). */}
           {block.legendary.actions.map((f, i) => <p key={`${f.name}-${i}`}><strong><em>{f.name}.</em></strong> {f.text}</p>)}
         </section>
       )}

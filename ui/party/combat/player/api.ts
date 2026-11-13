@@ -26,8 +26,15 @@ export type TurnPointer =
 
 // ---- the wire (combat-api.md "The projection") -------------------------------------------------------------------
 
-/** A death-save state: `alive`, `stable`, `dead`, or dying with its saves so far. */
-export type WireLife = "alive" | "stable" | "dead" | { dying: { successes: number; failures: number } };
+/**
+ * A death-save state, the engine's `Life`: `{state: "alive" | "stable" | "dead"}` or
+ * `{state: "dying", successes, failures}`. Earlier drafts sent a bare string or `{dying: {…}}`; both are still read.
+ */
+export type WireLife =
+  | { state: "alive" | "stable" | "dead" }
+  | { state: "dying"; successes: number; failures: number }
+  | "alive" | "stable" | "dead"
+  | { dying: { successes: number; failures: number } };
 
 export interface WireCombatant {
   id: string;
@@ -160,7 +167,9 @@ export interface WireContext {
 const life = (l: WireLife | undefined): { life?: Life; deathSaves?: { successes: number; failures: number } | null } => {
   if (!l) return {};
   if (typeof l === "string") return { life: l };
-  return { life: "dying", deathSaves: { ...l.dying } };
+  if ("dying" in l) return { life: "dying", deathSaves: { ...l.dying } };
+  if (l.state === "dying") return { life: "dying", deathSaves: { successes: l.successes, failures: l.failures } };
+  return { life: l.state };
 };
 
 const conditions = (c: WireCombatant): CombatCondition[] => [
@@ -256,9 +265,14 @@ export async function liveCombat(partyId: string, ctx: WireContext = {}): Promis
 }
 
 /** A player write; it answers the new projection. `id` must be the player's own PC; the server checks. */
-const act = (combat: string, action: string, args: Record<string, unknown>, ctx?: WireContext) =>
-  call<WireProjection>("POST", `/api/combats/${seg(combat)}/${action}`, { requestId: combatPlayerDeps.requestId(), args })
+/**
+ * A player write; it answers the new projection. `id` must be the player's own PC; the server checks. The same
+ * `requestId` is sent again on a retry, so the server does it at most once (combat-api.md "Writes").
+ */
+export const playerAction = (combat: string, action: string, args: Record<string, unknown>, ctx?: WireContext, requestId = combatPlayerDeps.requestId()) =>
+  call<WireProjection>("POST", `/api/combats/${seg(combat)}/${action}`, { requestId, args })
     .then((w) => fromWire(w, ctx));
+const act = (combat: string, action: string, args: Record<string, unknown>, ctx?: WireContext) => playerAction(combat, action, args, ctx);
 
 export const setInitiative = (combat: string, combatant: string, roll: D20Input, ctx?: WireContext) => act(combat, "set_initiative", { id: combatant, roll }, ctx);
 export const deathSave = (combat: string, combatant: string, roll: D20Input, ctx?: WireContext) => act(combat, "death_save", { id: combatant, roll }, ctx);

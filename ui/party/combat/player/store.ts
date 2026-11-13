@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { holdReload } from "../../api/connectivity";
 import {
-  actingId, combatPlayerDeps, diffEvents, liveCombat, myCombatant, watchCombats,
+  actingId, combatPlayerDeps, diffEvents, liveCombat, myCombatant, playerAction, watchCombats,
   type CombatLogEntry, type OpenCharacter, type PlayerCombat, type WireContext,
 } from "./api";
 import { loadSession } from "../../api/session";
@@ -29,9 +29,11 @@ export interface CombatStore {
   updatedAt: number | null;
   /** The first look at the parties is done. */
   ready: boolean;
+  /** Live combats this account runs as DM (from the DM tracker, registerDmLiveCombats), for the Live chip. */
+  dmCombats: { id: string; partyName?: string }[];
 }
 
-const EMPTY: CombatStore = { combats: [], offline: false, offlineSince: null, updatedAt: null, ready: false };
+const EMPTY: CombatStore = { combats: [], offline: false, offlineSince: null, updatedAt: null, ready: false, dmCombats: [] };
 
 let state: CombatStore = EMPTY;
 const subscribers = new Set<() => void>();
@@ -53,6 +55,8 @@ export const deviceDeps = {
   now: () => Date.now(),
   /** D44: offline longer than this, what's shown is called old. */
   staleMs: 60 * 1000,
+  /** No answer for this long, and the sub-tab says "Reconnecting…" (a blip shows nothing). */
+  reconnectingMs: 3000,
   vibrate: (pattern: number[]) => {
     try { navigator.vibrate?.(pattern); } catch { /* not on this device */ }
   },
@@ -104,6 +108,11 @@ function wentOffline(): void {
 function put(partyId: string, combat: PlayerCombat | null): void {
   const others = state.combats.filter((c) => c.partyId !== partyId);
   const before = state.combats.find((c) => c.partyId === partyId) ?? null;
+  // An answer older than what's shown (two requests crossing) never takes it back (no stale states).
+  if (combat && before && before.id === combat.id && combat.seq < before.seq && !optimistic.has(partyId)) {
+    if (state.offline) publish({ offline: false, offlineSince: null, updatedAt: deviceDeps.now() });
+    return;
+  }
   let keep: PlayerCombat[] = [];
   if (combat && isLive(combat) && myCombatant(combat)) {
     const kept = logs.get(partyId);
@@ -123,15 +132,32 @@ function put(partyId: string, combat: PlayerCombat | null): void {
   publish({ combats: [...others, ...keep], offline: false, offlineSince: null, updatedAt: deviceDeps.now() });
 }
 
+/** Requests in flight per party; an event while one is out asks again once it's back, so the newest always lands. */
+const inFlight = new Map<string, { again: boolean; done: Promise<void> }>();
+/** Parties with a player write on its way: what's shown is the player's own guess until the server answers. */
+const optimistic = new Map<string, number>();
+
 /** Ask one party for its combat again. A network failure keeps what's shown (D44). */
-async function refresh(partyId: string): Promise<void> {
-  try {
-    put(partyId, await liveCombat(partyId, contextFor(partyId)));
-  } catch (e) {
-    if (isNetwork(e)) wentOffline();
-    // Any other refusal: the party is gone or no longer this account's; its combat goes too.
-    else put(partyId, null);
-  }
+function refresh(partyId: string): Promise<void> {
+  const running = inFlight.get(partyId);
+  if (running) { running.again = true; return running.done; }
+  const entry = { again: false, done: Promise.resolve() };
+  entry.done = (async () => {
+    do {
+      entry.again = false;
+      try {
+        const combat = await liveCombat(partyId, contextFor(partyId));
+        if (!optimistic.has(partyId)) put(partyId, combat);
+      } catch (e) {
+        if (isNetwork(e)) wentOffline();
+        // Any other refusal: the party is gone or no longer this account's; its combat goes too.
+        else put(partyId, null);
+      }
+    } while (entry.again);
+    inFlight.delete(partyId);
+  })();
+  inFlight.set(partyId, entry);
+  return entry.done;
 }
 
 async function refreshAll(): Promise<void> {
@@ -153,6 +179,47 @@ export function adopt(combat: PlayerCombat): void {
   put(combat.partyId, combat);
 }
 
+/** How long a player write keeps trying through a lost signal (D44's buffer), and the waits between tries. */
+export const writeDeps = { retryForMs: 60_000, waits: [1000, 2000, 4000, 8000, 15000], sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)) };
+
+/**
+ * One player action (initiative, a death save, a concentration save, resolving a prompt): shown at once as `guess`
+ * would leave it (optimistic), sent with one requestId that every retry reuses, retried through a lost signal for up
+ * to a minute, and on a refusal (409, 400) taken back to what the server says, with the refusal thrown to the caller.
+ */
+export async function playerWrite(combat: PlayerCombat, action: string, args: Record<string, unknown>,
+  guess?: (c: PlayerCombat) => PlayerCombat): Promise<PlayerCombat> {
+  const partyId = combat.partyId;
+  const requestId = combatPlayerDeps.requestId();
+  const before = state.combats.find((c) => c.partyId === partyId) ?? combat;
+  optimistic.set(partyId, (optimistic.get(partyId) ?? 0) + 1);
+  if (guess) publish({ combats: state.combats.map((c) => (c.partyId === partyId ? { ...guess(c), seq: c.seq } : c)) });
+  const started = deviceDeps.now();
+  const settle = () => {
+    const n = (optimistic.get(partyId) ?? 1) - 1;
+    if (n > 0) optimistic.set(partyId, n); else optimistic.delete(partyId);
+  };
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const out = await playerAction(combat.id, action, args, contextFor(partyId), requestId);
+      settle();
+      put(partyId, out);
+      return out;
+    } catch (e) {
+      if (isNetwork(e) && deviceDeps.now() - started < writeDeps.retryForMs) {
+        wentOffline();
+        await writeDeps.sleep(writeDeps.waits[Math.min(attempt, writeDeps.waits.length - 1)]!);
+        continue;
+      }
+      settle();
+      // Taken back: what was shown before, then what the server says now.
+      if (guess) publish({ combats: state.combats.map((c) => (c.partyId === partyId ? before : c)) });
+      void refresh(partyId);
+      throw e;
+    }
+  }
+}
+
 /** Tests and a reconnect: ask everything again. */
 export const refreshCombats = (): Promise<void> => refreshAll();
 
@@ -164,6 +231,8 @@ export const combatWatchReady = (): Promise<void> => first;
 /** Starts following the account's combats; answers a stop. Once per page (a second start shares the first). */
 export function startCombatWatch(): () => void {
   if (running) return running;
+  // Events are invalidations in pseq order: one no newer than what's shown is skipped; any newer one (a gap
+  // included) fetches the whole projection and replaces what's shown. A reopened stream is a resync.
   const stopEvents = watchCombats((e) => {
     if (e.type === "combat") {
       if (!parties.has(e.party)) { void refreshAll(); return; }
@@ -171,9 +240,20 @@ export function startCombatWatch(): () => void {
       void refresh(e.party);
     } else void refreshAll();
   });
+  // The phone waking, or the app coming back from the background, or the network back: ask everything again once.
+  const wake = () => { if (document.visibilityState === "visible") void refreshAll(); };
+  const online = () => void refreshAll();
+  document.addEventListener("visibilitychange", wake);
+  window.addEventListener("pageshow", online);
+  window.addEventListener("online", online);
+  const stopDm = startDmWatch();
   first = refreshAll();
   running = () => {
     stopEvents();
+    stopDm();
+    document.removeEventListener("visibilitychange", wake);
+    window.removeEventListener("pageshow", online);
+    window.removeEventListener("online", online);
     running = null;
   };
   return running;
@@ -187,6 +267,9 @@ export function resetCombatStore(): void {
   lastSeq.clear();
   lastActing.clear();
   logs.clear();
+  inFlight.clear();
+  optimistic.clear();
+  dmSource = null;
   state = EMPTY;
   release();
   subscribers.forEach((s) => s());
@@ -224,6 +307,44 @@ if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") { lock = null; device(); }
   });
+}
+
+// ---- the DM's own live combats (the DM tracker registers them; this module never imports it) ------------------------
+
+export interface DmLiveSource {
+  /** The live combats this account runs as DM. */
+  list: () => Promise<{ id: string; partyName?: string }[]>;
+  /** Calls `onChange` when that list may have changed; answers a stop. */
+  watch: (onChange: () => void) => () => void;
+  /** The DM tracker's route for a combat. */
+  path: (id: string) => string;
+}
+
+let dmSource: DmLiveSource | null = null;
+let restartDm: (() => void) | null = null;
+
+/** The DM tracker (feat/dm-tracker) calls this once, so the Live chip shows the DM's own live combats too. */
+export function registerDmLiveCombats(source: DmLiveSource): void {
+  dmSource = source;
+  restartDm?.();
+}
+
+export const dmCombatPath = (id: string): string | null => dmSource?.path(id) ?? null;
+
+function startDmWatch(): () => void {
+  let stop: (() => void) | null = null;
+  const load = () => {
+    if (!dmSource) return;
+    dmSource.list().then((dmCombats) => publish({ dmCombats }), () => { /* offline: keep what's shown */ });
+  };
+  const begin = () => {
+    stop?.();
+    stop = dmSource ? dmSource.watch(load) : null;
+    load();
+  };
+  restartDm = begin;
+  begin();
+  return () => { stop?.(); stop = null; restartDm = null; };
 }
 
 /** The live combat that has this (open) character in it, or null. */

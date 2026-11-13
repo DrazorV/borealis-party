@@ -8,8 +8,9 @@
 // It also opens the imported character's sheet preview at Android font sizes 1.0 and 1.15 (sheetPreview below).
 //
 // node party/android/smoke/run.mjs --apk <path> [--out <folder>] [--port 18799] [--avd BalanceLab_Tablet]
-//   [--server-bin <WSL path>] [--keep] [--no-wide] [--sheet-only] [--max-minutes 20]
+//   [--server-bin <WSL path>] [--keep] [--no-wide] [--sheet-only] [--combat-only] [--max-minutes 20]
 // --sheet-only: sign in, import the character and check its sheet preview (step 7), nothing else.
+// --combat-only: sign in, import the character and check the player's Combat sub-tab, nothing else.
 // Exit code 0 when every check passed.
 
 import { spawn, spawnSync } from "node:child_process";
@@ -35,6 +36,8 @@ const avd = args.avd ?? "BalanceLab_Tablet";
 const out = resolve(args.out ?? join(repo, "target", "party-android-smoke"));
 const apk = args.apk ? resolve(args.apk) : null;
 const sheetOnly = args["sheet-only"] === "true";
+// --combat-only: sign in, import the character and check the player's Combat sub-tab (playerCombat), nothing else.
+const combatOnly = args["combat-only"] === "true";
 // The whole run stops after this many minutes (default 20), so a stalled emulator never holds it for hours.
 const maxMinutes = Number(args["max-minutes"] ?? 20);
 if (!Number.isFinite(maxMinutes) || maxMinutes <= 0) throw new Error(`--max-minutes needs a number of minutes above 0, not ${args["max-minutes"]}`);
@@ -293,7 +296,7 @@ async function main() {
   // Upstream's first-start notices, if any, are closed so they don't cover the import dialogs.
   for (const label of ["Close", "Dismiss", "OK", "Got it"]) await smoke(`click(${JSON.stringify(label)}, true)`).catch(() => false);
   await screenshot("02-signed-in");
-  if (!sheetOnly) await phoneLayout();
+  if (!sheetOnly && !combatOnly) await phoneLayout();
 
   const characters = async () => (await api(token, "list_characters")).map((c) => c.name);
   const packs = async () => (await api(token, "list_packs")).map((p) => p.name ?? p.id);
@@ -311,6 +314,7 @@ async function main() {
   await sleep(1500);
   await screenshot("04-character-imported");
   if (sheetOnly) { await sheetPreview(token); return; }
+  if (combatOnly) { await playerCombat(token); return; }
 
   // 2. The same file again, and Cancel: nothing changes.
   const count = (await characters()).length;
@@ -460,16 +464,18 @@ async function partyLive(token) {
 /**
  * The player's Combat sub-tab in the real app (0.3.0 part F): while the account's party has a live combat, the Live
  * chip shows in the top chrome, opens the Play tab's Combat sub-tab, and the DM's "Take 2 slashing?" prompt applied
- * there takes the damage on the player's own character on the server (D7 a). Until the combat server is in this tree,
- * the server's PLAYER projection is answered inside the WebView (a fetch wrapper put in before the page loads), so
- * what is checked is the app side: the tab injection, the chrome, the app's own fetch and the player's own command.
+ * there takes the damage on the player's own character on the server (D7 a); after the app goes to the background
+ * and comes back, the view shows what changed meanwhile (no stale state). Until the combat server is in this tree,
+ * the server's PLAYER projection is answered inside the WebView (a fetch wrapper put into the running page, which
+ * then asks again as it does when the network comes back), so what is checked is the app side: the tab injection,
+ * the chrome, the app's own fetch, the wake-up refresh and the player's own command.
  */
 async function playerCombat(token) {
   const hero = (await api(token, "list_characters"))[0];
   if (!hero) { check("the Combat sub-tab (needs the imported character)", false, "no character"); return; }
   await rest(token, "POST", "/api/me/roles/dm", {});
   const party = await rest(token, "POST", "/api/parties", { name: "Smoke Fight" });
-  let script = null;
+  let shimmed = false;
   try {
     await api(token, "load_character", { characterId: hero.id });
     await rest(token, "POST", `/api/parties/${party.id}/members`, { characterId: hero.id });
@@ -485,7 +491,9 @@ async function playerCombat(token) {
     };
     const shim = `(() => {
       const state = ${JSON.stringify(combat)};
-      const real = window.fetch.bind(window);
+      window.__smokeCombat = state;
+      const real = window.__smokeRealFetch || window.fetch.bind(window);
+      window.__smokeRealFetch = real;
       const json = (v) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
       window.fetch = (input, init) => {
         const url = String(typeof input === "string" ? input : input.url);
@@ -499,16 +507,17 @@ async function playerCombat(token) {
         }
         return real(input, init);
       };
+      return true;
     })()`;
     await connectPage().catch(() => null);
-    script = (await cdp("Page.addScriptToEvaluateOnNewDocument", { source: shim })).identifier;
     await page(`location.hash = "#/characters"`);
-    await cdp("Page.reload", {});
-    await sleep(3000);
-    await connectPage().catch(() => null);
+    await page(shim);
+    shimmed = true;
+    // The page asks for its combats again when the network comes back (combat/player/store.ts).
+    await page(`window.dispatchEvent(new Event("online")), true`);
     const chip = await until("the Live chip", () => page(`!!document.querySelector(".combat-live-chip")`), 30000).catch(() => false);
-    check("a live combat shows the Live chip in the app's top chrome", !!chip);
-    if (!chip) return;
+    check("a live combat shows the Live chip in the app's top chrome", !!chip, chip ? "" : await page(`JSON.stringify({ hash: location.hash, shim: String(window.fetch).includes("combat"), bar: (document.querySelector(".party-title-live, .party-bar") || {}).outerHTML?.slice(0, 160) })`).catch((e) => String(e)));
+    if (!chip) { await screenshot("11-combat-no-chip"); return; }
     await screenshot("11-combat-live-chip");
     await page(`document.querySelector(".combat-live-chip").click(), true`);
     const pane = await until("the Combat sub-tab", () => page(`!!document.querySelector('[data-testid="combat-pane"]') && [...document.querySelectorAll('[role="tab"]')].some((t) => t.innerText.trim() === "Combat" && t.getAttribute("aria-selected") === "true")`), 30000).catch(() => false);
@@ -527,13 +536,22 @@ async function playerCombat(token) {
     }, 15000, 500).catch(() => null);
     check("Apply takes the damage on the player's own character (D7 a)", after === Math.max(0, before - 2), `${before} -> ${after}`);
     await screenshot("13-combat-applied");
+
+    // Background and back: what changed meanwhile (no event reached the app) shows when it returns.
+    await page(`(() => { const s = window.__smokeCombat; s.pseq += 5; s.turn = { kind: "combatant", id: "me", round: 4 }; return true; })()`);
+    adbShell("input keyevent KEYCODE_HOME");
+    await sleep(2500);
+    adbShell(`am start -n ${ACTIVITY}`);
+    await sleep(1500);
+    await connectPage().catch(() => null);
+    const woke = await until("the view after coming back", () => page(`(() => { const p = document.querySelector('[data-testid="combat-pane"]'); return !!p && p.innerText.includes("Round 4") && p.innerText.includes("Your turn"); })()`), 15000, 500).catch(() => false);
+    check("back from the background, the Combat sub-tab shows what changed meanwhile", !!woke, woke ? "" : (await page(`(document.querySelector('[data-testid="combat-pane"]') || document.body).innerText.slice(0, 120)`).catch(() => "")));
+    await screenshot("14-combat-after-background");
   } finally {
-    if (script) await cdp("Page.removeScriptToEvaluateOnNewDocument", { identifier: script }).catch(() => null);
+    if (shimmed) await page(`(() => { if (window.__smokeRealFetch) window.fetch = window.__smokeRealFetch; delete window.__smokeCombat; return true; })()`).catch(() => null);
     await rest(token, "DELETE", `/api/parties/${party.id}`).catch(() => null);
     await page(`location.hash = "#/characters"`).catch(() => null);
-    await cdp("Page.reload", {}).catch(() => null);
-    await sleep(3000);
-    await connectPage().catch(() => null);
+    await page(`window.dispatchEvent(new Event("online")), true`).catch(() => null);
   }
 }
 
