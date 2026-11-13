@@ -124,6 +124,15 @@ function summonArgs(owner: string, b: QuickBlock, initiative?: D20Input) {
   };
 }
 
+/**
+ * The PC's companions to bring: the server's offers (`summon {owner, companion: key}`, built from the character on
+ * the server) when it sends them, else the open sheet's companions as quick blocks.
+ */
+function companionsOf(me: PlayerCombatant, s: CharacterSnapshot): { id: string; name: string; args: Record<string, unknown> }[] {
+  if (me.offers) return me.offers.map((k) => ({ id: k.key, name: k.name, args: { owner: me.id, companion: k.key } }));
+  return s.companions.map((k) => ({ id: k.id, name: k.name, args: summonArgs(me.id, { name: k.name, hp: k.hp, ac: k.armorClass }) }));
+}
+
 function SummonDialog({ combat, me, s, onClose }: { combat: PlayerCombat; me: PlayerCombatant; s: CharacterSnapshot; onClose: () => void }) {
   const { busy, error, run } = useAction();
   const [name, setName] = useState("");
@@ -139,15 +148,16 @@ function SummonDialog({ combat, me, s, onClose }: { combat: PlayerCombat; me: Pl
     onClose();
   });
   const quick = { name: name.trim(), hp: hpN, ac: acN };
+  const companions = companionsOf(me, s);
   return (
     <Modal title="Summon" onClose={onClose}>
       <div className="combat-summon">
-        {s.companions.length > 0 && (
+        {companions.length > 0 && (
           <section aria-label="Your companions">
             <h3 className="combat-h">Your companions</h3>
             <div className="combat-creature-row">
-              {s.companions.map((k) => (
-                <Button key={k.id} disabled={busy} onClick={() => void summon({ name: k.name, hp: k.hp, ac: k.armorClass })}>Bring {k.name}</Button>
+              {companions.map((k) => (
+                <Button key={k.id} disabled={busy} onClick={() => void run(async () => { await playerWrite(combat, "summon", k.args); onClose(); })}>Bring {k.name}</Button>
               ))}
             </div>
           </section>
@@ -182,7 +192,8 @@ export function Creatures({ combat, me, s }: { combat: PlayerCombat; me: PlayerC
   const [summoning, setSummoning] = useState(false);
   const { busy, error, run } = useAction();
   const mine = combat.combatants.filter((c) => c.mine && c.kind === "creature" && c.ownerId === me.id);
-  const missing = combat.status === "setup" ? s.companions.filter((k) => !mine.some((c) => c.name === k.name)) : [];
+  const offers = companionsOf(me, s);
+  const missing = combat.status === "setup" ? offers.filter((k) => !mine.some((c) => c.name === k.name)) : [];
   return (
     <section className="combat-creatures" aria-label="Your creatures">
       {missing.length > 0 && (
@@ -191,7 +202,7 @@ export function Creatures({ combat, me, s }: { combat: PlayerCombat; me: PlayerC
           <div className="combat-prompt-actions">
             {missing.map((k) => (
               <Button key={k.id} variant="primary" disabled={busy}
-                onClick={() => void run(() => playerWrite(combat, "summon", summonArgs(me.id, { name: k.name, hp: k.hp, ac: k.armorClass })))}>
+                onClick={() => void run(() => playerWrite(combat, "summon", k.args))}>
                 Bring {k.name}
               </Button>
             ))}

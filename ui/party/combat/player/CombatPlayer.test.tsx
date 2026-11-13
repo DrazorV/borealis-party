@@ -758,3 +758,31 @@ describe("before the PC's initiative is in", () => {
     expect(within(within(pane).getByRole("list", { name: "Turn order" })).queryByText(/\(you\)/)).toBeNull();
   });
 });
+
+describe("the server sends no characterId", () => {
+  it("before initiative, the PC in `me` only is the party's one character of this account", async () => {
+    const w = liveWith({ status: "setup", turn: { kind: "not_started" } });
+    w.order = w.order.filter((o) => o.id !== "me1");
+    delete w.me[0]!.characterId;
+    server.combats.set("p1", w);
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    expect(within(pane).getByRole("alertdialog", { name: "Roll initiative" })).toBeTruthy();
+  });
+});
+
+describe("the server's companion offers", () => {
+  it("are offered at the start and summoned by their key", async () => {
+    const user = userEvent.setup();
+    server.combats.set("p1", liveWith({ status: "setup", turn: { kind: "not_started" } }, { offers: [{ key: "companion-1", name: "Owl", hp: 1, ac: 11 }] }));
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    const offer = within(pane).getByRole("group", { name: "Bring your companions" });
+    await user.click(within(offer).getByRole("button", { name: "Bring Owl" }));
+    await waitFor(() => expect(server.calls.at(-1)?.path).toBe("/api/combats/c-p1/summon"));
+    expect(server.calls.at(-1)?.body).toMatchObject({ args: { owner: "me1", companion: "companion-1" } });
+  });
+});
+
