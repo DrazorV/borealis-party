@@ -39,7 +39,7 @@ export function RollInput(props: {
       if (props.kind === "dice" && ((props.min != null && n < props.min) || (props.max != null && n > props.max))) return null;
       return { kind: "typed", total: n };
     }
-    if (props.kind === "dice" && tryParseNotation(t)) return { kind: "roll", notation: t };
+    if (props.kind === "dice" && tryParseNotation(t)) return { kind: "app", notation: t };
     return null;
   };
   const submit = (e?: FormEvent) => {
@@ -51,8 +51,8 @@ export function RollInput(props: {
     (props.onSubmit as (i: D20Input | DiceInput) => void)(input);
   };
   const roll = () => {
-    if (props.kind === "d20") props.onSubmit({ kind: "roll", modifier: props.modifier ?? 0, mode: props.mode ?? "normal" });
-    else props.onSubmit({ kind: "roll", notation: props.notation });
+    if (props.kind === "d20") props.onSubmit({ kind: "app", modifier: props.modifier ?? 0, mode: props.mode ?? "normal" });
+    else props.onSubmit({ kind: "app", notation: props.notation });
   };
   const mod = props.kind === "d20" && props.modifier != null ? ` (d20${props.modifier >= 0 ? "+" : ""}${props.modifier})` : props.kind === "dice" ? ` (${props.notation})` : "";
   return (

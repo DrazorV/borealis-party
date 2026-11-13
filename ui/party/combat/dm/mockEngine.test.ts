@@ -63,10 +63,10 @@ describe("rolls: in the app or typed (D21, D43)", () => {
     const m = sampleCombat();
     run(m, { command: "set_initiative", id: "mage", roll: typed(17) });
     expect(byId(m.view.state, "mage")!.initiative).toBe(17);
-    run(m, { command: "set_initiative", id: "mage", roll: { kind: "roll" } });
+    run(m, { command: "set_initiative", id: "mage", roll: { kind: "app" } });
     const ev = m.view.log.at(-1)!;
     expect(ev.event).toBe("initiative");
-    expect((ev.roll as { source: string }).source).toBe("rolled");
+    expect((ev.roll as { source: string }).source).toBe("app");
     expect(byId(m.view.state, "mage")!.initiative).toBe((ev.roll as { total: number }).total);
   });
 
@@ -86,7 +86,7 @@ describe("rolls: in the app or typed (D21, D43)", () => {
     const m = ready();
     run(m, { command: "damage", target: "mage", parts: [{ amount: typed(7), damage_type: "slashing" }] });
     expect(byId(m.view.state, "mage")!.hp.current).toBe(33);
-    run(m, { command: "damage", target: "mage", parts: [{ amount: { kind: "roll", notation: "1d4" } }] });
+    run(m, { command: "damage", target: "mage", parts: [{ amount: { kind: "app", notation: "1d4" } }] });
     const hp = byId(m.view.state, "mage")!.hp.current;
     expect(hp).toBeGreaterThanOrEqual(29);
     expect(hp).toBeLessThanOrEqual(32);

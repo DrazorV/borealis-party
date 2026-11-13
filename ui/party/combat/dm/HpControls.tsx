@@ -30,7 +30,7 @@ export function HpControls({ c, send, disabled }: { c: Combatant; send: (cmd: Co
     if (!t) return null;
     const n = Number(t);
     if (Number.isInteger(n) && n >= 0) return { kind: "typed", total: n };
-    if (tryParseNotation(t)) return { kind: "roll", notation: t, ...(crit ? { critical: true } : {}) };
+    if (tryParseNotation(t)) return { kind: "app", notation: t, ...(crit ? { critical: true } : {}) };
     return null;
   };
   const input = parse();

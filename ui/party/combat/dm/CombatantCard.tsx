@@ -74,7 +74,7 @@ export function CombatantCard({ state, c, block, blockName, send, disabled }: {
     };
     send({
       command: "summon", owner: c.id, combatant: made, visible: r.visible,
-      ...(r.initiative === "" ? {} : { initiative: r.initiative === "roll" ? { kind: "roll" as const, modifier: r.initBonus } : { kind: "typed" as const, total: r.initiative } }),
+      ...(r.initiative === "" ? {} : { initiative: r.initiative === "roll" ? { kind: "app" as const, modifier: r.initBonus } : { kind: "typed" as const, total: r.initiative } }),
     });
   };
   return (

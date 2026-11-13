@@ -96,7 +96,7 @@ describe("CombatTracker", () => {
     // Rolled by the server for every creature.
     fireEvent.click(screen.getByRole("button", { name: "Roll initiatives" }));
     await waitFor(() => expect(byId(state(), "dragon")!.initiative).not.toBeNull());
-    expect(combat().view.log.filter((e) => e.event === "initiative" && (e.roll as { source: string }).source === "rolled").length).toBeGreaterThan(3);
+    expect(combat().view.log.filter((e) => e.event === "initiative" && (e.roll as { source: string }).source === "app").length).toBeGreaterThan(3);
   });
 
   it("damages with a typed amount and a type, and asks for the concentration save with its DC (C6, C11)", async () => {
@@ -220,7 +220,7 @@ describe("CombatTracker", () => {
     expect(within(breath).getByText("Needs recharge")).toBeTruthy();
     fireEvent.click(within(breath).getByRole("button", { name: "Roll in app" }));
     await waitFor(() => expect(combat().view.log.at(-1)!.event).toBe("recharge"));
-    expect((combat().view.log.at(-1)!.roll as { source: string }).source).toBe("rolled");
+    expect((combat().view.log.at(-1)!.roll as { source: string }).source).toBe("app");
   });
 
   it("exports the combat and imports it as a new combat (D45)", async () => {

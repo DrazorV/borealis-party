@@ -61,13 +61,13 @@ function d20(roll: D20Input, die: DieRoller): D20Result {
     };
   }
   const r = rollD20(roll.modifier ?? 0, roll.mode ?? "normal", die);
-  return { source: "rolled", mode: r.mode, dice: r.dice, natural: r.natural, modifier: r.modifier, total: r.total, is_nat20: r.isNat20, is_nat1: r.isNat1 };
+  return { source: "app", mode: r.mode, dice: r.dice, natural: r.natural, modifier: r.modifier, total: r.total, is_nat20: r.isNat20, is_nat1: r.isNat1 };
 }
 
 function dice(input: DiceInput, die: DieRoller): DiceResult {
   if (input.kind === "typed") return { source: "typed", notation: String(input.total), total: input.total, breakdown: String(input.total) };
   const r = rollExpr(parseNotation(input.notation), die);
-  return { source: "rolled", notation: r.notation, total: r.total, breakdown: r.breakdown };
+  return { source: "app", notation: r.notation, total: r.total, breakdown: r.breakdown };
 }
 
 const clauseApplies = (list: DamageClause[] | undefined, type: string, magical: boolean, qualified: boolean): boolean =>
@@ -132,7 +132,7 @@ class Run {
         this.ev(undefined, "order_changed", "Initiative rolled");
         return;
       }
-      case "set_initiative": { const c = this.c(cmd.id); const r = d20(cmd.roll.kind === "roll" ? { ...cmd.roll, modifier: cmd.roll.modifier ?? c.initiative_bonus ?? 0 } : cmd.roll, this.m.die); c.initiative = r.total; this.ev(c.id, "initiative", `${c.label} initiative ${r.total}${r.source === "rolled" ? ` (${r.dice.join(", ")})` : ""}`, { roll: r }); return; }
+      case "set_initiative": { const c = this.c(cmd.id); const r = d20(cmd.roll.kind === "app" ? { ...cmd.roll, modifier: cmd.roll.modifier ?? c.initiative_bonus ?? 0 } : cmd.roll, this.m.die); c.initiative = r.total; this.ev(c.id, "initiative", `${c.label} initiative ${r.total}${r.source === "app" ? ` (${r.dice.join(", ")})` : ""}`, { roll: r }); return; }
       case "clear_initiative": { this.c(cmd.id).initiative = null; return; }
       case "swap_tie": { const a = this.c(cmd.a); const b = this.c(cmd.b); [a.tiebreak, b.tiebreak] = [b.tiebreak, a.tiebreak]; this.ev(a.id, "order_changed", `${a.label} and ${b.label} swap`); return; }
       case "link": { const c = this.c(cmd.id); if (cmd.to) { this.c(cmd.to); c.linked_to = cmd.to; } else delete c.linked_to; this.ev(c.id, "order_changed", cmd.to ? `${c.label} acts after ${this.name(cmd.to)}` : `${c.label} acts on its own`); return; }
@@ -237,7 +237,7 @@ class Run {
       case "resolve_concentration": {
         const c = this.c(cmd.id);
         const check = c.pending_concentration?.[0] ?? refuse("No concentration check is waiting.", "no_pending_check");
-        const r = d20(cmd.roll.kind === "roll" ? { ...cmd.roll, modifier: cmd.roll.modifier ?? 0 } : cmd.roll, this.m.die);
+        const r = d20(cmd.roll.kind === "app" ? { ...cmd.roll, modifier: cmd.roll.modifier ?? 0 } : cmd.roll, this.m.die);
         c.pending_concentration = c.pending_concentration!.slice(1);
         const kept = r.total >= check.dc;
         this.ev(c.id, "concentration_save", `${c.label} concentration save ${r.total} vs DC ${check.dc}: ${kept ? "kept" : "lost"}`, { roll: r, kept });
@@ -337,7 +337,7 @@ class Run {
         c.tiebreak = s.next_tiebreak ?? 0;
         s.next_tiebreak = c.tiebreak + 1;
         s.combatants.push(c);
-        if (cmd.initiative) c.initiative = d20(cmd.initiative.kind === "roll" ? { ...cmd.initiative, modifier: cmd.initiative.modifier ?? c.initiative_bonus ?? 0 } : cmd.initiative, this.m.die).total;
+        if (cmd.initiative) c.initiative = d20(cmd.initiative.kind === "app" ? { ...cmd.initiative, modifier: cmd.initiative.modifier ?? c.initiative_bonus ?? 0 } : cmd.initiative, this.m.die).total;
         this.ev(c.id, "summoned", `${owner.label} summons ${c.label}`, { owner: owner.id });
         return;
       }
@@ -356,7 +356,7 @@ class Run {
         if (!c.owner_id) refuse("Only a controlled creature follows an owner.");
         c.initiative_mode = cmd.mode;
         if (cmd.mode === "own" && c.initiative == null) {
-          const r = d20(cmd.roll ?? { kind: "roll", modifier: c.initiative_bonus ?? 0 }, this.m.die);
+          const r = d20(cmd.roll ?? { kind: "app", modifier: c.initiative_bonus ?? 0 }, this.m.die);
           c.initiative = r.total;
         }
         this.ev(c.id, "order_changed", `${c.label} acts ${cmd.mode === "own" ? `on its own initiative (${c.initiative})` : "right after its owner"}`);
@@ -367,7 +367,7 @@ class Run {
   }
 
   rollOne(c: Combatant) {
-    const r = d20({ kind: "roll", modifier: c.initiative_bonus ?? 0, mode: c.initiative_advantage ? "advantage" : "normal" }, this.m.die);
+    const r = d20({ kind: "app", modifier: c.initiative_bonus ?? 0, mode: c.initiative_advantage ? "advantage" : "normal" }, this.m.die);
     c.initiative = r.total;
     this.ev(c.id, "initiative", `${c.label} rolls initiative ${r.total}`, { roll: r });
   }
@@ -408,7 +408,7 @@ class Run {
     }
     for (const a of c.abilities ?? []) {
       if (a.recharge && !a.recharge.ready) {
-        if (s.settings?.auto_recharge !== false && c.kind === "creature") this.finishRecharge(c, a.key, dice({ kind: "roll", notation: "1d6" }, this.m.die));
+        if (s.settings?.auto_recharge !== false && c.kind === "creature") this.finishRecharge(c, a.key, dice({ kind: "app", notation: "1d6" }, this.m.die));
         else this.ev(c.id, "recharge_due", `${c.label}: roll recharge for ${a.name}`, { ability: a.key });
       }
     }
