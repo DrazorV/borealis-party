@@ -59,8 +59,13 @@ describe("offerFor", () => {
     expect(isArm(LINUX, "arm")).toBe(true);
     expect(isArm("Mozilla/5.0 (X11; Linux aarch64)", "x86")).toBe(false);
   });
-  it("has notes, not downloads, for iOS and macOS", () => {
-    expect(offerFor(BASE, "ios")).toMatchObject({ kind: "note", note: expect.stringMatching(/registered in advance/) });
+  it("offers iOS the unsigned IPA to sideload, and macOS a note", () => {
+    expect(offerFor(BASE, "ios")).toEqual({
+      kind: "app",
+      name: "iPhone and iPad",
+      links: [{ label: "Download the app", href: `${BASE}/${APP_ASSETS.iosUnsigned}` }],
+      hint: expect.stringMatching(/AltStore, SideStore or Sideloadly.*7 days/),
+    });
     expect(offerFor(BASE, "mac")).toMatchObject({ kind: "note", note: expect.stringMatching(/no macOS app/) });
   });
   it("offers nothing when the server turned downloads off", () => {

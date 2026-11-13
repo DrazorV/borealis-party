@@ -7,6 +7,7 @@ name: Party apps
 #   borealis-party-arm64.apk                signed release APK for phones
 #   borealis-party-x86_64.apk               signed release APK for emulators and x86_64 Chromebooks
 #   borealis-party-ios.ipa                  signed iOS app, only when the iOS signing secrets are set
+#   borealis-party-ios-unsigned.ipa         unsigned iOS app for sideloading, when the iOS secrets are not set
 #   borealis-party-windows-x64-setup.exe    Windows installer (NSIS, per user), unsigned
 #   borealis-party-windows-x64.msi          Windows installer (MSI), unsigned; only when WiX succeeded
 #   borealis-party-linux-x86_64.AppImage    Linux x86_64
@@ -16,8 +17,9 @@ name: Party apps
 #   borealis-party-latest.json              the desktop apps' update feed, with a .sig per installer and AppImage
 #                                           (only with the updater key, party/desktop/updates.md)
 #   borealis-party-SHA256SUMS.txt
-# Without the iOS secrets the iOS job builds an unsigned simulator app instead, kept as the workflow artifact
-# party-ios-simulator and never attached to the release.
+# Without the iOS secrets the iOS job builds borealis-party-ios-unsigned.ipa instead, for sideloading (AltStore,
+# SideStore or Sideloadly sign it with the user's own Apple ID). iOS is optional: when its job does not run (macOS
+# runners can be short), the release goes out without an iOS file.
 #
 # "Run workflow" on main builds everything and keeps it as workflow artifacts; run on a party-v* tag, it also
 # releases. Mirrors party/android/build-apk.ps1: Tauri 2 with party/tauri.party.json and --no-default-features,
@@ -200,7 +202,7 @@ jobs:
       - name: Xcode
         run: xcodebuild -version && xcrun --sdk iphoneos --show-sdk-version
 
-      - name: Signed or simulator build
+      - name: Signed or unsigned build
         id: mode
         env:
           IOS_CERTIFICATE: ${{ secrets.PARTY_IOS_CERTIFICATE_P12 }}
@@ -217,9 +219,9 @@ jobs:
             echo "signed=true" >> "$GITHUB_OUTPUT"
             echo "rust=aarch64-apple-ios" >> "$GITHUB_OUTPUT"
           elif [ "$count" -eq 0 ]; then
-            echo "::warning::no iOS signing secrets: building an unsigned simulator app (artifact party-ios-simulator, not released)"
+            echo "::notice::no iOS signing secrets: building an unsigned IPA for sideloading (borealis-party-ios-unsigned.ipa)"
             echo "signed=false" >> "$GITHUB_OUTPUT"
-            echo "rust=aarch64-apple-ios-sim" >> "$GITHUB_OUTPUT"
+            echo "rust=aarch64-apple-ios" >> "$GITHUB_OUTPUT"
           else
             echo "::error::set all four iOS signing secrets or none (party/README.md)"
             exit 1
@@ -243,16 +245,19 @@ jobs:
       - run: npm ci
         working-directory: ui
 
-      # The party front end (party/tauri.party.json), the party app's own identity, as on Android and the desktop,
-      # and party/tauri.party.ios.json on top when the fork has one.
+      # The party front end (party/tauri.party.json), the party app's own identity and version (the IPA's
+      # CFBundleShortVersionString is the party version, not Borealis's), as on Android and the desktop, and
+      # party/tauri.party.ios.json on top when the fork has one.
       - name: Party config
         env:
           TEAM_ID: ${{ secrets.PARTY_APPLE_TEAM_ID }}
           RUN_NUMBER: ${{ github.run_number }}
+          PARTY_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          identity=$(jq -n --arg build "$RUN_NUMBER" --arg team "$TEAM_ID" '
-            {productName: "Borealis Party", identifier: "app.borealis.party",
+          test -n "$PARTY_VERSION"
+          identity=$(jq -n --arg build "$RUN_NUMBER" --arg team "$TEAM_ID" --arg version "$PARTY_VERSION" '
+            {productName: "Borealis Party", identifier: "app.borealis.party", version: $version,
              bundle: {iOS: ({bundleVersion: $build} + (if $team == "" then {} else {developmentTeam: $team} end))}}')
           printf '%s' "$identity" > "$RUNNER_TEMP/identity.json"
           files=(party/tauri.party.json "$RUNNER_TEMP/identity.json")
@@ -287,22 +292,31 @@ jobs:
           cp "$ipa" dist/borealis-party-ios.ipa
           ls -l dist
 
-      - name: Build the simulator app (unsigned)
+      # Without Apple secrets: an unsigned iPhone build. Sideloading tools (AltStore, SideStore, Sideloadly) sign it
+      # with the user's own Apple ID when they install it (party/README.md, "Download the apps").
+      - name: Build the unsigned IPA (for sideloading)
         if: steps.mode.outputs.signed != 'true'
         run: |
           set -euo pipefail
-          node ui/node_modules/@tauri-apps/cli/tauri.js ios build --debug --target aarch64-sim \
-            --config "$RUNNER_TEMP/party.ios.json" --ci -- --no-default-features
-          app=$(find src-tauri/gen/apple/build -name '*.app' -type d -path '*iphonesimulator*' | head -n 1)
-          [ -n "$app" ] || app=$(find src-tauri/gen/apple/build -name '*.app' -type d | head -n 1)
-          [ -n "$app" ] || { echo "::error::no .app under src-tauri/gen/apple/build"; exit 1; }
+          node ui/node_modules/@tauri-apps/cli/tauri.js ios build --target aarch64 --no-sign             --config "$RUNNER_TEMP/party.ios.json" --ci -- --no-default-features
+          ipa=$(find src-tauri/gen/apple/build -name '*.ipa' -type f | head -n 1)
+          [ -n "$ipa" ] || { echo "::error::no .ipa under src-tauri/gen/apple/build"; exit 1; }
+          check="$RUNNER_TEMP/ipa-check"
+          mkdir -p "$check"
+          unzip -q "$ipa" -d "$check"
+          app=$(find "$check/Payload" -maxdepth 1 -name '*.app' | head -n 1)
+          [ -n "$app" ] || { echo "::error::the IPA has no Payload/*.app"; exit 1; }
+          bundle_id=$(plutil -extract CFBundleIdentifier raw "$app/Info.plist")
+          [ "$bundle_id" = "app.borealis.party" ] || { echo "::error::IPA bundle id $bundle_id, expected app.borealis.party"; exit 1; }
+          platform=$(plutil -extract CFBundleSupportedPlatforms.0 raw "$app/Info.plist")
+          [ "$platform" = "iPhoneOS" ] || { echo "::error::the IPA is for $platform, not iPhoneOS"; exit 1; }
           mkdir -p dist
-          ditto -c -k --keepParent "$app" dist/borealis-party-ios-simulator.zip
+          cp "$ipa" dist/borealis-party-ios-unsigned.ipa
           ls -l dist
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.mode.outputs.signed == 'true' && 'party-ios' || 'party-ios-simulator' }}
+          name: ${{ steps.mode.outputs.signed == 'true' && 'party-ios' || 'party-ios-unsigned' }}
           path: dist/*
           if-no-files-found: error
 
@@ -453,7 +467,9 @@ jobs:
   release:
     name: GitHub release
     needs: [version, android, ios, desktop]
-    if: needs.version.outputs.release == 'true'
+    # iOS is optional: macOS runners can be short, and without Apple secrets the IPA is only for sideloading. The
+    # release goes out without it rather than not at all; Android and desktop must have built.
+    if: ${{ !cancelled() && needs.version.outputs.release == 'true' && needs.android.result == 'success' && needs.desktop.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -463,6 +479,7 @@ jobs:
       TAG: ${{ github.ref_name }}
       VERSION: ${{ needs.version.outputs.version }}
       SIGNED_IOS: ${{ needs.ios.outputs.signed }}
+      IOS_BUILT: ${{ needs.ios.result == 'success' }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -477,10 +494,11 @@ jobs:
           merge-multiple: true
 
       - uses: actions/download-artifact@v4
-        if: needs.ios.outputs.signed == 'true'
+        if: needs.ios.result == 'success'
         with:
-          name: party-ios
           path: assets
+          pattern: party-ios*
+          merge-multiple: true
 
       - uses: actions/checkout@v4
         with:
@@ -504,7 +522,10 @@ jobs:
           # Linux arm64 and the MSI are optional and released when they built.
           expected="borealis-party-arm64.apk borealis-party-x86_64.apk borealis-party-windows-x64-setup.exe"
           expected="$expected borealis-party-linux-x86_64.AppImage borealis-party-linux-amd64.deb"
-          [ "$SIGNED_IOS" != "true" ] || expected="$expected borealis-party-ios.ipa"
+          if [ "$IOS_BUILT" = "true" ]; then
+            if [ "$SIGNED_IOS" = "true" ]; then expected="$expected borealis-party-ios.ipa"
+            else expected="$expected borealis-party-ios-unsigned.ipa"; fi
+          fi
           for f in $expected; do
             [ -f "$f" ] || { echo "::error::missing asset $f"; ls -l; exit 1; }
           done
@@ -514,7 +535,9 @@ jobs:
       - name: Create or update the release
         run: |
           set -euo pipefail
-          if [ "$SIGNED_IOS" = "true" ]; then ios="the iOS app"; else ios="no iOS app (not signed)"; fi
+          if [ "$IOS_BUILT" != "true" ]; then ios="no iOS app (the iOS build did not run)"
+          elif [ "$SIGNED_IOS" = "true" ]; then ios="the iOS app"
+          else ios="an unsigned iOS app to sideload with AltStore, SideStore or Sideloadly"; fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --verify-tag --latest --title "Borealis Party $VERSION" \
               --notes "Borealis Party $VERSION: the Android app (arm64 for phones, x86_64 for emulators), the Windows and Linux apps (unsigned), and $ios. Verify downloads against borealis-party-SHA256SUMS.txt."

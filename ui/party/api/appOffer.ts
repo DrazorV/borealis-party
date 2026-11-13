@@ -8,6 +8,7 @@ import { normaliseAddress } from "./session";
 export const APP_ASSETS = {
   android: "borealis-party-arm64.apk",
   ios: "borealis-party-ios.ipa",
+  iosUnsigned: "borealis-party-ios-unsigned.ipa",
   windows: "borealis-party-windows-x64-setup.exe",
   linuxAppImage: "borealis-party-linux-x86_64.AppImage",
   linuxDeb: "borealis-party-linux-amd64.deb",
@@ -16,10 +17,11 @@ export const APP_ASSETS = {
 } as const;
 
 /**
- * Whether a browser can install the iOS file. Not today: the release's iOS file is an ad hoc build, which installs
- * only on the devices listed in its profile, so a website can't offer it to everyone and the page says so instead.
+ * The iOS file the page offers: the unsigned IPA, which sideloading tools sign with the visitor's own Apple ID. The
+ * signed ad hoc IPA installs only on the devices in its profile, so a website can't offer it to everyone.
  */
-export const IOS_INSTALLS_FROM_WEB = false;
+export const IOS_SIDELOAD_HINT = "Install it with AltStore, SideStore or Sideloadly and your own Apple ID. With a free "
+  + "Apple ID it has to be renewed every 7 days.";
 
 /** The systems the offer tells apart. */
 export type VisitorOs = "android" | "ios" | "windows" | "linux" | "mac";
@@ -53,11 +55,9 @@ export interface OfferLink {
 
 /** What the page offers a system: the app's downloads (the first is the main one), or a note when there is none. */
 export type Offer =
-  | { kind: "app"; name: string; links: OfferLink[] }
+  | { kind: "app"; name: string; links: OfferLink[]; hint?: string }
   | { kind: "note"; note: string };
 
-const IOS_NOTE = "There is no iPhone or iPad app to install from here: iOS installs apps from the App Store, or ad hoc "
-  + "builds only on devices registered in advance. Borealis Party works here in Safari.";
 const MAC_NOTE = "There is no macOS app yet. Borealis Party works here in your browser.";
 
 /**
@@ -88,9 +88,12 @@ export function offerFor(base: string | null | undefined, os: VisitorOs, arm = f
         ],
       };
     case "ios":
-      return IOS_INSTALLS_FROM_WEB
-        ? { kind: "app", name: "iOS", links: [{ label: "Download the app", href: at(APP_ASSETS.ios) }] }
-        : { kind: "note", note: IOS_NOTE };
+      return {
+        kind: "app",
+        name: "iPhone and iPad",
+        links: [{ label: "Download the app", href: at(APP_ASSETS.iosUnsigned) }],
+        hint: IOS_SIDELOAD_HINT,
+      };
     case "mac":
       return { kind: "note", note: MAC_NOTE };
   }

@@ -579,7 +579,8 @@ Every `party-v<version>` tag builds the phone and desktop apps and attaches them
 |---|---|
 | Android, phones (arm64) | `borealis-party-arm64.apk` |
 | Android, emulators and x86_64 Chromebooks | `borealis-party-x86_64.apk` |
-| iOS (only when the iOS secrets are set) | `borealis-party-ios.ipa` |
+| iOS, signed (only when the iOS secrets are set) | `borealis-party-ios.ipa` |
+| iOS, unsigned, to sideload (when they are not) | `borealis-party-ios-unsigned.ipa` |
 | Windows x64, installer for the current user | `borealis-party-windows-x64-setup.exe` |
 | Windows x64, MSI (only when it built) | `borealis-party-windows-x64.msi` |
 | Linux x86_64, AppImage | `borealis-party-linux-x86_64.AppImage` |
@@ -627,10 +628,23 @@ Base64 for a file, without line breaks: `base64 -w0 file` on Linux, `base64 -i f
 `[Convert]::ToBase64String([IO.File]::ReadAllBytes("file"))` in PowerShell.
 
 The Android secrets are required: use the same keystore as the hand builds, because Android only installs an update
-signed with the same key. The four iOS secrets go together. Without them the iOS job builds an unsigned app for the
-iOS Simulator, kept only as the workflow artifact `party-ios-simulator`, and the release has no iOS app. With them it
-builds an ad hoc IPA, which installs only on the devices listed in the profile; set the repository variable
-`PARTY_IOS_EXPORT_METHOD` to `debugging` or `app-store-connect` for a profile of that kind.
+signed with the same key. The four iOS secrets go together. Without them the iOS job builds an unsigned iPhone app,
+`borealis-party-ios-unsigned.ipa`, for sideloading (below). With them it builds an ad hoc IPA, which installs only on
+the devices listed in the profile; set the repository variable `PARTY_IOS_EXPORT_METHOD` to `debugging` or
+`app-store-connect` for a profile of that kind. iOS is optional: macOS runners on GitHub are sometimes too busy to
+pick the job up, and then the release goes out without an iOS file.
+
+### Sideload on iPhone
+
+Without a paid Apple developer account, the iPhone app is installed by sideloading. AltStore, SideStore or Sideloadly
+(they run on Windows and macOS) sign `borealis-party-ios-unsigned.ipa` with your own free Apple ID while installing it.
+Apple's limits for a free Apple ID apply:
+
+- The signature lasts 7 days. Until it is renewed the app does not open; your characters stay on the phone.
+  AltStore and Sideloadly renew it on the same Wi-Fi as their computer, SideStore on the phone itself.
+- At most 3 sideloaded apps per device.
+
+Borealis Party needs no capability a free Apple ID lacks: sign-in, offline use and sync work as on Android.
 
 ## Build the Android app
 

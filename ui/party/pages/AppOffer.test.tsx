@@ -38,11 +38,13 @@ it("offers the APK on an Android browser, with the address to enter", async () =
   expect(screen.getByText(window.location.origin.replace(/^https?:\/\//, ""), { exact: false })).toBeTruthy();
 });
 
-it("tells an iPhone honestly that there is no app to install, with the other systems' builds", async () => {
+it("offers an iPhone the app to sideload, says how, and links the other systems' builds", async () => {
   device(IPHONE);
   render(<AppOffer />);
-  expect(await screen.findByText(/no iPhone or iPad app to install/)).toBeTruthy();
-  expect(screen.queryByRole("link", { name: /download/i })).toBeNull();
+  expect(await screen.findByText("Get the iPhone and iPad app.")).toBeTruthy();
+  expect(screen.getByText(/AltStore, SideStore or Sideloadly/)).toBeTruthy();
+  expect(screen.getByRole("link", { name: /Download the app/ }).getAttribute("href"))
+    .toBe("https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-ios-unsigned.ipa");
   expect(screen.getByRole("link", { name: "Other systems" }).getAttribute("href")).toBe("https://github.com/DrazorV/borealis-party/releases/latest");
 });
 
