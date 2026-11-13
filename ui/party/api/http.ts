@@ -20,6 +20,7 @@ import "./overrides/encounters";
 import "./overrides/personality";
 import "./overrides/sourceRemoval";
 import "./overrides/combat";
+import "./overrides/assistant"; // the assistant's own routes; no command changes
 import "./overrides/contentRefresh"; // last: wraps the jobs and the source-removal question
 
 function fail(code: string, message: string): ApiError {

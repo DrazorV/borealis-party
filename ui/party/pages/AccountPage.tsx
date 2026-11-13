@@ -9,6 +9,7 @@ import { clearNotices, loadMirror, loadNotices } from "../sync/mirror";
 import { useSyncStatus } from "../sync/runner";
 import { AiAppsCard } from "./AiApps";
 import { DungeonMasterCard } from "./PartiesDm";
+import { YourAiCard } from "./YourAiCard";
 import "./party.css";
 
 /**
@@ -115,6 +116,7 @@ export function AccountPage() {
       </Card>
       <DungeonMasterCard />
       <AiAppsCard />
+      <YourAiCard />
       {isTauri() && user && <SyncNotes userId={user.id} />}
       {/* A browser got the page from the server itself, so only the apps have an address to change. */}
       {isTauri() && (
