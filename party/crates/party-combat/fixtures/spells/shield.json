@@ -1,0 +1,22 @@
+[
+  {
+    "v": 1, "key": "ID_PHB_SPELL_SHIELD", "edition": "2014", "name": "Shield", "rev": 1,
+    "level": 1, "cast": "reaction",
+    "targeting": { "kind": "self" },
+    "delivery": { "kind": "auto" },
+    "always": [{ "kind": "ac_bonus", "n": 5 }],
+    "duration": { "kind": "source_turns", "n": 1, "at": "start" },
+    "tier": "auto",
+    "notes": ["Counts against the triggering attack.", "No damage from Magic Missile while it lasts."]
+  },
+  {
+    "v": 1, "key": "ID_2024_SPELL_SHIELD", "edition": "2024", "name": "Shield", "rev": 1,
+    "level": 1, "cast": "reaction",
+    "targeting": { "kind": "self" },
+    "delivery": { "kind": "auto" },
+    "always": [{ "kind": "ac_bonus", "n": 5 }],
+    "duration": { "kind": "source_turns", "n": 1, "at": "start" },
+    "tier": "auto",
+    "notes": ["Counts against the triggering attack.", "No damage from Magic Missile while it lasts."]
+  }
+]

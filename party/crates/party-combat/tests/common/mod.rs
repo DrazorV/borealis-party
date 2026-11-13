@@ -63,17 +63,7 @@ pub fn warhorse(key: &str) -> Combatant {
 }
 
 pub fn ability(key: &str, name: &str, kind: AbilityKind) -> Ability {
-    Ability {
-        key: key.into(),
-        name: name.into(),
-        kind,
-        text: String::new(),
-        legendary_cost: None,
-        recharge: None,
-        uses: None,
-        group_limit: None,
-        requires_effect: None,
-    }
+    Ability::new(key, name, kind)
 }
 
 pub fn adult_red_dragon(key: &str) -> Combatant {
@@ -254,4 +244,44 @@ pub fn effect(name: &str, target: &str) -> EffectSpec {
 
 pub fn player_events_of(e: &Events) -> usize {
     e.players.len()
+}
+
+/// The spell fixtures (`fixtures/spells/<name>.json`, one definition per edition).
+pub const FIXTURES: &[&str] = &[
+    "mage-armor",
+    "shield",
+    "fireball",
+    "hold-person",
+    "bless",
+    "cure-wounds",
+    "counterspell",
+];
+
+/// A fixture definition.
+pub fn mech(name: &str, edition: Edition) -> spell::SpellMech {
+    let path = format!("{}/fixtures/spells/{name}.json", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let all: Vec<spell::SpellMech> =
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("{path}: {e}"));
+    all.into_iter()
+        .find(|m| m.edition == edition)
+        .unwrap_or_else(|| panic!("{name} has no {edition:?} definition"))
+}
+
+/// A fixture compiled for a caster with this DC and attack bonus (modifier +3, cantrip tier 1).
+pub fn spec_of(name: &str, edition: Edition, dc: u32, attack: Option<i32>) -> spell::CastSpec {
+    let m = mech(name, edition);
+    spell::CastSpec {
+        v: 1,
+        origin: spell::MechOrigin::Srd {
+            key: m.key.clone(),
+            rev: m.rev,
+        },
+        mech: m,
+        dc: Some(dc),
+        attack,
+        modifier: 3,
+        cantrip_tier: 1,
+        baked_in: false,
+    }
 }

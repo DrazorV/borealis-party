@@ -1,0 +1,34 @@
+[
+  {
+    "v": 1, "key": "ID_PHB_SPELL_COUNTERSPELL", "edition": "2014", "name": "Counterspell", "rev": 1,
+    "level": 3, "cast": "reaction",
+    "targeting": { "kind": "creatures", "max": "1", "filter": { "kind": "enemy" } },
+    "delivery": { "kind": "auto" },
+    "on_land": [{
+      "kind": "ruling",
+      "question": "Is the spell countered? Spells of the slot's level or lower are; higher ones need the check.",
+      "buttons": [
+        { "label": "Countered", "action": { "kind": "cancel_target_cast", "refund": false } },
+        { "label": "Not countered", "action": { "kind": "log" } },
+        { "label": "Roll check DC 10 + level", "action": { "kind": "roll_check" } }
+      ]
+    }],
+    "tier": "ruling"
+  },
+  {
+    "v": 1, "key": "ID_2024_SPELL_COUNTERSPELL", "edition": "2024", "name": "Counterspell", "rev": 1,
+    "level": 3, "cast": "reaction",
+    "targeting": { "kind": "creatures", "max": "1", "filter": { "kind": "enemy" } },
+    "delivery": { "kind": "auto" },
+    "on_land": [{
+      "kind": "ruling",
+      "question": "The caster makes a CON save against your DC. Countered on a failure; its slot isn't spent.",
+      "buttons": [
+        { "label": "Ask for the CON save", "action": { "kind": "ask_save", "ability": "con" } },
+        { "label": "Countered", "action": { "kind": "cancel_target_cast", "refund": true } },
+        { "label": "Not countered", "action": { "kind": "log" } }
+      ]
+    }],
+    "tier": "ruling"
+  }
+]
