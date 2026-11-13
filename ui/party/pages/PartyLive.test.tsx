@@ -188,13 +188,13 @@ describe("the DM's live roster", () => {
 });
 
 describe("a player's view of the party", () => {
-  it("other members show a name, class, level and health band only; their own card is whole", async () => {
+  it("other members show a name, class and level only, with no health band outside combat; their own card is whole", async () => {
     signIn("pl2");
     page();
     const card = await screen.findByRole("region", { name: "Tuesday Party" });
     const aria = within(card).getByRole("listitem", { name: "Aria" });
     expect(within(aria).getByText("Fighter 3 · 2024 rules · alice")).toBeTruthy();
-    expect(within(aria).getByText("Unhurt")).toBeTruthy();
+    expect(within(aria).queryByText(/Unhurt|Bloodied|Down/)).toBeNull();
     expect(within(aria).queryByRole("list", { name: "Numbers" })).toBeNull();
     expect(within(aria).queryByText(/Concentrating/)).toBeNull();
     expect(within(aria).queryByRole("link")).toBeNull();
@@ -204,11 +204,20 @@ describe("a player's view of the party", () => {
     expect(within(card).queryByRole("link", { name: /View/ })).toBeNull();
     expect(within(card).queryByText("Offline")).toBeNull();
 
-    // A scratch moves nothing a player sees; bloodied does, through their own event.
+    // Damage moves nothing a player sees outside combat.
     const before = gets();
-    act(() => hurt(20, false));
+    act(() => hurt(9, false));
     await act(async () => { await Promise.resolve(); });
     expect(gets()).toBe(before);
+    expect(within(within(card).getByRole("listitem", { name: "Aria" })).queryByText(/Bloodied/)).toBeNull();
+  });
+
+  it("in a combat (0.4.x) the server sends the band, and the card shows it", async () => {
+    server.inCombat = true;
+    signIn("pl2");
+    page();
+    const card = await screen.findByRole("region", { name: "Tuesday Party" });
+    expect(within(within(card).getByRole("listitem", { name: "Aria" })).getByText("Unhurt")).toBeTruthy();
     ariaBloodied();
     await waitFor(() => expect(within(within(card).getByRole("listitem", { name: "Aria" })).getByText("Bloodied")).toBeTruthy());
   });

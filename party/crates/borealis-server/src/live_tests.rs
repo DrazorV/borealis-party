@@ -291,18 +291,22 @@ fn assert_d6(member: &Value) {
         .keys()
         .map(String::as_str)
         .collect();
-    for hidden in ["stats", "ownerId", "online", "readAt"] {
+    // No combat before 0.4.x: no health band either (D6, the user's choice: during combat only).
+    for hidden in ["stats", "ownerId", "online", "readAt", "band"] {
         assert!(
             !keys.contains(&hidden),
             "{hidden} shown to another member: {member}"
         );
     }
-    for shown in ["name", "level", "classes", "band", "state"] {
+    for shown in ["name", "level", "classes", "state"] {
         assert!(keys.contains(&shown), "{shown} missing: {member}");
     }
     let text = member.to_string();
     assert!(
-        !text.contains("armorClass") && !text.contains("hpMax"),
+        !text.contains("armorClass")
+            && !text.contains("hpMax")
+            && !text.contains("unhurt")
+            && !text.contains("bloodied"),
         "{text}"
     );
 }
@@ -360,7 +364,6 @@ async fn live_flow(state: AppState) {
     // Another member sees the D6 fields only, in the roster and in the party's detail.
     let (seen, bob_seq) = member(&bob, &party, &a).await;
     assert_d6(&seen);
-    assert_eq!(seen["band"], "unhurt");
     let (_, detail) = bob.get(&format!("/api/parties/{party}")).await;
     let in_detail = detail["members"]
         .as_array()
@@ -391,7 +394,7 @@ async fn live_flow(state: AppState) {
     // Still unhurt: the players' view didn't change, so their sequence and their streams stay still.
     assert!(bob_events.parties(QUIET).await.is_empty());
     let (seen, seq) = member(&bob, &party, &a).await;
-    assert_eq!(seen["band"], "unhurt");
+    assert_d6(&seen);
     assert_eq!(
         seq, bob_seq,
         "the players' sequence moved for a hidden change"
@@ -404,18 +407,16 @@ async fn live_flow(state: AppState) {
         assert!(events.parties(Duration::ZERO).await.is_empty(), "{name}");
     }
 
-    // Bloodied: now the players hear, with their own sequence.
+    // Bloodied, outside combat: the DM hears; the players see no band, so they hear nothing and their sequence stays.
     let to_bloodied = u32::try_from(max - 1 - max / 2).unwrap();
     damage(&alice, &a, to_bloodied).await;
     assert!(dm_events.party(ARRIVES).await.is_some());
-    let e = bob_events
-        .party(ARRIVES)
-        .await
-        .expect("bob sees the band change");
-    assert_eq!(e.payload["kind"], "card");
-    assert_eq!(e.payload["pseq"].as_u64().unwrap(), bob_seq + 1);
-    let (seen, _) = member(&bob, &party, &a).await;
-    assert_eq!(seen["band"], "bloodied");
+    assert!(
+        bob_events.parties(QUIET).await.is_empty(),
+        "a band change reached a player outside combat"
+    );
+    let (seen, seq) = member(&bob, &party, &a).await;
+    assert_eq!(seq, bob_seq);
     assert_d6(&seen);
     for (name, events) in [
         ("carol", &mut carol_events),
@@ -514,12 +515,9 @@ async fn live_flow(state: AppState) {
     assert_eq!(e.payload["kind"], "roster");
     dm_events.parties(QUIET).await;
     damage(&alice, &a, 100).await;
-    let e = alice_events
-        .party(ARRIVES)
-        .await
-        .expect("alice sees herself down");
-    assert_eq!(e.payload["kind"], "card");
+    // Down: only the DM hears (the owner made the change, and no player sees a band outside combat).
     assert!(dm_events.party(ARRIVES).await.is_some());
+    assert!(alice_events.parties(QUIET).await.is_empty());
     assert!(
         bob_events.parties(QUIET).await.is_empty(),
         "a removed member still hears the party"
@@ -716,7 +714,7 @@ fn stale(state: &AppState, owner: &str, character: &str) {
         }),
         ..crate::hub::Card::default()
     };
-    state.hub.cards.put(owner, character, card);
+    state.hub.cards.put(owner, character, card, false);
 }
 
 /// Content changes (a pack imported or removed, over rpc or the bulk removal route) read the owner's member cards

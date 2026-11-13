@@ -62,7 +62,7 @@ What you see depends on who you are (plan 3.5, decision D6):
 | `ownerId` | yes | yes | no |
 | `online` (the owner has the app open) | yes | no | no |
 | `stats`, `readAt` | yes | yes | no |
-| `band` | no | no | yes |
+| `band` (during a combat only; absent otherwise, and always in 0.2.x) | no | no | yes |
 
 ```json
 {
@@ -84,7 +84,7 @@ What you see depends on who you are (plan 3.5, decision D6):
     "exhaustion": 0, "concentration": "Bless", "inspiration": false
   },
   "readAt": 1762970000,          // when `stats` were read, seconds
-  "band": "bloodied",            // another member only: "unhurt" | "bloodied" (at or under half) | "down" | null
+  "band": "bloodied",            // another member, in a combat only: "unhurt" | "bloodied" (at or under half) | "down" | null
   "build": null,
   "joinedAt": 1762970000
 }
@@ -230,7 +230,7 @@ Party events come on the account's existing event stream (no second connection),
 | `party://resync` | `{}` | Events may have been missed: refetch everything shown |
 
 - **Two audiences per party,** each with its own `pseq`: the DM's, and the players'. The players' only moves when what
-  players see changes (a member joins or leaves, a rename, a name, class, level or health band), never for an invite,
+  players see changes (a member joins or leaves, a rename, a name, class or level; a health band only in a combat), never for an invite,
   an offer or damage that keeps the same band. `GET /api/parties/{id}` and `…/roster` answer with your audience's
   `pseq`; ignore an event whose `pseq` isn't newer.
 - **Who hears** is read from the database when the event is sent: a removed member or a deleted party's players hear
