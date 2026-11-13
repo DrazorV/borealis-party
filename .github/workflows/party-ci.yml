@@ -116,10 +116,18 @@ jobs:
           echo "::group::the rest"
           cargo test -p borealis-server --locked -- --test-threads=2 --skip postgres $skip
           echo "::endgroup::"
+      # The automatic backup (backup.rs) runs pg_dump, which refuses a newer server: the runner's client is older than
+      # the postgres:18 service, so PostgreSQL's own client 18 is installed, as the image has it (party/docker).
+      - name: PostgreSQL client 18
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y --no-install-recommends postgresql-client-18
+          /usr/lib/postgresql/18/bin/pg_dump --version
       - name: Tests (server, PostgreSQL)
         working-directory: party
         env:
           BOREALIS_TEST_POSTGRES_URL: postgres://postgres:party-ci@localhost:5432/postgres
+          BOREALIS_TEST_PG_BIN: /usr/lib/postgresql/18/bin
         run: |
           tests=$(cargo test -p borealis-server --locked -- --list 2>/dev/null | grep -E 'postgres.*: test$' | sed 's/: test$//')
           test -n "$tests"
