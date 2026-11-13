@@ -3651,6 +3651,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "party-sim"
+version = "0.3.0"
+dependencies = [
+ "borealis-content",
+ "party-combat",
+ "party-encounter",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "password-hash"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

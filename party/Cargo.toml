@@ -9,6 +9,7 @@ members = [
   "crates/party-encounter",
   "crates/party-dice",
   "crates/party-combat",
+  "crates/party-sim",
   "crates/tauri",
   "crates/tauri-macros",
   "crates/tauri-build",
