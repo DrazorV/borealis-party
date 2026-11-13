@@ -1,5 +1,7 @@
 import { createElement, useState } from "react";
 import { Check } from "../../../src/components/Fields";
+import { errorMessage } from "../../../src/state/useAsync";
+import { contentSync } from "../../content/contentSync";
 import { ask } from "../ask";
 import { packsFrom, packSources, removePacks } from "../packRemoval";
 import { override } from "./registry";
@@ -9,6 +11,10 @@ import { override } from "./registry";
  * so. Upstream removes only the address and keeps the packs, which then stay with nothing to update them. When packs
  * came from the source, an app dialog asks first, with "Also remove the N packs that came from it" ticked; they go in
  * one server request (../packRemoval.ts). Characters using them show missing content, as after any removal.
+ *
+ * After the question the source and its packs leave the lists at once and the call answers; the server goes on in
+ * the background, with a "Removing…" activity row (../../content/contentSync.ts). A refusal brings them back, with the
+ * server's message in that row.
  */
 
 export interface SourceRemovalDeps {
@@ -50,6 +56,8 @@ export async function askRemoval(url: string, deps: SourceRemovalDeps = sourceRe
   return choice.packs ? ids : [];
 }
 
+const hostOf = (url: string) => { try { return new URL(url).host || url; } catch { return url; } };
+
 override("sourceRemoval", (methods) => {
   for (const [name, list] of [["remove5etoolsUrl", "list5etoolsUrls"], ["removeIndex", "listIndexes"]] as const) {
     const plain = methods[name];
@@ -58,9 +66,21 @@ override("sourceRemoval", (methods) => {
       const plan = await askRemoval(url);
       // Cancelled: nothing changes; the caller gets the list as it is.
       if (plan === "cancel") return methods[list]();
-      const out = await plain(args);
-      if (plan.length > 0) await sourceRemovalDeps.removePacks(plan);
-      return out;
+      const index = name === "removeIndex";
+      const what = `${index ? "the index file" : "the 5etools address"} from ${hostOf(url)}`;
+      const packs = plan.length > 0 ? ` and ${plan.length === 1 ? "its pack" : `its ${plan.length} packs`}` : "";
+      const op = contentSync.begin(index ? "indexes" : "fivetools", `Removing ${what}${packs}…`,
+        index ? { indexes: [url], packs: plan } : { fiveTools: [url], packs: plan });
+      void (async () => {
+        try {
+          await plain(args);
+          if (plan.length > 0) await sourceRemovalDeps.removePacks(plan);
+          contentSync.done(op, `Removed ${what}${packs}.`);
+        } catch (e) {
+          contentSync.fail(op, `${what[0]!.toUpperCase()}${what.slice(1)}${packs} ${plan.length > 0 ? "weren't" : "wasn't"} removed: ${errorMessage(e)}`);
+        }
+      })();
+      return methods[list]();
     };
   }
 });

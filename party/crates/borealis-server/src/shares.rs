@@ -1111,6 +1111,12 @@ async fn links(
             });
         }
     }
+    if indexes
+        .iter()
+        .any(|i| i["added"] == json!(true) && i.get("already").is_none())
+    {
+        crate::content_events::changed(&state.hub, &user.id, "indexes", "add_share_links");
+    }
     Ok(Json(json!({ "indexes": indexes, "fivetools": fivetools })))
 }
 

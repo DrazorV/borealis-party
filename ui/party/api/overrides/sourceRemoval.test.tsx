@@ -60,3 +60,49 @@ describe("removing a source", () => {
     expect(d.asked).toEqual([]);
   });
 });
+
+describe("the removal itself", () => {
+  const URL = "https://content.example/srd.index";
+  async function setUp(refuse: string | null) {
+    const { OVERRIDES } = await import("./registry");
+    const { sourceRemovalDeps } = await import("./sourceRemoval");
+    const { contentSync, resetContentSync } = await import("../../content/contentSync");
+    resetContentSync();
+    let answer = () => {};
+    const gate = new Promise<void>((r) => { answer = r; });
+    const removed: string[][] = [];
+    Object.assign(sourceRemovalDeps, deps("remove"), {
+      removePacks: async (ids: string[]) => { removed.push(ids); return { removed: ids.length, skipped: [], packs: [] }; },
+    });
+    const methods = {
+      listIndexes: async () => contentSync.indexes([{ url: URL }, { url: "https://other.example/o.index" }]),
+      removeIndex: async () => { await gate; if (refuse) throw { code: "internal", message: refuse }; return []; },
+    } as never as Record<string, (a?: unknown) => Promise<{ url: string }[]>>;
+    OVERRIDES.find((o) => o.name === "sourceRemoval")!.apply(methods as never, {} as never);
+    return { methods, answer, removed, contentSync };
+  }
+
+  it("takes the index and its packs off the lists at once, and removes the packs after the index", async () => {
+    const { methods, answer, removed, contentSync } = await setUp(null);
+    const list = await methods.removeIndex!({ url: URL });
+    expect(list.map((i) => i.url)).toEqual(["https://other.example/o.index"]);
+    expect(contentSync.packs([{ id: "idx" }, { id: "srd-a" }]).map((p) => p.id)).toEqual(["srd-a"]);
+    expect(contentSync.get().activity).toMatchObject([{ area: "indexes", state: "working", label: "Removing the index file from content.example and its pack…" }]);
+    expect(removed).toEqual([]);
+    answer();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(removed).toEqual([["idx"]]);
+    expect(contentSync.get().activity).toMatchObject([{ state: "done", message: "Removed the index file from content.example and its pack." }]);
+  });
+
+  it("brings them back with the server's message when it refuses", async () => {
+    const { methods, answer, removed, contentSync } = await setUp("The server is busy.");
+    await methods.removeIndex!({ url: URL });
+    answer();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(removed).toEqual([]);
+    expect((await methods.listIndexes!()).map((i) => i.url)).toContain(URL);
+    expect(contentSync.packs([{ id: "idx" }])).toHaveLength(1);
+    expect(contentSync.get().activity).toMatchObject([{ state: "failed", message: "The index file from content.example and its pack weren't removed: The server is busy." }]);
+  });
+});

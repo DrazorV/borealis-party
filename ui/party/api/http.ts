@@ -20,6 +20,7 @@ import "./overrides/encounters";
 import "./overrides/personality";
 import "./overrides/sourceRemoval";
 import "./overrides/combat";
+import "./overrides/contentRefresh"; // last: wraps the jobs and the source-removal question
 
 function fail(code: string, message: string): ApiError {
   return { code, message } as ApiError;

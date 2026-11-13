@@ -136,8 +136,10 @@ async fn remove_packs(
             Ok((removed, skipped, packs))
         })
         .await?;
-    // Content reloaded: the account's party cards may show other classes and numbers now.
+    // Content reloaded: every open Additional Content page of the account fetches its lists again, and the account's
+    // party cards may show other classes and numbers now.
     if removed > 0 {
+        crate::content_events::changed(&state.hub, &user.id, "packs", "remove_packs");
         crate::parties::after_command(
             &state,
             &user.id,

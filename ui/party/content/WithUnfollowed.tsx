@@ -8,6 +8,9 @@ import { Section } from "../../src/pages/content/Section";
 import { useApi } from "../../src/state/ApiContext";
 import { errorMessage } from "../../src/state/useAsync";
 import { type PackSource, packSources } from "../api/packRemoval";
+import { ContentActivity } from "./ContentActivity";
+import { ContentScope, useContentVersion } from "./ContentScope";
+import { contentSync } from "./contentSync";
 import "./content.css";
 
 /**
@@ -16,6 +19,8 @@ import "./content.css";
  * pack whose index could not be added, or when the index was removed and its packs kept. Upstream's ContentPage
  * imports this file in place of its IndexesTab (ui/party/vite.config.ts). The server names an index that has not
  * been downloaded yet after its pack (party/crates/borealis-server/src/index_subs.rs).
+ * Both lists follow the account's content changes at once (./ContentScope.tsx), with what is on its way to the server
+ * above them (./ContentActivity.tsx).
  */
 
 export interface Unfollowed { url: string; packs: string[] }
@@ -39,21 +44,21 @@ export function unfollowed(sources: PackSource[], indexes: ContentIndex[], packs
 
 const hostOf = (url: string): string => { try { return new URL(url).host; } catch { return url; } };
 
+const INDEXES = ["indexes"] as const;
+
 export function IndexesTab() {
   const api = useApi();
   const confirm = useConfirm();
   const toast = useToast();
   const [rows, setRows] = useState<Unfollowed[]>([]);
   const [busy, setBusy] = useState(false);
-  /** Upstream's list loads once; it is drawn again after an index is added here. */
-  const [round, setRound] = useState(0);
+  const version = useContentVersion();
   const load = useCallback(() => {
     void Promise.all([packSources(), api.listIndexes(), api.listPacks()])
       .then(([sources, indexes, packs]) => setRows(unfollowed(sources, indexes, packs)))
       .catch(() => setRows([]));
   }, [api]);
-  useEffect(load, [load]);
-  useEffect(() => api.subscribe("content:reloaded", load), [api, load]);
+  useEffect(load, [load, version]);
 
   const add = async (row: Unfollowed) => {
     const r = await confirm({ title: "Add content source", body: sourceConsentText(hostOf(row.url)), confirmLabel: "Add source" });
@@ -62,8 +67,8 @@ export function IndexesTab() {
     try {
       await api.addIndex({ url: row.url });
       toast.push(`Following ${row.packs.join(", ")}'s index. Press Update to check it for newer files.`, "info");
-      setRound((n) => n + 1);
-      load();
+      // Both lists show it (the app's addIndex does this too; several close together are one fetch).
+      contentSync.changed(true);
     } catch (e) {
       toast.push(errorMessage(e), "error");
     } finally { setBusy(false); }
@@ -71,6 +76,7 @@ export function IndexesTab() {
 
   return (
     <>
+      <ContentActivity areas={INDEXES} />
       {rows.length > 0 && (
         <Section title="Packs without their index">
           <p>These packs came from index files you don't follow, so they get no updates. Add the index to keep them up to date.</p>
@@ -84,7 +90,7 @@ export function IndexesTab() {
           </ul>
         </Section>
       )}
-      <UpstreamIndexesTab key={round} />
+      <ContentScope hold><UpstreamIndexesTab /></ContentScope>
     </>
   );
 }

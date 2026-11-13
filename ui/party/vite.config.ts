@@ -27,6 +27,8 @@ const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "src/pages/content/ContentPage.tsx": {
     "./PacksTab": local("./content/WithImport.tsx"),
     "./IndexesTab": local("./content/WithUnfollowed.tsx"),
+    // The 5etools addresses follow the account's content changes at once (content/ContentScope.tsx).
+    "./FiveToolsTab": local("./content/WithFiveTools.tsx"),
   },
   // Installed packs by origin, with Remove all on each group (content/PackGroups.tsx).
   "src/pages/content/PacksTab.tsx": { "./PackGroups": local("./content/PackGroups.tsx") },

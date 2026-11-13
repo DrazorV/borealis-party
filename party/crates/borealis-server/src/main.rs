@@ -23,6 +23,7 @@ mod backend;
 mod bestiary;
 mod combat;
 mod config;
+mod content_events;
 mod db;
 mod encounters;
 mod error;

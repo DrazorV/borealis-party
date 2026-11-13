@@ -5,6 +5,17 @@ html.phone .v4-pack-groups .party-remove-all { min-height: var(--ph-hit); min-wi
 .party-unfollowed { padding: var(--sp-3); }
 .party-unfollowed .muted { overflow-wrap: anywhere; }
 html.phone .party-unfollowed button { min-height: var(--ph-hit); }
+/* What is on its way to the server, above the list it changes (ContentActivity.tsx). */
+.party-content-activity { list-style: none; margin: 0 0 var(--sp-3); padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.party-activity { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-left: 3px solid var(--accent, #4a7ab8); background: var(--surface-2, rgba(127, 127, 127, 0.08)); }
+.party-activity-text { flex: 1; min-width: 10rem; overflow-wrap: anywhere; }
+.party-activity-working .party-activity-text::before { content: ""; display: inline-block; width: 0.6em; height: 0.6em; margin-right: 0.5em; border-radius: 50%; background: currentColor; opacity: 0.6; animation: party-activity-pulse 1s ease-in-out infinite alternate; }
+.party-activity-done { border-left-color: #4f9a5b; }
+.party-activity-failed { border-left-color: #cf6e39; }
+.party-activity-progress { flex-basis: 100%; display: flex; flex-direction: column; gap: var(--sp-1, 4px); }
+html.phone .party-activity button { min-height: var(--ph-hit); }
+@keyframes party-activity-pulse { from { opacity: 0.25; } to { opacity: 0.8; } }
+@media (prefers-reduced-motion: reduce) { .party-activity-working .party-activity-text::before { animation: none; } }
 /* The Remove source dialog (api/overrides/sourceRemoval.ts). */
 .party-remove-source p { margin: 0 0 var(--sp-2); overflow-wrap: anywhere; }
 /*

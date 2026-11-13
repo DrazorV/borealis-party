@@ -5,7 +5,8 @@ import { defineConfig, devices } from "@playwright/test";
  * on in a browser:
  *  - android-portrait / android-landscape: Chromium with an Android Chrome user agent at the S26 Ultra's CSS size;
  *  - iphone: WebKit as iOS Safari at 390x844;
- *  - desktop: Chromium at 1280x800 without the phone layer, for unify-imports.spec.ts and combat-tracker.spec.ts.
+ *  - desktop: Chromium at 1280x800 without the phone layer, for unify-imports.spec.ts, combat-tracker.spec.ts and
+ *    content-refresh.spec.ts.
  * The server is a throwaway local one (server/start.ts).
  */
 const ANDROID_UA =
@@ -42,6 +43,6 @@ export default defineConfig({
     { name: "android-landscape", use: { ...android, viewport: { width: 832, height: 384 } } },
     { name: "iphone", use: { ...devices["iPhone 14"], viewport: { width: 390, height: 844 } } },
     // A desktop browser window, for the specs that cover phones and desktops alike.
-    { name: "desktop", testMatch: /(unify-imports|combat-tracker)\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } } },
+    { name: "desktop", testMatch: /(unify-imports|combat-tracker|content-refresh)\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } } },
   ],
 });
