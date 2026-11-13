@@ -153,6 +153,32 @@ const TABLES: &[(&str, &[(&str, Column)])] = &[
             ("joined_at", Column::Int),
         ],
     ),
+    (
+        "monster_meta",
+        &[
+            ("owner_id", Column::Text),
+            ("element_id", Column::Text),
+            ("pack_id", Column::Text),
+            ("pack_rev", Column::Text),
+            ("environment_json", Column::Text),
+            ("page", Column::OptInt),
+            ("extras_json", Column::Text),
+            ("captured_at", Column::Int),
+        ],
+    ),
+    (
+        "bestiary_imports",
+        &[
+            ("owner_id", Column::Text),
+            ("pack_id", Column::Text),
+            ("pack_rev", Column::Text),
+            ("source", Column::Text),
+            ("in_data", Column::Int),
+            ("skipped_json", Column::Text),
+            ("partial_json", Column::Text),
+            ("captured_at", Column::Int),
+        ],
+    ),
 ];
 
 /// Tests: every table the copy moves, with its columns as `text`, `int` (never NULL) or `optint`.

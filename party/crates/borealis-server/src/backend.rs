@@ -35,7 +35,9 @@ use tauri::{AppHandle, Invocation, Manager};
 
 use borealis_lib::commands_content::{SearchEvents, TauriSink};
 use borealis_lib::commands_sync::TauriSyncEvents;
-use borealis_lib::content_dto::{ContentIndex, UpdateIndexesResult};
+use borealis_lib::content_dto::{
+    ContentIndex, FiveToolsImportReport, FiveToolsImportRequest, UpdateIndexesResult,
+};
 use borealis_lib::content_fivetools_url::FiveToolsUrlUpdate;
 use borealis_lib::content_index::HttpsFetcher;
 use borealis_lib::device_sync::inbox::is_bundle_name;
@@ -218,11 +220,41 @@ async fn stage_5etools_url(app: AppHandle, url: String) -> ApiResult<PickedPathD
     .await
 }
 
-/// Upstream's, with every file checked before it is fetched.
+/// Upstream's, with every file checked before it is fetched. When the address changed and its books were imported
+/// again, the creature details the import drops are read from the new download ([`crate::bestiary::capture`]).
 #[tauri::command]
 async fn update_5etools_url(app: AppHandle, url: String) -> ApiResult<FiveToolsUrlUpdate> {
     blocking(app, move |state, sink| {
-        state.update_5etools_url(&crate::net_guard::Guarded::new(HttpsFetcher), &url, sink)
+        let update =
+            state.update_5etools_url(&crate::net_guard::Guarded::new(HttpsFetcher), &url, sink)?;
+        if let (Some(report), Some(dir)) = (
+            &update.report,
+            crate::bestiary::staged_download(&state.paths.data),
+        ) {
+            crate::bestiary::capture_logged(state, &dir, report);
+        }
+        Ok(update)
+    })
+    .await
+}
+
+/// Upstream's; then the creature details the import drops are read from the same 5etools folder
+/// ([`crate::bestiary::capture`]). A failed capture is logged and never fails the import.
+#[tauri::command]
+async fn import_5etools(
+    app: AppHandle,
+    request: FiveToolsImportRequest,
+) -> ApiResult<FiveToolsImportReport> {
+    blocking(app, move |state, sink| {
+        let folder = state
+            .picked
+            .resolve(&request.folder, PickPurpose::FivetoolsFolder)
+            .ok();
+        let report = state.import_5etools(&request, sink)?;
+        if let Some(dir) = folder {
+            crate::bestiary::capture_logged(state, &dir, &report);
+        }
+        Ok(report)
     })
     .await
 }
@@ -704,7 +736,7 @@ fn offered(name: &str, invocation: &Invocation) -> Option<Result<Value, Value>> 
         stage_5etools_url,
         commands_content::remove_5etools_url,
         update_5etools_url,
-        commands_content::import_5etools,
+        import_5etools,
         // Bundle files, made from and previewed and applied in the account's own folder.
         bundle_export,
         stage_bundle,

@@ -876,6 +876,7 @@ dependencies = [
  "borealis-bundle",
  "borealis-character",
  "borealis-content",
+ "borealis-import-5etools",
  "clap",
  "http-body-util",
  "lettre",
