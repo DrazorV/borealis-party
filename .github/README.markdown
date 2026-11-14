@@ -49,13 +49,33 @@ it from any device:
 - **Offline play.** The apps keep a copy of your characters, so you can play and edit them without the server. They
   sync when you are back online.
 - **One import page.** Aurora `.dnd5e` characters, Aurora XML content and `.index` files, `.borealis` bundles, and
-  5etools-format data you supply, all in one place.
+  5etools-format data you supply, all in one place. In the apps, **Open with** (or Share to) Borealis Connect takes a file
+  such as a `.borealis` bundle straight to the import, after asking.
 - **Share codes.** Send characters and content packs to another player with a one-time code, Android included.
+- **Homebrew.** Write your own spells, feats, items, races, backgrounds, class features, archetypes and monsters in the
+  app, checked by the same engine as your characters. Build a pack into a standard `.index` plus its element files for
+  your own repository, so others can subscribe to it from Borealis Connect, Borealis or Aurora.
 - **Parties.** Switch on "Dungeon Master tools" on your Account page to run parties: invite players by username or with
-  a join code and add characters. The **live party roster** updates as characters are played: the Dungeon Master sees
-  hit points, AC, concentration and who is online, and can open any member's sheet read-only.
+  a join code, add characters, and set the party's edition (2014 or 2024 rules). The **live party roster** updates as
+  characters are played: health, AC, concentration and who is online.
+- **Bestiary and encounters.** Every creature in your installed content, searchable. The Dungeon Master builds
+  encounters from it, with per-encounter changes, pets and summons, and decides which creatures players see.
+- **Combat tracker.** Initiative, turns, hit points, conditions, concentration and legendary actions, run by the server
+  so everyone stays in step. The DM works in the **Combat** tab and the players in their own **Play** tab, and each
+  side sees only what it should: players see a monster's name and whether it is bloodied, and in a fight the DM sees
+  the characters' health bands, not their exact hit points.
+- **Spells as mechanics.** SRD spells carry their saves, attacks, damage and effects, so casting one in combat applies
+  it. Spells from your own 5etools data get a draft of their mechanics that you can check and correct.
+- **Simulations.** Play an encounter out on a copy, never the real fight, as often as you like, and read what happened.
+- **Your own AI, over MCP.** Connect your own ChatGPT, Claude or another MCP client to your account: it can search
+  the bestiary, build and simulate encounters, read characters and write homebrew, with the permissions you approve,
+  and it sees only what you may see. Borealis Connect never calls an AI service itself, and your own plan pays for
+  the AI.
+- **Safe upgrades.** Before each update's database changes the server makes an automatic backup, and `GET /api/health`
+  tells an uptime checker whether the server and its database are well.
 
-**In progress** (not released yet): a bestiary, an encounter builder and a combat tracker.
+**In progress:** 0.3.4 brings quick wins for players, and the 0.4 releases continue with larger features. The
+[releases](https://github.com/fortress-soft/borealis-connect/releases) list what each version brings.
 
 ## Run your own server
 
