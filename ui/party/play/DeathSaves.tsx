@@ -5,15 +5,18 @@ import { useToast } from "../../src/components/Toast";
 import { rollD20 } from "../../src/lib/dice";
 import { usePlayMutate } from "../../src/pages/play/playQueue";
 import { addRoll, currentDie } from "../../src/pages/play/rolls/rollStore";
-import { RollOrType } from "../combat/shared/RollOrType";
+import { OutcomeButtons } from "../combat/shared/OutcomeButtons";
+import { DEATH_SAVE_OUTCOMES } from "../combat/shared/outcomeInputs";
 import type { D20Input } from "../combat/shared/types";
 import "../combat/shared/combat.css";
+import { useDigitalDiceHidden } from "./dicePrefs";
 import "./quick-wins.css";
 
 /**
  * Death saves on the Play sub-tab outside a tracked combat (0.3.5, roadmap P10): at 0 hit points the player rolls at
- * the table and types the d20 (or "Roll for me"). 10 or more is a success, 9 or less a failure, a 1 two failures, a 20
- * brings them back with 1 hit point. Three successes: stable; three failures: dead. Damage at 0 hit points is a
+ * the table and presses the outcome (Success, Failure, Natural 20, Natural 1; no number box, as the combat section's
+ * death saves), or "Roll for me". 10 or more is a success, 9 or less a failure, a 1 two failures, a 20 brings them
+ * back with 1 hit point. Three successes: stable; three failures: dead. Damage at 0 hit points is a
  * failure (two on a critical hit). Inside a live combat the combat section's own death saves are the ones (the server
  * keeps them), so this card steps aside (./PlayTop.tsx).
  *
@@ -88,6 +91,7 @@ function Pips({ label, filled, tone }: { label: string; filled: number; tone: "s
 export function DeathSavesCard({ s }: { s: CharacterSnapshot }) {
   const saves = useDeathSaves(s.id);
   const run = usePlayMutate();
+  const hideApp = useDigitalDiceHidden();
   const toast = useToast();
   const hp = s.play.hitPoints;
   const up = hp.current > 0;
@@ -101,7 +105,7 @@ export function DeathSavesCard({ s }: { s: CharacterSnapshot }) {
     let total: number;
     if (input.kind === "typed") {
       total = input.total;
-      addRoll({ characterId: s.id, label: "Death save", total, breakdown: "rolled at the table" });
+      addRoll({ characterId: s.id, label: "Death save", total, breakdown: `${outcomeName(total)} at the table` });
     } else {
       const r = rollD20(0, "normal", currentDie());
       total = r.total;
@@ -127,7 +131,8 @@ export function DeathSavesCard({ s }: { s: CharacterSnapshot }) {
           <Pips label="Successes" filled={saves.successes} tone="success" />
           <Pips label="Failures" filled={saves.failures} tone="danger" />
         </div>
-        {!stable && !dead && <RollOrType label="Death save" onRoll={(i) => void roll(i)} />}
+        {!stable && !dead && <OutcomeButtons label="Death save" outcomes={DEATH_SAVE_OUTCOMES} onPick={(i) => void roll(i)}
+          onRoll={hideApp ? undefined : () => void roll({ kind: "app", modifier: 0, mode: "normal" })} />}
         {stable && <p className="v5-note">Stable: no more death saves. You regain 1 hit point after 1d4 hours, or when healed.</p>}
         {!dead && (
           <div className="bp-death-hurt" role="group" aria-label="Damage at 0 hit points">
@@ -139,4 +144,11 @@ export function DeathSavesCard({ s }: { s: CharacterSnapshot }) {
       </div>
     </section>
   );
+}
+
+/** The outcome a typed death save stands for, for the roll history. */
+function outcomeName(total: number): string {
+  if (total >= 20) return "Natural 20";
+  if (total <= 1) return "Natural 1";
+  return total >= 10 ? "Success" : "Failure";
 }

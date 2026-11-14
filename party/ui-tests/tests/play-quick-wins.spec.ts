@@ -103,7 +103,7 @@ test.describe("Play tab quick wins (0.3.5)", () => {
     await shot(page, testInfo, "roll-history");
     await page.keyboard.press("Escape");
 
-    // 2. Concentration: Bless, then 6 damage asks for a DC 10 save; a typed 7 ends it.
+    // 2. Concentration: Bless, then 6 damage asks for a DC 10 save; Failed ends it.
     const bless = hero.play.concentrationSpells.find((x) => x.name === "Bless") ?? hero.play.concentrationSpells[0]!;
     await api(request, session.token, "set_concentration", { characterId: hero.id, spellId: bless.id });
     await page.reload();
@@ -115,28 +115,26 @@ test.describe("Play tab quick wins (0.3.5)", () => {
     await expect(save).toContainText("(6 damage)");
     expect((await measureOverflow(page)).page).toBeLessThanOrEqual(0);
     await shot(page, testInfo, "concentration-save");
-    await save.getByRole("textbox").fill("7");
-    await tap(save.getByRole("button", { name: "Send" }));
+    await expect(save.getByRole("textbox")).toHaveCount(0);
+    await tap(save.getByRole("button", { name: "Failed" }));
     await expect(page.getByRole("region", { name: "Concentration" })).toHaveCount(0);
     await expect.poll(async () => (await api<Snapshot>(request, session.token, "get_snapshot", { characterId: hero.id })).play.concentration).toBeNull();
 
-    // 3. Death saves outside combat: down to 0, two successes and a typed 1 (two failures), then a third success.
+    // 3. Death saves outside combat: down to 0, a success and a natural 1 (two failures), then two more successes.
     const left = (await api<Snapshot>(request, session.token, "get_snapshot", { characterId: hero.id })).play.hitPoints.current;
     await page.getByRole("spinbutton", { name: "Hit point amount" }).fill(String(left));
     await tap(page.getByRole("button", { name: "Take damage" }));
     const card = page.getByRole("region", { name: "Death saves" });
     await expect(card).toBeVisible();
     await expect(card).toContainText("Dying");
-    for (const roll of ["14", "1"]) {
-      await card.getByRole("textbox", { name: "Death save: my table roll" }).fill(roll);
-      await tap(card.getByRole("button", { name: "Send" }));
+    for (const outcome of ["Success", "Natural 1"]) {
+      await tap(card.getByRole("button", { name: outcome }));
     }
     await expect(card.getByRole("img", { name: "Failures: 2 of 3" })).toBeVisible();
     expect((await measureOverflow(page)).page).toBeLessThanOrEqual(0);
     await shot(page, testInfo, "death-saves");
-    for (const roll of ["11", "18"]) {
-      await card.getByRole("textbox", { name: "Death save: my table roll" }).fill(roll);
-      await tap(card.getByRole("button", { name: "Send" }));
+    for (const outcome of ["Success", "Success"]) {
+      await tap(card.getByRole("button", { name: outcome }));
     }
     await expect(card).toContainText("Stable");
     await shot(page, testInfo, "death-stable");
