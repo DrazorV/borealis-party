@@ -211,6 +211,20 @@ export interface EffectSpec {
   spell?: SpellTag;
   /** Its target is dismissed when it ends (a creature bound to the caster's concentration). */
   dismiss_on_end?: boolean;
+  /** It ends when its target takes damage. */
+  ends_on_damage?: boolean;
+}
+
+/** `derive::effective_ac` (0.3.2 breakdown): "15 = Mage Armor 13 + DEX 2". */
+export interface AcBreakdown {
+  base: number | null;
+  effects: number;
+  cover: number;
+  total: number | null;
+  base_effect?: { label: string; value: number };
+  min?: number;
+  parts?: { label: string; value: number }[];
+  text: string;
 }
 
 export interface Effect extends EffectSpec {

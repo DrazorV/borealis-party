@@ -736,7 +736,7 @@ pub enum SummonInitiative {
 }
 
 /// What a summon or conjure spell offers. In 0.3.2 nothing spawns: the cast shows this as a toast, with a button
-/// that opens Add creature pre-filtered and "Controlled by <caster>" preset, optionally bound to the caster's
+/// that opens Add creature pre-filtered and "Controlled by" set to the caster, optionally bound to the caster's
 /// concentration ([`crate::EffectSpec::dismiss_on_end`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1180,7 +1180,7 @@ pub enum SpellFrequency {
     PerDay,
 }
 
-/// The spell an effect comes from, for [End], [Dismiss spell], Dispel and the zone button.
+/// The spell an effect comes from, for the End and Dismiss spell buttons, Dispel and the zone button.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpellTag {
     /// The spell element id.

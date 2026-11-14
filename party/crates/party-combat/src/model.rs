@@ -1066,6 +1066,9 @@ pub struct EffectSpec {
     /// Undo brings it back.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub dismiss_on_end: bool,
+    /// It ends when its target takes damage.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ends_on_damage: bool,
 }
 
 impl EffectSpec {
@@ -1087,6 +1090,7 @@ impl EffectSpec {
             follow_up: None,
             spell: None,
             dismiss_on_end: false,
+            ends_on_damage: false,
         }
     }
 }
