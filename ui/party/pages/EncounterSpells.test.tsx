@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { combatDeps, resetCombatDeps } from "../api/overrides/combat";
 import type { Creature, Precast, PrecastFields } from "../api/overrides/encounters";
+import { forgetEnabledSources } from "../api/contentRules";
 import { saveSession } from "../api/session";
 import { mockCombatServer } from "../combat/dm/mockServer";
 import { memoryStorage } from "../test/memoryStorage";
@@ -34,10 +35,49 @@ describe("the Spells section of the override dialog", () => {
     const [first, second] = within(d).getAllByRole("button", { name: /^Fireball/ });
     expect(first!.textContent).toContain("2024");
     expect(first!.textContent).toContain("also in a 5etools copy");
+    expect(first!.textContent).not.toContain("a 5etools copy, a 5etools copy");
     expect(second!.textContent).toContain("2014");
     fireEvent.click(first!);
     const listed = changes.at(-1)!.spells;
     expect(overrideSpells(listed)).toEqual([{ id: "ID_SRD_SPELL_FIREBALL", name: "Fireball", frequency: { kind: "slots", level: 3, slots: 2 } }]);
+  });
+});
+
+describe("the spell picker follows the account's content rules", () => {
+  const books = [
+    { id: "SRD 5.2.1", name: "SRD 5.2.1", playtest: false, thirdParty: false },
+    { id: "SRD 5.1", name: "SRD 5.1", playtest: false, thirdParty: false },
+    { id: "a 5etools copy", name: "a 5etools copy", playtest: false, thirdParty: true },
+  ];
+  const pick = async (ruleset: string, text: string) => {
+    render(<SpellsSection ruleset={ruleset} value={{ spells: [], slots: {}, dc: "", attack: "" }} onChange={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add spell…" }));
+    const d = await screen.findByRole("dialog", { name: "Add a spell" });
+    fireEvent.change(within(d).getByLabelText("Search spells"), { target: { value: text } });
+    return d;
+  };
+  beforeEach(() => forgetEnabledSources());
+
+  it("a book the Sources page restricts is neither offered nor named under also in", async () => {
+    const server = mockCombatServer();
+    server.spells.sources = books;
+    server.spells.settings = { restrictThirdParty: true };
+    Object.assign(combatDeps, server.deps);
+    const d = await pick("dnd2024", "fireball");
+    await waitFor(() => expect(within(d).getAllByRole("button", { name: /^Fireball/ })).toHaveLength(2));
+    for (const b of within(d).getAllByRole("button", { name: /^Fireball/ })) expect(b.textContent).not.toContain("also in");
+  });
+
+  it("the saved default sources leave a book out, and a 2014 creature gets no 2024 spells", async () => {
+    const server = mockCombatServer();
+    server.spells.sources = books;
+    Object.assign(combatDeps, server.deps);
+    localStorage.setItem("borealis.defaultSources", JSON.stringify(["SRD 5.1", "a 5etools copy"]));
+    const d = await pick("dnd2014", "fireball");
+    await waitFor(() => expect(within(d).getAllByRole("button", { name: /^Fireball/ })).toHaveLength(1));
+    expect(within(d).getByRole("button", { name: /^Fireball/ }).textContent).toContain("2014");
+    const sent = server.requests.filter((r) => r === "POST /api/spells/search");
+    expect(sent.length).toBeGreaterThan(0);
   });
 });
 

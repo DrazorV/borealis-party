@@ -57,6 +57,9 @@ Request (every field optional):
   `mountain`, `swamp`, `underdark`, `underwater`, `urban`, …). Only creatures with captured environments can match;
   the bundled SRD packs have none.
 - `sources`: pack ids (as `list_packs` names them) or source names (the element's `source`); either matches.
+- `enabledSources` (0.3.5): the source names the account's new characters start on (the Sources page's saved default
+  with its Restrict playtest / third-party toggles applied, as the app works it out). Creatures of any other source are
+  never listed. Without it, the account's toggles apply (`content_rules.rs`). The facets are not filtered.
 - `ruleset`: `dnd2014` or `dnd2024` (the edition). A creature marked `any` matches both.
 - `legendary`: `true` only creatures with legendary actions, `false` only creatures without; absent for both.
   Companions never have legendary actions.

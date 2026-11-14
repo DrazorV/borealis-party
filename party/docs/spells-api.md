@@ -35,7 +35,8 @@ Mechanics key on the one spell: a definition (or curated SRD row) of any copy ap
 
 | Route | What |
 |---|---|
-| `GET /api/spells?ruleset=&text=&level=&limit=&offset=` | the spells, one per name/edition/level, each with `coverage` |
+| `GET /api/spells?ruleset=&text=&level=&limit=&offset=&forRuleset=` | the spells, one per name/edition/level, each with `coverage` |
+| `POST /api/spells/search` | the same with the query as a body, and `enabledSources` (0.3.5) |
 | `GET /api/spells/{key}` | one spell from any copy's id: the spell, the element (its text), the account's rows, the mechanics combat would use, a suggestion |
 | `POST /api/spells/{key}/choose` | this copy is the one spell (an alias row) |
 | `DELETE /api/spells/{key}/choose` | back to the rule's choice |
@@ -45,6 +46,15 @@ source, packId, packKind }], coverage }`. `chosenBy` is `only`, `dmPick`, `newes
 `coverage` is `defined` or `linked` (the account's), the curated tier (`auto`, `partial`, `utility`, `ruling`), else
 `ruling` (no definition: a cast spends the slot and the DM rules). `concentration` comes from the element's
 `isConcentration` setter, never from its text.
+
+**Content rules (0.3.5):** the list offers only what the account's characters may pick
+(`crates/borealis-server/src/content_rules.rs`). `enabledSources` (body only) is the sources a new character starts on, as
+the app works it out (the Sources page's saved default with the Restrict playtest / third-party toggles applied); every
+other installed source is left out, as `set_source_restrictions` does. Without it, the account's toggles apply. A
+spell whose chosen copy is of a source that is off is not listed (its other copies stay hidden, as in the builder).
+`forRuleset` (`dnd2014` / `dnd2024`): only the spells a new pick of a character of that ruleset may take (the
+engine's edition rule: a 2014 pick takes no 2024 spells, a 2024 one may take 2014 ones). `alsoIn` keeps only copies
+of enabled sources, and `alsoInSources` names their books once each, without the chosen copy's own.
 
 `GET /api/spells/{key}` adds `mechanics: { def, origin: def|link|srd, fromKey, rev } | null`, `suggested: { mech,
 checks[] } | null` (a draft from the user's own 5etools data, never bound by itself: saving it is a `def` with origin

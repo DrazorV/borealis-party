@@ -183,6 +183,7 @@ export function EncounterPicker({ ruleset, room, owner, onAdd, onClose }: {
             </label>
           )}
         </div>
+        <div className="enc-filters">
         <div className="enc-chips" role="group" aria-label="Kind">
           <ToggleChip on={kinds.includes("monster")} label="Monsters" onClick={() => toggleKind("monster")} />
           <ToggleChip on={kinds.includes("companion")} label="Companions" onClick={() => toggleKind("companion")} />
@@ -197,13 +198,14 @@ export function EncounterPicker({ ruleset, room, owner, onAdd, onClose }: {
           {CR_BANDS.map((b) => <ToggleChip key={b.id} on={band === b.id} label={b.label} onClick={() => setBand(band === b.id ? "" : b.id)} />)}
         </div>
         {typeChips.length > 0 && (
-          <div className="enc-chips enc-chips-scroll" role="group" aria-label="Creature type">
+          <div className={`enc-chips${wide ? "" : " enc-chips-scroll"}`} role="group" aria-label="Creature type">
             {typeChips.map((t) => (
               <ToggleChip key={t} on={types.includes(t)} label={cap(t)}
                 onClick={() => setTypes(types.includes(t) ? types.filter((x) => x !== t) : [...types, t])} />
             ))}
           </div>
         )}
+        </div>
         {error && <Alert tone="danger">{error}</Alert>}
         <p className="muted party-note" aria-live="polite">{loading ? "Searching…" : `${total} ${total === 1 ? "creature" : "creatures"}`}{room < LIMITS.creatures ? ` · room for ${room - count} more` : ""}</p>
         {wide && added && <p className="party-note enc-added" role="status">{added}</p>}

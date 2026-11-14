@@ -1136,6 +1136,11 @@ pub struct SearchQuery {
     /// Pack ids or source names.
     #[serde(default)]
     pub sources: Vec<String>,
+    /// The sources the account's new characters start on (the Sources page's saved default, its toggles applied):
+    /// creatures of the other sources are never listed. None: the account's Restrict playtest / third-party toggles
+    /// ([`crate::content_rules`]).
+    #[serde(default)]
+    pub enabled_sources: Option<Vec<String>>,
     /// `dnd2014` or `dnd2024`.
     #[serde(default)]
     pub ruleset: Option<String>,
@@ -1303,8 +1308,12 @@ impl Filter {
 }
 
 /// Search the creature list.
-fn run(index: &Index, filter: &Filter) -> SearchPage {
-    let mut hits: Vec<&Summary> = index.items.iter().filter(|s| filter.matches(s)).collect();
+fn run(index: &Index, filter: &Filter, rules: &crate::content_rules::PickRules) -> SearchPage {
+    let mut hits: Vec<&Summary> = index
+        .items
+        .iter()
+        .filter(|s| rules.source_on(&s.source) && filter.matches(s))
+        .collect();
     let starts = |s: &Summary| !filter.text.is_empty() && s.name_lower.starts_with(&filter.text);
     hits.sort_by(|a, b| {
         let cr = |s: &Summary| s.cr_value.unwrap_or(f64::INFINITY);
@@ -1339,7 +1348,10 @@ fn run(index: &Index, filter: &Filter) -> SearchPage {
 pub async fn search(state: &AppState, owner: &str, query: &SearchQuery) -> ApiResult<SearchPage> {
     let filter = Filter::new(query)?;
     let index = index(state, owner).await?;
-    Ok(run(&index, &filter))
+    let rules =
+        crate::content_rules::rules(state, owner, query.enabled_sources.clone(), None, "Monster")
+            .await?;
+    Ok(run(&index, &filter, &rules))
 }
 
 fn facet<'a>(values: impl Iterator<Item = &'a str>) -> Vec<Count> {

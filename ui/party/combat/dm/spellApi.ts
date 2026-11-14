@@ -7,6 +7,7 @@
  */
 import { combatAction, combatDeps } from "../../api/overrides/combat";
 import type { MonsterPage, MonsterQuery } from "../../api/bestiary";
+import { withEnabledSources, type Fetch } from "../../api/contentRules";
 import { loadSession } from "../../api/session";
 import type { DmCombat, SpellMech } from "./types";
 
@@ -35,18 +36,26 @@ export interface SpellEntry {
   packId?: string;
   chosenBy?: string;
   alsoIn: SpellCopy[];
+  /** The other copies' books, once each, the enabled ones only (the "also in" note). */
+  alsoInSources?: string[];
   /** `defined`, `linked`, or the curated tier (`auto`, `partial`, `utility`, `ruling`, `uncurated`). */
   coverage: string;
 }
 
-export const searchSpells = (q: { text?: string; ruleset?: string; level?: number; limit?: number }) => {
-  const p = new URLSearchParams();
-  if (q.text) p.set("text", q.text);
-  if (q.ruleset) p.set("ruleset", q.ruleset);
-  if (q.level != null) p.set("level", String(q.level));
-  p.set("limit", String(q.limit ?? 50));
-  return call<{ total: number; items: SpellEntry[] }>("GET", `/api/spells?${p}`).then((r) => r?.items ?? []);
+const fetchVia: Fetch = (method, path, body) => call(method, path, body);
+
+/**
+ * The account's spells for a pick. `forRuleset` (a creature's ruleset): only what a new pick of a character of that
+ * ruleset may take. Always with the account's content rules: its enabled sources (contentRules.ts) and one copy per spell.
+ */
+export const searchSpells = async (q: { text?: string; ruleset?: string; forRuleset?: string; level?: number; limit?: number }) => {
+  const body = await withEnabledSources(fetchVia, { ...q, limit: q.limit ?? 50 });
+  return call<{ total: number; items: SpellEntry[] }>("POST", "/api/spells/search", body).then((r) => r?.items ?? []);
 };
+
+/** A spell's other copies' books, once each and only enabled ones (older servers: from `alsoIn`). */
+export const alsoInBooks = (s: Pick<SpellEntry, "alsoIn" | "alsoInSources" | "source">): string[] =>
+  s.alsoInSources ?? [...new Set(s.alsoIn.map((c) => c.source))].filter((n) => n !== s.source);
 
 /** What the builder needs to confirm in a tag draft (the server's `Check`s). */
 export type DraftCheck = string;
@@ -88,7 +97,7 @@ export const importMechanics = (file: unknown, mode: "merge" | "replace" = "merg
   call<{ imported?: number; rows?: number }>("POST", `/api/spell-mechanics/import?mode=${mode}`, file);
 
 /** The DM's bestiary, for Add creature (a summon's beasts, filtered by type and CR). */
-export const searchCreatures = (q: MonsterQuery) => call<MonsterPage>("POST", "/api/bestiary/search", q);
+export const searchCreatures = async (q: MonsterQuery) => call<MonsterPage>("POST", "/api/bestiary/search", await withEnabledSources(fetchVia, q));
 
 /**
  * Add creature from the bestiary (0.3.2 summons): the server's `summon {owner, elementId}`, once per creature, then
