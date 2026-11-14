@@ -21,6 +21,8 @@ export BOREALIS__PATHS__WEB="$web"
 export BOREALIS__PATHS__CONTENT="$content"
 export BOREALIS__DATABASE__TYPE=sqlite
 export BOREALIS__LOG__LEVEL="${BOREALIS__LOG__LEVEL:-warn}"
+# Every spec signs up from 127.0.0.1: the default 10 an hour runs out in one full run (as in start.ts).
+export BOREALIS__SERVER__SIGNUPS_PER_HOUR=10000
 
 printf '%s\n' "$admin_pw" | "$bin" add-user admin --email admin@phone-rig.test --admin >/dev/null
 printf '%s\n' "$player_pw" | "$bin" add-user player --email player@phone-rig.test >/dev/null
