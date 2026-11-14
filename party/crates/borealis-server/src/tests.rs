@@ -34,6 +34,8 @@ mod bestiary_tests;
 mod combat_tests;
 #[path = "content_tools_tests.rs"]
 mod content_tools_tests;
+#[path = "drop_ai_tests.rs"]
+mod drop_ai_tests;
 #[path = "encounters_tests.rs"]
 mod encounters_tests;
 #[path = "homebrew_tests.rs"]
@@ -405,7 +407,7 @@ async fn check_moved(router: &Router) {
 }
 
 /// The rows `some_accounts` makes, as the copy reports them.
-const MOVED: &str = "users 3, sessions 3, server_settings 1, activity 4, shares 0, share_blocks 0, account_roles 0, parties 0, party_invites 0, party_invite_holds 0, party_offers 0, party_members 0, monster_meta 0, bestiary_imports 0, encounters 0, encounter_creatures 0, encounter_effects 0, encounter_rules 0, combats 0, combatants 0, combat_journal 0, combat_log 0, combat_views 0, combat_prompts 0, combat_requests 0, api_tokens 0, oauth_clients 0, oauth_requests 0, oauth_codes 0, oauth_grants 0, oauth_tokens 0, ai_providers 0, ai_usage 0, spell_mechanics 0, encounter_casts 0, spell_meta 0";
+const MOVED: &str = "users 3, sessions 3, server_settings 1, activity 4, shares 0, share_blocks 0, account_roles 0, parties 0, party_invites 0, party_invite_holds 0, party_offers 0, party_members 0, monster_meta 0, bestiary_imports 0, encounters 0, encounter_creatures 0, encounter_effects 0, encounter_rules 0, combats 0, combatants 0, combat_journal 0, combat_log 0, combat_views 0, combat_prompts 0, combat_requests 0, api_tokens 0, oauth_clients 0, oauth_requests 0, oauth_codes 0, oauth_grants 0, oauth_tokens 0, spell_mechanics 0, encounter_casts 0, spell_meta 0";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_sqlite_instance_moves_with_its_accounts() {

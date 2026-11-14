@@ -4,7 +4,7 @@
 //!
 //! Prose is not code: `party/docs/` and READMEs may name vendors. The connection guides (how to add Borealis Party
 //! to ChatGPT or Claude) are allowed to name the apps, and so are the allowed origins of those apps, which are the
-//! apps' own sites (chatgpt.com, claude.ai), not their APIs.
+//! apps' own sites (chatgpt.com, chat.openai.com, claude.ai), not their APIs ([`APP_ORIGINS`]).
 
 use std::path::{Path, PathBuf};
 
@@ -24,6 +24,10 @@ const NEEDLES: [&str; 13] = [
     "anthropic-sdk",
     "\"openai\":",
 ];
+
+/// The AI apps' own sites, which may call `/api/mcp` from a browser (an origin allowlist): not their APIs, so a line
+/// is checked with these taken out first. `chat.openai.com` is ChatGPT's older address.
+const APP_ORIGINS: [&str; 1] = ["chat.openai.com"];
 
 /// Files that may name a vendor: the connection guides' text, and this test.
 const ALLOWED: [&str; 2] = [
@@ -101,7 +105,10 @@ fn no_code_calls_a_model_vendor() {
             continue;
         };
         for (n, line) in text.lines().enumerate() {
-            let lower = line.to_ascii_lowercase();
+            let mut lower = line.to_ascii_lowercase();
+            for origin in APP_ORIGINS {
+                lower = lower.replace(origin, "");
+            }
             for needle in NEEDLES {
                 if lower.contains(needle) {
                     found.push(format!("{rel}:{}: {needle}", n + 1));
@@ -114,4 +121,22 @@ fn no_code_calls_a_model_vendor() {
         "Borealis Party must not call an AI service itself (AI apps connect to it over MCP):\n{}",
         found.join("\n")
     );
+}
+
+#[test]
+fn an_app_origin_is_not_a_vendor_api_but_its_api_is() {
+    let check = |line: &str| {
+        let mut lower = line.to_ascii_lowercase();
+        for origin in APP_ORIGINS {
+            lower = lower.replace(origin, "");
+        }
+        NEEDLES.iter().any(|n| lower.contains(n))
+    };
+    assert!(!check(r#"    "https://chat.openai.com","#));
+    assert!(!check(r#"    "https://chatgpt.com", "https://claude.ai","#));
+    assert!(check(r#"const API: &str = "https://api.openai.com/v1";"#));
+    assert!(check(r#"fetch("https://openai.com/x")"#));
+    assert!(check(
+        r#"https://chat.openai.com https://api.anthropic.com"#
+    ));
 }

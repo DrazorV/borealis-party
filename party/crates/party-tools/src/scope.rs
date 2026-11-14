@@ -1,4 +1,4 @@
-//! Scopes a token (or the in-app assistant's opt-in) grants. Part A issues exactly these strings.
+//! Scopes a token or an OAuth grant gives. Part A issues exactly these strings.
 
 use std::collections::BTreeSet;
 use std::fmt;

@@ -85,7 +85,7 @@ Put passwords in variables rather than in the file.
 | `BOREALIS__BACKUP__ON_UPGRADE` | `auto` | `skip` starts without the backup (emergencies only) |
 | `BOREALIS__BACKUP__POSTGRES_BIN` | the PATH | Folder with `pg_dump` and `pg_restore`; the image sets the PostgreSQL 18 client |
 | `BOREALIS__LOG__LEVEL` | `info` | `error` to `trace` |
-| `BOREALIS__AI__SECRET_KEY` | | No longer used since 0.3.3 (the in-app assistant was removed): accepted and ignored, logged once at start. It can be removed from the stack. See `docs/ai-assistant.md` |
+| `BOREALIS__AI__SECRET_KEY` | | No longer used since 0.3.3 (the in-app assistant was removed): accepted and ignored, logged once at start. It can be removed from the stack |
 | `BOREALIS__FEATURES__AI` | `true` | `false` switches AI apps off: MCP, API tokens and the OAuth server (emergency switch; the routes answer 404) |
 
 `OPEN_REGISTRATION`, `REQUIRE_APPROVAL` and `TRUSTED_PROXIES` can also be changed on the admin page while the server
@@ -681,9 +681,6 @@ party/android/build-apk.ps1
 ```
 
 Keep the signing key: Android only installs an update signed with the same key.
-
-Known limit: in the Android app the character sheet cannot be saved or shared as a PDF yet (its web view has no
-download or share sheet). Open the server in the phone's browser for that.
 
 ### Android smoke run
 
