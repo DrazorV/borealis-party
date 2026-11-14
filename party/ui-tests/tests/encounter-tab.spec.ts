@@ -8,7 +8,7 @@ import { expect, measureOverflow, minTap, open, settled, smallTargets, test } fr
  * project) and on the phone (384x832):
  * - only a DM has the tabs, and the routes send anyone else to the start page;
  * - on a big screen the Encounters tab uses the whole width: the party's encounters on the left, the creatures in the
- *   middle, the picker docked beside them (keyboard: / opens it, Enter adds), players and setup on the right, and no
+ *   middle, the picker full width under them (0.3.5; keyboard: / opens it, Enter adds), players and setup on the right, and no
  *   bottom bar; the Combat tab lists ready encounters to start and opens the tracker full width;
  * - on the phone both tabs are rows on More, the builder keeps its stacked layout and its summary bar, and nothing
  *   scrolls sideways. No XP or difficulty anywhere (D16).
@@ -140,7 +140,8 @@ test.describe("Encounters and Combat tabs (0.3.1)", () => {
       expect((await measureOverflow(page)).page, "the page scrolls sideways").toBeLessThanOrEqual(0);
       await shot(page, testInfo, "builder");
 
-      // "/" docks the picker beside the creatures with the focus in its search; Enter adds and it stays open.
+      // "/" opens the picker full width under the creatures (0.3.5), in the page, with the focus in its search; Enter
+      // adds and it stays open.
       await page.locator(".enc-creatures-card h2").click();
       await page.keyboard.press("/");
       const picker = page.getByRole("complementary", { name: "Add creatures" });
@@ -150,7 +151,21 @@ test.describe("Encounters and Combat tabs (0.3.1)", () => {
       await expect(search).toBeFocused();
       const docked = (await picker.boundingBox())!;
       const creatures2 = await box(page, ".enc-creatures-card");
-      expect(docked.x, "the picker sits right of the creatures").toBeGreaterThanOrEqual(creatures2.x + creatures2.width - 1);
+      expect(docked.y, "the picker sits under the creatures").toBeGreaterThanOrEqual(creatures2.y + creatures2.height - 1);
+      expect(Math.abs(docked.width - creatures2.width), "as wide as the creatures card").toBeLessThanOrEqual(2);
+      const panels = await box(page, ".enc-panels");
+      expect(panels.y, "the other cards stay below it").toBeGreaterThanOrEqual(docked.y + docked.height - 1);
+      expect(docked.height, "its height is bounded").toBeLessThanOrEqual(page.viewportSize()!.height);
+      const searchBox = (await search.boundingBox())!;
+      const howMany = (await picker.getByLabel("How many to add").boundingBox())!;
+      expect(Math.abs(searchBox.y + searchBox.height - (howMany.y + howMany.height)), "search and How many on one line").toBeLessThanOrEqual(4);
+      const chips = await picker.locator(".enc-chips").evaluateAll((els) => els.map((e) => e.scrollWidth - e.clientWidth));
+      expect(Math.max(...chips), "no sideways scroll in the filters").toBeLessThanOrEqual(0);
+      const cols = await picker.locator(".enc-results").evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length);
+      expect(cols, "results in a grid of 2 to 4 columns").toBeGreaterThanOrEqual(2);
+      expect(cols).toBeLessThanOrEqual(4);
+      const heights = await picker.locator(".enc-result").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
+      expect(new Set(heights).size, "equal-height result cards").toBe(1);
       await search.fill("owl");
       await expect(picker.getByRole("button", { name: "Add Goblin Warrior" })).toHaveCount(0);
       await picker.getByLabel("How many to add").fill("2");

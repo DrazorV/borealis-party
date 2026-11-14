@@ -143,17 +143,16 @@ html.phone .enc-creature-controls > .btn { flex: 1 1 auto; justify-content: cent
 .enc-col-side { grid-area: side; display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; position: sticky; top: 48px; }
 .enc-panels { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); align-items: start; }
 .enc-panels > .enc-card { margin: 0; }
-/* With a tool open the side column moves under the creatures, unless the screen has room for all four columns. */
-.enc-builder.has-tool .enc-cols { grid-template-columns: minmax(0, 1fr) minmax(380px, 440px); grid-template-areas: "main tool" "side tool"; }
-.enc-builder.has-tool .enc-col-side { position: static; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); align-items: start; }
-@media (min-width: 1700px) {
-  .enc-builder.has-tool .enc-cols { grid-template-columns: minmax(0, 1fr) 440px 340px; grid-template-areas: "main tool side"; }
-  .enc-builder.has-tool .enc-col-side { position: sticky; display: flex; }
-}
+/* A tool (Add creatures) opens full width under the creatures card, in the page; its results scroll inside it. */
 .enc-tool {
-  grid-area: tool; position: sticky; top: 48px; display: flex; flex-direction: column; min-width: 0; margin: 0;
-  max-height: calc(100dvh - 260px); min-height: 360px; border-style: solid; border-color: var(--accent-base, var(--border));
+  display: flex; flex-direction: column; min-width: 0; margin: 0;
+  max-height: min(640px, calc(100dvh - 160px)); min-height: 360px; border-style: solid; border-color: var(--accent-base, var(--border));
 }
+.enc-tool .enc-filters { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); }
+.enc-tool .enc-filters > .enc-chips { flex-wrap: wrap; }
+.enc-tool .enc-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(240px, calc((100% - 3 * var(--sp-2)) / 4)), 1fr)); grid-auto-rows: 1fr; gap: var(--sp-2); }
+.enc-tool .enc-result { min-width: 0; align-items: flex-start; }
+.enc-tool .enc-result > .btn { align-self: center; }
 .enc-tool > .card-head { flex: none; margin-bottom: var(--sp-2); }
 .enc-tool-body { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .enc-tool-foot { flex: none; display: flex; gap: var(--sp-2); justify-content: flex-end; padding-top: var(--sp-2); }

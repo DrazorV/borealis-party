@@ -358,9 +358,10 @@ export function EncounterBuilder() {
         <div className="enc-cols">
           <div className="enc-col-main">
             {creatureCard}
+            {/* Add creatures opens full width under the creatures (the user, 0.3.5), the other cards stay below. */}
+            {picker}
             <div className="enc-panels">{effects}{rules}{notesCard}</div>
           </div>
-          {picker}
           <div className="enc-col-side">{players}{setup}{danger}</div>
         </div>
       ) : (
