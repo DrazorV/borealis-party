@@ -132,6 +132,14 @@ test.describe("Play tab quick wins (0.3.5)", () => {
     }
     await expect(card.getByRole("img", { name: "Failures: 2 of 3" })).toBeVisible();
     expect((await measureOverflow(page)).page).toBeLessThanOrEqual(0);
+    // The outcome buttons stay inside the card and show their whole label (nothing squeezed onto one phone row).
+    const spill = await card.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      return Array.from(el.querySelectorAll<HTMLElement>(".roll-outcomes-row > .btn"))
+        .filter((b) => { const r = b.getBoundingClientRect(); return r.left < box.left - 1 || r.right > box.right + 1 || b.scrollWidth > b.clientWidth + 1; })
+        .map((b) => b.textContent);
+    });
+    expect(spill).toEqual([]);
     await shot(page, testInfo, "death-saves");
     for (const outcome of ["Success", "Success"]) {
       await tap(card.getByRole("button", { name: outcome }));
