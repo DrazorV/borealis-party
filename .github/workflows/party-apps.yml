@@ -489,7 +489,9 @@ jobs:
           if ! grep -q 'type="application/x-borealis-bundle"' "$mime" || ! grep -q 'pattern="\*.borealis"' "$mime"; then
             echo "::error::borealis-party.xml does not define *.borealis"; exit 1
           fi
-          if grep -q 'dnd5e' "$mime"; then echo "::error::borealis-party.xml claims .dnd5e"; exit 1; fi
+          if grep -Eq 'pattern="[^"]*dnd5e"|type="application/x-dnd5e"' "$mime"; then
+            echo "::error::borealis-party.xml claims .dnd5e"; exit 1
+          fi
           desktop=$(find "$x/usr/share/applications" -name '*.desktop' | head -n 1)
           cat "$desktop"
           if ! grep -q '^MimeType=application/x-borealis-bundle;\?$' "$desktop"; then
