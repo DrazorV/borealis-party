@@ -182,8 +182,24 @@ test("against the real server: a second DM tab follows within 1 s, and the playe
   const encounter = await api<{ id: string }>(request, dm.token, "POST", `/api/parties/${party.id}/encounters`, { name: "Goblins" });
   await api(request, dm.token, "POST", `/api/encounters/${encounter.id}/creatures`, { elementId: "ID_SRD521_MONSTER_GOBLIN_WARRIOR", count: 1 });
   await api(request, dm.token, "PATCH", `/api/encounters/${encounter.id}`, { status: "ready" }).catch(() => null);
-  const started = await api<{ id: string; state: { combatants: { id: string; kind: string; label: string; visible: boolean }[] } }>(
-    request, dm.token, "POST", `/api/encounters/${encounter.id}/start`, { requestId: `rig-${Date.now()}` });
+  type Started = { id: string; state: { combatants: { id: string; kind: string; label: string; visible: boolean }[] } };
+  // A slow CI run can see the start answered 409 "already has a live combat" when the first send did reach the
+  // server (CI 43595665605): the party is new, so its live combat is this encounter's. Read it back from the server.
+  const sent = await request.fetch(`/api/encounters/${encounter.id}/start`, {
+    method: "POST", headers: { authorization: `Bearer ${dm.token}` }, data: { requestId: `rig-${Date.now()}` },
+  });
+  let started: Started;
+  if (sent.status() === 409) {
+    let live: string | null = null;
+    await expect.poll(async () => {
+      live = (await api<{ combat: string | null }>(request, dm.token, "GET", `/api/parties/${party.id}/combat`)).combat;
+      return live;
+    }, { message: "the party's live combat", timeout: 10_000 }).not.toBeNull();
+    started = await api<Started>(request, dm.token, "GET", `/api/combats/${live}`);
+  } else {
+    expect(sent.ok(), `start: ${sent.status()} ${await sent.text()}`).toBeTruthy();
+    started = (await sent.json()) as Started;
+  }
   const goblin = started.state.combatants.find((c) => c.kind === "creature")!;
   expect(goblin.visible).toBe(false);
 

@@ -29,7 +29,8 @@ test("a pack, an element from the form, a refused one in XML, and its index", as
   // The pack through the API (one per project), the element through the pages.
   const login = await request.post(`${baseURL}/api/auth/login`, { data: { username: "player", password: ACCOUNTS.player.password } });
   const { token } = (await login.json()) as { token: string };
-  const name = `Rig Brew ${testInfo.project.name}`;
+  // A new name per attempt: a retry (or a rerun on the same server) would get "You already have a pack called".
+  const name = `Rig Brew ${testInfo.project.name} ${Math.random().toString(36).slice(2, 7)}`;
   const made = await request.post(`${baseURL}/api/homebrew/packs`, { headers: { authorization: `Bearer ${token}` }, data: { name } });
   expect(made.ok(), await made.text()).toBeTruthy();
   const pack = ((await made.json()) as { id: string }).id;
