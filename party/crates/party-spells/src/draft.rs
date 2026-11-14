@@ -361,6 +361,7 @@ pub fn from_5etools(key: &str, edition: Edition, spell: &Value) -> Draft {
                 condition,
                 repeat_save: None,
                 ends_on_damage: false,
+                ends_on_attack: false,
             });
             checks.push(Check::Condition);
         }

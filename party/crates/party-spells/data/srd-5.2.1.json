@@ -2245,13 +2245,12 @@
      "kind": "long"
     },
     "tier": "partial",
-    "notes": [
-     "Ends on the target after it attacks, deals damage or casts a spell."
-    ],
+    "notes": [],
     "always": [
      {
       "kind": "condition",
-      "condition": "invisible"
+      "condition": "invisible",
+      "ends_on_attack": true
      }
     ]
    }
