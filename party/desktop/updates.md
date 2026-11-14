@@ -21,7 +21,7 @@ Characters and settings are not touched: they live in the app's data folder (`%A
 All of it is in the fork's own files; upstream's code is used as it is.
 
 - `party/tauri.party.desktop.json` gives upstream's updater plugin the party feed
-  (`https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-latest.json`) and the party
+  (`https://github.com/fortress-soft/borealis-party/releases/latest/download/borealis-party-latest.json`) and the party
   public key (`plugins.updater`), and lets the main window use the plugin's `check` and `download_and_install`
   (`app.security.capabilities`, after upstream's own `default` and `splash`). With a real key, upstream registers the
   plugin for a copy that can replace itself (an NSIS install, an AppImage) and leaves it out otherwise.
