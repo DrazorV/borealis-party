@@ -235,9 +235,42 @@ html.phone .party-sheet .party-line > .btn { min-height: var(--ph-hit); display:
 
 /* The party's edition (0.3.2): on the party card, in the New party and Change edition dialogs, and in the encounter's
    Setup. */
-.party-edition-line { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-1) 0 var(--sp-2); }
 .party-edition-choice { align-self: flex-start; }
 .party-edition-row { flex-direction: row !important; align-items: center; flex-wrap: wrap; gap: var(--sp-2) !important; }
 .party-edition-row .enc-setting-label { flex-basis: 100%; }
 .party-edition-fix { margin-top: var(--sp-3); }
 html.phone .party .party-edition-choice button { min-height: var(--ph-hit); }
+
+/*
+ * The party card (0.3.3, the user's "fix the button alignment, padding and overall design"): one header row (name,
+ * edition with Change edition inline, role badge), one toolbar with even gaps and Delete apart on the right, even
+ * spacing between sections, and each character's numbers with View / Leave on the same row on wide screens. At 384 px
+ * the header and the toolbar wrap; the numbers stay chips in rows, the character's buttons go under them.
+ */
+.party-parties .party-card { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); }
+.party-parties .party-card > .party-sub { margin: var(--sp-1) 0 calc(-1 * var(--sp-2)); }
+.party-parties .party-card > .party-list { margin: 0; }
+.party-card-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); min-width: 0; }
+.party-card-name { margin: 0; font-size: var(--fs-xl, 20px); min-width: 0; overflow-wrap: anywhere; }
+.party-edition-line { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 0 var(--sp-1); font-size: var(--fs-sm); }
+.party-card-badge { margin-left: auto; align-self: center; }
+.party-card-meta { margin: calc(-1 * var(--sp-2)) 0 0; }
+.party-link { all: unset; cursor: pointer; margin-left: var(--sp-2); color: var(--gold, var(--accent, inherit)); font-size: var(--fs-sm); text-decoration: underline; text-underline-offset: 2px; }
+.party-link:hover { filter: brightness(1.2); }
+.party-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.party-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0; border-top: var(--border-w) solid var(--border); border-bottom: var(--border-w) solid var(--border); }
+.party-actions > .btn, .party-actions > .enc-link { margin: 0; text-decoration: none; }
+.party-actions-end { margin-left: auto !important; }
+.party-member-body { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); min-width: 0; }
+.party-member-body > .party-stats { flex: 1 1 auto; margin: 0; }
+.party-member-body > .party-member-actions { margin-left: auto; flex-wrap: nowrap; }
+.party-stat { min-height: 28px; box-sizing: border-box; align-items: center; }
+html.phone .party-link { display: inline-flex; align-items: center; min-height: var(--ph-hit); margin-left: var(--sp-1); }
+html.phone .party-parties .party-card { padding: var(--sp-3); }
+/* Phones: the name and the badge on the first line, the edition under them. */
+html.phone .party-card-name { flex: 1 1 0; }
+html.phone .party-card-badge { order: 1; }
+html.phone .party-edition-line { order: 2; flex-basis: 100%; }
+html.phone .party-actions > .btn, html.phone .party-actions > .enc-link { flex: 1 1 calc(50% - var(--sp-2)); justify-content: center; }
+html.phone .party-actions-end { margin-left: 0 !important; }
+html.phone .party-member-body > .party-member-actions { margin-left: 0; flex: 1 1 100%; }

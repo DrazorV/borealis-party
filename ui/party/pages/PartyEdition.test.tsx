@@ -179,6 +179,36 @@ describe("Change edition on the party card", () => {
   });
 });
 
+describe("the party card's layout (0.3.3: one header row, one toolbar)", () => {
+  it("the DM's card: name, edition with Change edition inline and the DM badge in one header; Encounters to Delete in one toolbar", async () => {
+    party("dnd2024", [A]);
+    signIn("dm1");
+    page();
+    const card = await screen.findByRole("region", { name: "Tuesday Party" });
+    const head = card.querySelector(".party-card-head")!;
+    expect(within(head as HTMLElement).getByRole("heading", { name: "Tuesday Party" })).toBeTruthy();
+    expect(head.textContent).toMatch(/Edition:\s*2024 rules\s*Change edition.*DM/);
+    const bar = within(card).getByRole("toolbar", { name: "Tuesday Party actions" });
+    const labels = [...bar.children].map((b) => b.textContent?.trim());
+    expect(labels).toEqual(["Encounters", "Invite", "Add my character", "Rename", "Delete"]);
+    expect(bar.lastElementChild!.classList.contains("party-actions-end")).toBe(true);
+    // The DM keeps the numbers outside combat, with View on the same row as the chips.
+    const member = within(card).getByRole("listitem", { name: "Aria" });
+    const body = member.querySelector(".party-member-body")!;
+    expect(within(body as HTMLElement).getByRole("link", { name: "View Aria" })).toBeTruthy();
+  });
+
+  it("a player's card has no toolbar, and says who the DM is under the header", async () => {
+    party("dnd2024", [A]);
+    signIn("pl1");
+    page();
+    const card = await screen.findByRole("region", { name: "Tuesday Party" });
+    expect(within(card).queryByRole("toolbar")).toBeNull();
+    expect(card.querySelector(".party-card-meta")!.textContent).toContain("DM: dana");
+    expect(card.querySelector(".party-card-head")!.textContent).toContain("Player");
+  });
+});
+
 describe("the edition notes' switch", () => {
   it("DM, most characters use 2014: one tap, a confirm, then the PATCH", async () => {
     party("dnd2024", [A, B, C]);
