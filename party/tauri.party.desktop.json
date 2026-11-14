@@ -38,7 +38,8 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ4NDZEMjhBMUJFMjgyQ0YKUldUUGd1SWJpdEpHU0pCZDF6NTh0a0R6UDRnMGdWdFZobjBEdDJ0Qi9XbXZsUCt2Y2x3YlIrQ1AK",
       "endpoints": [
-        "https://github.com/fortress-soft/borealis-party/releases/latest/download/borealis-party-latest.json"
+        "https://github.com/fortress-soft/meadhall/releases/latest/download/borealis-party-latest.json",
+        "https://github.com/DrazorV/borealis-party/releases/latest/download/borealis-party-latest.json"
       ],
       "windows": {
         "installMode": "passive"
