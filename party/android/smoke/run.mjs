@@ -643,8 +643,8 @@ async function playerCombat(token) {
     if (!chip) { await screenshot("14-combat-no-chip"); return; }
     await screenshot("14-combat-live-chip");
     await page(`document.querySelector(".combat-live-chip").click(), true`);
-    const pane = await until("the Combat sub-tab", () => page(`!!document.querySelector('[data-testid="combat-pane"]') && [...document.querySelectorAll('[role="tab"]')].some((t) => t.innerText.trim() === "Combat" && t.getAttribute("aria-selected") === "true")`), 30000).catch(() => false);
-    check("the Live chip opens the Play tab's Combat sub-tab", !!pane);
+    const pane = await until("the live combat section", () => page(`!!document.querySelector('[data-testid="combat-pane"]') && [...document.querySelectorAll('[role="tab"]')].some((t) => t.innerText.trim() === "Play" && t.getAttribute("aria-selected") === "true")`), 30000).catch(() => false);
+    check("the Live chip opens the live combat section on the Play tab", !!pane);
     if (!pane) return;
     const shown = await page(`(() => { const t = document.querySelector('[data-testid="combat-pane"]').textContent; return ["Round 2", "Goblin", "Take 2 slashing damage?"].filter((w) => !t.includes(w)); })()`);
     check("the sub-tab shows the round, the turn order and the damage prompt", shown.length === 0, shown.length ? `missing ${shown.join(", ")}` : "");
