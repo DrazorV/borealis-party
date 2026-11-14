@@ -4,7 +4,7 @@ import { Button } from "../../../src/components/Button";
 import { Alert, Chip } from "../../../src/components/Card";
 import { useConnectivity } from "../../api/connectivity";
 import {
-  actingId, myCombatant,
+  actingId, myCombatant, onDeck,
   type CombatPrompt, type D20Input, type PlayerCombat, type PlayerCombatant,
 } from "./api";
 import { usePlayMutate } from "../../../src/pages/play/playQueue";
@@ -288,6 +288,7 @@ export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSn
   const yours = acting != null && combat.combatants.some((x) => x.mine && x.id === acting);
   const round = combat.pointer.kind === "combatant" || combat.pointer.kind === "enemy_turn" || combat.pointer.kind === "waiting" ? combat.pointer.round : combat.round;
   const conSave = s.abilities.save.con?.bonus ?? 0;
+  const deck = onDeck(combat);
   return (
     <div className="combat-pane" data-testid="combat-pane">
       <div className="combat-head">
@@ -300,6 +301,12 @@ export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSn
         <span className="combat-now-label">{yours ? "" : "Now"}</span>
         <strong className="combat-now-name">{nowText(combat, me)}</strong>
       </div>
+      {deck && (
+        <div className="combat-ondeck" role="status" aria-live="polite" data-testid="combat-on-deck">
+          <strong>You're next</strong>{deck.kind === "creature" ? <span> · {deck.name}</span> : null}
+          <span className="muted"> · get your turn ready</span>
+        </div>
+      )}
       {me && <Initiative combat={combat} me={me} modifier={s.stats.initiative} />}
       {me && combat.prompts.filter((p) => p.combatant === me.id).map((p) => (
         <PromptCard key={p.id} combat={combat} prompt={p} me={me} modifier={conSave}

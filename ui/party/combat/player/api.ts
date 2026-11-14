@@ -437,6 +437,25 @@ export function actingId(c: Pick<PlayerCombat, "pointer">): string | null {
   return c.pointer.kind === "combatant" ? c.pointer.id : null;
 }
 
+/**
+ * The signed-in player's combatant that is on deck (acts right after whoever is acting now), or null. Worked out from
+ * the visible order only (a hidden creature in between can make the banner come one turn early, and nothing about it
+ * leaks). Nothing is on deck while it's already one of mine, or on an enemy turn (whose place isn't shown).
+ */
+export function onDeck(c: Pick<PlayerCombat, "pointer" | "combatants" | "status">): PlayerCombatant | null {
+  const acting = actingId(c);
+  if (!acting || c.status !== "active") return null;
+  const order = c.combatants.filter((x) => x.inOrder && x.life !== "dead");
+  const at = order.findIndex((x) => x.id === acting);
+  if (at < 0 || order[at].mine) return null;
+  for (let i = 1; i < order.length; i += 1) {
+    const next = order[(at + i) % order.length];
+    if (next.id === acting) return null;
+    return next.mine ? next : null;
+  }
+  return null;
+}
+
 /** Which character a session's open sheet is, for finding its PC. */
 export interface OpenCharacter { id: string; name?: string | null }
 

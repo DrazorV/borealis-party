@@ -212,6 +212,22 @@ describe("the Play tab's live combat section", () => {
     expect(screen.getByRole("tab", { name: "Play" }).getAttribute("aria-selected")).toBe("true");
   });
 
+  it("says You're next with one soft buzz when the turn before mine starts", async () => {
+    server.combats.set("p1", liveWith({ turn: { kind: "combatant", id: "ally1", round: 1 } }));
+    await start();
+    renderPlay();
+    await openCombatTab();
+    expect(screen.queryByTestId("combat-on-deck")).toBeNull();
+    act(() => server.change("p1", (c) => ({ ...c, turn: { kind: "combatant", id: "cr1", round: 2 } })));
+    expect((await screen.findByTestId("combat-on-deck")).textContent).toContain("You're next");
+    expect(buzz).toHaveBeenCalledTimes(1);
+    expect(buzz).toHaveBeenCalledWith(store.ON_DECK_BUZZ);
+    // My turn: the banner goes, the turn buzz comes.
+    act(() => server.change("p1", (c) => ({ ...c, turn: { kind: "combatant", id: "me1", round: 2 } })));
+    await waitFor(() => expect(screen.queryByTestId("combat-on-deck")).toBeNull());
+    expect(buzz).toHaveBeenLastCalledWith(store.YOUR_TURN_BUZZ);
+  });
+
   it("says Your turn, buzzes once and shows the banner on other pages", async () => {
     server.combats.set("p1", liveWith());
     await start();
