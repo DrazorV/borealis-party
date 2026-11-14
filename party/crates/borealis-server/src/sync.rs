@@ -18,6 +18,15 @@
 //!   edits of an open session are saved first and compared by their save time (upstream keeps no time of the edit
 //!   itself); with autosave on, that is within seconds of the edit.
 //!
+//!   Since 0.3.6 a device sends `ask: true`, and then nothing is decided for it: a push whose `baseSha` is not the
+//!   server's file (another device or the DM changed it meanwhile, or it was deleted here) answers `conflict` with the
+//!   server file's digest (none when deleted) and writes nothing, not even to the trash: the device keeps its edit and
+//!   asks its user. "Keep mine" sends the same copy again with `forceOver`, the digest of the server copy the user
+//!   saw (empty when it was deleted): it is written only while the server still holds that copy (which goes to the
+//!   trash first, as always); a copy changed since is a conflict again. "Use the server's" sends the device's copy
+//!   with `discard: true`: it only goes to the trash as the device's (`discarded`), so it can be recovered for 30
+//!   days. A push without `ask` (the apps before 0.3.6) is decided by the clocks as above.
+//!
 //! A deleted character leaves a copy in the account's trash (`sync/trash/<ms>-<id>.json`, upstream's own folder and
 //! naming, swept after 30 days); a trash entry with no live character file is a delete record. A copy replaced by a
 //! push goes there too, under the same name, as a bundle's would; a device's copy that lost goes there as
@@ -141,8 +150,11 @@ struct Pushed {
     bytes: Vec<u8>,
     /// A stale push is answered `conflict` and never applied (0.3.6 devices); without it, the newest edit wins.
     ask: bool,
-    /// The device's user chose their copy over the server's: it is written whatever the server holds.
-    force: bool,
+    /// "Keep mine": the digest of the server copy the user chose over (empty: it was deleted). Written only while the
+    /// server still holds that copy.
+    force_over: Option<String>,
+    /// "Use the server's": the device drops its copy, which is only kept in the trash.
+    discard: bool,
 }
 
 impl Pushed {
@@ -174,7 +186,11 @@ impl Pushed {
             edited_at_ms,
             bytes,
             ask: flag("ask"),
-            force: flag("force"),
+            force_over: args
+                .get("forceOver")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            discard: flag("discard"),
         })
     }
 }
@@ -191,8 +207,8 @@ enum Outcome {
     Conflict,
 }
 
-/// `party_sync_push`. Answers `{ result, sha256, editedAtMs }`: `applied`, `identical`, `kept-server`, `deleted` or
-/// (with `ask`) `conflict`, with the server file's digest and stamp afterwards (none when deleted).
+/// `party_sync_push`. Answers `{ result, sha256, editedAtMs }`: `applied`, `identical`, `kept-server`, `deleted`,
+/// (with `ask`) `conflict`, or (with `discard`) `discarded`, with the server file's digest and stamp afterwards (none when deleted).
 fn push(app: &AppHandle, sent: &Pushed) -> ApiResult<Value> {
     let backend = app.state::<Backend>();
     let id = sent.id.as_str();
@@ -207,6 +223,13 @@ fn push(app: &AppHandle, sent: &Pushed) -> ApiResult<Value> {
     let trash = trash_dir(&backend.paths.data);
     let _ = sweep_trash(&trash, now);
     let hub = backend.hub().map_err(|e| internal(e.message))?;
+    if sent.discard {
+        // The device's user took the server's copy: theirs is kept where every losing copy is, and nothing else changes.
+        std::fs::create_dir_all(&trash).map_err(internal)?;
+        std::fs::write(trash_file(&trash, id, ".device.json"), &bytes).map_err(internal)?;
+        let (sha256, edited_at_ms) = file_stamp(&file);
+        return Ok(json!({ "result": "discarded", "sha256": sha256, "editedAtMs": edited_at_ms }));
+    }
     let written = {
         let mut sessions = backend.sessions().map_err(internal)?;
         // Edits not saved yet are the server's newest copy: on file first, so they are compared and never dropped.
@@ -222,9 +245,10 @@ fn push(app: &AppHandle, sent: &Pushed) -> ApiResult<Value> {
                     sha256: sha256_hex(&current),
                     edited_at_ms: mtime_ms(&file),
                 };
+                let chosen = sent.force_over.as_deref() == Some(local.sha256.as_str());
                 if local.sha256 == incoming_sha {
                     Outcome::Identical
-                } else if sent.force || sent.base_sha.as_deref() == Some(local.sha256.as_str()) {
+                } else if chosen || sent.base_sha.as_deref() == Some(local.sha256.as_str()) {
                     // Only the device changed it (or its user chose it): its copy goes on, after the server's
                     // whatever the clocks say.
                     Outcome::Write(edited.max(local.edited_at_ms + 1))
@@ -238,10 +262,11 @@ fn push(app: &AppHandle, sent: &Pushed) -> ApiResult<Value> {
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let chosen = sent.force_over.as_deref() == Some("");
                 match deleted(&trash, &BTreeSet::new()).get(id) {
                     // Deleted here after the device's copy was made: its user decides whether it comes back.
-                    Some(_) if sent.ask && !sent.force => Outcome::Conflict,
-                    Some(&at) if edited <= at && !sent.force => Outcome::Lost("deleted"),
+                    Some(_) if sent.ask && !chosen => Outcome::Conflict,
+                    Some(&at) if edited <= at && !sent.ask => Outcome::Lost("deleted"),
                     _ => Outcome::Write(edited),
                 }
             }

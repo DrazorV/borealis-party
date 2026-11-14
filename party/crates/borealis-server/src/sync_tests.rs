@@ -596,18 +596,18 @@ pub(super) async fn push_flow(router: Router, data: &Path) {
     assert_eq!(player(data, &bob.id, &id), "device one");
 }
 
-/// A 0.3.6 device's push (`ask`, and `force` for "Keep mine").
+/// A 0.3.6 device's push (`ask`, and for "Keep mine" `forceOver`, the server copy the user chose over).
 async fn ask_push(
     client: &Client,
     id: &str,
     base: Option<&str>,
     content: &[u8],
-    force: bool,
+    force_over: Option<&str>,
 ) -> (StatusCode, Value) {
     client
         .rpc(
             "party_sync_push",
-            json!({ "id": id, "baseSha": base, "editedAtMs": now_ms(), "contentBase64": b64(content), "ask": true, "force": force }),
+            json!({ "id": id, "baseSha": base, "editedAtMs": now_ms(), "contentBase64": b64(content), "ask": true, "forceOver": force_over }),
         )
         .await
 }
@@ -619,7 +619,9 @@ fn trash_count(data: &Path, account: &str) -> usize {
 
 /// Offline conflict safety (0.3.6): a device that asks is never decided for. A stale push (another device or the DM
 /// changed the file, or it was deleted) is a `conflict` that writes nothing anywhere, whatever the clocks say; a fresh
-/// one goes on; "Keep mine" (`force`) writes over the server's copy, which goes to the trash.
+/// one goes on; "Keep mine" (`forceOver`) writes over the server's copy the user saw, which goes to the trash, and is a
+/// conflict again when the server's copy changed since; "Use the server's" (`discard`) keeps the device's copy in the
+/// trash and changes nothing else.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stale_push_from_a_device_that_asks_is_a_conflict_and_never_applied() {
     let dir = tempfile::tempdir().unwrap();
@@ -636,7 +638,7 @@ async fn a_stale_push_from_a_device_that_asks_is_a_conflict_and_never_applied() 
 
     // Fresh: the server still holds the base, so the device's edit goes on.
     let fresh = device_copy(data, &alice.id, &id, "fresh");
-    let (status, out) = ask_push(&alice, &id, Some(&base), &fresh, false).await;
+    let (status, out) = ask_push(&alice, &id, Some(&base), &fresh, None).await;
     assert_eq!(status, StatusCode::OK, "{out}");
     assert_eq!(out["result"], "applied", "{out}");
     let (server_sha, server_ms) = on_file(data, &alice.id, &id);
@@ -646,7 +648,7 @@ async fn a_stale_push_from_a_device_that_asks_is_a_conflict_and_never_applied() 
     // nothing goes to the trash: the device keeps its copy.
     let trash_before = trash_count(data, &alice.id);
     let stale = device_copy_from(&fresh, "stale");
-    let (status, out) = ask_push(&alice, &id, Some(&base), &stale, false).await;
+    let (status, out) = ask_push(&alice, &id, Some(&base), &stale, None).await;
     assert_eq!(status, StatusCode::OK, "{out}");
     assert_eq!(out["result"], "conflict", "{out}");
     assert_eq!(out["sha256"], server_sha.as_str());
@@ -657,16 +659,44 @@ async fn a_stale_push_from_a_device_that_asks_is_a_conflict_and_never_applied() 
     assert_eq!(player(data, &alice.id, &id), "fresh");
     assert_eq!(trash_count(data, &alice.id), trash_before);
     // An unknown base is no base: a conflict too.
-    let (_, out) = ask_push(&alice, &id, None, &stale, false).await;
+    let (_, out) = ask_push(&alice, &id, None, &stale, None).await;
     assert_eq!(out["result"], "conflict", "{out}");
     assert_eq!(player(data, &alice.id, &id), "fresh");
 
     // The same content as the server's is no conflict.
-    let (_, out) = ask_push(&alice, &id, Some(&base), &fresh, false).await;
+    let (_, out) = ask_push(&alice, &id, Some(&base), &fresh, None).await;
     assert_eq!(out["result"], "identical", "{out}");
 
     // "Keep mine": written over the server's copy, which is kept in the trash.
-    let (_, out) = ask_push(&alice, &id, Some(&base), &stale, true).await;
+    // "Use the server's": the device's copy is kept in the trash, nothing else changes.
+    let (_, out) = alice
+        .rpc(
+            "party_sync_push",
+            json!({ "id": id, "baseSha": base, "editedAtMs": now_ms(), "contentBase64": b64(&device_copy_from(&fresh, "dropped")), "ask": true, "discard": true }),
+        )
+        .await;
+    assert_eq!(out["result"], "discarded", "{out}");
+    assert_eq!(out["sha256"], server_sha.as_str());
+    assert_eq!(player(data, &alice.id, &id), "fresh");
+    let dropped = trashed(data, &alice.id, "dropped");
+    assert_eq!(dropped.len(), 1);
+    assert!(
+        dropped[0].ends_with(&format!("-{id}.device.json")),
+        "{dropped:?}"
+    );
+    // "Keep mine" over a copy the user never saw (changed again since the conflict): a conflict again, nothing written.
+    let (_, out) = ask_push(
+        &alice,
+        &id,
+        Some(&base),
+        &stale,
+        Some("an older server copy"),
+    )
+    .await;
+    assert_eq!(out["result"], "conflict", "{out}");
+    assert_eq!(player(data, &alice.id, &id), "fresh");
+    // "Keep mine" over the copy the user saw: written, and the server's copy is kept in the trash.
+    let (_, out) = ask_push(&alice, &id, Some(&base), &stale, Some(&server_sha)).await;
     assert_eq!(out["result"], "applied", "{out}");
     assert_eq!(player(data, &alice.id, &id), "stale");
     assert_eq!(out["sha256"], sha256_hex(&stale).as_str());
@@ -678,7 +708,7 @@ async fn a_stale_push_from_a_device_that_asks_is_a_conflict_and_never_applied() 
         .await;
     assert_eq!(status, StatusCode::OK);
     let late = device_copy_from(&stale, "late");
-    let (_, out) = ask_push(&alice, &id, Some(&sha256_hex(&stale)), &late, false).await;
+    let (_, out) = ask_push(&alice, &id, Some(&sha256_hex(&stale)), &late, None).await;
     assert_eq!(out["result"], "conflict", "{out}");
     assert_eq!(out["sha256"], Value::Null);
     assert!(!character_file(data, &alice.id, &id).exists());
@@ -687,7 +717,19 @@ async fn a_stale_push_from_a_device_that_asks_is_a_conflict_and_never_applied() 
         "nothing of the device's copy is kept here"
     );
     // "Keep mine" brings it back.
-    let (_, out) = ask_push(&alice, &id, Some(&sha256_hex(&stale)), &late, true).await;
+    let (_, out) = ask_push(
+        &alice,
+        &id,
+        Some(&sha256_hex(&stale)),
+        &late,
+        Some(&server_sha),
+    )
+    .await;
+    assert_eq!(
+        out["result"], "conflict",
+        "a server copy is no deleted one: {out}"
+    );
+    let (_, out) = ask_push(&alice, &id, Some(&sha256_hex(&stale)), &late, Some("")).await;
     assert_eq!(out["result"], "applied", "{out}");
     assert_eq!(player(data, &alice.id, &id), "late");
 

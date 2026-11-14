@@ -12,7 +12,7 @@ import { expect, measureOverflow, open, signedInShell, test } from "./fixtures";
  * - the device goes offline and edits its copy; the server's copy changes meanwhile (another device);
  * - back online, the device's push (`ask`, from the old base) is a conflict: the server writes nothing;
  * - the page asks "Changed in two places" with Keep mine / Use the server's / Keep both, the same size, no sideways
- *   scroll; Keep mine is carried out with `force`, and the device's copy is then the server's.
+ *   scroll; Keep mine is carried out with `forceOver` (the server copy the user saw), and the device's copy is then the server's.
  * The sync logic itself is covered by ui/party/sync/sync.test.ts. Screenshots go to PARTY_SHOTS when it is set.
  */
 
@@ -88,13 +88,13 @@ test.describe("sync conflict", () => {
     expect(decode(server.contentBase64).meta.player).toBe("edited on another device");
 
     // The device records the conflict (as sync.ts does) and the page asks.
-    await page.evaluate(([uid, id, who]) => {
+    await page.evaluate(([uid, id, who, seen]) => {
       localStorage.setItem(`party.mirror.${uid}`, JSON.stringify({
         userId: uid, offsetMs: 0, lastSyncMs: Date.now(), packs: {}, pending: [], problems: {},
         characters: { [id]: { local: "L1", serverSha: "base", localSha: "edited", localMtime: "" } },
-        conflicts: { [id]: { name: who, deleted: false } },
+        conflicts: { [id]: { name: who, deleted: false, serverSha: seen, localSha: "edited" } },
       }));
-    }, [user.id, made.id, name]);
+    }, [user.id, made.id, name, other.sha256]);
     await page.reload();
     await signedInShell(page);
     const dialog = page.getByRole("dialog", { name: "Changed in two places" });
@@ -111,13 +111,15 @@ test.describe("sync conflict", () => {
     await page.waitForTimeout(500);
     await shot(page, testInfo, "dialog");
 
-    // Keep mine: the choice is kept for the next sync, the dialog goes, and the sync sends the copy with force.
+    // Keep mine: the choice is kept for the next sync, the dialog goes, and the sync sends the copy over the server copy
+    // the user saw (and no other).
     await choices[0]!.click();
     await expect(dialog).toHaveCount(0);
-    const chosen = await page.evaluate((uid) => JSON.parse(localStorage.getItem(`party.conflictChoices.${uid}`) ?? "{}") as Record<string, string>, user.id);
-    expect(chosen).toEqual({ [made.id]: "mine" });
+    const chosen = await page.evaluate((uid) => JSON.parse(localStorage.getItem(`party.conflictChoices.${uid}`) ?? "{}") as Record<string, unknown>, user.id);
+    // The choice is about the two copies the user saw.
+    expect(chosen).toEqual({ [made.id]: { choice: "mine", localSha: "edited", serverSha: other.sha256 } });
     const forced = await call<{ result: string }>("party_sync_push", {
-      id: made.id, baseSha: base.sha256, editedAtMs: Date.now(), contentBase64: encode(mine), ask: true, force: true,
+      id: made.id, baseSha: base.sha256, editedAtMs: Date.now(), contentBase64: encode(mine), ask: true, forceOver: other.sha256,
     });
     expect(forced.result).toBe("applied");
     const after = await call<{ contentBase64: string }>("party_sync_get", { id: made.id });

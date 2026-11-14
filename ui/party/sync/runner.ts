@@ -67,7 +67,7 @@ async function run(r: Runner): Promise<void> {
   try {
     const report = await syncOnce({ ...r, onProgress: (done, total) => publish({ state: "syncing", first, done, total }) });
     // Characters changed in two places: the dialog asks (pages/SyncConflicts.tsx).
-    conflictsChanged();
+    conflictsChanged(true);
     const problem = problemText(report);
     if (problem && unreachable()) {
       // Lost the signal part-way: the banner says so, and the sync runs again once the server answers.

@@ -15,6 +15,11 @@ export interface MirroredCharacter {
   localMtime: string;
   /** Found again after a lost record: `serverSha` is the server's file, not known to be this copy's base. */
   baseUnknown?: boolean;
+  /**
+   * The user chose the server's copy over this one, which is in the account's trash there: it is no edit, and the
+   * server's copy replaces it (tried again until it does).
+   */
+  discarded?: boolean;
 }
 
 export interface Mirror {
@@ -41,6 +46,11 @@ export interface SyncConflict {
   name: string;
   /** Deleted on the server, rather than changed: there is no server copy to use or keep beside it. */
   deleted: boolean;
+  /** The server copy's digest at the conflict (null: deleted), and the copy here then: a choice is about these two. */
+  serverSha: string | null;
+  localSha: string;
+  /** A chosen action the server refused: the dialog asks again and says why. */
+  error?: string;
 }
 
 const key = (userId: string) => `party.mirror.${userId}`;

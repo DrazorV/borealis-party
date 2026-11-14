@@ -1,6 +1,6 @@
 import type { Api, ApiError, ContentPack, ContentSource } from "../../src/api/contract";
 import { SKIP_KEY } from "../api/personality";
-import { asCopy, clearChoice, loadChoices } from "./conflicts";
+import { asCopy, clearChoice, copyName, loadChoices, saveChoice } from "./conflicts";
 import { addNotices, emptyMirror, heldByOthers, loadMirror, saveMirror, type Mirror } from "./mirror";
 
 /**
@@ -56,7 +56,7 @@ export interface SyncReport {
 
 /** The server's answer to `party_sync_push`: the digest of its file afterwards (none when deleted). */
 interface PushAnswer {
-  result: "applied" | "identical" | "kept-server" | "deleted" | "conflict";
+  result: "applied" | "identical" | "kept-server" | "deleted" | "conflict" | "discarded";
   sha256: string | null;
 }
 
@@ -285,6 +285,8 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
   const listed = new Map(localList.map((c) => [c.id, c.updatedAt]));
   for (const [s, m] of Object.entries(mirror.characters)) {
     const updatedAt = listed.get(m.local);
+    // Given up for the server's copy (kept in its trash): no edit, it is replaced below.
+    if (m.discarded) continue;
     if (updatedAt === undefined || updatedAt === m.localMtime) continue;
     try {
       const copy = await exported(local, m.local);
@@ -303,31 +305,58 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
   for (const s of Object.keys(mirror.conflicts)) {
     if (!edits.has(s) && !waiting.has(s)) { delete mirror.conflicts[s]; clearChoice(userId, s); }
   }
+  /** The server's character names, read once and only for Keep both. */
+  let serverNames: Map<string, string> | null = null;
+  const isNetwork = (e: unknown) => String((e as Partial<ApiError>)?.code) === "network";
   for (const [s, copy] of edits) {
     const m = mirror.characters[s]!;
     const name = names.get(m.local) || "A character";
     const updatedAt = listed.get(m.local) ?? "";
     const editedAtMs = Math.max(0, Math.round((Date.parse(updatedAt) || now()) + mirror.offsetMs));
     const conflict = mirror.conflicts[s];
-    const choice = conflict ? choices[s] : undefined;
-    if (choice === "server" || choice === "both") {
-      if (choice === "both" && !conflict!.deleted) {
-        // The copy here goes up as a character of its own first; only then is it replaced here.
-        try {
-          const made = await server("import_character", { fileName: `${s}.device.json`, contentBase64: asCopy(copy.data, name) }) as
-            { summary?: { id?: string } };
-          const id = made.summary?.id;
+    let chosen = conflict ? choices[s] : undefined;
+    // A choice covers the copy the user saw: an edit made here since is asked about again.
+    if (chosen && chosen.localSha !== copy.sha) { clearChoice(userId, s); chosen = undefined; }
+    /** The server refused the chosen action: the dialog asks again, saying why. */
+    const refused = (e: unknown, what: string) => {
+      mirror.conflicts[s] = { ...conflict!, error: `${what}: ${message(e)}` };
+      clearChoice(userId, s);
+      report.problems[s] = `${name}: ${what.toLowerCase()} (${message(e)}).`;
+      saveMirror(mirror);
+    };
+    if (chosen && (chosen.choice === "server" || chosen.choice === "both")) {
+      try {
+        if (chosen.choice === "both" && !conflict!.deleted) {
+          // The copy here goes up as a character of its own first, under a name fixed before it is sent: a repeat
+          // after a lost answer finds it there instead of making a second one.
+          serverNames ??= new Map((await server("list_characters") as { id: string; name: string }[]).map((c) => [c.name, c.id]));
+          if (!chosen.copyName) {
+            chosen = { ...chosen, copyName: copyName(name, serverNames.keys()) };
+            saveChoice(userId, s, chosen);
+          }
+          const as = chosen.copyName!;
+          let id = serverNames.get(as);
+          if (!id) {
+            const made = await server("import_character", { fileName: `${s}.device.json`, contentBase64: asCopy(copy.data, as) }) as
+              { summary?: { id?: string } };
+            id = made.summary?.id;
+            if (id) serverNames.set(as, id);
+          }
           if (id && !onServer.has(id)) { st.characters.push({ id, sha256: "" }); onServer.add(id); }
-          report.notes.push(`${name}: this device's copy was kept beside the server's, as "${name} (this device)".`);
-        } catch (e) {
-          if (String((e as Partial<ApiError>)?.code) === "network") throw e;
-          report.problems[s] = `Your copy of ${name} could not be kept beside the server's: ${message(e)}`;
-          continue;
+          report.notes.push(`${name}: this device's copy was kept beside the server's, as "${as}".`);
+        } else {
+          // The copy here is kept in the account's trash on the server before the server's replaces it.
+          await server("party_sync_push", { id: s, baseSha: m.serverSha, editedAtMs, contentBase64: copy.data, ask: true, discard: true });
         }
+      } catch (e) {
+        if (isNetwork(e)) throw e;
+        refused(e, chosen.choice === "both" ? "Your copy could not be kept beside the server's" : "Your copy could not be put in the trash");
+        continue;
       }
-      // The server's copy is fetched over this one below (or, deleted there, this one goes).
+      // The server's copy is fetched over this one below (or, deleted there, this one goes); until it is, the copy
+      // here is no edit (a failed fetch does not ask again).
       waiting.delete(s);
-      mirror.characters[s] = { ...m, serverSha: "", baseUnknown: undefined };
+      mirror.characters[s] = { ...m, serverSha: "", baseUnknown: undefined, discarded: true };
       delete mirror.conflicts[s];
       clearChoice(userId, s);
       saveMirror(mirror);
@@ -336,17 +365,21 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
     let answer: PushAnswer;
     try {
       answer = await server("party_sync_push", {
-        id: s, baseSha: m.baseUnknown ? null : m.serverSha, editedAtMs, contentBase64: copy.data,
-        ask: true, force: choice === "mine",
+        id: s, baseSha: m.baseUnknown ? null : m.serverSha, editedAtMs, contentBase64: copy.data, ask: true,
+        // Keep mine: over the server copy the user saw, and no other.
+        ...(chosen?.choice === "mine" ? { forceOver: chosen.serverSha ?? "" } : {}),
       }) as PushAnswer;
     } catch (e) {
-      if (String((e as Partial<ApiError>)?.code) === "network") throw e;
+      if (isNetwork(e)) throw e;
+      if (chosen) { refused(e, "Your copy could not be sent"); continue; }
       report.problems[s] = `Your changes to ${name} could not be sent: ${message(e)}`;
       continue;
     }
     if (answer.result === "conflict") {
-      // Nothing was taken on either side: the copy here waits, and the user chooses.
-      mirror.conflicts[s] = { name, deleted: answer.sha256 === null };
+      // Nothing was taken on either side: the copy here waits, and the user chooses (again, when the server's copy
+      // changed after the last choice).
+      mirror.conflicts[s] = { name, deleted: answer.sha256 === null, serverSha: answer.sha256, localSha: copy.sha };
+      clearChoice(userId, s);
       report.conflicts.push(s);
       saveMirror(mirror);
       continue;
