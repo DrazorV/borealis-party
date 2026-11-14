@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContentPack, ContentSource } from "../../src/api/contract";
 import { saveSession } from "../api/session";
 import { memoryStorage } from "../test/memoryStorage";
+import { chooseConflict, loadChoices, pendingConflicts } from "./conflicts";
 import { clearNotices, loadMirror, loadNotices } from "./mirror";
 import { lastSync, requestSync, resumeSync, startSync } from "./runner";
 import { syncOnce, type LocalApi, type ServerCall } from "./sync";
@@ -122,6 +123,12 @@ function fakeServer() {
     refuse: null as null | { code: string; message: string },
     /** Runs as a push arrives, after the state was read (a change made on the server in between). */
     beforePush: null as null | ((id: string) => void),
+    /** A 0.3.6 server: a push with `ask` from a stale base is a conflict, `force` writes it over. Off: the server before. */
+    asks: false,
+    /** Characters made by `import_character`, by id. */
+    imported: [] as string[],
+    /** `import_character` makes the character, then answers with this error (a lost answer, or a refusal). */
+    importThrows: null as null | { code: string; message: string },
   };
   const sha = (text: string) => `sha(${text})`;
   /** party_sync_push as the server decides it (sync.rs). */
@@ -139,6 +146,17 @@ function fakeServer() {
       state.edited.set(id, editedAtMs);
       return { result: "applied", sha256: sha(text) };
     };
+    if (state.asks && args.ask) {
+      if (args.discard) {
+        state.trash.push(text);
+        return { result: "discarded", sha256: current === undefined ? null : sha(current) };
+      }
+      if (current === text) return { result: "identical", sha256: sha(text) };
+      if (typeof args.forceOver === "string" && args.forceOver === (current === undefined ? "" : sha(current))) return take();
+      if (current !== undefined && baseSha === sha(current)) return take();
+      if (current === undefined && !state.deleted.has(id)) return take();
+      return { result: "conflict", sha256: current === undefined ? null : sha(current) };
+    }
     if (current !== undefined) {
       if (current === text) return { result: "identical", sha256: sha(text) };
       if (baseSha === sha(current) || editedAtMs > (state.edited.get(id) ?? 0)) return take();
@@ -173,6 +191,16 @@ function fakeServer() {
         if (!p) throw { code: "not_found", message: "That pack is not installed." };
         return { fileName: `${p.id}.json`, sha256: p.sha256, contentBase64: b64("{}") };
       }
+      case "import_character": {
+        const text = unb64(String(args?.contentBase64));
+        const id = `c_new${state.imported.length + 1}`;
+        state.imported.push(id);
+        state.characters.set(id, text);
+        if (state.importThrows) throw state.importThrows;
+        return { summary: { id } };
+      }
+      case "list_characters":
+        return [...state.characters].map(([id, text]) => ({ id, name: (JSON.parse(text) as { meta: { name: string } }).meta.name }));
       case "list_sources": return state.sources;
       case "get_settings": return state.settings;
       default: throw { code: "not_found", message: "The server does not offer that." };
@@ -695,4 +723,187 @@ it("signing out: one last sync after the one running, then none until the sign-o
   await requestSync();
   expect(states()).toBe(3);
   stop();
+});
+
+describe("offline conflict safety (0.3.6)", () => {
+  beforeEach(() => { server.state.asks = true; });
+
+  it("a stale edit is never sent over the server's copy, nor replaced by it: the copy waits and the user is asked", async () => {
+    await sync();
+    const mine = character("c_a", "Ana", 3);
+    const here = editHere("c_a", mine);
+    const theirs = character("c_a", "Ana", 20);
+    server.state.characters.set("c_a", theirs);
+    // Even a later edit time here changes nothing: the base decides.
+    server.state.edited.set("c_a", 1);
+    const report = await sync();
+    expect(report).toMatchObject({ pushed: 0, pulled: 0, conflicts: ["c_a"], waiting: ["c_a"], notices: [] });
+    expect(server.state.pushes.at(-1)).toMatchObject({ id: "c_a", baseSha: `sha(${character("c_a", "Ana")})` });
+    expect(server.state.characters.get("c_a")).toBe(theirs);
+    expect(server.state.trash).toEqual([]);
+    expect(local.state.files.get(here)?.text).toBe(mine);
+    expect(pendingConflicts("u1")).toMatchObject([{ id: "c_a", name: "Ana", deleted: false, serverSha: `sha(${theirs})` }]);
+    // Until the user chooses, every sync asks again and keeps both as they are.
+    await sync();
+    expect(server.state.characters.get("c_a")).toBe(theirs);
+    expect(local.state.files.get(here)?.text).toBe(mine);
+  });
+
+  it("Keep mine: the copy here is sent with force and goes over the server's", async () => {
+    await sync();
+    const mine = character("c_a", "Ana", 3);
+    const here = editHere("c_a", mine);
+    server.state.characters.set("c_a", character("c_a", "Ana", 20));
+    await sync();
+    chooseConflict("u1", "c_a", "mine");
+    expect(pendingConflicts("u1")).toEqual([]);
+    const report = await sync();
+    expect(report).toMatchObject({ pushed: 1, conflicts: [], waiting: [] });
+    expect(server.state.characters.get("c_a")).toBe(mine);
+    expect(local.state.files.get(here)?.text).toBe(mine);
+    expect(loadMirror("u1")!.conflicts).toEqual({});
+    expect(loadChoices("u1")).toEqual({});
+  });
+
+  it("Use the server's: the server's copy replaces the one here", async () => {
+    await sync();
+    const here = editHere("c_a", character("c_a", "Ana", 3));
+    const theirs = character("c_a", "Ana", 20);
+    server.state.characters.set("c_a", theirs);
+    await sync();
+    chooseConflict("u1", "c_a", "server");
+    const pushes = server.state.pushes.length;
+    const report = await sync();
+    // One push only: the copy here, to the trash.
+    expect(server.state.pushes.length).toBe(pushes + 1);
+    expect(report).toMatchObject({ pulled: 1, conflicts: [], waiting: [] });
+    expect(local.state.files.has(here)).toBe(false);
+    expect(localTexts()).toEqual([theirs, character("c_b", "Bo")]);
+    expect(server.state.characters.get("c_a")).toBe(theirs);
+    // The copy here is in the account's trash, not lost.
+    expect(server.state.trash).toEqual([character("c_a", "Ana", 3)]);
+  });
+
+  it("Keep both: the copy here becomes a new character beside the server's, and both are on the device", async () => {
+    await sync();
+    editHere("c_a", character("c_a", "Ana", 3));
+    const theirs = character("c_a", "Ana", 20);
+    server.state.characters.set("c_a", theirs);
+    await sync();
+    chooseConflict("u1", "c_a", "both");
+    const report = await sync();
+    expect(server.state.imported).toEqual(["c_new1"]);
+    const copy = JSON.parse(server.state.characters.get("c_new1")!) as { meta: { id?: string; name: string }; hp: number };
+    expect(copy).toEqual({ meta: { name: "Ana (this device)" }, hp: 3 });
+    expect(server.state.characters.get("c_a")).toBe(theirs);
+    expect(report).toMatchObject({ conflicts: [], waiting: [] });
+    expect(localTexts()).toEqual([theirs, character("c_b", "Bo"), server.state.characters.get("c_new1")].sort());
+  });
+
+  it("deleted on the server: asked too, with no Keep both; Use the server's removes the copy here", async () => {
+    await sync();
+    const here = editHere("c_a", character("c_a", "Ana", 3));
+    server.state.characters.delete("c_a");
+    server.state.deleted.set("c_a", 9000);
+    const report = await sync();
+    expect(report).toMatchObject({ conflicts: ["c_a"], removed: 0 });
+    expect(local.state.files.has(here)).toBe(true);
+    expect(pendingConflicts("u1")).toMatchObject([{ id: "c_a", name: "Ana", deleted: true, serverSha: null }]);
+    chooseConflict("u1", "c_a", "server");
+    expect(await sync()).toMatchObject({ removed: 1, conflicts: [] });
+    expect(local.state.files.has(here)).toBe(false);
+    expect(server.state.characters.has("c_a")).toBe(false);
+  });
+
+  it("a fresh edit (the server copy unchanged) is sent as before, with no question", async () => {
+    await sync();
+    const mine = character("c_a", "Ana", 3);
+    editHere("c_a", mine);
+    const report = await sync();
+    expect(report).toMatchObject({ pushed: 1, conflicts: [] });
+    expect(server.state.characters.get("c_a")).toBe(mine);
+    expect(pendingConflicts("u1")).toEqual([]);
+  });
+
+  /** Ana edited here and on the server: one conflict, as the dialog shows it. */
+  async function conflictOnAna(mine = character("c_a", "Ana", 3), theirs = character("c_a", "Ana", 20)) {
+    await sync();
+    const here = editHere("c_a", mine);
+    server.state.characters.set("c_a", theirs);
+    await sync();
+    return { here, mine, theirs };
+  }
+
+  it("Keep mine goes only over the server copy the user saw: a later server change is asked about again", async () => {
+    const { mine } = await conflictOnAna();
+    chooseConflict("u1", "c_a", "mine");
+    // The DM changes Ana again before the choice is carried out.
+    const later = character("c_a", "Ana", 25);
+    server.state.characters.set("c_a", later);
+    const report = await sync();
+    expect(server.state.characters.get("c_a")).toBe(later);
+    expect(report.conflicts).toEqual(["c_a"]);
+    expect(pendingConflicts("u1")).toMatchObject([{ id: "c_a", serverSha: `sha(${later})` }]);
+    // Chosen again, over the copy now seen: written.
+    chooseConflict("u1", "c_a", "mine");
+    await sync();
+    expect(server.state.characters.get("c_a")).toBe(mine);
+  });
+
+  it("a choice covers the copy the user saw: an edit made here after it is asked about again", async () => {
+    await conflictOnAna();
+    chooseConflict("u1", "c_a", "server");
+    const more = character("c_a", "Ana", 1);
+    const here = editHere("c_a", more, 3600);
+    const report = await sync();
+    expect(report.conflicts).toEqual(["c_a"]);
+    expect(local.state.files.get(here)?.text).toBe(more);
+    expect(server.state.trash).toEqual([]);
+    expect(loadChoices("u1")).toEqual({});
+    expect(pendingConflicts("u1")).toMatchObject([{ id: "c_a", localSha: expect.any(String) }]);
+  });
+
+  it("Use the server's whose fetch fails is not asked again: the next sync fetches it", async () => {
+    const { here, theirs } = await conflictOnAna();
+    chooseConflict("u1", "c_a", "server");
+    const call = server.call;
+    let fail = true;
+    const flaky: typeof call = async (command, args) => {
+      if (command === "party_sync_get" && fail) throw { code: "internal", message: "busy" };
+      return call(command, args);
+    };
+    const report = await syncOnce({ local: local.api, server: flaky, userId: "u1", now: () => 4000 });
+    expect(report.problems.c_a).toBeDefined();
+    expect(local.state.files.has(here)).toBe(true);
+    fail = false;
+    const pushes = server.state.pushes.length;
+    const next = await sync();
+    expect(next.conflicts).toEqual([]);
+    expect(server.state.pushes.length).toBe(pushes);
+    expect(localTexts()).toEqual([theirs, character("c_b", "Bo")]);
+  });
+
+  it("a refused choice comes back to the dialog with why, and can be chosen again", async () => {
+    await conflictOnAna();
+    chooseConflict("u1", "c_a", "both");
+    server.state.importThrows = { code: "invalid", message: "Too many characters" };
+    await sync();
+    expect(loadChoices("u1")).toEqual({});
+    expect(pendingConflicts("u1")).toMatchObject([{ id: "c_a", error: expect.stringContaining("Too many characters") }]);
+  });
+
+  it("Keep both after a lost answer makes no second copy, and copy names do not repeat", async () => {
+    server.state.characters.set("c_x", character("c_x", "Ana (this device)"));
+    await conflictOnAna();
+    chooseConflict("u1", "c_a", "both");
+    // The import lands, but its answer is lost.
+    server.state.importThrows = { code: "network", message: "lost" };
+    await expect(sync()).rejects.toMatchObject({ code: "network" });
+    server.state.importThrows = null;
+    await sync();
+    expect(server.state.imported).toEqual(["c_new1"]);
+    const copy = JSON.parse(server.state.characters.get("c_new1")!) as { meta: { name: string } };
+    expect(copy.meta.name).toBe("Ana (this device 2)");
+    expect(pendingConflicts("u1")).toEqual([]);
+  });
 });

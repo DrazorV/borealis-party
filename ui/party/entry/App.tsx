@@ -25,6 +25,7 @@ import { CombatHome } from "../pages/CombatHome";
 import { OfflinePage } from "../pages/OfflineBanner";
 import { IMPORT_PATH, OLD_IMPORT_PATH, setImportNavigate } from "../import/door";
 import { SharePage } from "../pages/SharePage";
+import { SyncConflicts } from "../pages/SyncConflicts";
 import { ShareReceivePage } from "../pages/ShareReceivePage";
 import { followReplaced } from "../sync/replaced";
 import { startSync } from "../sync/runner";
@@ -85,6 +86,8 @@ export function App() {
   return (
     <>
       <AccountBar />
+      {/* A character changed here offline and on the server: which copy stays (0.3.6). */}
+      <SyncConflicts />
       <Routes>
         <Route path="/account" element={<AppShell>{offline ? <OfflinePage /> : <AccountPage />}</AppShell>} />
         {/* An AI app asks to connect (OAuth consent, 0.3.1). */}

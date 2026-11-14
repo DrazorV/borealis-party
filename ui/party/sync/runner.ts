@@ -6,6 +6,7 @@ import { connectivity, holdReload, onBack } from "../api/connectivity";
 import { serverFetch } from "../api/http";
 import { liveEvents } from "../api/liveEvents";
 import { loadSession } from "../api/session";
+import { conflictsChanged } from "./conflicts";
 import { hasCopy } from "./mirror";
 import { rereadIfReplaced } from "./replaced";
 import { syncOnce, type LocalApi, type ServerCall, type SyncReport } from "./sync";
@@ -65,6 +66,8 @@ async function run(r: Runner): Promise<void> {
   const release = holdReload("sync");
   try {
     const report = await syncOnce({ ...r, onProgress: (done, total) => publish({ state: "syncing", first, done, total }) });
+    // Characters changed in two places: the dialog asks (pages/SyncConflicts.tsx).
+    conflictsChanged(true);
     const problem = problemText(report);
     if (problem && unreachable()) {
       // Lost the signal part-way: the banner says so, and the sync runs again once the server answers.
