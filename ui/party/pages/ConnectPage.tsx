@@ -165,7 +165,7 @@ export function ConnectPage({ again }: { again?: ServerSession } = {}) {
   return (
     <div className="party-connect">
       <form className="card party-connect-card" onSubmit={(e) => void (server ? submit(e) : submitAddress(e))}>
-        <h1>Borealis Party</h1>
+        <h1>Borealis Connect</h1>
         {again && (
           <p className="muted">
             Sign in again as {again.user.username} to send the changes made on this device. Until then they stay here.

@@ -58,7 +58,7 @@ export type Offer =
   | { kind: "app"; name: string; links: OfferLink[]; hint?: string }
   | { kind: "note"; note: string };
 
-const MAC_NOTE = "There is no macOS app yet. Borealis Party works here in your browser.";
+const MAC_NOTE = "There is no macOS app yet. Borealis Connect works here in your browser.";
 
 /**
  * Whether the browser runs on ARM: `userAgentData`'s architecture where the browser gives it (Chrome's user agent

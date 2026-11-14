@@ -1,6 +1,6 @@
 # MCP server (`/api/mcp`)
 
-Borealis Party serves the [Model Context Protocol](https://modelcontextprotocol.io) at `https://party.example.com/api/mcp`, so AI apps
+Borealis Connect serves the [Model Context Protocol](https://modelcontextprotocol.io) at `https://party.example.com/api/mcp`, so AI apps
 can search the bestiary, build and simulate encounters, read characters, and author homebrew as the signed-in
 account. No tool reads or changes a live combat (D25).
 
@@ -131,7 +131,7 @@ you want. Client menus change often; these were current on 2026-11-13.
 ### Claude Code
 
 ```bash
-claude mcp add --transport http borealis-party https://party.example.com/api/mcp --header "Authorization: Bearer bpt_your_token"
+claude mcp add --transport http borealis-connect https://party.example.com/api/mcp --header "Authorization: Bearer bpt_your_token"
 ```
 
 Without `--header`, Claude Code finds the OAuth metadata and signs in through the browser (run `/mcp`).
@@ -145,16 +145,19 @@ Without `--header`, Claude Code finds the OAuth metadata and signs in through th
 ### Claude Desktop (local, with a token): the stdio bridge
 
 The bridge is `borealis-party-mcp`, built from `party/crates/party-mcp-bridge`. It reads the address and the token
-from its environment only, never from arguments. Add it to `claude_desktop_config.json`:
+from its environment only, never from arguments: `BOREALIS_CONNECT_URL` and `BOREALIS_CONNECT_TOKEN`. The names from before the
+rename to Borealis Connect, `BOREALIS_PARTY_URL` and `BOREALIS_PARTY_TOKEN`, still work (each is read when its `BOREALIS_CONNECT_*`
+name is not set), and the binary keeps its name, so existing configs need no change. Add it to
+`claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "borealis-party": {
+    "borealis-connect": {
       "command": "/path/to/borealis-party-mcp",
       "env": {
-        "BOREALIS_PARTY_URL": "https://party.example.com",
-        "BOREALIS_PARTY_TOKEN": "bpt_your_token"
+        "BOREALIS_CONNECT_URL": "https://party.example.com",
+        "BOREALIS_CONNECT_TOKEN": "bpt_your_token"
       }
     }
   }
@@ -200,9 +203,9 @@ In `~/.gemini/settings.json` (Gemini CLI expands `$VAR` from the environment):
 ```json
 {
   "mcpServers": {
-    "borealis-party": {
+    "borealis-connect": {
       "httpUrl": "https://party.example.com/api/mcp",
-      "headers": { "Authorization": "Bearer $BOREALIS_PARTY_TOKEN" }
+      "headers": { "Authorization": "Bearer $BOREALIS_CONNECT_TOKEN" }
     }
   }
 }
@@ -215,9 +218,9 @@ In `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project):
 ```json
 {
   "mcpServers": {
-    "borealis-party": {
+    "borealis-connect": {
       "url": "https://party.example.com/api/mcp",
-      "headers": { "Authorization": "Bearer ${env:BOREALIS_PARTY_TOKEN}" }
+      "headers": { "Authorization": "Bearer ${env:BOREALIS_CONNECT_TOKEN}" }
     }
   }
 }

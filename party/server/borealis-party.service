@@ -1,5 +1,5 @@
 [Unit]
-Description=Borealis Party server
+Description=Borealis Connect server
 After=network-online.target
 Wants=network-online.target
 

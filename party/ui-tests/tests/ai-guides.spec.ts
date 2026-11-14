@@ -5,7 +5,7 @@ import { expect, measureOverflow, minTap, open, smallTargets, test } from "./fix
 /**
  * Account → AI apps (0.3.2) at 1440x900 (desktop-wide) and 384x832 (android-portrait):
  * - since 0.3.3 the only AI: connecting ChatGPT or Claude comes first, then the instructions, then keys, and the
- *   page says Borealis Party never calls an AI service itself; there is no "Your AI" card any more;
+ *   page says Borealis Connect never calls an AI service itself; there is no "Your AI" card any more;
  * - the connection guides in tabs (ChatGPT, Claude, Developer tools), with numbered steps and example prompts;
  * - the keys in their own collapsible section;
  * - the instructions for the assistant, read-only with Copy, as the real server sends them.
@@ -57,7 +57,7 @@ test("AI apps: connection guides, keys and the assistant's instructions", async 
   await expect(panel).toContainText("Add custom connector");
   await fits(page, testInfo, ".ai-guides");
   await tabs.getByRole("tab", { name: "Developer tools" }).click();
-  await expect(panel).toContainText(`claude mcp add --transport http borealis-party ${MCP}`);
+  await expect(panel).toContainText(`claude mcp add --transport http borealis-connect ${MCP}`);
   await fits(page, testInfo, ".ai-guides");
   await shot(page, testInfo, "dev");
 
@@ -93,8 +93,8 @@ test("AI apps comes first as the only AI: guides, then instructions, then keys; 
   else await page.goto("/#/account");
   const card = page.locator("section.ai-apps");
   await expect(card).toBeVisible({ timeout: 30_000 });
-  await expect(card).toContainText("Borealis Party uses your own ChatGPT or Claude");
-  await expect(card).toContainText("Borealis Party never calls an AI service itself.");
+  await expect(card).toContainText("Borealis Connect uses your own ChatGPT or Claude");
+  await expect(card).toContainText("Borealis Connect never calls an AI service itself.");
   await expect(page.getByRole("heading", { name: "Your AI" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Connect OpenRouter" })).toHaveCount(0);
 

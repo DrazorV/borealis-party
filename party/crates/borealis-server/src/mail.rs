@@ -102,9 +102,9 @@ impl Mailer for Recorder {
 /// The email that confirms an address.
 pub fn confirmation(username: &str, link: &str) -> (String, String) {
     (
-        "Confirm your Borealis Party email address".to_string(),
+        "Confirm your Borealis Connect email address".to_string(),
         format!(
-            "Hello {username},\n\nSomeone, hopefully you, asked for a Borealis Party account with this address. \
+            "Hello {username},\n\nSomeone, hopefully you, asked for a Borealis Connect account with this address. \
              Open this link to confirm it:\n\n{link}\n\nThe link works for 48 hours. If you didn't ask for an \
              account, ignore this email.\n"
         ),
@@ -114,9 +114,9 @@ pub fn confirmation(username: &str, link: &str) -> (String, String) {
 /// The email admins get about a new request.
 pub fn approval_needed(username: &str, email: &str, admin_page: &str) -> (String, String) {
     (
-        format!("Borealis Party: {username} asks for an account"),
+        format!("Borealis Connect: {username} asks for an account"),
         format!(
-            "{username} ({email}) asks for an account on your Borealis Party server.\n\n\
+            "{username} ({email}) asks for an account on your Borealis Connect server.\n\n\
              Approve or reject it on the admin page:\n\n{admin_page}\n"
         ),
     )

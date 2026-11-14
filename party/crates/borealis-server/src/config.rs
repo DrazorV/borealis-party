@@ -19,7 +19,7 @@ pub const DEFAULT_APP_DOWNLOAD: &str =
     "https://github.com/fortress-soft/borealis-connect/releases/latest/download";
 
 /// The file written on first start. Keep it in step with the defaults below (a test checks).
-pub const DEFAULT_FILE: &str = r#"# Borealis Party settings.
+pub const DEFAULT_FILE: &str = r#"# Borealis Connect settings.
 #
 # Any setting can also come from an environment variable named BOREALIS__<SECTION>__<KEY>, which wins over this file.
 # Put passwords there rather than here, for example BOREALIS__POSTGRES__PASSWORD.
@@ -88,7 +88,7 @@ data = "data"
 port = 587
 # user = "borealis@example.com"
 # password: set BOREALIS__SMTP__PASSWORD.
-# from = "Borealis Party <borealis@example.com>"
+# from = "Borealis Connect <borealis@example.com>"
 # "starttls" (usually port 587), "tls" (usually port 465) or "none" (a relay on a trusted network only).
 tls = "starttls"
 
@@ -214,7 +214,7 @@ impl Default for FeatureSettings {
     }
 }
 
-/// `[ai]`: the in-app assistant's settings, unused since 0.3.3 (Borealis Party never calls an AI service itself; AI
+/// `[ai]`: the in-app assistant's settings, unused since 0.3.3 (Borealis Connect never calls an AI service itself; AI
 /// apps connect to it over MCP). Still accepted, so a config file or a `BOREALIS__AI__*` variable from 0.3.1 or 0.3.2
 /// never stops the server from starting; main.rs logs once that they are no longer used.
 #[derive(Clone, Default, Serialize, Deserialize, PartialEq)]

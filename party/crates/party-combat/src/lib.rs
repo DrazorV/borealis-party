@@ -1,4 +1,4 @@
-//! The Borealis Party combat engine: pure, serializable combat state and the rules that change it.
+//! The Borealis Connect combat engine: pure, serializable combat state and the rules that change it.
 //!
 //! - [`CombatState`] is plain data: the roster, the turn, effects, legendary pools and encounter rules.
 //! - [`apply`] takes a state, an [`Actor`], a [`Command`] and a die, and returns the new state plus [`Events`]:

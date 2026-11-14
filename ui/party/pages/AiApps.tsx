@@ -10,7 +10,7 @@ import { AssistantInstructions, ConnectGuides } from "./AiAppsGuides";
 import "./AiApps.css";
 
 // The Account page's "AI apps & API tokens" (0.3.1, plan 4.5a part A; server: tokens.rs and oauth.rs). Since 0.3.3 it is
-// the only AI in Borealis Party: ChatGPT or Claude connect to it over MCP, and the server never calls an AI service.
+// the only AI in Borealis Connect: ChatGPT or Claude connect to it over MCP, and the server never calls an AI service.
 
 export interface ScopeInfo { id: string; label: string; default: boolean }
 
@@ -80,10 +80,10 @@ async function copy(text: string): Promise<boolean> {
 /** Setup lines for the popular clients, for a token just made. */
 export function setupSnippets(mcpUrl: string, token: string): { label: string; text: string }[] {
   return [
-    { label: "Claude Code", text: `claude mcp add --transport http borealis-party ${mcpUrl} --header "Authorization: Bearer ${token}"` },
+    { label: "Claude Code", text: `claude mcp add --transport http borealis-connect ${mcpUrl} --header "Authorization: Bearer ${token}"` },
     {
       label: "Other MCP clients (Cursor, Gemini CLI, Codex, …)",
-      text: JSON.stringify({ mcpServers: { "borealis-party": { url: mcpUrl, headers: { Authorization: `Bearer ${token}` } } } }, null, 2),
+      text: JSON.stringify({ mcpServers: { "borealis-connect": { url: mcpUrl, headers: { Authorization: `Bearer ${token}` } } } }, null, 2),
     },
   ];
 }
@@ -229,8 +229,8 @@ export function AiAppsCard() {
   return (
     <Card title="AI apps & API tokens" className="ai-apps">
       <p className="muted ai-lead">
-        Borealis Party uses your own ChatGPT or Claude: you connect the app to your account here, and your own plan
-        pays for it. Borealis Party never calls an AI service itself.
+        Borealis Connect uses your own ChatGPT or Claude: you connect the app to your account here, and your own plan
+        pays for it. Borealis Connect never calls an AI service itself.
       </p>
       <p className="muted">
         A connected app can do only what you can: DM-only actions still need you to be that party's DM, and players

@@ -1,4 +1,4 @@
-//! The curated SRD spell mechanics shipped with Borealis Party: `data/srd-5.1.json` and `data/srd-5.2.1.json`.
+//! The curated SRD spell mechanics shipped with Borealis Connect: `data/srd-5.1.json` and `data/srd-5.2.1.json`.
 //!
 //! Each table lists, per bundled SRD spell element id, a [`SpellMech`] with numbers and enums only (notes are our
 //! own words, never rules prose), and the fingerprint of the SRD text it was reviewed against (`srdTextSha`, FNV-1a

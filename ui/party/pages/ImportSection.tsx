@@ -439,7 +439,7 @@ export function ImportSection() {
       <Card title="5etools data" id={FIVETOOLS_CARD}>
         <p className="muted">{defaultUrl
           ? "Use the source your server offers, or your own, then choose the books."
-          : "Borealis Party comes with no 5etools address. Give the address of 5etools-format data, then choose the books."}{" "}
+          : "Borealis Connect comes with no 5etools address. Give the address of 5etools-format data, then choose the books."}{" "}
           Doing it again later re-imports the same books when they changed. Only use content you are entitled to use.</p>
         <div className="party-import-sources">
           {defaultUrl && (

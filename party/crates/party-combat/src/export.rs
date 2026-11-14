@@ -61,7 +61,7 @@ pub fn import_json(text: &str, seed: u32) -> Result<Combat, CombatError> {
         serde_json::from_str(text).map_err(|e| CombatError::Import(format!("not JSON ({e})")))?;
     if value.get("format").and_then(Value::as_str) != Some(EXPORT_FORMAT) {
         return Err(CombatError::Import(
-            "not a Borealis Party combat export".into(),
+            "not a Borealis Connect combat export".into(),
         ));
     }
     let version = value

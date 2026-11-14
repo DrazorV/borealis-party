@@ -51,14 +51,15 @@ manual install of a build with a new public key. If it leaks, someone could sign
 
 Apps installed before this change have no updater, and they call themselves 1.4.0. Install the first release with the
 updater by hand once. Windows may say a newer version is already installed: let it replace that version, or
-uninstall Borealis Party first (your characters stay in the data folder). After that, every release arrives in the
+uninstall Borealis Connect first (Windows lists it as "Borealis Party", the installed name it keeps; your characters stay in
+the data folder). After that, every release arrives in the
 app.
 
 ## Trying it on one machine
 
-A test copy with its own name and data folder, so an installed Borealis Party is never touched:
+A test copy with its own name and data folder, so an installed Borealis Connect is never touched:
 
-1. Write a config (`test-0.0.1.json`) with `"version": "0.0.1"`, `"productName": "Borealis Party Update Test"`,
+1. Write a config (`test-0.0.1.json`) with `"version": "0.0.1"`, `"productName": "Borealis Connect Update Test"`,
    `"mainBinaryName": "borealis-party-updatetest"`, `"identifier": "app.borealis.party.updatetest"`,
    `"bundle": {"createUpdaterArtifacts": true}` and `plugins.updater` with
    `"endpoints": ["http://127.0.0.1:8798/borealis-party-latest.json"]` and `"dangerousInsecureTransportProtocol": true`.

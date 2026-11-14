@@ -618,7 +618,7 @@ fn page(title: &str, text: &str) -> Html<String> {
          content=\"width=device-width, initial-scale=1\"><title>{title}</title></head>\
          <body style=\"font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 16px; \
          line-height: 1.5\"><h1 style=\"font-size: 1.4rem\">{title}</h1><p>{text}</p>\
-         <p><a href=\"/\">Open Borealis Party</a></p></body></html>"
+         <p><a href=\"/\">Open Borealis Connect</a></p></body></html>"
     ))
 }
 

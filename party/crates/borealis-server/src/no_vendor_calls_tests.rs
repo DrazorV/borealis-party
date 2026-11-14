@@ -1,8 +1,8 @@
-//! Borealis Party never calls an AI service itself (0.3.3, roadmap 4.5c): ChatGPT and Claude connect TO it over MCP
+//! Borealis Connect never calls an AI service itself (0.3.3, roadmap 4.5c): ChatGPT and Claude connect TO it over MCP
 //! and the user's own plan pays. This test reads the fork's own code, `party/` and `ui/party/`, and fails on any model
 //! vendor's API address or SDK, so the removed in-app assistant can't come back by accident.
 //!
-//! Prose is not code: `party/docs/` and READMEs may name vendors. The connection guides (how to add Borealis Party
+//! Prose is not code: `party/docs/` and READMEs may name vendors. The connection guides (how to add Borealis Connect
 //! to ChatGPT or Claude) are allowed to name the apps, and so are the allowed origins of those apps, which are the
 //! apps' own sites (chatgpt.com, chat.openai.com, claude.ai), not their APIs ([`APP_ORIGINS`]).
 
@@ -118,7 +118,7 @@ fn no_code_calls_a_model_vendor() {
     }
     assert!(
         found.is_empty(),
-        "Borealis Party must not call an AI service itself (AI apps connect to it over MCP):\n{}",
+        "Borealis Connect must not call an AI service itself (AI apps connect to it over MCP):\n{}",
         found.join("\n")
     );
 }

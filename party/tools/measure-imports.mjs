@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Times the long Borealis Party imports (plan item I0) against a server, signed in as a THROWAWAY account.
+// Times the long Borealis Connect imports (plan item I0) against a server, signed in as a THROWAWAY account.
 //
 //   node party/tools/measure-imports.mjs --server https://party.example.com --via-cloudflare \
 //     --index https://raw.githubusercontent.com/AuroraLegacy/elements/master/core.index \

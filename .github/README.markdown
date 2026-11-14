@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="/ui/party/public/favicon.svg" alt="Borealis Party" width="96">
+<img src="/ui/party/public/favicon.svg" alt="Borealis Connect" width="96">
 
-# Borealis Party
+# Borealis Connect
 
 **Borealis for the whole table: a self-hosted, multi-user server for playing fifth edition together.**
 
@@ -20,23 +20,23 @@
 
 ## Built on Borealis ❤️
 
-Borealis Party is an add-on to **[Borealis](https://github.com/TeamBorealis/borealis)**, the free and open-source
+Borealis Connect is an add-on to **[Borealis](https://github.com/TeamBorealis/borealis)**, the free and open-source
 character builder by **[TeamBorealis](https://github.com/TeamBorealis)**. The character builder, the rules and content
 engine, the character sheets and the importers are all their work. This fork adds only the multi-user part on top: the
 server, accounts and the party features.
 
-If you like Borealis Party, you like Borealis. Please give the
+If you like Borealis Connect, you like Borealis. Please give the
 **[original repository a star](https://github.com/TeamBorealis/borealis)**, try the
 **[desktop and phone apps](https://borealisbuilder.com)**, and come and say hi on the
 **[Borealis Discord](https://discord.gg/r4K4D3AJpZ)**.
 
-The two projects work together. Borealis Party stays a separate port, by agreement with the Borealis team, and the two
-coordinate releases: every Borealis Party release is built on a Borealis release, and fixes that belong in Borealis go
+The two projects work together. Borealis Connect stays a separate port, by agreement with the Borealis team, and the two
+coordinate releases: every Borealis Connect release is built on a Borealis release, and fixes that belong in Borealis go
 to them as pull requests.
 
 ## What it adds
 
-Borealis keeps everything on one device. Borealis Party puts the same app on a server you run, so a whole group can use
+Borealis keeps everything on one device. Borealis Connect puts the same app on a server you run, so a whole group can use
 it from any device:
 
 - **A self-hosted server.** One Docker image (`ghcr.io/fortress-soft/borealis-connect`), with SQLite or PostgreSQL. It runs
@@ -63,7 +63,7 @@ With Docker (or a Portainer stack), using SQLite:
 
 ```yaml
 services:
-  borealis-party:
+  borealis-connect:
     image: "ghcr.io/fortress-soft/borealis-connect:latest"
     ports:
       - "8787:8787/tcp"
@@ -71,6 +71,9 @@ services:
     volumes:
       - "/docker/borealis-party/config:/config"
 ```
+
+Servers set up before the rename to Borealis Connect keep their `borealis-party` service name; the host folder and the
+`BOREALIS__*` variables keep their names on every install.
 
 1. Start it and open `http://<server>:8787`. The first account you create becomes the admin.
 2. Everything the server keeps is in `/config`. Back up that folder to back up the server.
@@ -99,17 +102,17 @@ at all: every browser works too.
 
 ## Content and licensing
 
-Borealis Party ships only the System Reference Document content (SRD 5.1 and SRD 5.2.1) that Borealis includes. Any
+Borealis Connect ships only the System Reference Document content (SRD 5.1 and SRD 5.2.1) that Borealis includes. Any
 other content is what each player imports into their own account, for their own use.
 
 ### Licence
 
-Like Borealis, Borealis Party is dual-licensed under **[MIT](/LICENSE-MIT)** OR **[Apache-2.0](/LICENSE-APACHE)**, at
+Like Borealis, Borealis Connect is dual-licensed under **[MIT](/LICENSE-MIT)** OR **[Apache-2.0](/LICENSE-APACHE)**, at
 your option. Borealis's copyright and notices are kept unchanged ([NOTICE](/NOTICE)).
 
 ## Support
 
-Borealis Party is a hobby project. If it brings your table together, you can buy me a coffee:
+Borealis Connect is a hobby project. If it brings your table together, you can buy me a coffee:
 
 <a href="https://buymeacoffee.com/drazorv"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="45"></a>
 

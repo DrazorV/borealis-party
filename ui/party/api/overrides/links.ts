@@ -64,7 +64,7 @@ export const COPY_TITLE = "Open in your browser";
 /** Shows the address with Copy link, for a page the device could not open. */
 async function offerCopy(url: string, deps: LinkDeps): Promise<void> {
   const message = createElement("div", null,
-    createElement("p", null, "Borealis Party couldn't open this page. Copy the address and open it in your web browser:"),
+    createElement("p", null, "Borealis Connect couldn't open this page. Copy the address and open it in your web browser:"),
     createElement("p", { className: "party-link-address", style: { wordBreak: "break-all", userSelect: "text" } }, url));
   const answer = await deps.ask(COPY_TITLE, message, [{ id: "copy", label: "Copy link" }, { id: "close", label: "Close" }]);
   if (answer !== "copy") return;

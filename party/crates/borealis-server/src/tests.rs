@@ -2065,7 +2065,7 @@ async fn receive_flow(router: Router, data: &Path) {
 
     // New: it comes in, as the recipient's own copy to edit.
     let preview = bob.open_bundle("hero.borealis", &bundle).await;
-    assert_eq!(preview["sourceDevice"], "another Borealis Party account");
+    assert_eq!(preview["sourceDevice"], "another Borealis Connect account");
     assert_eq!(actions(&preview), one("character", "new"), "{preview}");
     assert_eq!(bob.accept_bundle(&preview).await["added"], 1);
     // The same again is identical.

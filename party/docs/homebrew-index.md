@@ -4,7 +4,7 @@ An account makes its own content in the app: spells, feats, items, magic items, 
 backgrounds, class features, archetypes and their features, and monsters. Elements are written as standard Aurora XML and
 checked by the same engine that loads the account's characters. A pack can then be **built into a standard `.index`
 plus its element files for the author's own repository** (for example a GitHub repository). Others subscribe to that
-repository's `.index` in Borealis Party, plain Borealis or Aurora.
+repository's `.index` in Borealis Connect, plain Borealis or Aurora.
 
 **The server never hosts or publishes an index** (the user's decision D47: copyright risk). Index creation is for people
 whose own local agent, or their own hands, put the files in their own git and push them. The server answers the files as

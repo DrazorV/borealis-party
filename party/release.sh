@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tags a Borealis Party release on main: party-v<version from party/Cargo.toml>, with the Borealis release it is built on
+# Tags a Borealis Connect release on main: party-v<version from party/Cargo.toml>, with the Borealis release it is built on
 # in the tag message. Checks first; pushes nothing.
 # Usage: bash party/release.sh [--unreleased]
 #   --unreleased  allow Borealis commits that are newer than its last release (say why in the release notes)
@@ -54,6 +54,6 @@ based="Based on Borealis ${base#v}."
 if [ "$ahead" -gt 0 ]; then
     based="Based on Borealis ${base#v}, plus $ahead newer Borealis commits up to $(git merge-base HEAD upstream/main | cut -c1-7)."
 fi
-git tag -a "$tag" -m "Borealis Party $version" -m "$based"
+git tag -a "$tag" -m "Borealis Connect $version" -m "$based"
 echo "tagged $tag: $based"
 echo "push it with: git push origin $tag"

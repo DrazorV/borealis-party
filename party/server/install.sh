@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installs or upgrades the Borealis Party service from an unpacked release. Run as root from the release folder.
+# Installs or upgrades the Borealis Connect service from an unpacked release. Run as root from the release folder.
 # Characters, accounts and content in /var/lib/borealis-party are never touched.
 set -eu
 
@@ -31,5 +31,5 @@ install -m 0644 "$here/borealis-party.service" /etc/systemd/system/borealis-part
 systemctl daemon-reload
 systemctl enable --now borealis-party
 
-echo "Borealis Party is running. Settings: /var/lib/borealis-party/config.toml (passwords: /etc/borealis-party/server.env)"
+echo "Borealis Connect is running. Settings: /var/lib/borealis-party/config.toml (passwords: /etc/borealis-party/server.env)"
 echo "Logs: journalctl -u borealis-party -f"

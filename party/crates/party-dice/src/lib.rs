@@ -1,4 +1,4 @@
-//! Dice for Borealis Party combat: a Rust port of `ui/src/lib/dice.ts`.
+//! Dice for Borealis Connect combat: a Rust port of `ui/src/lib/dice.ts`.
 //!
 //! - **Notation:** `1d8+3`, `2d6`, `d20`, `1d4+1d6+2` ([`parse_notation`]), and the dice of a printed damage text
 //!   such as `1d8+3 slashing + 1d6 fire` ([`damage_dice`]).
