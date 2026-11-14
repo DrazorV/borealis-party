@@ -1,6 +1,6 @@
 name: Party image
 
-# Builds the Borealis Party server image from main and pushes it to ghcr.io/fortress-soft/meadhall.
+# Builds the Borealis Party server image from main and pushes it to ghcr.io/fortress-soft/borealis-connect.
 # Tags: latest, sha-<short commit>, and the version in party/Cargo.toml.
 # This file belongs to the fork (party/check-upstream.sh accepts .github/workflows/party-*.yml).
 on:
@@ -26,11 +26,11 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/fortress-soft/meadhall
+  IMAGE: ghcr.io/fortress-soft/borealis-connect
 
 jobs:
   image:
-    if: github.repository == 'fortress-soft/meadhall'
+    if: github.repository == 'fortress-soft/borealis-connect'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:

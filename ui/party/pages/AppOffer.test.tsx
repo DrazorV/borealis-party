@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { memoryStorage } from "../test/memoryStorage";
 
-const env = vi.hoisted(() => ({ tauri: false, folder: "https://github.com/fortress-soft/meadhall/releases/latest/download" as string | null, asked: 0 }));
+const env = vi.hoisted(() => ({ tauri: false, folder: "https://github.com/fortress-soft/borealis-connect/releases/latest/download" as string | null, asked: 0 }));
 vi.mock("../../src/lib/tauri", () => ({ isTauri: () => env.tauri }));
 vi.mock("../api/party", () => ({
   checkServer: async () => { env.asked += 1; return { app: "borealis-party", appDownload: env.folder }; },
@@ -21,7 +21,7 @@ const device = (userAgent: string) => vi.spyOn(navigator, "userAgent", "get").mo
 beforeEach(() => {
   vi.stubGlobal("localStorage", memoryStorage());
   env.tauri = false;
-  env.folder = "https://github.com/fortress-soft/meadhall/releases/latest/download";
+  env.folder = "https://github.com/fortress-soft/borealis-connect/releases/latest/download";
   env.asked = 0;
   forgetDownloadFolderForTests();
 });
@@ -34,7 +34,7 @@ it("offers the APK on an Android browser, with the address to enter", async () =
   device(PIXEL);
   render(<AppOffer />);
   const link = await screen.findByRole("link", { name: /download the app/i });
-  expect(link.getAttribute("href")).toBe("https://github.com/fortress-soft/meadhall/releases/latest/download/borealis-party-arm64.apk");
+  expect(link.getAttribute("href")).toBe("https://github.com/fortress-soft/borealis-connect/releases/latest/download/borealis-party-arm64.apk");
   expect(screen.getByText(window.location.origin.replace(/^https?:\/\//, ""), { exact: false })).toBeTruthy();
 });
 
@@ -44,15 +44,15 @@ it("offers an iPhone the app to sideload, says how, and links the other systems'
   expect(await screen.findByText("Get the iPhone and iPad app.")).toBeTruthy();
   expect(screen.getByText(/AltStore, SideStore or Sideloadly/)).toBeTruthy();
   expect(screen.getByRole("link", { name: /Download the app/ }).getAttribute("href"))
-    .toBe("https://github.com/fortress-soft/meadhall/releases/latest/download/borealis-party-ios-unsigned.ipa");
-  expect(screen.getByRole("link", { name: "Other systems" }).getAttribute("href")).toBe("https://github.com/fortress-soft/meadhall/releases/latest");
+    .toBe("https://github.com/fortress-soft/borealis-connect/releases/latest/download/borealis-party-ios-unsigned.ipa");
+  expect(screen.getByRole("link", { name: "Other systems" }).getAttribute("href")).toBe("https://github.com/fortress-soft/borealis-connect/releases/latest");
 });
 
 it("offers Windows its installer", async () => {
   device(WINDOWS);
   render(<AppOffer />);
   expect(await screen.findByText("Get the Windows app.")).toBeTruthy();
-  expect(screen.getByRole("link", { name: /download the installer/i }).getAttribute("href")).toBe("https://github.com/fortress-soft/meadhall/releases/latest/download/borealis-party-windows-x64-setup.exe");
+  expect(screen.getByRole("link", { name: /download the installer/i }).getAttribute("href")).toBe("https://github.com/fortress-soft/borealis-connect/releases/latest/download/borealis-party-windows-x64-setup.exe");
 });
 
 it("offers Linux the AppImage, then the .deb", async () => {
@@ -61,9 +61,9 @@ it("offers Linux the AppImage, then the .deb", async () => {
   await screen.findByText("Get the Linux app.");
   const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
   expect(hrefs).toEqual([
-    "https://github.com/fortress-soft/meadhall/releases/latest/download/borealis-party-linux-x86_64.AppImage",
-    "https://github.com/fortress-soft/meadhall/releases/latest/download/borealis-party-linux-amd64.deb",
-    "https://github.com/fortress-soft/meadhall/releases/latest",
+    "https://github.com/fortress-soft/borealis-connect/releases/latest/download/borealis-party-linux-x86_64.AppImage",
+    "https://github.com/fortress-soft/borealis-connect/releases/latest/download/borealis-party-linux-amd64.deb",
+    "https://github.com/fortress-soft/borealis-connect/releases/latest",
   ]);
 });
 
