@@ -56,8 +56,7 @@ function StatLine({ stats }: { stats: CardStats }) {
   const band = bandOf(stats);
   const dcs = stats.spellDcs.map((d) => d.dc);
   return (
-    <>
-      <div className="party-stats" role="list" aria-label="Numbers">
+    <div className="party-stats" role="list" aria-label="Numbers">
         <span role="listitem" className={`party-stat party-stat-hp ${band ?? ""}`} aria-label={`Hit points ${stats.hp} of ${stats.hpMax}${stats.tempHp ? `, ${stats.tempHp} temporary` : ""}`}>
           <span className="party-stat-label">HP</span>
           <span className="party-stat-value">{stats.hp}<span className="muted">/{stats.hpMax}</span>{stats.tempHp > 0 && <span className="party-stat-temp"> +{stats.tempHp}</span>}</span>
@@ -68,15 +67,19 @@ function StatLine({ stats }: { stats: CardStats }) {
         {dcs.length > 0 && (
           <span role="listitem" className="party-stat" aria-label={`Spell save DC ${dcs.join(", ")}`}><span className="party-stat-label">DC</span><span className="party-stat-value">{dcs.join("/")}</span></span>
         )}
-      </div>
-      {(stats.concentration || stats.exhaustion > 0 || stats.inspiration) && (
-        <div className="party-conditions">
-          {stats.concentration && <Chip tone="info">Concentrating: {stats.concentration}</Chip>}
-          {stats.exhaustion > 0 && <Chip tone="warning">Exhaustion {stats.exhaustion}</Chip>}
-          {stats.inspiration && <Chip tone="gold">Inspiration</Chip>}
-        </div>
-      )}
-    </>
+    </div>
+  );
+}
+
+/** Concentration, exhaustion and inspiration, under the numbers. */
+function Conditions({ stats }: { stats: CardStats }) {
+  if (!stats.concentration && !(stats.exhaustion > 0) && !stats.inspiration) return null;
+  return (
+    <div className="party-conditions">
+      {stats.concentration && <Chip tone="info">Concentrating: {stats.concentration}</Chip>}
+      {stats.exhaustion > 0 && <Chip tone="warning">Exhaustion {stats.exhaustion}</Chip>}
+      {stats.inspiration && <Chip tone="gold">Inspiration</Chip>}
+    </div>
   );
 }
 
@@ -105,6 +108,7 @@ function MemberRow({ member, dm, partyId, onRemove, onLeave }: {
         {member.state === "unreadable" && <Chip tone="warning" title="The file is there but can't be read">Unreadable</Chip>}
         {member.state === "missing" && <Chip tone="warning" title="The character's file is gone">Missing</Chip>}
       </div>
+      <div className="party-member-body">
       {member.stats && <StatLine stats={member.stats} />}
       {(member.ownerId && (dm || member.mine)) && (
         <div className="party-member-actions">
@@ -116,6 +120,8 @@ function MemberRow({ member, dm, partyId, onRemove, onLeave }: {
           {dm && !member.mine && <Button small variant="danger" onClick={onRemove}>Remove</Button>}
         </div>
       )}
+      </div>
+      {member.stats && <Conditions stats={member.stats} />}
     </li>
   );
 }
@@ -155,24 +161,32 @@ function PartyCard({ party, act, open }: {
   const invites = party.invites ?? [];
   const mismatch = editionToSwitchTo(party);
   return (
-    <Card className={`party-card ${dm ? "party-card-dm" : "party-card-player"}`} aria-label={party.name} title={party.name}
-      actions={<Chip tone={dm ? "gold" : "accent"}>{dm ? "DM" : "Player"}</Chip>}>
-      {!dm && <p className="muted party-note">DM: {party.dmName}</p>}
-      <div className="party-edition-line">
-        <span className="grow">Edition: <strong>{EDITION[party.ruleset]}</strong>
-          {mismatch && <span className="muted party-note">Most of its characters use {EDITION[mismatch]}.</span>}
+    <Card className={`party-card ${dm ? "party-card-dm" : "party-card-player"}`} aria-label={party.name}>
+      {/* One header row: the name, the edition (with Change edition inline for the DM) and the role badge. */}
+      <header className="party-card-head">
+        <h2 className="party-card-name">{party.name}</h2>
+        <span className="party-edition-line">
+          <span className="muted">Edition:</span> <strong>{EDITION[party.ruleset]}</strong>
+          {dm && <button type="button" className="party-link" onClick={() => open({ kind: "edition", party })}>Change edition</button>}
         </span>
-        {dm && <Button small onClick={() => open({ kind: "edition", party })}>Change edition</Button>}
-      </div>
-      <EncounterTeaser partyId={party.id} dm={dm} />
-      {dm && (
-        <div className="party-actions">
+        <span className="party-card-badge"><Chip tone={dm ? "gold" : "accent"}>{dm ? "DM" : "Player"}</Chip></span>
+      </header>
+      {(mismatch || !dm) && (
+        <p className="muted party-note party-card-meta">
+          {!dm && <>DM: {party.dmName}</>}
+          {mismatch && <>{!dm ? " · " : ""}Most of its characters use {EDITION[mismatch]}.</>}
+        </p>
+      )}
+      {/* The DM's one toolbar: Encounters first, Delete apart on the right. A player sees the next encounter. */}
+      {dm ? (
+        <div className="party-actions" role="toolbar" aria-label={`${party.name} actions`}>
+          <EncounterTeaser partyId={party.id} dm />
           <Button small icon="send" variant="primary" onClick={() => open({ kind: "invite", party })}>Invite</Button>
           <Button small icon="plus" onClick={() => open({ kind: "add-own", party })}>Add my character</Button>
           <Button small icon="pen" onClick={() => open({ kind: "rename", party })}>Rename</Button>
-          <Button small icon="trash" variant="danger" onClick={() => void destroy()}>Delete</Button>
+          <Button small icon="trash" variant="danger" className="party-actions-end" onClick={() => void destroy()}>Delete</Button>
         </div>
-      )}
+      ) : <EncounterTeaser partyId={party.id} dm={false} />}
       <h3 className="party-sub">Characters</h3>
       {party.members.length === 0
         ? <p className="muted">{dm ? "No characters yet. Invite your players." : "No characters yet."}</p>
