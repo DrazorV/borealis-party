@@ -213,6 +213,8 @@ export interface EffectSpec {
   dismiss_on_end?: boolean;
   /** It ends when its target takes damage. */
   ends_on_damage?: boolean;
+  /** It ends when its target attacks or casts (Invisibility): the "It attacked: end" reminder, never automatic. */
+  ends_on_attack?: boolean;
 }
 
 /** `derive::effective_ac` (0.3.2 breakdown): "15 = Mage Armor 13 + DEX 2". */
@@ -350,7 +352,7 @@ export type Primitive =
   | { kind: "damage"; dice: Formula; damage_type?: DamageType; choice?: DamageType[] }
   | { kind: "heal"; dice: Formula; add_mod?: boolean }
   | { kind: "temp_hp"; dice: Formula; add_mod?: boolean }
-  | { kind: "condition"; condition: Condition; repeat_save?: { ability: AbilityName; at: Boundary }; ends_on_damage?: boolean }
+  | { kind: "condition"; condition: Condition; repeat_save?: { ability: AbilityName; at: Boundary }; ends_on_damage?: boolean; ends_on_attack?: boolean }
   | { kind: "ac_base"; base: number; add_dex?: boolean }
   | { kind: "ac_bonus"; n: number }
   | { kind: "ac_min"; n: number }
@@ -519,7 +521,7 @@ export type Command =
   | { command: "cancel_cast"; cast: string; refund?: boolean }
   | { command: "apply_zone"; effect: number; targets: string[]; rows?: RowInput[]; amounts?: AmountRoll[]; id?: string }
   | { command: "perform_statblock"; id: string; ability: string; spec?: CastSpec; targets?: string[];
-      rows?: RowInput[]; amounts?: AmountRoll[]; crit_amounts?: AmountRoll[]; force?: boolean; cast_id?: string }
+      rows?: RowInput[]; amounts?: AmountRoll[]; crit_amounts?: AmountRoll[]; force?: boolean; cast_id?: string; as_reaction?: boolean }
   | { command: "standard_action"; id: string; action: StandardActionKind; target?: string; bonus?: boolean }
   | { command: "bind_to_concentration"; id: string };
 

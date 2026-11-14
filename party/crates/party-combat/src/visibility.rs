@@ -288,6 +288,7 @@ pub const EFFECT_DM_ONLY: &[&str] = &[
     "spell",
     "dismiss_on_end",
     "ends_on_damage",
+    "ends_on_attack",
 ];
 
 /// Combat state keys that reach players only through this module's functions (the turn pointer, the visible

@@ -850,6 +850,9 @@ pub enum Primitive {
         /// It ends when the target takes damage.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         ends_on_damage: bool,
+        /// It ends when the target attacks or casts a spell (Invisibility): a reminder button, never automatic.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ends_on_attack: bool,
     },
     /// The base AC becomes `base` (+ DEX): Mage Armor 13 + DEX. The best base counts; it never lowers AC.
     AcBase {
