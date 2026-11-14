@@ -78,7 +78,7 @@ async fn every_route_is_still_registered() {
             trusted_proxies: Vec::new(),
         }),
         login_limiter: RateLimiter::logins(),
-        signup_limiter: RateLimiter::signups(),
+        signup_limiter: RateLimiter::signups(crate::auth::SIGNUPS_ALLOWED),
         mailer: None,
         accounts: Arc::new(tokio::sync::Mutex::new(())),
         started: std::time::Instant::now(),

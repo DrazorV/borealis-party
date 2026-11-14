@@ -98,6 +98,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       BOREALIS__PATHS__CONTENT: content,
       BOREALIS__DATABASE__TYPE: "sqlite",
       BOREALIS__LOG__LEVEL: process.env.BOREALIS__LOG__LEVEL ?? "warn",
+      // Every spec signs up from 127.0.0.1; the default 10 an hour runs out in one full run (CI, 0.3.6).
+      BOREALIS__SERVER__SIGNUPS_PER_HOUR: "10000",
     };
     for (const [name, a] of Object.entries(ACCOUNTS)) {
       const args = ["add-user", name, "--email", a.email, ...(a.admin ? ["--admin"] : [])];

@@ -82,9 +82,9 @@ impl RateLimiter {
         Self::new(FAILED_LOGINS_ALLOWED, FAILED_LOGIN_WINDOW)
     }
 
-    /// The limiter for sign-ups.
-    pub fn signups() -> Self {
-        Self::new(SIGNUPS_ALLOWED, SIGNUP_WINDOW)
+    /// The limiter for sign-ups: `per_hour` per client address (`[server] signups_per_hour`, at least 1).
+    pub fn signups(per_hour: usize) -> Self {
+        Self::new(per_hour.max(1), SIGNUP_WINDOW)
     }
 
     fn blocked(&self, key: &str) -> bool {

@@ -471,7 +471,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             trusted_proxies: settings.server.trusted_proxies.clone(),
         }),
         login_limiter: RateLimiter::logins(),
-        signup_limiter: RateLimiter::signups(),
+        signup_limiter: RateLimiter::signups(settings.server.signups_per_hour),
         mailer,
         accounts: Arc::new(tokio::sync::Mutex::new(())),
         started: std::time::Instant::now(),

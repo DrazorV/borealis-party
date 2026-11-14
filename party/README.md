@@ -65,6 +65,7 @@ Put passwords in variables rather than in the file.
 | `BOREALIS__SERVER__PUBLIC_UPLOAD_MB` | `95` | Largest upload through the public address, in MB (see [Upload size](#upload-size)) |
 | `BOREALIS__SERVER__APP_DOWNLOAD` | the latest GitHub release | Folder URL the website offers the apps from; `off` offers none |
 | `BOREALIS__SERVER__TRUSTED_PROXIES` | | Reverse proxies allowed to name the client, such as `172.20.20.100`; commas between entries (see [Security and proxies](#security-and-proxies)) |
+| `BOREALIS__SERVER__SIGNUPS_PER_HOUR` | `10` | Sign-ups allowed per client address per hour; raise it for an event where everyone shares one address |
 | `BOREALIS__IMPORT__DEFAULT_5ETOOLS_URL` | | A 5etools-format source the Import section offers every account in one tap (an https:// GitHub repository or data folder you are entitled to use). None ships with the server; Admin › Settings › Default 5etools source wins over this |
 | `BOREALIS__DATABASE__TYPE` | `sqlite` | `sqlite` or `postgres` |
 | `BOREALIS__SQLITE__PATH` | `party.db` | SQLite file, relative to the config folder |

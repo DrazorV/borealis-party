@@ -53,6 +53,8 @@ public_upload_mb = 95
 # client looks like the proxy: one sign-up limit for everyone, and failed sign-ins lock a name for everyone.
 # Empty: the headers are ignored and the connecting address is the client. As a variable, separate with commas.
 trusted_proxies = []
+# Sign-ups allowed per client address per hour (10). Raise it for a table event where everyone shares one address.
+# signups_per_hour = 10
 
 [database]
 # "sqlite" (a file in this folder) or "postgres" (your own server, see [postgres]).
@@ -288,6 +290,8 @@ pub struct ServerSettings {
     pub app_download: Option<String>,
     /// Reverse proxies whose client headers are believed ([`crate::auth::ClientIp`]).
     pub trusted_proxies: Vec<String>,
+    /// Sign-ups allowed per client address per hour ([`crate::auth::SIGNUPS_ALLOWED`] by default; at least 1).
+    pub signups_per_hour: usize,
 }
 
 impl Default for ServerSettings {
@@ -301,6 +305,7 @@ impl Default for ServerSettings {
             public_upload_mb: 95,
             app_download: None,
             trusted_proxies: Vec::new(),
+            signups_per_hour: crate::auth::SIGNUPS_ALLOWED,
         }
     }
 }
