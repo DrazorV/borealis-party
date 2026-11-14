@@ -444,6 +444,49 @@ const TABLES: &[(&str, &[(&str, Column)])] = &[
             ("tokens", Column::Int),
         ],
     ),
+    (
+        "spell_mechanics",
+        &[
+            ("account_id", Column::Text),
+            ("spell_key", Column::Text),
+            ("ruleset", Column::Text),
+            ("kind", Column::Text),
+            ("alias_name", Column::Text),
+            ("def_json", Column::Text),
+            ("schema_v", Column::Int),
+            ("rev", Column::Int),
+            ("origin", Column::Text),
+            ("source_hash", Column::Text),
+            ("created_at", Column::Int),
+            ("updated_at", Column::Int),
+        ],
+    ),
+    (
+        "encounter_casts",
+        &[
+            ("id", Column::Text),
+            ("encounter_id", Column::Text),
+            ("caster_creature_id", Column::Text),
+            ("sort", Column::Int),
+            ("spell_key", Column::Text),
+            ("name", Column::Text),
+            ("slot_level", Column::OptInt),
+            ("targets_json", Column::Text),
+            ("choices_json", Column::Text),
+            ("created_at", Column::Int),
+        ],
+    ),
+    (
+        "spell_meta",
+        &[
+            ("owner_id", Column::Text),
+            ("element_id", Column::Text),
+            ("pack_id", Column::Text),
+            ("pack_rev", Column::Text),
+            ("raw_json", Column::Text),
+            ("captured_at", Column::Int),
+        ],
+    ),
 ];
 
 /// Tests: every table the copy moves, with its columns as `text`, `int` (never NULL) or `optint`.

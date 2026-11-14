@@ -884,6 +884,7 @@ dependencies = [
  "party-combat",
  "party-encounter",
  "party-sim",
+ "party-spells",
  "party-tools",
  "rand 0.9.5",
  "reqwest",

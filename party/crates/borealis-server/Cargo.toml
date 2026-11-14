@@ -27,6 +27,8 @@ borealis-import-5etools = { path = "../../../crates/borealis-import-5etools" }
 party-encounter = { path = "../party-encounter" }
 # The combat engine (combat.rs): pure state, commands and the seeded die.
 party-combat = { path = "../party-combat" }
+# Spell data (0.3.2, spells.rs): the curated SRD mechanics, one spell per edition, and drafts from 5etools tags.
+party-spells = { path = "../party-spells" }
 # The AI tool registry, the dry-run simulator and the MCP envelope (mcp.rs, tools_backend.rs).
 party-tools = { path = "../party-tools" }
 # Homebrew authoring (homebrew.rs): the Aurora XML reader the importer uses, and the zip a pack exports as.

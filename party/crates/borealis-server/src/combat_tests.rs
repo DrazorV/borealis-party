@@ -719,6 +719,15 @@ async fn leak_suite(t: &Table) {
         "undo",
         "no_such_action",
         "Death_Save",
+        // Spells (0.3.2): the DM's casts, and the one a player may answer (their own PC's row).
+        "cast_spell",
+        "resolve_cast_row",
+        "apply_cast",
+        "cancel_cast",
+        "apply_zone",
+        "perform_statblock",
+        "standard_action",
+        "bind_to_concentration",
     ];
     for action in actions {
         for id in &ids {
@@ -727,6 +736,8 @@ async fn leak_suite(t: &Table) {
                 json!({ "id": id, "name": "Bless" }),
                 json!({ "promptId": id, "applied": true }),
                 json!({ "target": id, "parts": [{ "amount": typed(1) }] }),
+                json!({ "caster": id, "spellKey": "ID_2024_SPELL_FIREBALL", "slot": 3, "targets": [id] }),
+                json!({ "cast": id, "target": id, "roll": typed(10) }),
             ] {
                 let body = json!({ "requestId": request_id(), "args": args }).to_string();
                 routes.push(("POST".into(), format!("/api/combats/{c}/{action}"), body));
@@ -1991,6 +2002,7 @@ async fn combats_on_postgres() {
     summons_and_companions(&postgres_table(&url, &dir.path().join("summons")).await).await;
     live_and_unblocked(&postgres_table(&url, &dir.path().join("live")).await).await;
     companions_from_an_encounter(&postgres_table(&url, &dir.path().join("companions")).await).await;
+    spells_in_combat(&postgres_table(&url, &dir.path().join("spells")).await).await;
     drop_all(&url).await;
 }
 
@@ -2610,4 +2622,415 @@ async fn companions_from_an_encounter(t: &Table) {
 async fn encounter_companions_start_with_their_printed_or_rolled_numbers() {
     let dir = tempfile::tempdir().unwrap();
     companions_from_an_encounter(&memory_table(dir.path()).await).await;
+}
+
+// Spells in combat (0.3.2): precast spells with their real effect and slot, the legacy custom effect's slot, a live
+// cast with a player's own save row (the caster hidden), a summon spell's notice and a creature bound to its
+// caster's concentration, and what players never get: the casting numbers, definitions, spell keys and the hidden
+// caster.
+
+const MAGE_2014: &str = "ID_SRD51_MONSTER_MAGE";
+const OWLBEAR_2014: &str = "ID_SRD51_MONSTER_OWLBEAR";
+const MAGE_ARMOR_2014: &str = "ID_PHB_SPELL_MAGE_ARMOR";
+const FIREBALL_2014: &str = "ID_PHB_SPELL_FIREBALL";
+const CONJURE_ANIMALS_2014: &str = "ID_PHB_SPELL_CONJURE_ANIMALS";
+
+fn combatant_in<'a>(view: &'a Value, id: &str) -> &'a Value {
+    view["state"]["combatants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == id)
+        .unwrap_or_else(|| panic!("no {id}"))
+}
+
+fn state_of(view: &Value) -> CombatState {
+    serde_json::from_value(view["state"].clone()).unwrap()
+}
+
+fn slots_left(view: &Value, id: &str, level: u8) -> u64 {
+    combatant_in(view, id)["spell_slots"][level.to_string()]["remaining"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("no level {level} slots: {}", combatant_in(view, id)))
+}
+
+/// What a player must never see of the spells in this fight.
+fn spell_leaks(text: &str, mage: &str, mage_src: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    for s in [
+        "SECRET-MAGE",
+        mage,
+        mage_src,
+        MAGE_2014,
+        MAGE_ARMOR_2014,
+        FIREBALL_2014,
+        CONJURE_ANIMALS_2014,
+        "\"mech\"",
+        "\"casting\"",
+        "\"spec\"",
+        "\"stats\"",
+        "Fireball",
+        "Mage Armor",
+    ] {
+        if !s.is_empty() && text.contains(s) {
+            found.push(s.to_string());
+        }
+    }
+    found
+}
+
+#[allow(clippy::too_many_lines)]
+async fn spells_in_combat(t: &Table) {
+    // A 2014 party with the player's character, and an encounter with a hidden SRD 5.1 Mage and a revealed owlbear.
+    let (status, party) =
+        t.dm.post(
+            "/api/parties",
+            json!({ "name": "Spell Party", "ruleset": "dnd2014" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{party}");
+    let party = party["id"].as_str().unwrap().to_string();
+    join(
+        &t.dm,
+        &party,
+        "Spell Party",
+        &t.player,
+        "cbt-player",
+        "Hero Three",
+    )
+    .await;
+    let e = ok(
+        &t.dm,
+        "POST",
+        &format!("/api/parties/{party}/encounters"),
+        json!({ "name": "Tower", "publicName": "Tower" }),
+    )
+    .await;
+    let enc = e["id"].as_str().unwrap().to_string();
+    let path = format!("/api/encounters/{enc}/creatures");
+    let v = ok(
+        &t.dm,
+        "POST",
+        &path,
+        json!({ "elementId": MAGE_2014, "dmLabel": "SECRET-MAGE", "hidden": true }),
+    )
+    .await;
+    let mage_src = last_creature(&v);
+    let v = ok(
+        &t.dm,
+        "POST",
+        &path,
+        json!({ "elementId": OWLBEAR_2014, "dmLabel": "Bear", "publicName": "Owlbear", "hidden": false }),
+    )
+    .await;
+    let bear_src = last_creature(&v);
+
+    // Precast spells: checked against the encounter and the DM's own content.
+    let casts = format!("/api/encounters/{enc}/casts");
+    for (bad, why) in [
+        (
+            json!({ "casterId": "nobody", "spellKey": MAGE_ARMOR_2014, "slotLevel": 1 }),
+            "not a creature here",
+        ),
+        (
+            json!({ "casterId": mage_src, "spellKey": "ID_NO_SUCH_SPELL", "slotLevel": 1 }),
+            "not installed",
+        ),
+        (
+            json!({ "casterId": mage_src, "spellKey": FIREBALL_2014, "slotLevel": 2 }),
+            "below the spell's level",
+        ),
+        (
+            json!({ "casterId": mage_src, "spellKey": FIREBALL_2014, "slotLevel": 10 }),
+            "no such slot",
+        ),
+        (
+            json!({ "casterId": mage_src, "spellKey": "ID_2024_SPELL_MAGE_ARMOR", "slotLevel": 1 }),
+            "the other edition",
+        ),
+        (
+            json!({ "casterId": mage_src, "spellKey": MAGE_ARMOR_2014, "slotLevel": 1, "targets": ["elsewhere"] }),
+            "a target not here",
+        ),
+        (
+            json!({ "casterId": mage_src, "spellKey": MAGE_ARMOR_2014, "choices": { "script": 1 } }),
+            "choices that don't fit",
+        ),
+        (
+            json!({ "casterId": mage_src, "spellKey": MAGE_ARMOR_2014, "extra": 1 }),
+            "an unknown field",
+        ),
+    ] {
+        let (status, out) = t.dm.post(&casts, bad.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{why}: {out}");
+    }
+    let v = ok(
+        &t.dm,
+        "POST",
+        &casts,
+        json!({ "casterId": mage_src, "spellKey": MAGE_ARMOR_2014, "slotLevel": 1, "targets": ["self"] }),
+    )
+    .await;
+    assert_eq!(v["casts"][0]["name"], "Mage Armor", "{v}");
+    assert!(v.get("castWarning").is_none());
+    let cast_id = v["casts"][0]["id"].as_str().unwrap().to_string();
+    let v = ok(
+        &t.dm,
+        "PATCH",
+        &format!("{casts}/{cast_id}"),
+        json!({ "slotLevel": 1 }),
+    )
+    .await;
+    assert_eq!(v["casts"].as_array().unwrap().len(), 1);
+    // The legacy "Custom effect" with a slot level spends that slot too.
+    ok(
+        &t.dm,
+        "POST",
+        &format!("/api/encounters/{enc}/effects"),
+        json!({ "creatureId": mage_src, "name": "Old ward", "slotLevel": 1 }),
+    )
+    .await;
+    // Players see no precast spells, and can't write them.
+    ok(
+        &t.dm,
+        "PATCH",
+        &format!("/api/encounters/{enc}"),
+        json!({ "status": "ready", "playerVisible": true }),
+    )
+    .await;
+    let (status, seen) = t.player.get(&format!("/api/encounters/{enc}")).await;
+    assert_eq!(status, StatusCode::OK, "{seen}");
+    assert!(seen.get("casts").is_none(), "{seen}");
+    let text = seen.to_string();
+    assert!(
+        spell_leaks(&text, "", &mage_src).is_empty(),
+        "{:?} in {text}",
+        spell_leaks(&text, "", &mage_src)
+    );
+    let (status, _) = t
+        .player
+        .post(
+            &casts,
+            json!({ "casterId": bear_src, "spellKey": MAGE_ARMOR_2014 }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Start: Mage Armor is on the mage with its real effect (12 -> 15), and two level 1 slots are spent.
+    let dm_view = ok(
+        &t.dm,
+        "POST",
+        &format!("/api/encounters/{enc}/start"),
+        json!({ "requestId": request_id() }),
+    )
+    .await;
+    let combat = dm_view["id"].as_str().unwrap().to_string();
+    let mage = find_by_label(&dm_view, "SECRET-MAGE");
+    let bear = find_by_label(&dm_view, "Bear");
+    let pc = pc_of(&dm_view, &t.player.id);
+    assert_eq!(slots_left(&dm_view, &mage, 1), 2, "precast + custom effect");
+    assert_eq!(slots_left(&dm_view, &mage, 3), 3);
+    let st = state_of(&dm_view);
+    let m = st.combatant(&CombatantId::new(mage.clone())).unwrap();
+    assert_eq!(
+        party_combat::derive::effective_ac(&st, m).total,
+        Some(15),
+        "Mage Armor: 13 + DEX 2"
+    );
+    assert!(
+        st.effects.iter().any(|e| e
+            .spec
+            .spell
+            .as_ref()
+            .is_some_and(|s| s.key == MAGE_ARMOR_2014)),
+        "{:?}",
+        st.effects
+    );
+
+    // Casting is the DM's: a player gets the one 404, whatever they send.
+    for action in [
+        "cast_spell",
+        "apply_cast",
+        "cancel_cast",
+        "apply_zone",
+        "perform_statblock",
+        "standard_action",
+        "bind_to_concentration",
+    ] {
+        let (status, out) = act(&t.player, &combat, action, json!({ "caster": pc })).await;
+        assert_eq!(
+            (status, out["message"].as_str()),
+            (StatusCode::NOT_FOUND, Some(NOT_FOUND)),
+            "{action}"
+        );
+    }
+    let (status, out) = act(
+        &t.dm,
+        &combat,
+        "cast_spell",
+        json!({ "spellKey": FIREBALL_2014 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "no caster: {out}");
+    let (status, out) = act(
+        &t.dm,
+        &combat,
+        "cast_spell",
+        json!({ "caster": mage, "spellKey": "ID_NO_SUCH_SPELL", "slot": 3 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "not installed: {out}");
+    let (status, out) = act(
+        &t.dm,
+        &combat,
+        "cast_spell",
+        json!({ "caster": mage, "spellKey": FIREBALL_2014, "slot": 3, "precast": true,
+                "targets": [bear], "force": true }),
+    )
+    .await;
+    // A client's `precast` is dropped: this is a live cast, which spends a slot like any other.
+    assert_eq!(status, StatusCode::OK, "{out}");
+    act_ok(
+        &t.dm,
+        &combat,
+        "cancel_cast",
+        json!({ "cast": out["state"]["casts"][0]["id"], "refund": true }),
+    )
+    .await;
+
+    // A live Fireball (compiled on the server from the curated SRD row): the DM types the owlbear's save, the
+    // player's PC waits for its player.
+    let v = act_ok(
+        &t.dm,
+        &combat,
+        "cast_spell",
+        json!({ "caster": mage, "spellKey": FIREBALL_2014, "slot": 3, "targets": [bear, pc], "force": true,
+                "rows": [{ "target": bear, "roll": typed(4) }] }),
+    )
+    .await;
+    assert_eq!(slots_left(&v, &mage, 3), 2);
+    let pending = &v["state"]["casts"][0];
+    let cast = pending["id"].as_str().unwrap().to_string();
+    assert!(cast.len() > 20, "a random id, not a count: {cast}");
+    assert_eq!(pending["spec"]["dc"], 14, "the mage's DC: {pending}");
+    assert_eq!(pending["spec"]["origin"]["kind"], "srd", "{pending}");
+    // The player sees only their own row, the caster unnamed while hidden.
+    let (_, pv) = t.player.get(&format!("/api/combats/{combat}")).await;
+    let rows = pv["casts"].as_array().unwrap_or_else(|| panic!("{pv}"));
+    assert_eq!(rows.len(), 1, "{pv}");
+    assert_eq!(rows[0]["target"], pc.as_str());
+    assert_eq!(rows[0]["ability"], "dex");
+    assert_eq!(rows[0]["dc"], 14);
+    assert!(
+        rows[0].get("from").is_none() && rows[0].get("spell").is_none(),
+        "{pv}"
+    );
+    let text = pv.to_string();
+    assert!(
+        spell_leaks(&text, &mage, &mage_src).is_empty(),
+        "{:?} in {text}",
+        spell_leaks(&text, &mage, &mage_src)
+    );
+    // Another player of the party sees no row; they can't answer the PC's row or the owlbear's.
+    let (_, other) = t.member2.get(&format!("/api/parties/{party}/combat")).await;
+    assert!(
+        other.get("casts").is_none_or(|c| c == &json!([])),
+        "{other}"
+    );
+    let (status, _) = act(
+        &t.player,
+        &combat,
+        "resolve_cast_row",
+        json!({ "cast": cast, "target": bear, "roll": typed(20) }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // The player answers their own row with their dice.
+    act_ok(
+        &t.player,
+        &combat,
+        "resolve_cast_row",
+        json!({ "cast": cast, "target": pc, "roll": typed(18) }),
+    )
+    .await;
+    let bear_hp = combatant_in(&v, &bear)["hp"]["current"].as_i64().unwrap();
+    let v = act_ok(
+        &t.dm,
+        &combat,
+        "apply_cast",
+        json!({ "cast": cast, "amounts": [{ "kind": "typed", "total": 20 }] }),
+    )
+    .await;
+    assert_eq!(
+        combatant_in(&v, &bear)["hp"]["current"].as_i64().unwrap(),
+        bear_hp - 20,
+        "the failed save takes it all"
+    );
+    assert!(
+        v["state"]["casts"].as_array().is_none_or(Vec::is_empty),
+        "applied: {}",
+        v["state"]["casts"]
+    );
+
+    // Conjure Animals: no spawn, a notice for the toast; the DM adds the beasts, controlled by and bound to the mage.
+    let v = act_ok(
+        &t.dm,
+        &combat,
+        "cast_spell",
+        json!({ "caster": mage, "spellKey": CONJURE_ANIMALS_2014, "slot": 3, "force": true }),
+    )
+    .await;
+    let notice = v["notices"]
+        .as_array()
+        .and_then(|n| n.iter().find(|e| e["event"] == "summon_options"))
+        .unwrap_or_else(|| panic!("no summon notice: {}", v["notices"]));
+    assert_eq!(notice["caster"], mage.as_str());
+    assert_eq!(notice["concentration"], true);
+    assert_eq!(notice["info"]["creature_types"][0], "beast", "{notice}");
+    let before = v["state"]["combatants"].as_array().unwrap().len();
+    assert_eq!(before, combatants_of(&v).len());
+    let (status, out) = act(
+        &t.dm,
+        &combat,
+        "add_creature",
+        json!({ "copyOf": bear, "controlledBy": bear, "bindConcentration": true }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "the owlbear concentrates on nothing: {out}"
+    );
+    let v = act_ok(
+        &t.dm,
+        &combat,
+        "add_creature",
+        json!({ "copyOf": bear, "count": 2, "controlledBy": mage, "bindConcentration": true }),
+    )
+    .await;
+    let beasts: Vec<String> = combatants_of(&v)
+        .iter()
+        .filter(|c| c["owner_id"] == mage.as_str())
+        .map(|c| c["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(beasts.len(), 2, "{}", v["state"]);
+    // The concentration ends: the bound beasts go with it.
+    let v = act_ok(&t.dm, &combat, "end_concentration", json!({ "id": mage })).await;
+    for b in &beasts {
+        assert_eq!(combatant_in(&v, b)["removed"], true, "{b}");
+    }
+    // A player still sees nothing of the casting or the mage.
+    let (_, pv) = t.player.get(&format!("/api/combats/{combat}")).await;
+    let text = pv.to_string();
+    assert!(
+        spell_leaks(&text, &mage, &mage_src).is_empty(),
+        "{:?} in {text}",
+        spell_leaks(&text, &mage, &mage_src)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn spells_cast_in_combat_with_their_slots_and_nothing_reaches_players() {
+    let dir = tempfile::tempdir().unwrap();
+    spells_in_combat(&memory_table(dir.path()).await).await;
 }

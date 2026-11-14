@@ -102,6 +102,11 @@ pub(crate) fn routes_if(on: bool) -> axum::Router<AppState> {
             "/api/encounters/{encounter}/effects/{effect}",
             patch(update_effect).delete(remove_effect),
         )
+        .route("/api/encounters/{encounter}/casts", post(add_cast))
+        .route(
+            "/api/encounters/{encounter}/casts/{cast}",
+            patch(update_cast).delete(remove_cast),
+        )
         .route("/api/encounters/{encounter}/rules", post(add_rule))
         .route(
             "/api/encounters/{encounter}/rules/{rule}",
@@ -628,7 +633,10 @@ async fn dm_view(state: &AppState, id: &str) -> ApiResult<Value> {
         rules(state, id).await?,
         warnings(&enc.ruleset, &list, &members),
     );
-    Ok(view_for(Viewer::Dm, &enc, &list, Some(extra)))
+    let mut view = view_for(Viewer::Dm, &enc, &list, Some(extra));
+    // Precast spells: the DM's only (never in a player's projection).
+    view["casts"] = json!(casts(state, id).await?);
+    Ok(view)
 }
 
 /// What players see of an encounter now: its projection, or nothing while it isn't player-visible (or is gone).
@@ -1098,6 +1106,15 @@ struct AddForm {
     init_mode: Option<String>,
 }
 
+/// The creature's automation data kept with its copy (0.3.2): the raw 5etools `spellcasting` blocks of the DM's
+/// import, which the monster spellbook (`party-encounter`) reads at combat start; `None` without any (SRD and Aurora
+/// creatures have only their text). DM-only: never in a player's projection.
+async fn automation_of(state: &AppState, owner: &str, element: &str) -> ApiResult<Option<String>> {
+    Ok(crate::bestiary::spellcasting_of(state, owner, element)
+        .await?
+        .map(|raw| json!({ "v": 1, "fivetools": { "spellcasting": raw } }).to_string()))
+}
+
 /// `POST /api/encounters/{encounter}/creatures`: copy a creature from the DM's content into the encounter, on its
 /// own or controlled by another one (`ownerId`).
 pub async fn add_creatures(
@@ -1128,6 +1145,7 @@ pub async fn add_creatures(
     let (snapshot, pack) = copy_creature(&state, &user.id, &element)
         .await?
         .ok_or_else(|| invalid("That creature isn't in your content."))?;
+    let automation = automation_of(&state, &user.id, &element).await?;
     let before = players_see(&state, &id).await?;
     let same = i64::try_from(list.iter().filter(|c| c.element_id == element).count()).unwrap_or(0);
     let base_label = label.unwrap_or_else(|| snapshot.name.chars().take(70).collect());
@@ -1167,8 +1185,8 @@ pub async fn add_creatures(
         sqlx::query(
             "INSERT INTO encounter_creatures (id, encounter_id, sort, kind, dm_label, public_name, element_id, pack_id,
                  pack_rev, statblock_json, overrides_json, hp_mode, visibility, revealed_at, owner_creature_id,
-                 init_mode, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, '{}', 'encounter', $11, $12, $13, $14, $15, $16)",
+                 init_mode, created_at, updated_at, automation_json)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, '{}', 'encounter', $11, $12, $13, $14, $15, $16, $17)",
         )
         .bind(uuid::Uuid::new_v4().to_string())
         .bind(&id)
@@ -1186,6 +1204,7 @@ pub async fn add_creatures(
         .bind(&init_mode)
         .bind(at)
         .bind(at)
+        .bind(&automation)
         .execute(&mut *tx)
         .await?;
         sort += 1;
@@ -1421,16 +1440,18 @@ pub async fn refresh_creature(
             "encounter": dm_view(&state, &id).await?,
         })));
     };
+    let automation = automation_of(&state, &user.id, &c.element_id).await?;
     let before = players_see(&state, &id).await?;
     sqlx::query(
         "UPDATE encounter_creatures SET statblock_json = $1, pack_id = $2, pack_rev = $3, overrides_json = $4,
-             updated_at = $5 WHERE id = $6",
+             updated_at = $5, automation_json = $6 WHERE id = $7",
     )
     .bind(serde_json::to_string(&fresh).map_err(internal)?)
     .bind(&pack)
     .bind(fresh.rev())
     .bind(serde_json::to_string(&overrides).map_err(internal)?)
     .bind(now())
+    .bind(&automation)
     .bind(&cid)
     .execute(state.db.pool())
     .await?;
@@ -1466,10 +1487,11 @@ pub async fn swap_creature(
     let (snapshot, pack) = copy_creature(&state, &user.id, &element)
         .await?
         .ok_or_else(|| invalid("That creature isn't in your content."))?;
+    let automation = automation_of(&state, &user.id, &element).await?;
     let before = players_see(&state, &id).await?;
     sqlx::query(
         "UPDATE encounter_creatures SET element_id = $1, pack_id = $2, pack_rev = $3, statblock_json = $4, kind = $5,
-             overrides_json = '{}', updated_at = $6 WHERE id = $7",
+             overrides_json = '{}', updated_at = $6, automation_json = $7 WHERE id = $8",
     )
     .bind(&element)
     .bind(&pack)
@@ -1477,6 +1499,7 @@ pub async fn swap_creature(
     .bind(serde_json::to_string(&snapshot).map_err(internal)?)
     .bind(snapshot.kind.as_str())
     .bind(now())
+    .bind(&automation)
     .bind(&cid)
     .execute(state.db.pool())
     .await?;
@@ -1755,6 +1778,295 @@ pub async fn remove_effect(
     let before = players_see(&state, &id).await?;
     sqlx::query("DELETE FROM encounter_effects WHERE id = $1 AND encounter_id = $2")
         .bind(&eid)
+        .bind(&id)
+        .execute(state.db.pool())
+        .await?;
+    finish(&state, &enc, before).await
+}
+
+// Precast spells (0.3.2): they replace "Starting effect" (legacy effects stay, as "Custom effect"). Cast when combat
+// starts, with the spell's real effect, spending the caster's slot (combat.rs `precast`).
+
+/// Precast spells one encounter may have, and targets one may name.
+const MAX_CASTS: i64 = 40;
+const MAX_CAST_TARGETS: usize = 20;
+/// Largest `choices` object, in bytes of JSON.
+const MAX_CHOICES: usize = 4 * 1024;
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CastForm {
+    #[serde(default)]
+    caster_id: Option<String>,
+    #[serde(default)]
+    spell_key: Option<String>,
+    #[serde(default, deserialize_with = "some")]
+    slot_level: Option<Option<i64>>,
+    /// Creature ids of the encounter, or `self`.
+    #[serde(default)]
+    targets: Option<Vec<String>>,
+    #[serde(default)]
+    choices: Option<Value>,
+}
+
+/// An encounter's precast spells. None while the database has no `encounter_casts` yet (a binary newer than its
+/// schema, as the upgrade tests seed older schemas through these routes); start-up adds the table.
+async fn casts(state: &AppState, encounter: &str) -> ApiResult<Vec<Value>> {
+    let rows = match sqlx::query(
+        "SELECT id, caster_creature_id, sort, spell_key, name, slot_level, targets_json, choices_json
+         FROM encounter_casts WHERE encounter_id = $1 ORDER BY sort, id",
+    )
+    .bind(encounter)
+    .fetch_all(state.db.pool())
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!("encounters: precast spells not read: {e}");
+            return Ok(Vec::new());
+        }
+    };
+    rows.iter()
+        .map(|r| {
+            let targets: String = r.try_get(6)?;
+            let choices: String = r.try_get(7)?;
+            Ok(json!({
+                "id": r.try_get::<String, _>(0)?,
+                "casterId": r.try_get::<String, _>(1)?,
+                "sort": r.try_get::<i64, _>(2)?,
+                "spellKey": r.try_get::<String, _>(3)?,
+                "name": r.try_get::<String, _>(4)?,
+                "slotLevel": r.try_get::<Option<i64>, _>(5)?,
+                "targets": serde_json::from_str::<Value>(&targets).unwrap_or_else(|_| json!([])),
+                "choices": serde_json::from_str::<Value>(&choices).unwrap_or_else(|_| json!({})),
+            }))
+        })
+        .collect::<sqlx::Result<_>>()
+        .map_err(Into::into)
+}
+
+/// A precast as stored.
+struct CastFields {
+    caster: String,
+    key: String,
+    name: String,
+    slot: Option<i64>,
+    targets: String,
+    choices: String,
+    concentration: bool,
+}
+
+/// A precast as sent, checked against the encounter and the DM's own content: the spell must be installed (its one
+/// copy for the party's edition), a slot is 1 to 9 and never below the spell's level, targets are the encounter's
+/// creatures (or `self`), and the choices fit the engine's closed `CastChoices`.
+async fn cast_fields(
+    state: &AppState,
+    enc: &Encounter,
+    form: CastForm,
+    ids: &[String],
+    old: Option<&Value>,
+) -> ApiResult<CastFields> {
+    let had = |k: &str| old.map_or(Value::Null, |o| o[k].clone());
+    let caster = match form.caster_id {
+        Some(c) => c,
+        None => had("casterId")
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| invalid("Choose who casts the spell."))?,
+    };
+    if !ids.contains(&caster) {
+        return Err(invalid("The caster isn't a creature of this encounter."));
+    }
+    let key = match form.spell_key {
+        Some(k) => k,
+        None => had("spellKey")
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| invalid("Choose a spell."))?,
+    };
+    if key.is_empty() || key.len() > 200 {
+        return Err(invalid("Choose a spell."));
+    }
+    let spell = crate::spells::canonical(state, &enc.dm_id, &key)
+        .await?
+        .ok_or_else(|| invalid("That spell isn't in your content."))?;
+    if spell.ruleset != enc.ruleset && spell.ruleset != "any" {
+        return Err(invalid("That spell is of the other edition."));
+    }
+    let slot = match form.slot_level {
+        Some(s) => s,
+        None => had("slotLevel").as_i64(),
+    };
+    if let Some(l) = slot {
+        if !(1..=9).contains(&l) {
+            return Err(invalid("A spell slot level is 1 to 9."));
+        }
+        if spell.level.is_some_and(|level| l < i64::from(level)) {
+            return Err(invalid("That slot is below the spell's level."));
+        }
+        if spell.level == Some(0) {
+            return Err(invalid("A cantrip uses no slot."));
+        }
+    }
+    let targets: Vec<String> = match form.targets {
+        Some(t) => t,
+        None => serde_json::from_value(had("targets")).unwrap_or_default(),
+    };
+    if targets.len() > MAX_CAST_TARGETS {
+        return Err(invalid("A precast spell names at most 20 targets."));
+    }
+    if targets.iter().any(|t| t != "self" && !ids.contains(t)) {
+        return Err(invalid("A target isn't a creature of this encounter."));
+    }
+    let choices = match form.choices {
+        Some(c) => c,
+        None => match had("choices") {
+            Value::Null => json!({}),
+            v => v,
+        },
+    };
+    if choices.to_string().len() > MAX_CHOICES
+        || serde_json::from_value::<party_combat::spell::CastChoices>(choices.clone()).is_err()
+    {
+        return Err(invalid("Those choices don't fit the spell."));
+    }
+    Ok(CastFields {
+        caster,
+        key: spell.key.clone(),
+        name: spell.name.clone(),
+        slot,
+        targets: serde_json::to_string(&targets).map_err(internal)?,
+        choices: choices.to_string(),
+        concentration: spell.concentration,
+    })
+}
+
+/// The answer to a precast write: the DM view, with a warning when the caster now precasts two concentration spells
+/// (only one lasts).
+async fn cast_answer(
+    state: &AppState,
+    enc: &Encounter,
+    before: Option<Value>,
+    f: &CastFields,
+) -> ApiResult<Json<Value>> {
+    let Json(mut view) = finish(state, enc, before).await?;
+    if f.concentration {
+        let mut concentrating = 0;
+        for c in view["casts"].as_array().cloned().unwrap_or_default() {
+            if c["casterId"] != f.caster.as_str() {
+                continue;
+            }
+            let key = c["spellKey"].as_str().unwrap_or_default();
+            if crate::spells::canonical(state, &enc.dm_id, key)
+                .await?
+                .is_some_and(|s| s.concentration)
+            {
+                concentrating += 1;
+            }
+        }
+        if concentrating > 1 {
+            view["castWarning"] =
+                json!("This creature precasts two concentration spells: only the last one lasts.");
+        }
+    }
+    Ok(Json(view))
+}
+
+/// `POST /api/encounters/{encounter}/casts`.
+pub async fn add_cast(
+    State(state): State<AppState>,
+    user: User,
+    Path(id): Path<String>,
+    bytes: Bytes,
+) -> ApiResult<Json<Value>> {
+    let enc = run_by(&state, &user, &id).await?;
+    let form: CastForm = body(&bytes)?;
+    let ids = creature_ids(&state, &id).await?;
+    let f = cast_fields(&state, &enc, form, &ids, None).await?;
+    if count(
+        &state,
+        "SELECT COUNT(*) FROM encounter_casts WHERE encounter_id = $1",
+        &id,
+    )
+    .await?
+        >= MAX_CASTS
+    {
+        return Err(invalid("An encounter can have 40 precast spells."));
+    }
+    let before = players_see(&state, &id).await?;
+    let sort = next_sort(&state, "encounter_casts", &id).await?;
+    sqlx::query(
+        "INSERT INTO encounter_casts (id, encounter_id, caster_creature_id, sort, spell_key, name, slot_level,
+             targets_json, choices_json, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(&id)
+    .bind(&f.caster)
+    .bind(sort)
+    .bind(&f.key)
+    .bind(&f.name)
+    .bind(f.slot)
+    .bind(&f.targets)
+    .bind(&f.choices)
+    .bind(now())
+    .execute(state.db.pool())
+    .await?;
+    cast_answer(&state, &enc, before, &f).await
+}
+
+async fn cast_of(state: &AppState, encounter: &str, cast: &str) -> ApiResult<Value> {
+    if !id_ok(cast) {
+        return Err(not_found());
+    }
+    casts(state, encounter)
+        .await?
+        .into_iter()
+        .find(|c| c["id"] == cast)
+        .ok_or_else(not_found)
+}
+
+/// `PATCH /api/encounters/{encounter}/casts/{cast}`.
+pub async fn update_cast(
+    State(state): State<AppState>,
+    user: User,
+    Path((id, cid)): Path<(String, String)>,
+    bytes: Bytes,
+) -> ApiResult<Json<Value>> {
+    let enc = run_by(&state, &user, &id).await?;
+    let had = cast_of(&state, &id, &cid).await?;
+    let form: CastForm = body(&bytes)?;
+    let ids = creature_ids(&state, &id).await?;
+    let f = cast_fields(&state, &enc, form, &ids, Some(&had)).await?;
+    let before = players_see(&state, &id).await?;
+    sqlx::query(
+        "UPDATE encounter_casts SET caster_creature_id = $1, spell_key = $2, name = $3, slot_level = $4,
+             targets_json = $5, choices_json = $6 WHERE id = $7 AND encounter_id = $8",
+    )
+    .bind(&f.caster)
+    .bind(&f.key)
+    .bind(&f.name)
+    .bind(f.slot)
+    .bind(&f.targets)
+    .bind(&f.choices)
+    .bind(&cid)
+    .bind(&id)
+    .execute(state.db.pool())
+    .await?;
+    cast_answer(&state, &enc, before, &f).await
+}
+
+/// `DELETE /api/encounters/{encounter}/casts/{cast}`.
+pub async fn remove_cast(
+    State(state): State<AppState>,
+    user: User,
+    Path((id, cid)): Path<(String, String)>,
+) -> ApiResult<Json<Value>> {
+    let enc = run_by(&state, &user, &id).await?;
+    cast_of(&state, &id, &cid).await?;
+    let before = players_see(&state, &id).await?;
+    sqlx::query("DELETE FROM encounter_casts WHERE id = $1 AND encounter_id = $2")
+        .bind(&cid)
         .bind(&id)
         .execute(state.db.pool())
         .await?;
