@@ -16,6 +16,7 @@ import {
 import { EncounterTeaser } from "./EncountersPage";
 import { InviteDialog, NameDialog, NewPartyDialog, PickCharacterDialog } from "./PartiesDialogs";
 import { ChangeEditionDialog } from "./PartyEdition";
+import { KEPT_NOTE } from "./RecentlyDeleted";
 import "./party.css";
 
 /** What the page loaded. */
@@ -155,10 +156,10 @@ function PartyCard({ party, act, open }: {
     const answer = await confirm({
       title: `Delete ${party.name}?`, danger: true, confirmLabel: "Delete party",
       body: others > 0
-        ? `The party ends for its ${others === 1 ? "one other character" : `${others} other characters`}. Everyone keeps their characters. This can't be undone.`
-        : "Everyone keeps their characters. This can't be undone.",
+        ? `The party ends for its ${others === 1 ? "one other character" : `${others} other characters`}. Everyone keeps their characters. ${KEPT_NOTE}`
+        : `Everyone keeps their characters. ${KEPT_NOTE}`,
     });
-    if (answer === "confirm") await act(() => deleteParty(party.id), `${party.name} was deleted.`);
+    if (answer === "confirm") await act(() => deleteParty(party.id), `${party.name} was moved to Recently deleted.`);
   };
   const invites = party.invites ?? [];
   const mismatch = editionToSwitchTo(party);

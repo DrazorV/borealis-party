@@ -23,7 +23,8 @@ export function trashLabel(item: TrashItem): string {
 
 /**
  * Admin › Trash: characters the accounts deleted in the last 30 days, with Restore. Names and dates only; the sheets
- * stay private. Only characters are kept after a delete; encounters, parties and content are deleted for good.
+ * stay private. Deleted parties and encounters are in their DM's own Recently deleted (Account page); content is deleted
+ * for good.
  */
 export function Trash() {
   const toast = useToast();
@@ -56,7 +57,7 @@ export function Trash() {
   const now = Date.now();
   return (
     <Card title="Trash">
-      <p className="muted">Characters deleted in the last {days} days. After that the server removes them for good. Encounters, parties and content have no trash.</p>
+      <p className="muted">Characters deleted in the last {days} days. After that the server removes them for good. Each DM restores their own parties and encounters from Account › Recently deleted; content has no trash.</p>
       {items?.length === 0 && <EmptyState title="The trash is empty" />}
       <ul className="party-list">
         {items?.map((item) => (

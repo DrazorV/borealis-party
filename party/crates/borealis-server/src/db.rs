@@ -481,6 +481,26 @@ const MIGRATIONS: &[&[&str]] = &[
     // 10: unused since 0.3.3, empty since 0.3.5. It dropped step 8's tables (0.3.3); every database has run it, so
     // its statements are gone. It keeps its place (see step 8) and has no marker.
     &[],
+    // 11 (M-recently-deleted, 0.3.6), after step 10. "Recently deleted" (recently_deleted.rs): a party or encounter
+    // its DM deleted, kept for 30 days with a Restore. The delete moves the rows out of their own tables into one
+    // JSON snapshot here, so no other query has to skip deleted rows; a restore puts them back. `deleted_at` is in
+    // seconds; `party_id` is an encounter's party (NULL for a party); `detail` is that party's name, for the list.
+    // Deleted characters stay files in the account's sync trash, as before. New table only: nothing existing changes.
+    &[
+        "CREATE TABLE IF NOT EXISTS deleted_items (
+            kind TEXT NOT NULL,
+            id TEXT NOT NULL,
+            owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            party_id TEXT,
+            name TEXT NOT NULL,
+            detail TEXT NOT NULL DEFAULT '',
+            snapshot_json TEXT NOT NULL,
+            deleted_at BIGINT NOT NULL,
+            PRIMARY KEY (kind, id)
+        )",
+        "CREATE INDEX IF NOT EXISTS deleted_items_owner ON deleted_items (owner_id, deleted_at)",
+        "CREATE INDEX IF NOT EXISTS deleted_items_at ON deleted_items (deleted_at)",
+    ],
 ];
 
 /// How many steps [`MIGRATIONS`] has: the schema version a database is at after [`Db::open`] (also `/api/health`).
@@ -502,6 +522,7 @@ const MARKERS: &[(usize, &str)] = &[
     // Its table that refers to step 5's: a database that lost (or never had) those gets step 9 again too.
     (9, "encounter_casts"),
     // No 10: it is empty (unused since 0.3.3).
+    (11, "deleted_items"),
 ];
 
 /// The steps from 2 on with no marker: the empty ones (8 and 10, unused since 0.3.3).

@@ -188,6 +188,12 @@ pub(crate) fn party_in_combat(party: &str) -> bool {
     guard(&LIVE).contains(party)
 }
 
+/// A party's combats are over as far as the band goes: a party back from Recently deleted, whose live combat came
+/// back ended (recently_deleted.rs).
+pub(crate) fn forget_live(party: &str) {
+    set_live(party, false);
+}
+
 fn set_live(party: &str, live: bool) {
     let mut set = guard(&LIVE);
     if live {

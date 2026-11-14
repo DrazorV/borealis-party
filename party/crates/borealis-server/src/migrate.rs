@@ -461,6 +461,19 @@ const TABLES: &[(&str, &[(&str, Column)])] = &[
             ("captured_at", Column::Int),
         ],
     ),
+    (
+        "deleted_items",
+        &[
+            ("kind", Column::Text),
+            ("id", Column::Text),
+            ("owner_id", Column::Text),
+            ("party_id", Column::Text),
+            ("name", Column::Text),
+            ("detail", Column::Text),
+            ("snapshot_json", Column::Text),
+            ("deleted_at", Column::Int),
+        ],
+    ),
 ];
 
 /// Tests: every table the copy moves, with its columns as `text`, `int` (never NULL) or `optint`.

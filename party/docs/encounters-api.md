@@ -136,7 +136,8 @@ Any of `{ name, publicName, status, playerVisible, hpMode, dmNotes }`. Answers t
 
 ### `DELETE /api/encounters/{encounter}` (DM)
 
-`{ "deleted": true }`. Its creatures, effects and rules go with it.
+`{ "deleted": true }`. Its creatures, effects and rules go with it. Since 0.3.6 it waits 30 days in the DM's Recently
+deleted (parties-api.md, "Recently deleted") and can be restored into its party.
 
 ## Creatures (DM)
 

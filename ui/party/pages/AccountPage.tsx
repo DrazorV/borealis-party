@@ -3,6 +3,7 @@ import { Button } from "../../src/components/Button";
 import { Alert, Card } from "../../src/components/Card";
 import { useToast } from "../../src/components/Toast";
 import { SignOutEverywhereCard } from "./SignOutEverywhere";
+import { RecentlyDeletedCard } from "./RecentlyDeleted";
 import { isTauri } from "../../src/lib/tauri";
 import { changeEmail, changePassword, checkServer, sameAccountAt } from "../api/party";
 import { isLocalAddress, loadSession, normaliseAddress, setServerAddress, updateUser } from "../api/session";
@@ -117,6 +118,7 @@ export function AccountPage() {
       <SignOutEverywhereCard />
       <DungeonMasterCard />
       <AiAppsCard />
+      <RecentlyDeletedCard />
       {isTauri() && user && <SyncNotes userId={user.id} />}
       {/* A browser got the page from the server itself, so only the apps have an address to change. */}
       {isTauri() && (

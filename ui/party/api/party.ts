@@ -203,6 +203,22 @@ export interface TrashItem {
   deletedAtMs: number;
   purgeAtMs: number;
 }
+/** Account › Recently deleted (0.3.6): the caller's own deleted parties, encounters and characters. */
+export type DeletedKind = "party" | "encounter" | "character";
+export interface DeletedItem {
+  kind: DeletedKind;
+  id: string;
+  name: string;
+  /** An encounter's party; "" otherwise. */
+  detail: string;
+  deletedAtMs: number;
+  purgeAtMs: number;
+}
+export const listDeleted = () => call<{ items: DeletedItem[]; retentionDays: number }>("GET", "/api/me/deleted");
+export const restoreDeleted = (kind: DeletedKind, id: string) =>
+  call<{ kind: DeletedKind; id: string; name: string }>("POST", "/api/me/deleted/restore", { kind, id });
+export const deleteForever = (kind: DeletedKind, id: string) =>
+  call<{ deleted: true }>("DELETE", `/api/me/deleted/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`);
 export const adminTrash = () => call<{ items: TrashItem[]; retentionDays: number }>("GET", "/api/admin/trash");
 export const restoreFromTrash = (accountId: string, characterId: string) =>
   call<{ characterId: string; name: string | null }>("POST", "/api/admin/trash/restore", { accountId, characterId });

@@ -931,13 +931,33 @@ pub async fn remove(
 ) -> ApiResult<Json<Value>> {
     let enc = run_by(&state, &user, &id).await?;
     let before = players_see(&state, &id).await?;
-    sqlx::query("DELETE FROM encounters WHERE id = $1")
-        .bind(&id)
-        .execute(state.db.pool())
-        .await?;
+    // Kept in the DM's Recently deleted for 30 days (recently_deleted.rs).
+    crate::recently_deleted::delete_encounter(&state.db, &user.id, &id).await?;
     tracing::info!("encounters: deleted {id}");
     publish(&state, &enc.party_id, &id, before.is_some()).await;
     Ok(Json(json!({ "deleted": true })))
+}
+
+/// Whether `party` has room for a deleted encounter to come back.
+pub(crate) async fn may_restore(state: &AppState, party: &str) -> ApiResult<()> {
+    if count(
+        state,
+        "SELECT COUNT(*) FROM encounters WHERE party_id = $1",
+        party,
+    )
+    .await?
+        >= MAX_ENCOUNTERS
+    {
+        return Err(ApiError::TooMany);
+    }
+    Ok(())
+}
+
+/// An encounter is back (Recently deleted): its DM hears, and its players when they may see it.
+pub(crate) async fn restored(state: &AppState, party: &str, id: &str) {
+    let players = matches!(players_see(state, id).await, Ok(Some(_)));
+    tracing::info!("encounters: restored {id}");
+    publish(state, party, id, players).await;
 }
 
 // Creatures.

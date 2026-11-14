@@ -44,6 +44,7 @@ mod net_guard;
 mod oauth;
 mod pack_removal;
 mod parties;
+mod recently_deleted;
 mod release;
 #[cfg(test)]
 mod route_tests;
@@ -172,6 +173,7 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
         .merge(shares::routes())
         .merge(parties::routes())
         .merge(encounters::routes())
+        .merge(recently_deleted::routes())
         .merge(combat::routes())
         .merge(import_source::routes())
         .merge(pack_removal::routes())
@@ -455,6 +457,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let workspaces = Arc::new(Workspaces::new(data, content));
     tokio::spawn(Arc::clone(&workspaces).evict_loop());
     tokio::spawn(shares::sweep_loop(db.clone(), Arc::clone(&workspaces)));
+    tokio::spawn(recently_deleted::sweep_loop(db.clone()));
     tokio::spawn(combat::startup(db.clone()));
     config::set_upload_limits(settings.server.upload_limits());
     let state = AppState {

@@ -5,7 +5,9 @@ import upstream from "../vite.config";
 import { applyBrand, BRAND_EDITS, brandedFile, PRODUCT_NAME } from "./branding";
 import { releaseVersion } from "./version";
 
-const local = (path: string) => fileURLToPath(new URL(path, import.meta.url));
+// Forward slashes, as vite writes module ids on Windows too: a party file imported both through REPLACED and directly
+// (play/rolls/RollContext.tsx, from play/CompanionAttackButtons.tsx) is then one module, with one React context.
+const local = (path: string) => fileURLToPath(new URL(path, import.meta.url)).replace(/\\/g, "/");
 
 /**
  * The party build is upstream's app with some of its imports pointed at ours, so upstream's own files stay as they are:
@@ -39,7 +41,8 @@ const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     "./RestBar": local("./play/PlayTop.tsx"),
     "./rolls/RollContext": local("./play/rolls/RollContext.tsx"),
     "./rolls/RollResult": local("./play/rolls/RollResult.tsx"),
-    "./HitPointsCard": local("./play/HitPointsCard.tsx"),
+    // 0.3.6: the Companions card right under Hit Points (play/HitPointsWithCompanions.tsx, play/Companions.tsx).
+    "./HitPointsCard": local("./play/HitPointsWithCompanions.tsx"),
     "./SpellSlotsCard": local("./play/SpellSlotsCard.tsx"),
     "./TrackersCard": local("./play/TrackersCard.tsx"),
   },

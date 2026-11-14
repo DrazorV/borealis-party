@@ -1,0 +1,16 @@
+/* The Play tab's Companions card (0.3.6, ./Companions.tsx): one card per companion or summon. On wide screens they sit
+   side by side, equal height in a row (the grid stretches each); on a phone (or a narrow pane) one column. */
+.bp-companions {
+  list-style: none; margin: 0; padding: var(--sp-2) 0; display: grid; gap: var(--sp-2);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); align-items: stretch;
+}
+.bp-companions > .combat-creature { height: 100%; box-sizing: border-box; min-width: 0; }
+.bp-companions > .combat-creature > :last-child { margin-top: auto; }
+.bp-companion-build, .bp-companion-note { margin: 0; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.bp-companion-attacks { display: flex; flex-wrap: wrap; gap: var(--sp-2); min-width: 0; }
+.bp-companion-attacks > .btn { max-width: 100%; white-space: normal; text-align: left; }
+.bp-companion-hit { opacity: 0.8; margin-left: 0.25em; }
+html.phone .bp-companion-attacks > .btn { min-height: var(--ph-hit, 48px); flex: 1 1 100%; justify-content: flex-start; }
+@media (max-width: 600px) {
+  .bp-companions { grid-template-columns: 1fr; }
+}
