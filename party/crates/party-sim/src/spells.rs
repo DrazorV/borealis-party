@@ -144,6 +144,8 @@ pub fn equip(
             MechOrigin::Def { id, rev } => format!("def:{id}:{rev}"),
             MechOrigin::Statblock => "statblock".into(),
             MechOrigin::Ruling => "ruling".into(),
+            // A player's cast drafted from their own data (part F): the same unreviewed draft as above.
+            MechOrigin::Draft { .. } => format!("draft:{}", draft_hash(&spec.mech)),
         };
         prints.insert(format!("spell:{}", spec.mech.key), print);
         if let Some(link) = a.spell.as_mut() {
