@@ -57,7 +57,7 @@ export function stats(hp: number, hpMax: number, more: Partial<CardStats> = {}):
 }
 
 const band = (st: CardStats | null | undefined) => {
-  if (!st || st.hpMax === 0) return null;
+  if (!st || st.hp == null || !st.hpMax) return null;
   return st.hp === 0 ? "down" : st.hp * 2 <= st.hpMax ? "bloodied" : "unhurt";
 };
 

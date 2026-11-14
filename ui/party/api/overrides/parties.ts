@@ -42,17 +42,28 @@ export interface ClassLine {
 
 /** What the DM (and the owner) see of a member character at the table. */
 export interface CardStats {
-  hp: number;
-  hpMax: number;
-  tempHp: number;
+  /**
+   * Hit points: the owner's always; the DM's only where the server sends them (0.3.3, party/docs/role-views.md: the
+   * DM's roster card may leave them out).
+   */
+  hp?: number;
+  hpMax?: number;
+  tempHp?: number;
   armorClass: number;
   initiative: number;
   speed: number;
   passivePerception: number;
   spellDcs: { class: string; dc: number }[];
   exhaustion: number;
-  concentration: string | null;
+  /** The spell, or (the DM's card since 0.3.3) only whether it concentrates. */
+  concentration: string | boolean | null;
   inspiration: boolean;
+}
+
+/** "Concentrating: Bless", or "Concentrating" when the card says only that it does; null when it doesn't. */
+export function concentrationText(c: CardStats["concentration"]): string | null {
+  if (!c) return null;
+  return typeof c === "string" ? `Concentrating: ${c}` : "Concentrating";
 }
 
 /** How hurt a member looks to the rest of the party (plan D6). */

@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router";
 import type { CharacterSnapshot } from "../../src/api/contract";
 import { Alert, Card, Chip } from "../../src/components/Card";
 import { errorMessage } from "../../src/state/useAsync";
-import { BAND_LABEL, classLine, viewMember, watchParties, type MemberView } from "../api/overrides/parties";
+import { BAND_LABEL, classLine, concentrationText, viewMember, watchParties, type MemberView } from "../api/overrides/parties";
 import { bandOf } from "./PartiesPage";
 import "./party.css";
 
@@ -28,7 +28,8 @@ function Box({ label, value, wide }: { label: string; value: string | number; wi
 
 function Sheet({ view }: { view: MemberView }) {
   const s: Snap = view.snapshot;
-  const hp = s.play?.hitPoints ?? { current: 0, max: s.stats?.hpMax ?? 0, temp: 0 };
+  // The DM's sheet view may carry no hit points or slots (0.3.3, party/docs/role-views.md): then they aren't shown.
+  const hp = s.play?.hitPoints ?? (s.stats?.hpMax != null ? { current: 0, max: s.stats.hpMax, temp: 0 } : null);
   const stats = view.card.stats;
   const band = stats ? bandOf(stats) : null;
   const classes = classLine(view.card.classes) || `Level ${s.level?.total ?? view.card.level ?? "?"}`;
@@ -40,14 +41,14 @@ function Sheet({ view }: { view: MemberView }) {
       <Card className="party-sheet-head" title={s.name} aria-label={s.name}
         actions={band ? <Chip tone={band === "unhurt" ? "success" : band === "bloodied" ? "warning" : "danger"}>{BAND_LABEL[band]}</Chip> : undefined}>
         <p className="muted party-note">{classes} · {view.card.ownerName ? `${view.card.ownerName}'s character` : "a member's character"}</p>
-        <div className="party-sheet-hp" role="group" aria-label={`Hit points ${hp.current} of ${hp.max}${hp.temp ? `, ${hp.temp} temporary` : ""}`}>
+        {hp && <div className="party-sheet-hp" role="group" aria-label={`Hit points ${hp.current} of ${hp.max}${hp.temp ? `, ${hp.temp} temporary` : ""}`}>
           <span className="party-sheet-hp-now">{hp.current}</span>
           <span className="muted">/ {hp.max} HP</span>
           {hp.temp > 0 && <Chip tone="info">+{hp.temp} temporary</Chip>}
           <span className="party-sheet-hp-bar" aria-hidden="true">
             <span style={{ width: `${hp.max > 0 ? Math.round((100 * hp.current) / hp.max) : 0}%` }} className={band ?? ""} />
           </span>
-        </div>
+        </div>}
         <div className="party-sheet-boxes">
           <Box label="AC" value={s.stats?.armorClass ?? "?"} />
           <Box label="Initiative" value={signed(s.stats?.initiative ?? 0)} />
@@ -57,7 +58,7 @@ function Sheet({ view }: { view: MemberView }) {
         </div>
         {stats && (stats.concentration || stats.exhaustion > 0 || stats.inspiration) && (
           <div className="party-conditions">
-            {stats.concentration && <Chip tone="info">Concentrating: {stats.concentration}</Chip>}
+            {stats.concentration && <Chip tone="info">{concentrationText(stats.concentration)}</Chip>}
             {stats.exhaustion > 0 && <Chip tone="warning">Exhaustion {stats.exhaustion}</Chip>}
             {stats.inspiration && <Chip tone="gold">Inspiration</Chip>}
           </div>
