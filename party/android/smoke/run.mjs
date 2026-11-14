@@ -660,21 +660,9 @@ async function playerCombat(token) {
     check("Apply takes the damage on the player's own character (D7 a)", after === Math.max(0, before - 2), `${before} -> ${after}`);
     await screenshot("16-combat-applied");
 
-    // A summon: a quick stat block, right after the PC in the turn order.
-    await smoke("click('Summon…')");
-    await until("the Summon dialog", () => page(`!!document.querySelector("#summon-name")`), 10000);
-    await smoke(`fill("#summon-name", "Spirit Wolf")`);
-    await smoke(`fill("#summon-hp", "11")`);
-    // innerText is as the CSS shows it (headings in capitals), so the dialog is found by its name field.
-    await page(`(() => { const d = document.querySelector("#summon-name").closest('[role="dialog"]'); const b = [...d.querySelectorAll("button")].find((x) => x.textContent.trim() === "Summon"); if (!b || b.disabled) return false; b.click(); return true; })()`);
-    const order = `[...document.querySelectorAll('[data-testid="combat-pane"] .combat-row .combat-row-name')].map((e) => e.textContent)`;
-    const summoned = await until("the summon in the turn order", async () => {
-      const names = await page(order);
-      const at = names.findIndex((n) => n.startsWith("Spirit Wolf"));
-      return at > 0 && names[at - 1].includes("(you)") ? names : null;
-    }, 15000, 500).catch(() => null);
-    check("Summon puts the creature right after the PC in the turn order", !!summoned, summoned ? summoned.join(" | ") : JSON.stringify(await page(order).catch(() => [])));
-    await screenshot("16b-combat-summon");
+    // No generic Summon button and no monster stat block on the player's screen (user, 2026-11-14).
+    const extras = await page(`[...document.querySelectorAll('[data-testid="combat-pane"] button')].filter((b) => /^Summon|stat block/.test(b.textContent + " " + (b.getAttribute("aria-label") || ""))).length`).catch(() => -1);
+    check("the player's screen has no Summon button and no monster stat block", extras === 0, `${extras}`);
 
     // Background and back: what changed meanwhile (no event reached the app) shows when it returns.
     await page(`(() => { const s = window.__smokeCombat; s.pseq += 5; s.turn = { kind: "combatant", id: "me", round: 4 }; return true; })()`);
@@ -684,7 +672,7 @@ async function playerCombat(token) {
     await sleep(1500);
     await connectPage().catch(() => null);
     const woke = await until("the view after coming back", () => page(`(() => { const p = document.querySelector('[data-testid="combat-pane"]'); return !!p && p.textContent.includes("Round 4") && p.textContent.includes("Your turn"); })()`), 15000, 500).catch(() => false);
-    check("back from the background, the Combat sub-tab shows what changed meanwhile", !!woke, woke ? "" : (await page(`(document.querySelector('[data-testid="combat-pane"]') || document.body).innerText.slice(0, 120)`).catch(() => "")));
+    check("back from the background, the live combat section shows what changed meanwhile", !!woke, woke ? "" : (await page(`(document.querySelector('[data-testid="combat-pane"]') || document.body).innerText.slice(0, 120)`).catch(() => "")));
     await screenshot("17-combat-after-background");
   } finally {
     if (shimmed) await page(`(() => { if (window.__smokeRealFetch) window.fetch = window.__smokeRealFetch; delete window.__smokeCombat; return true; })()`).catch(() => null);

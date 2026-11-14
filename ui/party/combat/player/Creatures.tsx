@@ -3,7 +3,6 @@ import type { CharacterSnapshot } from "../../../src/api/contract";
 import { Button } from "../../../src/components/Button";
 import { Alert, Chip } from "../../../src/components/Card";
 import { useConfirm } from "../../../src/components/Confirm";
-import { Modal } from "../../../src/components/Modal";
 import { ConditionChips } from "../shared/ConditionChips";
 import { RollOrType } from "../shared/RollOrType";
 import type { D20Input } from "../shared/types";
@@ -112,7 +111,7 @@ function CreatureCard({ combat, c }: { combat: PlayerCombat; c: PlayerCombatant 
   );
 }
 
-/** A creature summoned by hand: a quick block (name, HP, AC), or one of the character's companions. */
+/** A companion from the character's sheet as a quick block (name, HP, AC). */
 interface QuickBlock { name: string; hp: number; ac: number | null }
 
 function summonArgs(owner: string, b: QuickBlock, initiative?: D20Input) {
@@ -124,76 +123,22 @@ function summonArgs(owner: string, b: QuickBlock, initiative?: D20Input) {
   };
 }
 
-/**
- * The PC's companions to bring: the server's offers (`summon {owner, companion: key}`, built from the character on
- * the server) when it sends them, else the open sheet's companions as quick blocks.
- */
+/** The character's companions to bring: the server's offers, else the sheet's own (a quick block). */
 function companionsOf(me: PlayerCombatant, s: CharacterSnapshot): { id: string; name: string; args: Record<string, unknown> }[] {
   if (me.offers) return me.offers.map((k) => ({ id: k.key, name: k.name, args: { owner: me.id, companion: k.key } }));
   return s.companions.map((k) => ({ id: k.id, name: k.name, args: summonArgs(me.id, { name: k.name, hp: k.hp, ac: k.armorClass }) }));
 }
 
-function SummonDialog({ combat, me, s, onClose }: { combat: PlayerCombat; me: PlayerCombatant; s: CharacterSnapshot; onClose: () => void }) {
-  const { busy, error, run } = useAction();
-  const [name, setName] = useState("");
-  const [hp, setHp] = useState("");
-  const [ac, setAc] = useState("");
-  const [own, setOwn] = useState(false);
-  const hpN = Number(hp);
-  const acN = ac.trim() === "" ? null : Number(ac);
-  const valid = name.trim().length > 0 && name.trim().length <= 60 && Number.isInteger(hpN) && hpN >= 1 && hpN <= MAX_AMOUNT
-    && (acN == null || (Number.isInteger(acN) && acN >= 0 && acN <= 40));
-  const summon = (b: QuickBlock, initiative?: D20Input) => run(async () => {
-    await playerWrite(combat, "summon", summonArgs(me.id, b, initiative));
-    onClose();
-  });
-  const quick = { name: name.trim(), hp: hpN, ac: acN };
-  const companions = companionsOf(me, s);
-  return (
-    <Modal title="Summon" onClose={onClose}>
-      <div className="combat-summon">
-        {companions.length > 0 && (
-          <section aria-label="Your companions">
-            <h3 className="combat-h">Your companions</h3>
-            <div className="combat-creature-row">
-              {companions.map((k) => (
-                <Button key={k.id} disabled={busy} onClick={() => void run(async () => { await playerWrite(combat, "summon", k.args); onClose(); })}>Bring {k.name}</Button>
-              ))}
-            </div>
-          </section>
-        )}
-        <section aria-label="A quick stat block">
-          <h3 className="combat-h">A quick stat block</h3>
-          <label className="field-label" htmlFor="summon-name">Name</label>
-          <input id="summon-name" className="input" maxLength={60} value={name} onChange={(e) => setName(e.target.value)} />
-          <div className="combat-creature-row">
-            <span>
-              <label className="field-label" htmlFor="summon-hp">Hit points</label>
-              <input id="summon-hp" className="input combat-amount" type="number" inputMode="numeric" min={1} max={MAX_AMOUNT} value={hp} onChange={(e) => setHp(e.target.value)} />
-            </span>
-            <span>
-              <label className="field-label" htmlFor="summon-ac">Armor class</label>
-              <input id="summon-ac" className="input combat-amount" type="number" inputMode="numeric" min={0} max={40} value={ac} onChange={(e) => setAc(e.target.value)} />
-            </span>
-          </div>
-          <label className="combat-check"><input type="checkbox" checked={own} onChange={(e) => setOwn(e.target.checked)} /> Its own initiative (else it acts right after you)</label>
-          {own
-            ? <RollOrType label="Its initiative" busy={busy || !valid} onRoll={(input) => summon(quick, input)} rollLabel="Summon, roll for me" />
-            : <Button variant="primary" disabled={busy || !valid} onClick={() => void summon(quick)}>Summon</Button>}
-        </section>
-        {error && <Alert tone="danger">{error}</Alert>}
-      </div>
-    </Modal>
-  );
-}
-
-/** The player's creatures, the Summon button, and at the start of a fight the character's companions to bring. */
+/**
+ * The player's creatures, and at the start of a fight the character's companions to bring. There is no generic Summon
+ * button (user, 2026-11-14): a summon comes from casting its spell or from the DM's Add creature.
+ */
 export function Creatures({ combat, me, s }: { combat: PlayerCombat; me: PlayerCombatant; s: CharacterSnapshot }) {
-  const [summoning, setSummoning] = useState(false);
   const { busy, error, run } = useAction();
   const mine = combat.combatants.filter((c) => c.mine && c.kind === "creature" && c.ownerId === me.id);
   const offers = companionsOf(me, s);
   const missing = combat.status === "setup" ? offers.filter((k) => !mine.some((c) => c.name === k.name)) : [];
+  if (missing.length === 0 && mine.length === 0) return null;
   return (
     <section className="combat-creatures" aria-label="Your creatures">
       {missing.length > 0 && (
@@ -216,8 +161,6 @@ export function Creatures({ combat, me, s }: { combat: PlayerCombat; me: PlayerC
           <ul className="combat-creature-list">{mine.map((c) => <CreatureCard key={c.id} combat={combat} c={c} />)}</ul>
         </>
       )}
-      <Button onClick={() => setSummoning(true)}>Summon…</Button>
-      {summoning && <SummonDialog combat={combat} me={me} s={s} onClose={() => setSummoning(false)} />}
     </section>
   );
 }

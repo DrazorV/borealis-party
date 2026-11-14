@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import type { CharacterSnapshot } from "../../../src/api/contract";
 import { Button } from "../../../src/components/Button";
 import { Alert, Chip } from "../../../src/components/Card";
-import { Modal } from "../../../src/components/Modal";
 import { useConnectivity } from "../../api/connectivity";
 import {
   actingId, myCombatant,
@@ -12,7 +11,6 @@ import { usePlayMutate } from "../../../src/pages/play/playQueue";
 import { ConditionChips } from "../shared/ConditionChips";
 import { HealthBand } from "../shared/HealthBand";
 import { RollOrType } from "../shared/RollOrType";
-import { StatBlockView } from "../shared/StatBlockView";
 import { Creatures } from "./Creatures";
 import { TurnPanel } from "./TurnPanel";
 import { deviceDeps, playerWrite, useCombatStore } from "./store";
@@ -225,7 +223,12 @@ function Initiative({ combat, me, modifier }: { combat: PlayerCombat; me: Player
   );
 }
 
-function Order({ combat, onStatBlock }: { combat: PlayerCombat; onStatBlock: (c: PlayerCombatant) => void }) {
+/**
+ * The turn order. A monster (a creature not mine) shows only its name and, when it applies, a Bloodied or Down chip
+ * (user, 2026-11-14: "players do not need to know much about monsters in their tab only the name and if bloodied"):
+ * no conditions, no concentration, no stat block, AC or abilities.
+ */
+function Order({ combat }: { combat: PlayerCombat }) {
   const acting = actingId(combat);
   const names = new Map(combat.combatants.map((c) => [c.id, c.name || "you"]));
   return (
@@ -233,6 +236,7 @@ function Order({ combat, onStatBlock }: { combat: PlayerCombat; onStatBlock: (c:
       {combat.combatants.filter((c) => c.inOrder).map((c) => {
         const now = c.id === acting;
         const follows = c.ownerId && names.has(c.ownerId) && c.initiative == null;
+        const monster = c.kind === "creature" && !c.mine;
         return (
           <li key={c.id} className={`combat-row${now ? " acting" : ""}${c.mine ? " mine" : ""}${c.life === "dead" ? " dead" : ""}${follows ? " follows" : ""}`}
             aria-current={now ? "true" : undefined}>
@@ -242,17 +246,14 @@ function Order({ combat, onStatBlock }: { combat: PlayerCombat; onStatBlock: (c:
             <span className="combat-row-main">
               <span className="combat-row-name">
                 {c.name}{c.mine && <span className="muted">{c.kind === "character" ? " (you)" : " (yours)"}</span>}
-                {c.concentration && !c.mine && <span className="muted combat-row-owner"> · concentrating</span>}
+                {c.concentration && !c.mine && !monster && <span className="muted combat-row-owner"> · concentrating</span>}
                 {now && <span className="sr-only"> is acting now</span>}
               </span>
               {c.ownerId && names.has(c.ownerId) && <span className="muted combat-row-owner">with {names.get(c.ownerId)}</span>}
-              <ConditionChips conditions={c.conditions} label={`${c.name} conditions`} />
+              {!monster && <ConditionChips conditions={c.conditions} label={`${c.name} conditions`} />}
             </span>
             <span className="combat-row-side">
-              {c.band && <HealthBand band={c.band} />}
-              {c.kind === "creature" && c.statBlock && (
-                <Button small onClick={() => onStatBlock(c)} aria-label={`${c.name} stat block`}>Stats</Button>
-              )}
+              {c.band && (!monster || c.band !== "unhurt") && <HealthBand band={c.band} />}
             </span>
           </li>
         );
@@ -282,7 +283,6 @@ function Log({ combat }: { combat: PlayerCombat }) {
  */
 export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSnapshot }) {
   const me = myCombatant(combat, { id: s.id, name: s.name });
-  const [sheet, setSheet] = useState<PlayerCombatant | null>(null);
   const acting = actingId(combat);
   const yours = acting != null && combat.combatants.some((x) => x.mine && x.id === acting);
   const round = combat.pointer.kind === "combatant" || combat.pointer.kind === "enemy_turn" || combat.pointer.kind === "waiting" ? combat.pointer.round : combat.round;
@@ -309,19 +309,9 @@ export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSn
       {me && <Creatures combat={combat} me={me} s={s} />}
       <section className="card combat-order-card" aria-label="Initiative">
         <h2 className="combat-h">Turn order</h2>
-        <Order combat={combat} onStatBlock={setSheet} />
+        <Order combat={combat} />
       </section>
       <Log combat={combat} />
-      {sheet?.statBlock && (
-        <Modal title={sheet.name} onClose={() => setSheet(null)}>
-          {(sheet.hp || sheet.ac != null) && (
-            <p className="combat-sb-now">
-              {sheet.hp && <Chip tone="info">HP {sheet.hp.current} / {sheet.hp.max}</Chip>} {sheet.ac != null && <Chip>AC {sheet.ac}</Chip>}
-            </p>
-          )}
-          <StatBlockView name={sheet.name} block={sheet.statBlock} />
-        </Modal>
-      )}
     </div>
   );
 }

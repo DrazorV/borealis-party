@@ -126,18 +126,16 @@ test.describe("The player's live combat section with the combat server (0.3.0)",
         // A DM change the player can see: on the phone within a second, with no reload.
         const loads = (await page.evaluate(() => performance.getEntriesByType("navigation").length));
         const t1 = Date.now();
-        await api(request, dm.token, "POST", `/api/combats/${started.id}/add_condition`, { requestId: rid(), args: { effect: { name: "Prone", target: hidden.id, conditions: ["prone"] } } });
-        await expect(order.locator(".combat-row").filter({ hasText: HIDDEN_PUBLIC }).getByText("Prone")).toBeVisible({ timeout: QUICK_MS });
-        testInfo.annotations.push({ type: "live", description: `DM condition shown in ${Date.now() - t1} ms` });
+        // A monster shows only its name and band (user, 2026-11-14): the DM bloodies it.
+        await api(request, dm.token, "POST", `/api/combats/${started.id}/set_hp`, { requestId: rid(), args: { id: hidden.id, current: 1 } });
+        await expect(order.locator(".combat-row").filter({ hasText: HIDDEN_PUBLIC }).getByLabel("Health: Bloodied")).toBeVisible({ timeout: QUICK_MS });
+        testInfo.annotations.push({ type: "live", description: `DM change shown in ${Date.now() - t1} ms` });
         expect(await page.evaluate(() => performance.getEntriesByType("navigation").length), "no reload").toBe(loads);
 
-        // The player summons a creature; it follows the PC, and the DM sees it in the combat.
-        await pane.getByRole("button", { name: "Summon…" }).tap();
-        const dialog = page.getByRole("dialog", { name: "Summon" });
-        await dialog.getByLabel("Name").fill("Spirit Wolf");
-        await dialog.getByLabel("Hit points").fill("11");
-        await dialog.getByRole("button", { name: "Summon", exact: true }).tap();
-        await expect(dialog).toHaveCount(0);
+        // No generic Summon button (user, 2026-11-14): the DM adds the PC's summon; it follows the PC as the player's.
+        await expect(pane.getByRole("button", { name: "Summon…" })).toHaveCount(0);
+        await api(request, dm.token, "POST", `/api/combats/${started.id}/summon`, { requestId: rid(), args: { owner: me.id,
+          combatant: { kind: "creature", label: "Spirit Wolf", public_name: "Spirit Wolf", hp: { current: 11, max: 11 } } } });
         const names = order.locator(".combat-row .combat-row-name");
         await expect(names.filter({ hasText: "Spirit Wolf (yours)" })).toHaveCount(1);
         const all = await names.allTextContents();

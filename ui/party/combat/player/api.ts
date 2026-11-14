@@ -145,9 +145,7 @@ export interface PlayerCombatant {
   /** Own PCs only. */
   deathSaves?: { successes: number; failures: number } | null;
   concentration?: string | null;
-  /** Revealed creatures only (D20 b). */
-  statBlock?: StatBlock | null;
-  /** Revealed creatures, and my own controlled creatures (theirs lives in the combat). */
+  /** My own controlled creatures (theirs lives in the combat); never a monster's. */
   hp?: { current: number; max: number; temp?: number } | null;
   ac?: number | null;
   /** A controlled creature's owner (a combatant id): it acts right after it unless it has its own initiative. */
@@ -241,11 +239,8 @@ export function fromWire(w: WireProjection, ctx: WireContext = {}): PlayerCombat
       ...life(m?.life ?? o.life),
       concentration: m?.concentration ?? o.concentration ?? null,
       ownerId: o.view?.owner_id ?? o.ownerId ?? null,
-      ...(o.kind === "creature" ? {
-        statBlock: o.statBlock ?? null,
-        hp: m?.hp ?? o.view?.hp ?? o.hp ?? null,
-        ac: o.view?.ac ?? o.ac ?? null,
-      } : {}),
+      // A monster is its name and band only (user, 2026-11-14); my own creatures keep their HP, which I play.
+      ...(o.kind === "creature" && mine ? { hp: m?.hp ?? o.view?.hp ?? o.hp ?? null, ac: o.view?.ac ?? o.ac ?? null } : {}),
       ...(m?.offers ? { offers: m.offers.map((k) => ({ key: k.key, name: k.name, hp: k.hp ?? null, ac: k.ac ?? null })) } : {}),
       ...(roll ? { lastRoll: `${roll.name} ${roll.total}${roll.breakdown ? ` (${roll.breakdown})` : ""}` } : {}),
     };
@@ -445,7 +440,10 @@ export function diffEvents(before: PlayerCombat | null, after: PlayerCombat, at:
   for (const c of after.combatants) {
     const was = old.get(c.id);
     if (!was) { out.push(line(c.kind === "creature" ? `${c.name} appears.` : `${c.name} joins the fight.`)); continue; }
-    if (c.band && was.band && c.band !== was.band) out.push(line(`${c.name} is ${BAND_WORD[c.band]}.`));
+    // A monster: only its name and whether it's bloodied or down (user, 2026-11-14).
+    const monster = c.kind === "creature" && !c.mine;
+    if (c.band && was.band && c.band !== was.band && !(monster && c.band === "unhurt")) out.push(line(`${c.name} is ${BAND_WORD[c.band]}.`));
+    if (monster) continue;
     if (c.life !== was.life && c.life && c.life !== "alive") out.push(line(`${c.name} is ${c.life}.`));
     const had = new Set(was.conditions.map((x) => x.name));
     const has = new Set(c.conditions.map((x) => x.name));

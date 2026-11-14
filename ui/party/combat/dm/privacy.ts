@@ -19,6 +19,32 @@ export function playerSide(c: Combatant): boolean {
 /** What the DM screen keeps of a player-side combatant's HP: nothing (a zero the screen never shows). */
 const NO_HP = Object.freeze({ current: 0, max: 0, temp: 0 });
 
+/**
+ * The health band the DM sees for a player's combatant (user, 2026-11-14: "DM can have the same information as
+ * players, bloodied, healthy, down"): never a number. The server's own `band` when it sends one, else read from what it
+ * sent, before that is stripped.
+ */
+export type DmBand = "healthy" | "bloodied" | "down" | "stable" | "dead";
+
+export const DM_BAND_LABEL: Record<DmBand, string> = { healthy: "Healthy", bloodied: "Bloodied", down: "Down", stable: "Stable", dead: "Dead" };
+
+const SERVER_BAND: Record<string, DmBand> = { unhurt: "healthy", healthy: "healthy", bloodied: "bloodied", down: "down", stable: "stable", dead: "dead", dying: "down" };
+
+function bandOf(c: Combatant): DmBand | undefined {
+  const sent = (c as { band?: unknown }).band;
+  if (typeof sent === "string" && SERVER_BAND[sent]) return SERVER_BAND[sent];
+  const life = c.life?.state;
+  if (life === "dead") return "dead";
+  if (life === "stable") return "stable";
+  if (life === "dying" || (c as { down?: boolean }).down === true) return "down";
+  if (!c.hp || !(c.hp.max > 0)) return undefined;
+  if (c.hp.current <= 0) return "down";
+  return c.hp.current * 2 <= c.hp.max ? "bloodied" : "healthy";
+}
+
+/** The band kept on a stripped player's combatant (see {@link redactCombatant}). */
+export const dmBand = (c: Combatant): DmBand | undefined => (c as Combatant & { dmBand?: DmBand }).dmBand;
+
 /** What a player-side combatant never brings to the DM screen besides its HP: death saves, slots, resources, economy. */
 const PRIVATE = ["life", "zero_hp", "spell_slots", "resources", "economy", "pending_concentration", "legendary_resistance", "spell_turn"] as const;
 
@@ -28,7 +54,11 @@ const PRIVATE = ["life", "zero_hp", "spell_slots", "resources", "economy", "pend
  */
 export function redactCombatant(c: Combatant, state?: CombatState): Combatant {
   if (!playerSide(c)) return c;
-  const kept: Combatant = { ...c, hp: { ...NO_HP } };
+  // Already stripped (the band is read once, from what the server sent).
+  if ((c as { dmBand?: unknown }).dmBand !== undefined || (c.hp && c.hp.max === 0 && c.hp.current === 0 && !c.life)) return c;
+  const band = bandOf(c);
+  const kept = { ...c, hp: { ...NO_HP }, ...(band ? { dmBand: band } : {}) } as Combatant;
+  delete (kept as { band?: unknown }).band;
   for (const k of PRIVATE) delete kept[k];
   const conc = c.concentration as unknown;
   if (conc === true || (conc !== null && typeof conc === "object" && !(conc as { name?: unknown }).name)) {
@@ -44,8 +74,6 @@ export function redactState(state: CombatState): CombatState {
   return { ...state, combatants: state.combatants.map((c) => redactCombatant(c, state)) };
 }
 
-/** The server's flag that a player's combatant is down (0 HP on the sheet), when it sends one. Never a number. */
-export const isDown = (c: Combatant): boolean => (c as Combatant & { down?: boolean }).down === true;
 
 /**
  * Damage the DM sent a player and what became of it. A server that keeps answered prompts says so with `status`;

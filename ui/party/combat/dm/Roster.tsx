@@ -3,7 +3,8 @@ import { Button, IconButton } from "../../../src/components/Button";
 import { HpBar } from "./HpBar";
 import { conditionWord } from "./common";
 import { conditionsOf, effectiveAc, effectiveInitiative, effectsOn, followDepth, isCharacter, isDefeated, leader, poolOf, rosterOrder, byId } from "./derive";
-import { isDown, playerSide } from "./privacy";
+import { BandChip } from "./BandChip";
+import { playerSide } from "./privacy";
 import type { Combatant, Command, CombatState } from "./types";
 
 /**
@@ -93,7 +94,7 @@ function Row({ c, state, selected, onSelect, send, disabled }: {
         </span>
         <span className="cb-row-meta">
           {pc && <span>Player · {c.absent ? "absent" : out ? "no initiative" : "PC"}</span>}
-          {mine && isDown(c) && <span className="cb-row-conds">Down</span>}
+          {mine && <BandChip c={c} />}
           <span>AC <b>{effectiveAc(state, c).total ?? "—"}</b></span>
           {owner && <span>↳ {owner.label}</span>}
           {pool && (

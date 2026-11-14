@@ -101,6 +101,10 @@ describe("DM screen privacy", () => {
     expect(within(row("pc-aria")).getByText("16")).toBeTruthy();
     expect(within(row("pc-aria")).getByTitle(/Concentrating on Bless/)).toBeTruthy();
     expect(within(row("pc-bram")).getByTitle("Bless, from Aria")).toBeTruthy();
+    // The health band instead of numbers: Aria 37/45 is Healthy, Bram dying is Down, the wolf 19/23 Healthy.
+    expect(within(row("pc-aria")).getByLabelText("Health: Healthy")).toBeTruthy();
+    expect(within(row("pc-bram")).getByLabelText("Health: Down")).toBeTruthy();
+    expect(within(row("wolf")).getByLabelText("Health: Healthy")).toBeTruthy();
     for (const id of ["pc-aria", "pc-bram", "wolf"]) {
       fireEvent.click(within(row(id)).getAllByRole("button")[0]!);
       await waitFor(() => expect(card().getAttribute("aria-label")).toContain(id === "wolf" ? "Wolf" : id === "pc-aria" ? "Aria" : "Bram"));

@@ -11,7 +11,8 @@ import { TextDialog } from "./dialogs";
 import { byId, conditionsOf, effectiveAc, effectiveInitiative, effectiveSpeed, isCharacter, isDefeated, linkActive, sameSpeeds, speedText } from "./derive";
 import { EffectsList } from "./EffectsList";
 import { HpControls } from "./HpControls";
-import { isDown, playerName, playerSide } from "./privacy";
+import { BandChip } from "./BandChip";
+import { playerName, playerSide } from "./privacy";
 import { SendDamage } from "./SendDamage";
 import { initiativeText, quickRef, saveBonus } from "./statRef";
 import type { AddPreset } from "./SummonPanel";
@@ -76,7 +77,7 @@ export function CombatantCard({ state, c, block, blockName, blockOf, send, disab
             <div className="cb-overline">{pc ? "Player character" : blockName ?? "Creature"}{!pc && c.public_name !== c.label ? ` · players see "${c.public_name}"` : ""}</div>
             <h2>{c.label}{c.concentration && <span className="cb-conc">● CONC</span>}</h2>
           </div>
-          <span className={`chip ${dead ? "danger" : current ? "gold" : ""}`}>{dead ? "DEFEATED" : current ? "CURRENT TURN" : mine && isDown(c) ? "DOWN" : life.state === "dying" ? "DYING" : life.state === "stable" ? "STABLE" : pc ? "PLAYER" : "READY"}</span>
+          <span className={`chip ${dead ? "danger" : current ? "gold" : ""}`}>{dead ? "DEFEATED" : current ? "CURRENT TURN" : life.state === "dying" ? "DYING" : life.state === "stable" ? "STABLE" : pc ? "PLAYER" : "READY"}</span>
         </div>
         <div className="cb-card-actions">
           {!pc && !playerPet && (c.visible
@@ -94,6 +95,7 @@ export function CombatantCard({ state, c, block, blockName, blockOf, send, disab
             <b>AC {ac.total ?? "—"}</b>{ac.text ? <span className="cb-ac-why"> {ac.text.replace(/^\d+ /, "")}</span> : null}
           </span>
           {!mine && <span><b>{c.hp.current}/{c.hp.max} HP</b>{c.hp.temp ? ` +${c.hp.temp}` : ""}</span>}
+          {mine && <BandChip c={c} />}
           <span>Init {effectiveInitiative(state, c) ?? "–"}{!pc && <span className="muted"> ({initiativeText(block, c.initiative_bonus)})</span>}</span>
           {!mine && <span className={`cb-speed${sameSpeeds(speed, base) ? "" : " changed"}`} title={sameSpeeds(speed, base) ? undefined : `Base ${speedText(base)}`}>Speed {speedText(speed)}</span>}
         </div>

@@ -108,6 +108,8 @@ test.describe("Role screens: the DM's Combat tab and the player's Play tab (0.3.
       const pane = phone.getByTestId("combat-pane");
       await expect(pane).toBeVisible();
       await expect(phone.getByRole("tab", { name: "Combat" })).toHaveCount(0);
+      // A monster is its name and band only; no generic Summon button.
+      await expect(pane.getByRole("button", { name: /stat block|^Stats$|^Summon/ })).toHaveCount(0);
       const init = pane.getByRole("alertdialog", { name: "Roll initiative" });
       await init.getByLabel("Initiative: my table roll").fill("19");
       await init.getByRole("button", { name: "Send" }).tap();
@@ -126,6 +128,8 @@ test.describe("Role screens: the DM's Combat tab and the player's Play tab (0.3.
       const row = desk.locator(`[data-combatant="${pc.id}"]`);
       await expect(row).toBeVisible({ timeout: 30_000 });
       await expect(row.locator(".cb-row-hp")).toHaveCount(0);
+      // The PC's health band instead (Healthy / Bloodied / Down / Stable / Dead), never a number.
+      await expect(row.getByLabel(/^Health: (Healthy|Bloodied|Down|Stable|Dead)$/)).toBeVisible();
       await expect(row.getByLabel(/hit points/)).toHaveCount(0);
       const sheetHp = (await api<{ play: { hitPoints: { current: number; max: number } } }>(request, player.token, "POST", "/api/rpc/get_snapshot", { characterId: hero.id })).play.hitPoints;
       await row.locator(".cb-row-main").click();
