@@ -31,7 +31,9 @@ function signIn(uid: string) {
   server.me = uid;
   const a = server.accounts.find((x) => x.id === uid)!;
   saveSession({ baseUrl: "http://server", token: "t", user: { id: a.id, username: a.username, email: null, admin: false, mustChangePassword: false } });
-  api = { listCharacters: async () => a.characters.map((c) => ({ id: c.id, name: c.name, build: `Fighter ${c.level}`, level: c.level })) } as unknown as Api;
+  api = {
+    listCharacters: async () => a.characters.map((c) => ({ id: c.id, name: c.name, build: `Fighter ${c.level}`, level: c.level, ruleset: c.ruleset, updatedAt: c.updatedAt })),
+  } as unknown as Api;
 }
 
 function page(path = "/parties") {
@@ -61,6 +63,7 @@ async function dmMakesCode(name = "Tuesday Party", uses = 1): Promise<string> {
   await loaded();
   fireEvent.click(screen.getByRole("button", { name: /New party/ }));
   fireEvent.change(within(dialog()).getByLabelText("Party name"), { target: { value: name } });
+  fireEvent.click(within(dialog()).getByRole("radio", { name: "2024 rules" }));
   fireEvent.click(within(dialog()).getByRole("button", { name: "Create" }));
   const card = await screen.findByRole("region", { name });
   fireEvent.click(within(card).getByRole("button", { name: /Invite/ }));
@@ -146,10 +149,11 @@ describe("as a DM", () => {
     expect(screen.getByText("No parties yet")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /New party/ }));
     fireEvent.change(within(dialog()).getByLabelText("Party name"), { target: { value: "Tuesday Party" } });
+    fireEvent.click(within(dialog()).getByRole("radio", { name: "2024 rules" }));
     fireEvent.click(within(dialog()).getByRole("button", { name: "Create" }));
     const card = await screen.findByRole("region", { name: "Tuesday Party" });
     expect(within(card).getByText("DM")).toBeTruthy();
-    expect(server.calls).toContainEqual({ method: "POST", path: "/api/parties", body: { name: "Tuesday Party" } });
+    expect(server.calls).toContainEqual({ method: "POST", path: "/api/parties", body: { name: "Tuesday Party", ruleset: "dnd2024" } });
 
     fireEvent.click(within(card).getByRole("button", { name: /Rename/ }));
     fireEvent.change(within(dialog()).getByLabelText("Party name"), { target: { value: "Friday Party" } });

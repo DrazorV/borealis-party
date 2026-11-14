@@ -122,6 +122,7 @@ test.describe("Parties on a phone (plan 4.1)", () => {
     await page.getByRole("button", { name: /New party/ }).tap();
     const create = page.getByRole("dialog", { name: "New party" });
     await create.getByLabel("Party name").fill(name);
+    await create.getByRole("radio", { name: "2024 rules" }).tap();
     await create.getByRole("button", { name: "Create" }).tap();
     const card = partyCard(page, name);
     await expect(card).toBeVisible();

@@ -285,6 +285,43 @@ export function watchParties(listener: (e: PartyEvent) => void): () => void {
   }, (again) => { if (again) listener({ type: "resync" }); });
 }
 
+/** The editions, as the UI names them. */
+export const RULESETS: readonly Ruleset[] = ["dnd2014", "dnd2024"];
+export const EDITION_LABEL: Record<Ruleset, string> = { dnd2014: "2014 rules", dnd2024: "2024 rules" };
+export const otherEdition = (r: Ruleset): Ruleset => (r === "dnd2014" ? "dnd2024" : "dnd2014");
+const isRuleset = (r: unknown): r is Ruleset => r === "dnd2014" || r === "dnd2024";
+
+/** The edition of the account's most recently changed character, to pre-select for a new party; null with none. */
+export function newestEdition(characters: readonly { ruleset?: unknown; updatedAt?: unknown }[]): Ruleset | null {
+  let best: { at: number; ruleset: Ruleset } | null = null;
+  for (const c of characters) {
+    if (!isRuleset(c.ruleset)) continue;
+    const parsed = typeof c.updatedAt === "string" ? Date.parse(c.updatedAt) : typeof c.updatedAt === "number" ? c.updatedAt : NaN;
+    const at = Number.isFinite(parsed) ? parsed : -Infinity;
+    if (!best || at > best.at) best = { at, ruleset: c.ruleset };
+  }
+  return best?.ruleset ?? null;
+}
+
+/** How many of the party's characters use each edition (unreadable ones count for neither). */
+export function editionCounts(members: readonly { ruleset: Ruleset | null }[]): Record<Ruleset, number> {
+  const out: Record<Ruleset, number> = { dnd2014: 0, dnd2024: 0 };
+  for (const m of members) if (isRuleset(m.ruleset)) out[m.ruleset] += 1;
+  return out;
+}
+
+/**
+ * The edition to offer the DM a one-tap switch to: the other one, when most of the party's characters (more than
+ * half of those whose edition is known) use it. Null for a player, or when the party already matches its characters.
+ */
+export function editionToSwitchTo(party: Pick<Party, "role" | "ruleset" | "members">): Ruleset | null {
+  if (party.role !== "dm") return null;
+  const counts = editionCounts(party.members);
+  const other = otherEdition(party.ruleset);
+  const known = counts.dnd2014 + counts.dnd2024;
+  return known > 0 && counts[other] * 2 > known ? other : null;
+}
+
 /** Human words for a health band. */
 export const BAND_LABEL: Record<HealthBand, string> = { unhurt: "Unhurt", bloodied: "Bloodied", down: "Down" };
 
@@ -293,7 +330,15 @@ export function classLine(classes: ClassLine[] | undefined): string {
   return (classes ?? []).map((c) => `${c.name} ${c.level}`).join(" / ");
 }
 
-export const createParty = (name: string) => changing(call<Party>("POST", "/api/parties", { name }).then(detail));
+/** The UI always names the edition (0.3.2): the server's default (2024) is only for API clients that don't. */
+export const createParty = (name: string, ruleset: Ruleset) =>
+  changing(call<Party>("POST", "/api/parties", { name, ruleset }).then(detail));
+/**
+ * The DM changes the party's edition (D23 b): its encounters and the combats started from now on follow it; a combat
+ * that is running keeps its snapshot. The server tells everyone (a `party` event), so open encounter screens reload.
+ */
+export const setPartyEdition = (id: string, ruleset: Ruleset) =>
+  changing(call<Party>("PATCH", `/api/parties/${seg(id)}`, { ruleset }).then(detail));
 export const renameParty = (id: string, name: string) => changing(call<Party>("PATCH", `/api/parties/${seg(id)}`, { name }).then(detail));
 export const deleteParty = (id: string) => changing(call<unknown>("DELETE", `/api/parties/${seg(id)}`));
 
