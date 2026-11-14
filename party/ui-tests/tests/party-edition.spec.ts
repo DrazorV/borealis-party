@@ -47,8 +47,14 @@ async function fits(page: Page, testInfo: TestInfo, within: string) {
   expect(o.page, "the page scrolls sideways").toBeLessThanOrEqual(0);
   expect(o.scrollers.filter((s) => !s.includes("enc-chips")), "containers that scroll sideways").toEqual([]);
   if (!desktop(testInfo)) {
-    const small = (await smallTargets(page, minTap(testInfo), within)).map((t) => `${t.label} ${t.width}x${t.height}`);
-    expect(small, `controls under ${minTap(testInfo)} px in ${within}`).toEqual([]);
+    // Polled, not read once: a dialog that has just opened can still be animating in, and a 48 px button then
+    // measures 47.x px for a frame (seen on CI as "360x48" under 48).
+    await expect
+      .poll(async () => (await smallTargets(page, minTap(testInfo), within)).map((t) => `${t.label} ${t.width}x${t.height}`), {
+        message: `controls under ${minTap(testInfo)} px in ${within}`,
+        timeout: 3_000,
+      })
+      .toEqual([]);
   }
 }
 
