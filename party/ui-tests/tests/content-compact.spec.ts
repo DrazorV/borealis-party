@@ -148,3 +148,29 @@ test("a source's packs open as chips with a search", async ({ page }, testInfo) 
   expect(o.page, "the page scrolls sideways").toBeLessThanOrEqual(0);
   await page.screenshot({ path: testInfo.outputPath("packs-open.png"), fullPage: true });
 });
+
+test("the Assistant section is spaced and lined up like the page's other sections (0.3.2)", async ({ page }, testInfo) => {
+  await openContent(page, testInfo);
+  const assistant = page.getByRole("region", { name: "Assistant" });
+  await expect(assistant).toBeVisible({ timeout: 30_000 });
+  await expect(assistant.getByRole("button", { name: "Assistant" })).toBeVisible();
+  await expect(bestiary(page)).toContainText(/creatures with stat blocks/, { timeout: 30_000 });
+  // Every visible section of the page, as boxes: those stacked over each other keep a section's gap.
+  const boxes = await page.locator(".v4-content section.v4-csec").evaluateAll((els) => els
+    .map((el) => ({ name: el.getAttribute("aria-label") ?? "", r: el.getBoundingClientRect() }))
+    .filter((b) => b.r.width > 0 && b.r.height > 0)
+    .map((b) => ({ name: b.name, x: b.r.x, y: b.r.y, w: b.r.width, h: b.r.height })));
+  const a = boxes.find((b) => b.name === "Assistant")!;
+  expect(a, "the Assistant section").toBeTruthy();
+  const left = Math.min(...boxes.map((b) => b.x));
+  expect(Math.abs(a.x - left), "the Assistant section starts at the page's left edge, like the others").toBeLessThanOrEqual(1);
+  for (const b of boxes) {
+    if (b === a) continue;
+    const sideBySide = b.x >= a.x + a.w || a.x >= b.x + b.w;
+    if (sideBySide) continue;
+    const gap = b.y >= a.y ? b.y - (a.y + a.h) : a.y - (b.y + b.h);
+    expect(gap, `space between Assistant and ${b.name}`).toBeGreaterThanOrEqual(16);
+  }
+  await assistant.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("content-assistant.png") });
+});

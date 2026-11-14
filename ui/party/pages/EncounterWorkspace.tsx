@@ -128,13 +128,8 @@ function PartyList({ partyId, current }: { partyId: string; current?: string }) 
       {error && <Alert tone="danger">{error}</Alert>}
       {list === undefined && !error && <p className="muted">Loading encounters…</p>}
       {list === null && <Alert tone="info">This party isn't there any more, or it isn't yours.</Alert>}
-      {list?.role === "dm" && (
-        <div className="party-line">
-          <span className="grow" />
-          <AssistantButton purpose="encounter" context={{ partyId }} onChanged={() => void reload()} />
-        </div>
-      )}
-      {list?.role === "dm" && <DmEncounterList partyId={partyId} list={list} current={current} onNew={() => setCreating(true)} />}
+      {list?.role === "dm" && <DmEncounterList partyId={partyId} list={list} current={current} onNew={() => setCreating(true)}
+        tools={<AssistantButton purpose="encounter" context={{ partyId }} onChanged={() => void reload()} />} />}
       {creating && <NewEncounterDialog partyId={partyId} onClose={() => setCreating(false)} />}
     </>
   );

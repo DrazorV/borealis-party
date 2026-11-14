@@ -74,6 +74,29 @@ async function prepare(request: APIRequestContext, testInfo: TestInfo) {
 
 const box = async (page: Page, selector: string) => (await page.locator(selector).first().boundingBox())!;
 
+/** The list's heading row (0.3.2): ENCOUNTERS, then Assistant and New encounter beside it, none on top of another. */
+async function headingRow(page: Page, testInfo: TestInfo) {
+  const head = page.locator(".enc-list-card .card-head").first();
+  const title = await head.locator("h2").boundingBox();
+  const assistant = await head.getByRole("button", { name: "Assistant" }).boundingBox();
+  const add = await head.getByRole("button", { name: "New encounter" }).boundingBox();
+  expect(title && assistant && add, "the heading row has ENCOUNTERS, Assistant and New encounter").toBeTruthy();
+  const apart = (p: { x: number; y: number; width: number; height: number }, q: typeof p) =>
+    p.x + p.width <= q.x + 0.5 || q.x + q.width <= p.x + 0.5 || p.y + p.height <= q.y + 0.5 || q.y + q.height <= p.y + 0.5;
+  expect(apart(title!, assistant!), "Assistant doesn't sit on the heading").toBe(true);
+  expect(apart(title!, add!), "New encounter doesn't sit on the heading").toBe(true);
+  expect(apart(assistant!, add!), "Assistant and New encounter don't overlap").toBe(true);
+  // The two buttons share a line: beside the heading when the column has room, else together under it.
+  const mid = (b: { y: number; height: number }) => b.y + b.height / 2;
+  expect(Math.abs(mid(add!) - mid(assistant!)), "Assistant and New encounter share a line").toBeLessThanOrEqual(2);
+  const beside = Math.abs(mid(assistant!) - mid(title!)) <= 8;
+  const under = assistant!.y >= title!.y + title!.height + 4;
+  expect(beside || under, `the buttons are on the heading's line or clearly under it (${testInfo.project.name})`).toBe(true);
+  // Nothing of the list's card sits above its own heading row.
+  const card = await page.locator(".enc-list-card").first().boundingBox();
+  expect(Math.min(title!.y, assistant!.y, add!.y)).toBeGreaterThanOrEqual(card!.y - 0.5);
+}
+
 test.describe("Encounters and Combat tabs (0.3.1)", () => {
   test("a big screen: the whole width for session prep, then running it from the Combat tab", async ({ page, request }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-wide", "the big-screen layout: 1440x900");
@@ -97,6 +120,7 @@ test.describe("Encounters and Combat tabs (0.3.1)", () => {
       await expect(tab).toHaveAttribute("aria-current", "page");
       const list = page.getByRole("navigation", { name: `${partyName}: encounters` });
       await expect(page.getByText("Pick an encounter")).toBeVisible();
+      await headingRow(page, testInfo);
       await list.getByRole("link", { name: "Open Bridge ambush" }).click();
       await expect(page).toHaveURL(new RegExp(`#/encounters/${party.id}/${enc.id}$`));
       await expect(page.getByRole("heading", { name: "Bridge ambush" })).toBeVisible();
@@ -205,6 +229,7 @@ test.describe("Encounters and Combat tabs (0.3.1)", () => {
       await open(page, `/encounters/${party.id}`);
       const row = page.getByRole("link", { name: "Open Bridge ambush" });
       await expect(row).toBeVisible();
+      await headingRow(page, testInfo);
       await shot(page, testInfo, "list");
       await row.tap();
       await expect(page).toHaveURL(new RegExp(`#/encounters/${party.id}/${enc.id}$`));

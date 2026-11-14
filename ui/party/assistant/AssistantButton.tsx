@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "../../src/components/Button";
-import { Card } from "../../src/components/Card";
+import { Section } from "../../src/pages/content/Section";
 import type { Purpose } from "../api/overrides/assistant";
 import { type AssistantContext, type AssistantFrame, AssistantPanel } from "./AssistantPanel";
 
@@ -25,14 +25,14 @@ export function AssistantButton({ purpose, context, onChanged, small = true, fra
   );
 }
 
-/** Additional Content's entry: homebrew and custom indexes with the person's own AI. */
+/**
+ * Additional Content's entry: homebrew and custom indexes with the person's own AI. One of the page's own sections
+ * (upstream's Section), so it has the same heading, button row and spacing as Update content files and the others.
+ */
 export function AssistantContentCard() {
   return (
-    <Card title="Assistant">
-      <p className="muted">Draft homebrew or build a custom index with your own AI (Account, Your AI).</p>
-      <div className="party-inline">
-        <AssistantButton purpose="homebrew" />
-      </div>
-    </Card>
+    <Section title="Assistant" actions={<AssistantButton purpose="homebrew" />}>
+      <p className="muted party-assistant-note">Draft homebrew or build a custom index with your own AI (Account, Your AI).</p>
+    </Section>
   );
 }
