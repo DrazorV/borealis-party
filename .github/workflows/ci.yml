@@ -37,7 +37,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # ubuntu-24.04, not ubuntu-latest: 26.04's compiler fails the llama.cpp x86 levels check and would raise the
+        # glibc a Linux build needs. Move on purpose (pinned 2026-11-14, like rust-toolchain.toml).
+        os: [ubuntu-24.04, windows-latest]
     steps:
       - name: Keep LF line endings (Windows)
         # The AI profile is hash-verified and content files are byte-compared; CRLF breaks both.
@@ -116,7 +118,7 @@ jobs:
   audit:
     name: dependency audit
     if: ${{ !inputs.only_embed && !inputs.only_bundle }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -148,7 +150,7 @@ jobs:
       matrix:
         include:
           - platform: android
-            os: ubuntu-latest
+            os: ubuntu-24.04
             target: aarch64-linux-android
           # The iOS SDK exists only on macOS. The repo is public, so the macOS runner costs no minutes.
           - platform: ios
@@ -198,7 +200,7 @@ jobs:
         # Release builds: the Windows debug exe is console-subsystem (a console window opens).
         # Linux: deb + AppImage (tauri.linux.conf.json); Windows: unsigned NSIS installer
         # (tauri.windows.conf.json).
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
     steps:
       - name: Keep LF line endings (Windows)
         if: runner.os == 'Windows'
@@ -519,7 +521,7 @@ jobs:
   android:
     name: Android build (manual, experimental)
     if: github.event_name == 'workflow_dispatch' && !inputs.only_embed && !inputs.only_bundle
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -574,7 +576,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
     defaults:
       run:
         shell: bash
