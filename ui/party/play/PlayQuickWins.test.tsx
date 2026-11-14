@@ -136,24 +136,25 @@ describe("concentration save after damage", () => {
     return spell;
   }
 
-  it("damage asks for the save; a fail ends concentration", async () => {
+  it("damage asks for the save; Failed ends concentration", async () => {
     const spell = await concentrating();
     const user = await open();
     await screen.findByText(spell.name);
     await damage(user, 4);
     const prompt = await screen.findByRole("alertdialog", { name: "Concentration save, DC 10" });
     expect(within(prompt).getByText("(4 damage)")).toBeTruthy();
-    await user.type(within(prompt).getByRole("textbox"), "8{Enter}");
+    expect(within(prompt).queryByRole("textbox")).toBeNull();
+    await user.click(within(prompt).getByRole("button", { name: "Failed" }));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Concentration" })).toBeNull());
     expect((await api.getSnapshot({ characterId: id })).play.concentration).toBeNull();
   });
 
-  it("a save at the DC keeps it", async () => {
+  it("Saved keeps it", async () => {
     await concentrating();
     const user = await open();
     await damage(user, 2);
     const prompt = await screen.findByRole("alertdialog", { name: "Concentration save, DC 10" });
-    await user.type(within(prompt).getByRole("textbox"), "10{Enter}");
+    await user.click(within(prompt).getByRole("button", { name: "Saved" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect((await api.getSnapshot({ characterId: id })).play.concentration).not.toBeNull();
   });
@@ -176,14 +177,15 @@ describe("death saves outside combat", () => {
     expect(applyDeathSave({ successes: 2, failures: 2 }, 20)).toEqual({ saves: none, revived: true });
   });
 
-  it("appears at 0 hit points, counts typed saves to stable, and goes once healed", async () => {
+  it("appears at 0 hit points, counts outcome buttons to stable, and goes once healed", async () => {
     const user = await open();
     expect(screen.queryByRole("region", { name: "Death saves" })).toBeNull();
     await damage(user, hp());
     const card = await screen.findByRole("region", { name: "Death saves" });
     expect(within(card).getByText("Dying")).toBeTruthy();
-    for (const roll of ["12", "15", "10"]) {
-      await user.type(within(card).getByRole("textbox", { name: "Death save: my table roll" }), `${roll}{Enter}`);
+    expect(within(card).queryByRole("textbox")).toBeNull();
+    for (const outcome of ["Success", "Success", "Success"]) {
+      await user.click(within(card).getByRole("button", { name: outcome }));
     }
     await waitFor(() => expect(within(card).getByText("Stable")).toBeTruthy());
     expect(within(card).getByRole("img", { name: "Successes: 3 of 3" })).toBeTruthy();
@@ -192,13 +194,13 @@ describe("death saves outside combat", () => {
     await waitFor(() => expect(screen.queryByRole("region", { name: "Death saves" })).toBeNull());
   });
 
-  it("a typed 20 brings them back with 1 hit point; damage at 0 is a failure", async () => {
+  it("Natural 20 brings them back with 1 hit point; damage at 0 is a failure", async () => {
     const user = await open();
     await damage(user, hp());
     const card = await screen.findByRole("region", { name: "Death saves" });
     await user.click(within(card).getByRole("button", { name: "Critical hit" }));
     expect(within(card).getByRole("img", { name: "Failures: 2 of 3" })).toBeTruthy();
-    await user.type(within(card).getByRole("textbox"), "20{Enter}");
+    await user.click(within(card).getByRole("button", { name: "Natural 20" }));
     await waitFor(() => expect(hp()).toBe(1));
     expect(screen.queryByRole("region", { name: "Death saves" })).toBeNull();
   });
