@@ -125,6 +125,9 @@ export function smallTargets(page: Page, min: number, within?: string): Promise<
     const sel = "button, a[href], input:not([type=hidden]), select, textarea, summary, [role=button], [role=tab], [role=menuitem], [role=checkbox], [role=switch], [role=option]";
     const out: { label: string; width: number; height: number }[] = [];
     const scope: ParentNode = (within && document.querySelector(within)) || document;
+    // Sub-pixel layout: a 44 px button can measure 43.98 px on another machine's fonts (CI, 0.3.3: "154x44" under
+    // 44). A size that rounds to the minimum meets it, as the report prints it; 43 px still fails.
+    const fits = (w: number, h: number) => w >= min - 0.5 && h >= min - 0.5;
     for (const el of Array.from(scope.querySelectorAll<HTMLElement>(sel))) {
       let r: { width: number; height: number; left: number; right: number } = el.getBoundingClientRect();
       // Nothing to see (and a 1 px screen-reader-only control is not meant to be tapped).
@@ -143,9 +146,9 @@ export function smallTargets(page: Page, min: number, within?: string): Promise<
       const outer = el.parentElement?.closest(sel);
       if (outer) {
         const o = outer.getBoundingClientRect();
-        if (o.width >= min && o.height >= min) continue;
+        if (fits(o.width, o.height)) continue;
       }
-      if (r.width >= min && r.height >= min) continue;
+      if (fits(r.width, r.height)) continue;
       const text = (el.getAttribute("aria-label") || el.getAttribute("title") || label?.textContent || el.textContent
         || (el as HTMLInputElement).placeholder || el.getAttribute("type") || el.tagName)
         .trim().replace(/\s+/g, " ").slice(0, 40);
