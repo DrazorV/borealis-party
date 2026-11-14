@@ -36,6 +36,8 @@ pub fn kind_of(command: &str) -> Option<&'static str> {
 
 /// Tell `account`'s open streams that `command` changed its content.
 pub fn changed(hub: &PartyHub, account: &str, kind: &str, command: &str) {
+    // Other spells now: the copies hidden from new picks are worked out again on the account's next command.
+    crate::spells::mark_stale(account);
     hub.deliver(
         account,
         CONTENT_CHANGED,

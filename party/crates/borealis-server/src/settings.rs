@@ -23,13 +23,15 @@ const FOLDERS: [&str; 4] = [
     "vaultDir",
 ];
 
-/// What else a client can't set: the updater, the AI CLIs and the flags upstream pins per build.
-const FIXED: [&str; 5] = [
+/// What else a client can't set: the updater, the AI CLIs, the flags upstream pins per build, and the spell copies
+/// the server hides from new picks (one spell per edition: [`crate::spells::sync_hidden`]).
+const FIXED: [&str; 6] = [
     "checkAppUpdates",
     "ai",
     "mobile",
     "storeBuild",
     "aiAvailable",
+    "hiddenElements",
 ];
 
 /// The party's own settings, which upstream's file has no field for, with their defaults. Each account keeps them in

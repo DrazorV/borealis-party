@@ -810,3 +810,77 @@ async fn spells_on_postgres() {
     .await;
     drop_all(&url).await;
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Hidden copies: one spell per edition in the account's pickers
+// ---------------------------------------------------------------------------------------------------------------
+
+async fn hidden_now(client: &Client) -> Vec<String> {
+    let (status, out) = client.rpc("get_settings", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let mut ids: Vec<String> = out["hiddenElements"]
+        .as_array()
+        .map(|a| a.iter().map(|v| v.as_str().unwrap().to_string()).collect())
+        .unwrap_or_default();
+    ids.sort();
+    ids
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_other_copies_of_a_spell_are_hidden_from_new_picks() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = router_on(
+        dir.path().to_path_buf(),
+        Db::open(&Location::Memory).await.unwrap(),
+    );
+    let dm = sign_up(&router, "hide-dm").await;
+    let other = sign_up(&router, "hide-other").await;
+    // The bundled SRD has one copy of each spell per edition: nothing to hide.
+    assert_eq!(hidden_now(&dm).await, Vec::<String>::new());
+    // A second copy of Fireball (2014): the SRD one is the spell, the copy is hidden (on the next command).
+    let copy = homebrew_fireball(&dm).await;
+    assert_eq!(hidden_now(&dm).await, vec![copy.clone()]);
+    assert_eq!(
+        hidden_now(&other).await,
+        Vec::<String>::new(),
+        "per account"
+    );
+    // A client can't change the list itself.
+    let (status, out) = dm
+        .rpc(
+            "save_settings",
+            json!({ "patch": { "hiddenElements": [] } }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(hidden_now(&dm).await, vec![copy.clone()]);
+    // The DM's pick swaps them; back to the rule swaps them back.
+    ok(
+        &dm,
+        "POST",
+        &format!("/api/spells/{copy}/choose"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(hidden_now(&dm).await, vec![FIREBALL_2014.to_string()]);
+    ok(
+        &dm,
+        "DELETE",
+        &format!("/api/spells/{copy}/choose"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(hidden_now(&dm).await, vec![copy.clone()]);
+    // Restoring the default settings hides them again.
+    let (status, out) = dm.rpc("restore_default_settings", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(hidden_now(&dm).await, vec![copy.clone()]);
+    // A character still loads with the list in place (upstream replays a stored pick of a hidden copy: its test).
+    let (status, out) = dm
+        .rpc("create_character", super::new_character("Hidden Test"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let id = out["id"].as_str().unwrap().to_string();
+    let (status, out) = dm.rpc("get_snapshot", json!({ "characterId": id })).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+}
