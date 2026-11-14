@@ -4,9 +4,10 @@
  * rule for the cultists (C20) with a group limit (C21), a mage with spell slots and concentration (C18), and two PCs.
  */
 import { emptyState, newCombat, type MockCombat } from "./mockEngine";
+import type { SpellAbility, SpellCombatant, SpellLink, SpellMech } from "./spellTypes";
 import type { Ability, Combatant, CombatState, StatBlockSnapshot } from "./types";
 
-function creature(id: string, label: string, hp: number, ac: number, init: number, extra: Partial<Combatant> = {}): Combatant {
+function creature(id: string, label: string, hp: number, ac: number, init: number, extra: Partial<SpellCombatant> = {}): Combatant {
   return {
     id, kind: "creature", label, public_name: label, visible: false, ever_revealed: false, removed: false,
     initiative: null, initiative_bonus: init, tiebreak: 0, absent: false,
@@ -22,7 +23,16 @@ export function character(id: string, owner: string, name: string, hp: number, a
   };
 }
 
-const act = (key: string, name: string, kind: Ability["kind"], text: string, more: Partial<Ability> = {}): Ability => ({ key, name, kind, text, ...more });
+const act = (key: string, name: string, kind: Ability["kind"], text: string, more: Partial<SpellAbility> = {}): Ability => ({ key, name, kind, text, ...more });
+
+/** A spell ability with SRD mechanics (0.3.2; the curated table's shape, numbers only). */
+function spell(key: string, kind: Ability["kind"], text: string, mech: Omit<SpellMech, "key">, link: Partial<SpellLink> = {}, more: Partial<SpellAbility> = {}): Ability {
+  return act(key, mech.name, kind, text, {
+    mech: { key, ...mech },
+    spell: { key, element_id: `ID_SRD_SPELL_${key.toUpperCase()}`, name: mech.name, level: mech.level, ruleset: "2024", status: "linked", ...link },
+    ...more,
+  });
+}
 
 export const SAMPLE_STATBLOCKS: Record<string, StatBlockSnapshot> = {
   knight: {
@@ -84,6 +94,15 @@ export const SAMPLE_STATBLOCKS: Record<string, StatBlockSnapshot> = {
       actions: [{ name: "Scimitar", text: "Melee Weapon Attack: +3 to hit, reach 5 ft. Hit: 4 (1d6 + 1) slashing damage.", attack: { kind: "melee_weapon", to_hit: 3, reach: 5, damage: [{ average: 4, dice: "1d6+1", type: "slashing" }] } }],
     },
   },
+  druid: {
+    name: "Druid",
+    data: {
+      ac: [{ value: 11 }], hp: { average: 27, formula: "5d8+5" }, speed: { walk: 30 },
+      abilities: { str: 10, dex: 12, con: 13, int: 12, wis: 15, cha: 11 },
+      traits: [{ name: "Spellcasting", text: "The druid is a 4th-level spellcaster (spell save DC 12, +4 to hit with spell attacks).", spellcasting: { ability: "wis", save_dc: 12, attack_bonus: 4, lists: [] } }],
+      actions: [{ name: "Quarterstaff", text: "Melee Weapon Attack: +2 to hit, reach 5 ft. Hit: 3 (1d6) bludgeoning damage.", attack: { kind: "melee_weapon", to_hit: 2, reach: 5, damage: [{ average: 3, dice: "1d6", type: "bludgeoning" }] } }],
+    },
+  },
   mage: {
     name: "Mage",
     data: {
@@ -122,8 +141,14 @@ export function sampleState(): CombatState {
       spell_slots: { "1": { max: 4, remaining: 4 }, "2": { max: 3, remaining: 3 }, "3": { max: 2, remaining: 2 } },
       abilities: [
         act("mace", "Mace", "action", "+2 to hit, 1d6 bludgeoning."),
-        act("bless", "Bless", "action", "Up to three creatures add 1d4 to attacks and saves. Concentration, 1 minute."),
-        act("spirit_guardians", "Spirit Guardians", "action", "15-ft aura, DC 13 WIS, 3d8 radiant. Concentration, 10 minutes."),
+        spell("bless", "action", "Up to three creatures add 1d4 to attacks and saves. Concentration, 1 minute.", { name: "Bless", level: 1, concentration: true, cast: "action", tier: "auto", duration_turns: 10,
+          targeting: { kind: "creatures", max: "3+slot_above", filter: { kind: "willing" } }, delivery: { kind: "auto" }, always: [{ kind: "roll_dice", on: "attack", term: "1d4" }, { kind: "roll_dice", on: "save", term: "1d4" }] }),
+        spell("sacred_flame", "action", "DEX save or 1d8 radiant.", { name: "Sacred Flame", level: 0, concentration: false, cast: "action", tier: "auto", dc: 13,
+          targeting: { kind: "creatures", max: 1 }, delivery: { kind: "save", ability: "dex", success: "none" }, on_land: [{ kind: "damage", dice: "(cantrip_tier)d8", type: "radiant" }] }, { frequency: "at_will" }),
+        spell("cure_wounds", "action", "A creature it touches regains 2d8 + WIS hit points.", { name: "Cure Wounds", level: 1, concentration: false, cast: "action", tier: "auto", mod: 3,
+          targeting: { kind: "creatures", max: 1 }, delivery: { kind: "auto" }, on_land: [{ kind: "heal", dice: "2d8+(2*slot_above)d8+mod", add_mod: true }] }),
+        spell("spirit_guardians", "action", "15-ft aura, DC 13 WIS, 3d8 radiant. Concentration, 10 minutes.", { name: "Spirit Guardians", level: 3, concentration: true, cast: "action", tier: "partial", dc: 13, duration_turns: 100,
+          targeting: { kind: "self" }, delivery: { kind: "auto" }, always: [{ kind: "zone", ability: "wis", damage: { dice: "3d8+(slot_above)d8", type: "radiant" }, half: true }] }),
       ],
     }),
     creature("cultist1", "Cultist 1", 9, 12, 1, { group: "cultists", abilities: [act("scimitar", "Scimitar", "action", "+3 to hit, 1d6+1 slashing."), act("dark_gift", "Dark Gift", "bonus_action", "Once per round for the whole group, while the priest lives.", { group_limit: "cultists" })] }),
@@ -131,12 +156,38 @@ export function sampleState(): CombatState {
     creature("mage", "Mage", 40, 12, 2, {
       spell_slots: { "1": { max: 4, remaining: 4 }, "2": { max: 3, remaining: 3 }, "3": { max: 3, remaining: 3 }, "4": { max: 3, remaining: 3 }, "5": { max: 1, remaining: 1 } },
       resources: { misty: { label: "Misty Step 1/day", pool: { max: 1, remaining: 1 }, reset: "never" } },
+      stats: { mods: [-1, 2, 0, 3, 1, 0], saves: [-1, 2, 0, 6, 4, 0] }, casting: [{ ability: "int", dc: 14, attack: 6, caster_level: 9 }],
       abilities: [
         act("dagger", "Dagger", "action", "+5 to hit, 1d4+2 piercing."),
-        act("fire_bolt", "Fire Bolt", "action", "+6 to hit, 2d10 fire."),
-        act("haste", "Haste", "action", "One willing creature: speed doubled, +2 AC. Concentration, 1 minute."),
-        act("misty_step", "Misty Step", "bonus_action", "Teleport up to 30 ft.", { uses: "misty" }),
-        act("counterspell", "Counterspell", "reaction", "Interrupt a spell."),
+        spell("fire_bolt", "action", "+6 to hit, 2d10 fire.", { name: "Fire Bolt", level: 0, concentration: false, cast: "action", tier: "auto", attack: 6,
+          targeting: { kind: "creatures", max: 1 }, delivery: { kind: "attack", attack_kind: "ranged" }, on_land: [{ kind: "damage", dice: "(cantrip_tier)d10", type: "fire" }] }, { frequency: "at_will" }),
+        spell("mage_armor", "action", "A willing creature not wearing armor: base AC 13 + DEX for 8 hours.", { name: "Mage Armor", level: 1, concentration: false, cast: "action", tier: "auto",
+          targeting: { kind: "creatures", max: 1, filter: { kind: "willing" } }, delivery: { kind: "auto" }, always: [{ kind: "ac_base", base: 13, add_dex: true }], notes: ["ends if it dons armor"] }),
+        spell("shield", "reaction", "+5 AC until the start of its next turn.", { name: "Shield", level: 1, concentration: false, cast: "reaction", tier: "auto", duration_turns: 1,
+          targeting: { kind: "self" }, delivery: { kind: "auto" }, always: [{ kind: "ac_bonus", value: 5 }] }),
+        spell("hold_person", "action", "A humanoid: WIS save or paralyzed; it repeats the save at the end of each of its turns. Concentration, 1 minute.", { name: "Hold Person", level: 2, concentration: true, cast: "action", tier: "auto", dc: 14, duration_turns: 10,
+          targeting: { kind: "creatures", max: "1+slot_above", filter: { kind: "type", types: ["humanoid"] } }, delivery: { kind: "save", ability: "wis", success: "none" },
+          on_land: [{ kind: "condition", condition: "paralyzed", repeat_save: { ability: "wis", at: "end" } }] }),
+        spell("fireball", "action", "20-ft sphere: DEX save, 8d6 fire, half on a success; +1d6 per slot above 3rd.", { name: "Fireball", level: 3, concentration: false, cast: "action", tier: "auto", dc: 14,
+          targeting: { kind: "area", shape: "sphere", size_ft: 20 }, delivery: { kind: "save", ability: "dex", success: "half" }, on_land: [{ kind: "damage", dice: "8d6+(slot_above)d6", type: "fire" }] }),
+        spell("haste", "action", "One willing creature: speed doubled, +2 AC, advantage on DEX saves, one extra limited action. Concentration, 1 minute.", { name: "Haste", level: 3, concentration: true, cast: "action", tier: "partial", duration_turns: 10,
+          targeting: { kind: "creatures", max: 1, filter: { kind: "willing" } }, delivery: { kind: "auto" }, always: [{ kind: "ac_bonus", value: 2 }, { kind: "speed", op: "mult", value: 2 }, { kind: "note", key: "haste_action", text: "one extra limited action" }] }),
+        spell("greater_invisibility", "action", "Invisible for 1 minute. Concentration.", { name: "Greater Invisibility", level: 4, concentration: true, cast: "action", tier: "auto", duration_turns: 10,
+          targeting: { kind: "creatures", max: 1 }, delivery: { kind: "auto" }, always: [{ kind: "condition", condition: "invisible" }] }),
+        act("misty_step", "Misty Step", "bonus_action", "Teleport up to 30 ft.", { uses: "misty", spell: { key: "misty_step", name: "Misty Step", level: 2, status: "linked", coverage: "ruling", frequency: { per_day: 1 } } }),
+        spell("counterspell", "reaction", "Interrupt a spell.", { name: "Counterspell", level: 3, concentration: false, cast: "reaction", tier: "ruling",
+          targeting: { kind: "creatures", max: 1 }, delivery: { kind: "auto" }, on_land: [{ kind: "ruling", question: "Was the spell countered?", buttons: ["Countered", "Not countered"] }] }),
+        act("cone_of_cold", "Cone of Cold", "action", "60-ft cone, CON save, 8d8 cold.", { spell: { key: "cone_of_cold", name: "Cone of Cold", level: 5, status: "linked", coverage: "suggested" } }),
+        act("arcane_word", "Arcane Word", "action", "A homebrew spell this DM has not defined.", { spell: { key: "arcane_word", name: "Arcane Word", level: 1, status: "unlinked" } }),
+      ],
+    }),
+    creature("druid", "Druid", 27, 11, 1, {
+      spell_slots: { "1": { max: 4, remaining: 4 }, "2": { max: 3, remaining: 3 }, "3": { max: 2, remaining: 2 } },
+      abilities: [
+        act("quarterstaff", "Quarterstaff", "action", "+2 to hit, 1d6 bludgeoning."),
+        spell("conjure_animals", "action", "Fey spirits take the form of beasts: one of CR 2, two of CR 1, four of CR 1/2 or eight of CR 1/4. Concentration, 1 hour.", { name: "Conjure Animals", edition: "2014", level: 3, concentration: true, cast: "action", tier: "partial", duration_turns: 600,
+          targeting: { kind: "self" }, delivery: { kind: "auto" },
+          always: [{ kind: "summon_info", creature_type: "beast", options: [{ cr: 2, count: 1 }, { cr: 1, count: 2 }, { cr: 0.5, count: 4 }, { cr: 0.25, count: 8 }], per_slot: { "5": 2, "7": 3 } }] }, { ruleset: "2014" }),
       ],
     }),
     character("pc-aria", "pl1", "Aria", 28, 16, 2, 15),
@@ -155,7 +206,7 @@ export function sampleState(): CombatState {
 }
 
 export const SAMPLE_BLOCK_OF: Record<string, keyof typeof SAMPLE_STATBLOCKS> = {
-  knight: "knight", warhorse: "warhorse", dragon: "dragon", priest: "priest", cultist1: "cultist", cultist2: "cultist", mage: "mage",
+  knight: "knight", warhorse: "warhorse", dragon: "dragon", priest: "priest", cultist1: "cultist", cultist2: "cultist", mage: "mage", druid: "druid",
 };
 
 export function sampleStatblocks(): Record<string, StatBlockSnapshot> {

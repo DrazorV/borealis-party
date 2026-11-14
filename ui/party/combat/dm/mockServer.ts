@@ -7,6 +7,7 @@ import type { CombatDeps } from "../../api/overrides/combat";
 import { sampleCombat } from "./fixtures";
 import { seededDie } from "../../../src/lib/dice";
 import { CombatRefusal, execute, exportCombat, importCombat, undo, type MockCombat } from "./mockEngine";
+import { MOCK_BEASTS, newSpellStore, spellRoute, type MockSpellStore } from "./mockSpellRoutes";
 import type { Combatant, Command, CompanionOffer, DmCombat } from "./types";
 
 export interface MockServer {
@@ -22,6 +23,8 @@ export interface MockServer {
   playerWrite: (combat: string, command: Command) => void;
   /** Another DM tab's write: done on the server, announced on the stream. */
   otherWrite: (combat: string, command: Command) => void;
+  /** 0.3.2: spells, effect definitions, precasts and the bestiary (./mockSpellRoutes.ts). */
+  spells: MockSpellStore;
   /** The stream: a ping, a drop, a reopen (events may have been missed). */
   stream: { beat: () => void; drop: () => void; reopen: () => void };
 }
@@ -92,6 +95,7 @@ export function mockCombatServer(seed?: MockCombat[], sharing?: MockSharing): Mo
   let made = 0;
   const server: MockServer = {
     combats,
+    spells: newSpellStore(),
     offline: false,
     requests: [],
     notify: (combat) => {
@@ -136,6 +140,8 @@ export function mockCombatServer(seed?: MockCombat[], sharing?: MockSharing): Mo
             combats.set(m.view.id, m);
             return dmView(m);
           }
+          const spellAnswer = spellRoute(server.spells, method, path, body);
+          if (spellAnswer !== undefined) return spellAnswer;
           if (parts[2] !== "combats") throw fail("not_found", "The server does not offer that.");
           const m = combats.get(parts[3] ?? "");
           if (!m) throw fail("not_found", "There is no such combat here.");
@@ -153,7 +159,29 @@ export function mockCombatServer(seed?: MockCombat[], sharing?: MockSharing): Mo
           }
           const args = b.args ?? {};
           if (action === "undo") undo(m, undefined, Boolean(args.force));
-          else if (action === "add_creature") {
+          else if (action === "add_creature" && typeof args.elementId === "string") {
+            // 0.3.2: from the DM's bestiary, controlled by a caster, optionally bound to its concentration.
+            const beast = MOCK_BEASTS.find((x) => x.id === args.elementId);
+            if (!beast) throw fail("refused", "That creature isn't in your content.");
+            const owner = typeof args.owner === "string" ? m.view.state.combatants.find((c) => c.id === args.owner) : undefined;
+            for (let i = 0; i < Number(args.count ?? 1); i++) {
+              const n = m.view.state.combatants.filter((c) => c.label.startsWith(beast.name)).length + 1;
+              const id = `${beast.id.toLowerCase()}-${++made}`;
+              const c: Combatant = {
+                id, kind: "creature", label: `${beast.name} ${n}`, public_name: beast.name, visible: args.hidden === false, ever_revealed: false, removed: false,
+                initiative: null, initiative_bonus: 1, tiebreak: 0, absent: false, hp: { current: beast.hp ?? 10, max: beast.hp ?? 10, temp: 0 }, hp_authority: "engine",
+                zero_hp: "dies", life: { state: "alive" }, ac: beast.ac, speed: { walk: 40 }, economy: { action: false, bonus_action: false, reaction: false },
+                abilities: [{ key: "bite", name: "Bite", kind: "action", text: "A bite." }],
+                ...(owner ? { owner_id: owner.id, controller: { kind: "dm" as const }, initiative_mode: (args.initiativeMode as "own" | "after_owner" | undefined) ?? "after_owner" } : {}),
+              };
+              execute(m, { command: "add_combatant", combatant: c, roll_initiative: args.rollInitiative !== false && !owner });
+              m.view.statblocks[id] = { name: beast.name, data: { ac: [{ value: beast.ac ?? 10 }], hp: { average: beast.hp ?? 10 } } };
+              if (owner && args.bindToConcentration && owner.concentration) {
+                execute(m, { command: "add_effect", effect: { name: owner.concentration.name, source: owner.id, target: id, concentration: true, dismiss_on_end: true,
+                  detail: `Bound to ${owner.concentration.name}: it goes when the concentration ends.` } as never });
+              }
+            }
+          } else if (action === "add_creature") {
             const from = m.view.state.combatants.find((c) => c.id === args.copyOf);
             if (!from) throw fail("refused", "No such creature.");
             const count = Number(args.count ?? 1);

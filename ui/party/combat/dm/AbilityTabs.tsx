@@ -1,60 +1,59 @@
 import { useState } from "react";
 import { Button } from "../../../src/components/Button";
 import { Segmented } from "../../../src/components/Tabs";
+import { CastSheet } from "./CastSheet";
 import { RollInput } from "./RollInput";
-import { abilityStatus } from "./derive";
-import { EffectDialog, draftSpecs, emptyDraft } from "./dialogs";
-import { featureFor, KIND_WORD, spellLists } from "./statRef";
+import { isDefeated } from "./derive";
+import { asCommand, COVERAGE_HELP, COVERAGE_WORD, mechOf, spellOf } from "./spellTypes";
+import { spellLists } from "./statRef";
+import type { AddPreset } from "./SummonPanel";
+import { TurnPanel } from "./TurnPanel";
+import { turnButtons, type TurnButton } from "./turn";
 import type { Ability, Combatant, Command, CombatState, StatBlock } from "./types";
 
 type Tab = "combat" | "spells" | "traits";
 
-const GROUPS: { title: string; kinds: Ability["kind"][] }[] = [
-  { title: "Actions", kinds: ["action"] },
-  { title: "Bonus actions", kinds: ["bonus_action"] },
-  { title: "Reactions", kinds: ["reaction"] },
-  { title: "Legendary actions", kinds: ["legendary"] },
-  { title: "Free / lair", kinds: ["free"] },
-];
-
 /**
- * The creature card's tabs (C14, C15, C18): Combat lists its abilities grouped by what they spend, each with a Use
- * button that spends the economy, recharge, uses, group limit or legendary actions, or says why it can't. Spells has
- * the slots and per-day uses and Cast, which records the effect and who failed the save. Traits is the reference.
- * Nothing rolls an attack: the DM rolls (or the app's dice) and types damage (D43).
+ * The creature card's tabs (C14, C15, C18; 0.3.2): Combat is the turn panel, a button for every action it has,
+ * spending what it costs. Spells lists its spells with how well the app knows each one (Auto, Partial, Ruling,
+ * Unlinked, Suggested) and [Cast]. Traits is the reference.
  */
-export function AbilityTabs({ state, c, block, send, disabled }: {
-  state: CombatState; c: Combatant; block: StatBlock | undefined; send: (cmd: Command) => void; disabled: boolean;
+export function AbilityTabs({ state, c, block, blockOf, send, disabled, onDefine, onAddCreature }: {
+  state: CombatState; c: Combatant; block: StatBlock | undefined; blockOf: (id: string) => StatBlock | undefined;
+  send: (cmd: Command) => void; disabled: boolean; onDefine: (a: Ability) => void; onAddCreature?: (p: AddPreset) => void;
 }) {
   const [tab, setTab] = useState<Tab>("combat");
-  const lists = spellLists(block);
-  const spellNames = new Set(lists.flatMap((l) => l.lists.flatMap((x) => x.spells.map((s) => s.toLowerCase()))));
-  const isSpell = (a: Ability) => spellNames.has(a.name.toLowerCase());
-  const abilities = (c.abilities ?? []).filter((a) => a.kind !== "passive");
-  const hasSpells = lists.length > 0 || Object.keys(c.spell_slots ?? {}).length > 0;
+  const hasSpells = spellLists(block).length > 0 || Object.keys(c.spell_slots ?? {}).length > 0 || turnButtons(state, c, block).some((b) => b.kind === "spell");
   return (
     <div className="cb-tabs">
       <Segmented<Tab> label="Creature sections" value={tab} onChange={setTab}
         options={[{ id: "combat", label: "Combat" }, { id: "spells", label: hasSpells ? "Spells" : "Spells (none)" }, { id: "traits", label: "Traits" }]} />
       {tab === "combat" && (
         <div className="cb-tab-body">
-          <Economy c={c} send={send} disabled={disabled} />
-          {GROUPS.map((g) => {
-            const items = abilities.filter((a) => g.kinds.includes(a.kind) && !isSpell(a));
-            if (!items.length) return null;
-            return (
-              <section key={g.title}>
-                <h4 className="cb-group-title">{g.title}</h4>
-                <ul className="cb-abilities">{items.map((a) => <AbilityCard key={a.key} a={a} state={state} c={c} block={block} send={send} disabled={disabled} />)}</ul>
-              </section>
-            );
-          })}
-          {abilities.length === 0 && <p className="muted cb-small">No usable abilities on this combatant; see Traits for its stat block.</p>}
+          <TurnPanel state={state} c={c} block={block} blockOf={blockOf} send={send} disabled={disabled} onAddCreature={onAddCreature} />
+          <RechargeRows c={c} send={send} disabled={disabled} />
         </div>
       )}
-      {tab === "spells" && <Spells state={state} c={c} block={block} send={send} disabled={disabled} spells={abilities.filter(isSpell)} />}
+      {tab === "spells" && <Spells state={state} c={c} block={block} blockOf={blockOf} send={send} disabled={disabled} onDefine={onDefine} />}
       {tab === "traits" && <Traits c={c} block={block} />}
     </div>
+  );
+}
+
+/** Spent recharge abilities: the d6 typed from the table first, or rolled in the app. */
+function RechargeRows({ c, send, disabled }: { c: Combatant; send: (cmd: Command) => void; disabled: boolean }) {
+  const spent = (c.abilities ?? []).filter((a) => a.recharge && !a.recharge.ready);
+  if (!spent.length) return null;
+  return (
+    <section className="cb-recharges">
+      {spent.map((a) => (
+        <div key={a.key} className="cb-recharge">
+          <RollInput kind="dice" label={`Recharge ${a.name} (d6, ${a.recharge!.min}–6)`} notation="1d6" min={1} max={6} disabled={disabled}
+            onSubmit={(roll) => send({ command: "roll_recharge", id: c.id, ability: a.key, roll })} />
+          <Button small variant="ghost" disabled={disabled} onClick={() => send({ command: "set_recharge", id: c.id, ability: a.key, ready: true })}>Mark ready</Button>
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -70,60 +69,20 @@ export function Economy({ c, send, disabled }: { c: Combatant; send: (cmd: Comma
   return <div className="cb-econ-row" role="group" aria-label="Action economy">{chip("action", "Action")}{chip("bonus_action", "Bonus")}{chip("reaction", "Reaction")}</div>;
 }
 
-function AbilityCard({ a, state, c, block, send, disabled, slot }: {
-  a: Ability; state: CombatState; c: Combatant; block: StatBlock | undefined; send: (cmd: Command) => void; disabled: boolean; slot?: number;
+function Spells({ state, c, block, blockOf, send, disabled, onDefine }: {
+  state: CombatState; c: Combatant; block: StatBlock | undefined; blockOf: (id: string) => StatBlock | undefined;
+  send: (cmd: Command) => void; disabled: boolean; onDefine: (a: Ability) => void;
 }) {
-  const why = abilityStatus(state, c, a, slot);
-  const text = a.text || featureFor(block, a)?.text || "";
-  const res = a.uses ? c.resources?.[a.uses] : undefined;
-  const meta = [
-    KIND_WORD[a.kind],
-    a.kind === "legendary" ? `${a.legendary_cost ?? 1} LA` : null,
-    a.recharge ? `Recharge ${a.recharge.min === 6 ? "6" : `${a.recharge.min}–6`}: ${a.recharge.ready ? "ready" : "spent"}` : null,
-    res ? `${res.label}: ${res.pool.remaining}/${res.pool.max}` : null,
-    a.group_limit ? `group: ${a.group_limit}` : null,
-    a.requires_effect ? `needs ${a.requires_effect}` : null,
-  ].filter(Boolean).join(" · ");
-  return (
-    <li className="cb-ability">
-      <div className="cb-ability-top">
-        <div>
-          <div className="cb-ability-name">{a.name}</div>
-          <div className="cb-small muted">{meta}</div>
-        </div>
-        <Button small variant={why ? "default" : "primary"} disabled={disabled || Boolean(why)} title={why ?? `Use ${a.name}`}
-          onClick={() => send({ command: "use_ability", id: c.id, ability: a.key, ...(slot !== undefined ? { slot } : {}) })}>
-          {why ? "Unavailable" : "Use"}
-        </Button>
-      </div>
-      {text && <p className="cb-ability-text">{text}</p>}
-      {why && why !== "Passive" && <p className="cb-small cb-why">{why}</p>}
-      {a.recharge && !a.recharge.ready && (
-        <div className="cb-recharge">
-          <RollInput kind="dice" label={`Recharge ${a.name} (d6)`} notation="1d6" min={1} max={6} disabled={disabled}
-            onSubmit={(roll) => send({ command: "roll_recharge", id: c.id, ability: a.key, roll })} />
-          <Button small variant="ghost" disabled={disabled} onClick={() => send({ command: "set_recharge", id: c.id, ability: a.key, ready: true })}>Mark ready</Button>
-        </div>
-      )}
-    </li>
-  );
-}
-
-function Spells({ state, c, block, send, disabled, spells }: {
-  state: CombatState; c: Combatant; block: StatBlock | undefined; send: (cmd: Command) => void; disabled: boolean; spells: Ability[];
-}) {
-  const [casting, setCasting] = useState<string | null>(null);
+  const [casting, setCasting] = useState<TurnButton | null>(null);
   const lists = spellLists(block);
   const slots = Object.entries(c.spell_slots ?? {}).sort(([a], [b]) => Number(a) - Number(b));
   const resources = Object.entries(c.resources ?? {});
-  const levels = slots.filter(([, p]) => p.remaining > 0).map(([l]) => Number(l));
-  const cast = (name: string, slot: number | undefined, specs: ReturnType<typeof draftSpecs>, concentration: boolean) => {
-    const ability = (c.abilities ?? []).find((a) => a.name.toLowerCase() === name.toLowerCase());
-    if (ability) send({ command: "use_ability", id: c.id, ability: ability.key, ...(slot !== undefined ? { slot } : {}) });
-    else if (slot !== undefined) send({ command: "adjust_slot", id: c.id, level: slot, delta: -1 });
-    if (concentration && specs.length === 0) send({ command: "set_concentration", id: c.id, name });
-    for (const effect of specs) send({ command: "add_effect", effect });
-  };
+  const buttons = turnButtons(state, c, block).filter((b) => b.kind === "spell");
+  const known = new Set(buttons.map((b) => b.ability!.name.toLowerCase()));
+  // Spells the block names that aren't abilities of this combatant: cast as a ruling (the slot and action only).
+  const loose = lists.flatMap((l) => l.lists.flatMap((x) => x.spells.map((s) => ({ name: s.replace(/\s*\(.*\)$/, ""), label: x.label }))))
+    .filter((s) => !known.has(s.name.toLowerCase()));
+  const byLevel = [...buttons].sort((x, y) => levelOf(x.ability!) - levelOf(y.ability!) || x.label.localeCompare(y.label));
   return (
     <div className="cb-tab-body">
       {slots.length > 0 && (
@@ -155,42 +114,48 @@ function Spells({ state, c, block, send, disabled, spells }: {
         </section>
       )}
       {lists.map((l) => (
-        <section key={l.feature}>
-          <h4 className="cb-group-title">{l.feature}{l.dc != null ? ` · DC ${l.dc}` : ""}{l.attack != null ? ` · ${l.attack >= 0 ? "+" : ""}${l.attack} to hit` : ""}</h4>
-          {l.lists.map((x) => (
-            <div key={x.label} className="cb-spell-list">
-              <span className="cb-small muted">{x.label}</span>
-              {x.spells.map((s) => <Button key={s} small disabled={disabled} onClick={() => setCasting(s)}>{s}</Button>)}
-            </div>
-          ))}
-        </section>
+        <p key={l.feature} className="cb-small muted">{l.feature}{l.dc != null ? ` · DC ${l.dc}` : ""}{l.attack != null ? ` · ${l.attack >= 0 ? "+" : ""}${l.attack} to hit` : ""}</p>
       ))}
-      {spells.length > 0 && (
-        <ul className="cb-abilities">{spells.map((a) => (
-          <li key={a.key} className="cb-ability">
-            <div className="cb-ability-top">
-              <div><div className="cb-ability-name">{a.name}</div><div className="cb-small muted">{KIND_WORD[a.kind]}</div></div>
-              <Button small variant="primary" disabled={disabled || Boolean(abilityStatus(state, c, a))} title={abilityStatus(state, c, a) ?? `Cast ${a.name}`} onClick={() => setCasting(a.name)}>Cast</Button>
-            </div>
-            {a.text && <p className="cb-ability-text">{a.text}</p>}
-            {abilityStatus(state, c, a) && <p className="cb-small cb-why">{abilityStatus(state, c, a)}</p>}
-          </li>
-        ))}</ul>
+      {byLevel.length > 0 && (
+        <ul className="cb-spell-rows" aria-label="Spells">
+          {byLevel.map((b) => {
+            const a = b.ability!;
+            const cov = b.coverage ?? "unlinked";
+            const lvl = levelOf(a);
+            return (
+              <li key={a.key} className="cb-spell-row" data-spell={a.key}>
+                <span className="cb-spell-name">{a.name}</span>
+                <span className="cb-small muted">{lvl === 0 ? "Cantrip" : `L${lvl}`} · {b.detail}</span>
+                <span className={`cb-cov cb-cov-${cov}`} title={COVERAGE_HELP[cov]}>{COVERAGE_WORD[cov]}</span>
+                {(cov === "ruling" || cov === "unlinked") && <Button small variant="ghost" disabled={disabled} onClick={() => onDefine(a)}>Define effect…</Button>}
+                {cov === "suggested" && <Button small variant="ghost" disabled={disabled} onClick={() => onDefine(a)}>Check and confirm…</Button>}
+                <Button small variant="primary" disabled={disabled || Boolean(b.reason)} title={b.reason ?? `Cast ${a.name}`} onClick={() => setCasting(b)}>Cast</Button>
+                {b.reason && <span className="cb-small cb-why">{b.reason}</span>}
+              </li>
+            );
+          })}
+        </ul>
       )}
-      <Button small icon="plus" disabled={disabled} onClick={() => setCasting("")}>Cast another spell…</Button>
-      {lists.length === 0 && slots.length === 0 && <p className="muted cb-small">No spellcasting in this stat block.</p>}
-      {casting !== null && (
-        <EffectDialog title={casting ? `Cast ${casting}` : "Cast a spell"} castMode combatants={state.combatants} slotLevels={levels}
-          initial={{ ...emptyDraft(c.id, ""), name: casting, targets: [], concentration: /concentration/i.test(spells.find((a) => a.name === casting)?.text ?? "") }}
-          onDone={(r) => {
-            setCasting(null);
-            if (!r) return;
-            cast(r.draft.name.trim(), r.slot, r.draft.targets.length ? draftSpecs(r.draft) : [], r.draft.concentration);
-          }} />
+      {loose.length > 0 && (
+        <ul className="cb-spell-rows" aria-label="Other spells in the stat block">
+          {loose.map((s) => (
+            <li key={`${s.label}-${s.name}`} className="cb-spell-row">
+              <span className="cb-spell-name">{s.name}</span>
+              <span className="cb-small muted">{s.label}</span>
+              <span className="cb-cov cb-cov-unlinked" title={COVERAGE_HELP.unlinked}>{COVERAGE_WORD.unlinked}</span>
+              <Button small disabled={disabled || isDefeated(c)} onClick={() => send(asCommand({ command: "cast_spell", caster: c.id, targets: [],
+                adhoc: { key: s.name.toLowerCase().replace(/\W+/g, "_"), name: s.name, level: 0, concentration: false, cast: "action", tier: "ruling", targeting: { kind: "self" }, delivery: { kind: "auto" } } }))}>Cast (ruling)</Button>
+            </li>
+          ))}
+        </ul>
       )}
+      {lists.length === 0 && slots.length === 0 && byLevel.length === 0 && <p className="muted cb-small">No spellcasting in this stat block.</p>}
+      {casting && <CastSheet state={state} caster={c} button={casting} blockOf={blockOf} send={send} onDone={() => setCasting(null)} />}
     </div>
   );
 }
+
+const levelOf = (a: Ability): number => mechOf(a)?.level ?? spellOf(a)?.level ?? 0;
 
 function Traits({ c, block }: { c: Combatant; block: StatBlock | undefined }) {
   const traits = block?.traits ?? [];

@@ -85,6 +85,20 @@ export interface HpValue { average: number; formula?: string }
 export interface AcValue { value: number; source?: string }
 export interface Changed<T> { value: T; base: T | null }
 
+/** How often a creature casts a spell it was given (0.3.2). */
+export type SpellFrequency = "at_will" | { per_day: number } | "slot";
+
+/** A real spell from the DM's content on a creature (0.3.2, Overrides.spells; PROVISIONAL until the server's shape). */
+export interface OverrideSpell {
+  key: string;
+  elementId?: string;
+  name: string;
+  level: number;
+  ruleset: string;
+  frequency: SpellFrequency;
+  concentration?: boolean;
+}
+
 /** What an encounter changes on one creature's block (D41). `base` is the source value, recorded by the server. */
 export interface Overrides {
   hp?: Changed<HpValue>;
@@ -92,6 +106,10 @@ export interface Overrides {
   saves?: Partial<Record<Ability, Changed<number>>>;
   traits?: { name: string; text: string }[];
   notes?: string;
+  /** 0.3.2: spells, slots per level, and the casting numbers. */
+  spells?: OverrideSpell[];
+  slots?: Record<string, number>;
+  casting?: { dc?: number; attack?: number };
 }
 
 /** What the app sends to change overrides: absent = leave, null = drop. */
@@ -101,6 +119,9 @@ export interface OverridesForm {
   saves?: Partial<Record<Ability, number | null>>;
   traits?: { name: string; text: string }[];
   notes?: string | null;
+  spells?: OverrideSpell[];
+  slots?: Record<string, number> | null;
+  casting?: { dc?: number; attack?: number } | null;
 }
 
 /** A creature as the DM sees it. */

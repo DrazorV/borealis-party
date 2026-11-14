@@ -115,7 +115,7 @@ test.describe("Encounters and Combat tabs (0.3.1)", () => {
       await expect(page.locator(".enc-col-side")).toContainText("Players and combat");
       await expect(page.locator(".enc-col-side")).toContainText("Setup");
       await expect(page.getByRole("status", { name: "Encounter summary" })).toHaveCount(0);
-      await expect(page.locator(".enc-panels")).toContainText("Starting effects");
+      await expect(page.locator(".enc-panels")).toContainText("Before the fight");
       await expect(page.locator(".enc-panels")).toContainText("Encounter rules");
       expect((await measureOverflow(page)).page, "the page scrolls sideways").toBeLessThanOrEqual(0);
       await shot(page, testInfo, "builder");

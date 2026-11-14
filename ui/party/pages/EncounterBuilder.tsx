@@ -17,6 +17,8 @@ import {
 import type { Ruleset } from "../api/overrides/parties";
 import { LiveCombatLink, StartCombatButton } from "../combat/dm/StartCombatButton";
 import { CreatureDialog, DetailsDialog, EffectDialog, RefreshDialog, RuleDialog, WarningsDialog } from "./EncounterDialogs";
+import { BeforeFightCard, PrecastDialog } from "./EncounterSpells";
+import { addPrecast, deletePrecast, listPrecasts, updatePrecast, type Precast } from "../combat/dm/spellApi";
 import { EncounterPicker } from "./EncounterPicker";
 import { useWide } from "./EncounterToolPanel";
 import { encountersPath } from "./EncountersPage";
@@ -36,6 +38,7 @@ type Open =
   | { kind: "block"; creature: Creature }
   | { kind: "refresh"; creature: Creature; conflicts: Conflict[] }
   | { kind: "effect"; effect?: Effect }
+  | { kind: "precast"; precast?: Precast }
   | { kind: "rule"; rule?: Rule }
   | { kind: "warnings" }
   | { kind: "more"; creature: Creature };
@@ -94,6 +97,10 @@ export function EncounterBuilder() {
   const [dialog, setDialog] = useState<Open | null>(null);
   const [tool, setTool] = useState<Tool | null>(null);
   const [notes, setNotes] = useState<string | null>(null);
+  /** 0.3.2: spells cast before the fight (their own route; a server without it shows none). */
+  const [precasts, setPrecasts] = useState<Precast[]>([]);
+  const loadPrecasts = useCallback(() => { listPrecasts(id).then(setPrecasts, () => setPrecasts([])); }, [id]);
+  useEffect(loadPrecasts, [loadPrecasts]);
   const root = useRef<HTMLDivElement>(null);
 
   // "/" opens the creature picker (or puts the focus back in its search), unless the DM is typing somewhere.
@@ -287,26 +294,12 @@ export function EncounterBuilder() {
   );
 
   const effects = (
-    <Card title="Starting effects" aria-label="Starting effects" className="enc-card"
-      actions={creatures.length > 0 && enc.effects.length < LIMITS.effects ? <Button small icon="plus" onClick={() => setDialog({ kind: "effect" })}>Add</Button> : undefined}>
-      {enc.effects.length === 0
-        ? <p className="muted party-note">Buffs already up when the fight starts, like a spell cast beforehand.</p>
-        : (
-          <ul className="party-list">
-            {enc.effects.map((e) => (
-              <li key={e.id} className="party-line enc-item">
-                <span className="grow">
-                  <strong>{e.name}</strong> <span className="muted">on {named(e.creatureId)}</span>
-                  <span className="muted party-note">{[e.sourceCreatureId ? `by ${named(e.sourceCreatureId)}` : null, e.durationTurns ? `${e.durationTurns} turns` : null,
-                    e.charges ? `${e.charges} charges` : null, e.slotLevel ? `level ${e.slotLevel} slot` : null, e.concentration ? "concentration" : null].filter(Boolean).join(" · ")}</span>
-                </span>
-                <Button small onClick={() => setDialog({ kind: "effect", effect: e })}>Edit</Button>
-                <IconButton icon="trash" label={`Remove ${e.name}`} onClick={() => void act(() => removeEffect(enc.id, e.id))} />
-              </li>
-            ))}
-          </ul>
-        )}
-    </Card>
+    <BeforeFightCard creatures={creatures} precasts={precasts} effects={enc.effects} named={(cid) => named(cid ?? "")}
+      canAddEffect={enc.effects.length < LIMITS.effects}
+      onPrecast={() => setDialog({ kind: "precast" })} onEditPrecast={(pc) => setDialog({ kind: "precast", precast: pc })}
+      onRemovePrecast={(pc) => { void deletePrecast(enc.id, pc.id).then(loadPrecasts, (e: unknown) => toast.push(errorMessage(e), "error")); }}
+      onCustom={() => setDialog({ kind: "effect" })} onEditEffect={(e) => setDialog({ kind: "effect", effect: e })}
+      onRemoveEffect={(e) => void act(() => removeEffect(enc.id, e.id))} />
   );
 
   const rules = (
@@ -417,6 +410,10 @@ export function EncounterBuilder() {
       {dialog?.kind === "effect" && (
         <EffectDialog creatures={creatures} effect={dialog.effect} onClose={() => setDialog(null)}
           onSave={async (f) => setEnc(await (dialog.effect ? updateEffect(enc.id, dialog.effect.id, f) : addEffect(enc.id, f)))} />
+      )}
+      {dialog?.kind === "precast" && (
+        <PrecastDialog creatures={creatures} precasts={precasts} precast={dialog.precast} onClose={() => setDialog(null)}
+          onSave={async (f) => { await (dialog.precast ? updatePrecast(enc.id, dialog.precast.id, f) : addPrecast(enc.id, f)); loadPrecasts(); }} />
       )}
       {dialog?.kind === "rule" && (
         <RuleDialog creatures={creatures} rule={dialog.rule} onClose={() => setDialog(null)}

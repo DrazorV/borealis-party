@@ -12,7 +12,8 @@ import { byId, conditionsOf, effectiveAc, effectiveInitiative, effectiveSpeed, i
 import { EffectsList } from "./EffectsList";
 import { HpControls } from "./HpControls";
 import { initiativeText, quickRef, saveBonus } from "./statRef";
-import type { Combatant, Command, CombatState, StatBlock } from "./types";
+import type { AddPreset } from "./SummonPanel";
+import type { Ability, Combatant, Command, CombatState, StatBlock } from "./types";
 
 const signed = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
 
@@ -20,8 +21,9 @@ const signed = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
  * The selected combatant (C6–C19): title with reveal/hide, AC and speed with effect-derived values, the quick
  * reference from its stat block, HP, concentration with the pending CON save, conditions, effects and its abilities.
  */
-export function CombatantCard({ state, c, block, blockName, send, disabled }: {
+export function CombatantCard({ state, c, block, blockName, blockOf, send, disabled, onDefine, onAddCreature }: {
   state: CombatState; c: Combatant; block: StatBlock | undefined; blockName?: string; send: (cmd: Command) => void; disabled: boolean;
+  blockOf: (id: string) => StatBlock | undefined; onDefine: (a: Ability) => void; onAddCreature?: (p: AddPreset) => void;
 }) {
   const confirm = useConfirm();
   const phone = usePhone();
@@ -81,8 +83,8 @@ export function CombatantCard({ state, c, block, blockName, send, disabled }: {
             : <Button small variant="ghost" onClick={() => void remove()} disabled={disabled}>Remove</Button>)}
         </div>
         <div className="cb-statline">
-          <span title={ac.total !== ac.base ? `Base ${ac.base}${ac.effects ? `, effects ${signed(ac.effects)}` : ""}${ac.cover ? `, cover +${ac.cover}` : ""}` : undefined}>
-            <b>AC {ac.total ?? "—"}</b>{ac.total !== ac.base && <span className="muted"> (base {ac.base ?? "—"})</span>}
+          <span className={`cb-ac${ac.text ? " changed" : ""}`} data-ac={ac.total ?? ""} title={ac.text || undefined}>
+            <b>AC {ac.total ?? "—"}</b>{ac.text ? <span className="cb-ac-why"> {ac.text.replace(/^\d+ /, "")}</span> : null}
           </span>
           <span><b>{c.hp.current}/{c.hp.max} HP</b>{c.hp.temp ? ` +${c.hp.temp}` : ""}</span>
           <span>Init {effectiveInitiative(state, c) ?? "–"}{!pc && <span className="muted"> ({initiativeText(block, c.initiative_bonus)})</span>}</span>
@@ -164,7 +166,7 @@ export function CombatantCard({ state, c, block, blockName, send, disabled }: {
       {pc
         ? <div className="cb-tab-body"><p className="cb-small muted">The player's character: HP, AC and speed come from their Play tab. Effects, conditions and concentration are tracked here.</p>
           {c.initiative == null && <RollInput kind="d20" label="Initiative (if the player can't)" modifier={c.initiative_bonus ?? 0} disabled={disabled} onSubmit={(roll) => send({ command: "set_initiative", id: c.id, roll })} />}</div>
-        : <AbilityTabs state={state} c={c} block={block} send={send} disabled={disabled} />}
+        : <AbilityTabs state={state} c={c} block={block} blockOf={blockOf} send={send} disabled={disabled} onDefine={onDefine} onAddCreature={onAddCreature} />}
       {dialog === "rename" && <TextDialog title={`Rename ${c.label}`} label="Your label (players don't see it)" initial={c.label} confirm="Rename"
         onDone={(v) => { setDialog(null); if (v && v !== c.label) send({ command: "rename", id: c.id, label: v }); }} />}
       {dialog === "public" && <TextDialog title="Public name" label="What players see once it's revealed" initial={c.public_name} confirm="Save"

@@ -8,6 +8,7 @@ import {
   type Effect, type EffectFields, type Encounter, type InitMode, type OverridesForm, type Rule, type RuleFields, type Warning,
 } from "../api/overrides/encounters";
 import { EncounterStatBlock } from "./EncounterStatBlock";
+import { SpellsSection, type SpellsValue } from "./EncounterSpells";
 
 /** Run `work`, closing on success and showing the error in the dialog otherwise. */
 function useSave(onClose: () => void) {
@@ -89,6 +90,12 @@ export function CreatureDialog({ creature, owner, onSave, onClose }: {
   const [traits, setTraits] = useState(o.traits ?? []);
   const [notes, setNotes] = useState(o.notes ?? "");
   const [initMode, setInitMode] = useState<InitMode>(creature.initMode);
+  const [spells, setSpells] = useState<SpellsValue>(() => ({
+    spells: o.spells ?? [],
+    slots: Object.fromEntries(Object.entries(o.slots ?? {}).map(([l, n]) => [l, String(n)])),
+    dc: o.casting?.dc != null ? String(o.casting.dc) : "",
+    attack: o.casting?.attack != null ? String(o.casting.attack) : "",
+  }));
   const [showBlock, setShowBlock] = useState(false);
   const [rolled, setRolled] = useState("");
   const { error, busy, save, setError } = useSave(onClose);
@@ -111,12 +118,26 @@ export function CreatureDialog({ creature, owner, onSave, onClose }: {
       const had = o.saves?.[a]?.value ?? null;
       if (v !== had) saveForm[a] = v;
     }
+    const slots: Record<string, number> = {};
+    for (const [l, v] of Object.entries(spells.slots)) {
+      if (!v.trim()) continue;
+      const n = whole(v);
+      if (n == null || n < 0) return setError(`Level ${l} slots are a whole number.`);
+      if (n > 0) slots[l] = n;
+    }
+    const dc = whole(spells.dc);
+    const attack = whole(spells.attack.replace(/^\+/, ""));
+    if (spells.dc.trim() && dc == null) return setError("The spell save DC is a whole number.");
+    if (spells.attack.trim() && attack == null) return setError("The spell attack is a whole number like 6.");
     const overrides: OverridesForm = {
       hp: hpValue != null ? { average: hpValue, ...(formula.trim() ? { formula: formula.trim() } : {}) } : null,
       ac: acValue != null ? { value: acValue, ...(acSource.trim() ? { source: acSource.trim() } : {}) } : null,
       saves: saveForm,
       traits: traits.filter((t) => t.name.trim()).map((t) => ({ name: t.name.trim(), text: t.text.trim() })),
       notes: notes.trim() ? notes.trim() : null,
+      ...(spells.spells.length || o.spells?.length ? { spells: spells.spells } : {}),
+      ...(Object.keys(slots).length ? { slots } : o.slots ? { slots: null } : {}),
+      ...(dc != null || attack != null ? { casting: { ...(dc != null ? { dc } : {}), ...(attack != null ? { attack } : {}) } } : o.casting ? { casting: null } : {}),
     };
     void save(() => onSave({
       dmLabel: dmLabel.trim(), publicName: publicName.trim(), hpMode: fixed ? "fixed" : "encounter", hpMax: fixed ? fixedHp : null,
@@ -191,6 +212,7 @@ export function CreatureDialog({ creature, owner, onSave, onClose }: {
             </label>
           ))}
         </fieldset>
+        <SpellsSection ruleset={creature.ruleset} value={spells} onChange={setSpells} />
         <h4 className="party-sub">Added traits</h4>
         {traits.map((t, i) => (
           <div key={i} className="enc-trait">
@@ -283,7 +305,7 @@ export function EffectDialog({ creatures, effect, onSave, onClose }: {
     void save(() => onSave(fields));
   };
   return (
-    <Modal title={effect ? `Edit ${effect.name}` : "Starting effect"} onClose={onClose}
+    <Modal title={effect ? `Edit ${effect.name}` : "Custom starting effect"} onClose={onClose}
       footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={busy || !name.trim() || !creatureId} onClick={() => submit()}>Save</Button></>}>
       <form className="party-form enc-form" onSubmit={submit}>
         <p className="muted party-note">Applied when the fight starts.</p>

@@ -6,6 +6,7 @@ import { saveSession } from "../api/session";
 import { byId } from "../combat/dm/derive";
 import { execute } from "../combat/dm/mockEngine";
 import { mockCombatServer, type MockServer } from "../combat/dm/mockServer";
+import { resetCastFocus } from "../combat/dm/castFocus";
 import { memoryStorage } from "../test/memoryStorage";
 
 /**
@@ -53,6 +54,7 @@ beforeEach(() => {
   vi.stubGlobal("localStorage", memoryStorage());
   saveSession({ baseUrl: "http://server", token: "t", user: { id: "dm1", username: "dana", email: null, admin: false, mustChangePassword: false } });
   server = mockCombatServer();
+  resetCastFocus();
   Object.assign(combatDeps, server.deps);
   toasts.length = 0;
   confirmAnswer = "confirm";
@@ -65,7 +67,7 @@ describe("CombatTracker", () => {
     page();
     await screen.findByText("ROUND 1");
     const ids = [...document.querySelectorAll("[data-combatant]")].map((e) => e.getAttribute("data-combatant"));
-    expect(ids).toEqual(["knight", "warhorse", "pc-aria", "dragon", "priest", "cultist1", "cultist2", "mage", "pc-bram"]);
+    expect(ids).toEqual(["knight", "warhorse", "pc-aria", "dragon", "priest", "cultist1", "cultist2", "mage", "druid", "pc-bram"]);
     expect(within(row("pc-bram")).getByText(/no initiative/)).toBeTruthy();
     expect(row("knight").getAttribute("aria-current")).toBe("true");
     expect(within(row("warhorse")).getByTitle(/Acts right after Knight/)).toBeTruthy();
@@ -197,15 +199,24 @@ describe("CombatTracker", () => {
     expect(within(panel).getAllByText(/· Legendary actions/)).toHaveLength(1);
   });
 
-  it("Use spends the economy and says why an ability can't be used (C14, C5)", async () => {
+  it("a turn button spends the economy and says why an ability can't be used (C14, C5; 0.3.2)", async () => {
     readyAndStart();
     page();
-    const c = await screen.findByRole("region", { name: "Knight details" });
-    const great = within(c).getByText("Greatsword").closest("li")!;
-    fireEvent.click(within(great).getByRole("button", { name: "Use" }));
+    await screen.findByRole("region", { name: "Knight details" });
+    const great = () => document.querySelector<HTMLButtonElement>('[data-turn-button="greatsword"]')!;
+    expect(great().textContent).toMatch(/Greatsword\+5 · 2d6\+3/);
+    fireEvent.click(great());
+    const sheet = await screen.findByRole("dialog", { name: "Knight: Greatsword" });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Aria" }));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Attack" }));
     await waitFor(() => expect(byId(state(), "knight")!.economy!.action).toBe(true));
-    await within(great).findByText("Action spent");
-    expect(within(card()).getByRole("button", { name: /Action: spent/ })).toBeTruthy();
+    // The attack waits for the table roll: its resolution sheet opens.
+    await screen.findByRole("dialog", { name: "Greatsword · Knight" });
+    fireEvent.click(screen.getByRole("button", { name: "Later" }));
+    await waitFor(() => expect(great().disabled).toBe(true));
+    expect(great().closest("li")!.textContent).toMatch(/Action spent/);
+    expect(within(card()).getByRole("button", { name: "Action: spent" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "1 pending" })).toBeTruthy();
   });
 
   it("reveals and hides a creature (D20 b), and asks before hiding one players have seen", async () => {
@@ -255,9 +266,10 @@ describe("CombatTracker", () => {
     execute(combat(), { command: "use_ability", id: "dragon", ability: "fire_breath" });
     page();
     const c = await screen.findByRole("region", { name: "Adult Red Dragon details" });
-    const breath = within(c).getByText("Fire Breath").closest("li")!;
+    const breath = c.querySelector<HTMLElement>('[data-turn-button="fire_breath"]')!.closest("li")!;
+    expect(breath.textContent).toMatch(/Fire Breath 5–6/);
     expect(within(breath).getByText("Needs recharge")).toBeTruthy();
-    fireEvent.click(within(breath).getByRole("button", { name: "Roll in app" }));
+    fireEvent.click(within(c).getByRole("button", { name: "Roll in app" }));
     await waitFor(() => expect(combat().view.log.at(-1)!.event).toBe("recharge"));
     expect((combat().view.log.at(-1)!.roll as { source: string }).source).toBe("app");
   });

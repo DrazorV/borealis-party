@@ -85,6 +85,11 @@ export interface WireMine {
   concentration?: string | null;
   concentrationChecks?: { dc: number }[];
   prompts?: WirePrompt[];
+  /**
+   * 0.3.2 (PROVISIONAL until the server's projection): a spell or ability waiting on this PC's save. `from` is null
+   * when its caster is hidden ("from an unseen creature"); nothing else about a hidden caster reaches the player.
+   */
+  castRows?: { cast: string; name: string; kind: "save" | "attack"; ability?: string | null; dc?: number | null; from?: string | null }[];
 }
 
 export interface WireProjection {
@@ -150,7 +155,9 @@ export type CombatPrompt =
   | { id: string; kind: "damage"; combatant: string; amount: number; damageType?: string | null; critical?: boolean }
   | { id: string; kind: "heal"; combatant: string; amount: number }
   /** The PC took damage while concentrating: a save is waiting. */
-  | { id: string; kind: "concentration"; combatant: string; dc: number };
+  | { id: string; kind: "concentration"; combatant: string; dc: number }
+  /** 0.3.2: a spell's (or a breath weapon's) save: the player rolls at the table and types it, or the app rolls. */
+  | { id: string; kind: "cast_save"; combatant: string; cast: string; name: string; ability: string; dc: number | null; from: string | null };
 
 /** A line of the revealed-events log, built on this device from what the player saw change (D32: revealed only). */
 export interface CombatLogEntry {
@@ -247,6 +254,9 @@ export function fromWire(w: WireProjection, ctx: WireContext = {}): PlayerCombat
       return { id: p.id, kind: "damage", combatant: m.id, amount: p.amount, damageType: types.length ? types.join(" and ") : null, critical: Boolean(p.criticalHit) };
     }),
     ...(m.concentrationChecks ?? []).slice(0, 1).map((c): CombatPrompt => ({ id: `concentration-${m.id}`, kind: "concentration", combatant: m.id, dc: c.dc })),
+    ...(m.castRows ?? []).filter((r) => r.kind === "save").map((r): CombatPrompt => ({
+      id: `cast-${r.cast}-${m.id}`, kind: "cast_save", combatant: m.id, cast: r.cast, name: r.name, ability: (r.ability ?? "dex").toLowerCase(), dc: r.dc ?? null, from: r.from ?? null,
+    })),
   ]);
   return {
     id: w.id, partyId: w.partyId, partyName: ctx.partyName, title: w.encounter?.publicName ?? null,

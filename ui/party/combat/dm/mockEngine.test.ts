@@ -52,7 +52,7 @@ describe("turn order", () => {
     const knight = byId(m.view.state, "knight")!;
     const thin = { ...knight, id: "wisp", ac: null };
     const state = { ...m.view.state, combatants: [...m.view.state.combatants, thin] };
-    expect(effectiveAc(state, thin)).toEqual({ base: null, effects: 0, cover: 0, total: null });
+    expect(effectiveAc(state, thin)).toMatchObject({ base: null, effects: 0, cover: 0, total: null });
     const shielded = { ...state, effects: [{ id: 99, name: "Shield", target: "wisp", modifiers: [{ kind: "ac" as const, value: 5 }] }] };
     expect(effectiveAc(shielded, thin).total).toBeNull();
   });
