@@ -447,13 +447,9 @@ export function onDeck(c: Pick<PlayerCombat, "pointer" | "combatants" | "status"
   if (!acting || c.status !== "active") return null;
   const order = c.combatants.filter((x) => x.inOrder && x.life !== "dead");
   const at = order.findIndex((x) => x.id === acting);
-  if (at < 0 || order[at].mine) return null;
-  for (let i = 1; i < order.length; i += 1) {
-    const next = order[(at + i) % order.length];
-    if (next.id === acting) return null;
-    return next.mine ? next : null;
-  }
-  return null;
+  if (at < 0 || order[at]?.mine || order.length < 2) return null;
+  const next = order[(at + 1) % order.length];
+  return next?.mine ? next : null;
 }
 
 /** Which character a session's open sheet is, for finding its PC. */
