@@ -14,7 +14,7 @@ use crate::menu::{Decision, Opt};
 use crate::rules;
 use crate::runner::{Sim, Window};
 use crate::setup::Side;
-use crate::sheet::{parts_avg2, ActionDef, AttackDef, Def, SaveDef};
+use crate::sheet::{parts_avg2, ActionDef, AttackDef, Def, SaveDef, SpellDef};
 
 /// Expected damage of one attack on `target`, ×1000 (in units of 1/2 HP × 1/400 chance, rescaled).
 fn attack_ev(sim: &Sim, actor: &CombatantId, target: &CombatantId, x: &AttackDef) -> i64 {
@@ -51,6 +51,158 @@ fn save_ev_one(sim: &Sim, target: &CombatantId, s: &SaveDef) -> i64 {
     let half = if s.half { full / 2 } else { 0 };
     let cond = if s.rider.is_some() { 6 } else { 0 }; // a condition is worth about 3 HP
     (fail * (full + cond) + succeed * half) * 1000 / 800
+}
+
+/// Expected value of a spell on one target, ×1000 (the same units as attacks): its damage and conditions through
+/// the save or attack chance, its healing for a dying ally. Pure buffs count 0 (Basic doesn't spend turns on them).
+fn spell_ev_one(
+    sim: &Sim,
+    actor: &CombatantId,
+    target: &CombatantId,
+    s: &SpellDef,
+    slot: Option<u8>,
+) -> i64 {
+    use party_combat::spell::{Delivery, Primitive, SaveSuccess};
+    let spec = &s.spec;
+    let m = &spec.mech;
+    let vars = spec.vars(slot);
+    let Some(t) = sim.state.combatant(target) else {
+        return 0;
+    };
+    let enemy = sim.side(target) != sim.side(actor);
+    let mut dmg2: i64 = 0;
+    let mut cond2: i64 = 0;
+    let mut heal2: i64 = 0;
+    for p in &m.on_land {
+        match p {
+            Primitive::Damage { .. } if enemy => {
+                if let Primitive::Damage { dice, .. } = p {
+                    dmg2 += i64::from(crate::spells::avg2(dice, &vars));
+                }
+            }
+            Primitive::Condition { condition, .. } if enemy => {
+                if !t.defenses.condition_immunities.contains(condition)
+                    && !derive::has_condition(&sim.state, target, *condition)
+                {
+                    cond2 += i64::from(crate::spells::condition_value2(*condition, t.hp.current));
+                }
+            }
+            Primitive::Heal { dice, add_mod } if !enemy => {
+                heal2 += i64::from(crate::spells::avg2(dice, &vars))
+                    + if *add_mod {
+                        i64::from(spec.modifier) * 2
+                    } else {
+                        0
+                    };
+            }
+            _ => {}
+        }
+    }
+    if heal2 > 0 {
+        let urgent = matches!(t.life, Life::Dying { .. })
+            || (target == actor && t.hp.current * 4 <= t.hp.max);
+        return if urgent { heal2 * 1000 + 100_000 } else { 0 };
+    }
+    if !enemy || !t.life.is_alive() {
+        return 0;
+    }
+    match &m.delivery {
+        Delivery::Save { ability, success } => {
+            let sm = derive::save_mod(&sim.state, target, *ability, true);
+            let dc = i32::try_from(spec.dc.unwrap_or(10)).unwrap_or(10);
+            let succeed = if sm.auto_fail {
+                0
+            } else {
+                i64::from(rules::chance_400(sm.bonus, dc, sm.mode, false))
+            };
+            let fail = 400 - succeed;
+            let half = if *success == SaveSuccess::Half {
+                dmg2 / 2
+            } else {
+                0
+            };
+            (fail * (dmg2 + cond2) + succeed * half) * 1000 / 800
+        }
+        Delivery::Attack { attack, .. } => {
+            let ac = derive::effective_ac(&sim.state, t).total.unwrap_or(12);
+            let cx = party_combat::derive::AttackContext {
+                ranged: *attack == party_combat::spell::AttackKind::Ranged,
+                adjacent: *attack == party_combat::spell::AttackKind::Melee,
+                ..Default::default()
+            };
+            let am = derive::attack_mode(&sim.state, actor, target, cx);
+            let p = i64::from(rules::chance_400(
+                spec.attack.unwrap_or(0),
+                ac,
+                am.mode,
+                true,
+            ));
+            p * (dmg2 + cond2) * 1000 / 800
+        }
+        Delivery::Auto => (dmg2 + cond2) * 1000 / 2,
+    }
+}
+
+/// The best targets of a spell option and its score: the area around the best enemy, the top creatures up to its
+/// maximum, or every ray on the best target. A new concentration spell while concentrating is skipped, and a
+/// higher slot costs a little so Basic upcasts only when it pays.
+fn spell_pick(
+    sim: &Sim,
+    actor: &CombatantId,
+    opt: &Opt,
+    s: &SpellDef,
+) -> Option<(i64, Vec<String>)> {
+    use party_combat::spell::Targeting;
+    if s.concentration()
+        && sim
+            .state
+            .combatant(actor)
+            .is_some_and(|c| c.concentration.is_some())
+    {
+        return None;
+    }
+    let mut scored: Vec<(i64, CombatantId)> = opt
+        .targets
+        .iter()
+        .map(|t| {
+            let ev = spell_ev_one(sim, actor, t, s, opt.slot);
+            let k = if sim.side(t) == sim.side(actor) {
+                100
+            } else {
+                priority(sim, actor, t, ev)
+            };
+            (ev * k / 100, t.clone())
+        })
+        .filter(|(ev, _)| *ev > 0)
+        .collect();
+    // Highest first; ties by roster order (the targets' listed order).
+    scored.sort_by_key(|s| std::cmp::Reverse(s.0));
+    let (best, first) = scored.first().cloned()?;
+    let max = usize::try_from(opt.max_targets.max(1)).unwrap_or(1);
+    let (score, targets) = match &s.spec.mech.targeting {
+        Targeting::Area { .. } => {
+            let mut out = vec![first.clone()];
+            let mut total = best;
+            for (ev, t) in &scored[1..] {
+                if out.len() < max && sim.space.steps(t, &first) == 0 {
+                    out.push(t.clone());
+                    total += ev;
+                }
+            }
+            (total, out)
+        }
+        _ if opt.repeat_targets => (best * i64::try_from(max).unwrap_or(1), vec![first]),
+        _ => {
+            let top: Vec<(i64, CombatantId)> = scored.into_iter().take(max).collect();
+            (
+                top.iter().map(|(ev, _)| ev).sum(),
+                top.into_iter().map(|(_, t)| t).collect(),
+            )
+        }
+    };
+    let above = i64::from(opt.slot.unwrap_or(s.level()).saturating_sub(s.level()));
+    let score = score - above * 1500;
+    (score > 0).then(|| (score, targets.into_iter().map(|t| t.0).collect()))
 }
 
 /// The targets a save effect would catch around `primary`.
@@ -113,6 +265,15 @@ struct Pick {
 
 fn evaluate(sim: &Sim, actor: &CombatantId, opt: &Opt) -> Option<Pick> {
     let a = sim.sheets.get(actor)?.actions.get(opt.action?)?;
+    if let (Def::Spell(s), crate::menu::OptKind::Spell) = (&a.def, &opt.kind) {
+        let (score, t) = spell_pick(sim, actor, opt, s)?;
+        return Some(Pick {
+            score,
+            o: opt.o.clone(),
+            t,
+            limited: opt.slot.is_some() || limited(sim, actor, a),
+        });
+    }
     let int = sim.sheets.get(actor).map_or(10, |s| s.int);
     let sticky = sim
         .sticky

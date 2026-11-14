@@ -50,8 +50,8 @@ mod rpc;
 mod settings;
 mod shares;
 mod simulate;
-mod simulate_ai;
 mod simulate_tools;
+mod spell_tools;
 mod spells;
 mod sync;
 #[cfg(test)]
@@ -322,8 +322,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "{e}: API tokens and connected AI apps will stop working when the server restarts"
         );
     }
-    // The simulator's assistant oracle plays with the account's own hosted model (0.3.1 parts C and E).
-    simulate_ai::install();
     let location = settings.database(dir)?;
     tracing::info!(
         "config {}, database {}",

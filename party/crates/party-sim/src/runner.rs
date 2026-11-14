@@ -46,7 +46,6 @@ pub struct TurnState {
 #[serde(rename_all = "snake_case")]
 pub enum By {
     Agent,
-    Assistant,
     Basic,
     Fallback,
 }
@@ -200,6 +199,36 @@ fn d20(modifier: i32, mode: RollMode) -> D20Input {
     D20Input::app(modifier, mode)
 }
 
+/// A coverage line: the owner, the action, and for a spell what is not run.
+fn coverage_label(owner: &str, a: &ActionDef) -> String {
+    match &a.def {
+        Def::Spell(s) if crate::spells::summon_only(&s.spec.mech) => {
+            format!(
+                "{owner}: {} (summon: its options only, nothing spawns)",
+                a.name
+            )
+        }
+        Def::Spell(s) if s.spec.mech.tier == party_combat::spell::Tier::Utility => {
+            format!("{owner}: {} (no combat effect simulated)", a.name)
+        }
+        Def::Spell(_)
+            if a.kind == AbilityKind::Reaction && a.coverage == sheet::Coverage::Automated =>
+        {
+            format!(
+                "{owner}: {} (reaction, cast when it turns a hit into a miss)",
+                a.name
+            )
+        }
+        Def::Spell(_) if a.kind == AbilityKind::Reaction => {
+            format!(
+                "{owner}: {} (reaction spells other than Shield-like ones)",
+                a.name
+            )
+        }
+        _ => format!("{owner}: {}", a.name),
+    }
+}
+
 impl Sim {
     /// Build the copy: PCs `c1..`, then creatures, initiative rolled by the engine, and the first turn started.
     ///
@@ -243,9 +272,10 @@ impl Sim {
             n += 1;
             let (mut c, keys) = pc_combatant(&id.0, pc, setup.opts.pc_hp);
             c.id = id.clone();
-            let sheet = sheet::pc_sheet(pc, &keys, setup.edition);
+            crate::spells::equip(&setup.spells, setup.edition, &mut c, &mut fingerprints);
+            let sheet = sheet::pc_sheet(pc, &c, &keys);
             for a in &sheet.actions {
-                let label = format!("{}: {}", pc.name, a.name);
+                let label = coverage_label(&pc.name, a);
                 match a.coverage {
                     sheet::Coverage::Automated => coverage.automated.push(label),
                     sheet::Coverage::Adjudicable => coverage.adjudicable.push(label),
@@ -281,9 +311,18 @@ impl Sim {
             let mut c =
                 party_encounter::combatant::creature_of(&id.0, &cr.label, &cr.label, &f, f.average);
             c.visible = true;
+            // Its whole spellcasting, as a combat start gives it: the printed block, the raw 5etools spellcasting
+            // kept with the copy and the DM's added spells; then the account's mechanics for each spell.
+            party_encounter::spellbook::equip_start(
+                &mut c,
+                f.data.as_ref(),
+                cr.automation.as_deref(),
+                &cr.overrides,
+            );
+            crate::spells::equip(&setup.spells, setup.edition, &mut c, &mut fingerprints);
             let sheet = sheet::creature_sheet(&c, f.data.as_ref());
             for a in &sheet.actions {
-                let label = format!("{}: {}", cr.label, a.name);
+                let label = coverage_label(&cr.label, a);
                 match a.coverage {
                     sheet::Coverage::Automated => coverage.automated.push(label),
                     sheet::Coverage::Adjudicable => coverage.adjudicable.push(label),
@@ -547,22 +586,8 @@ impl Sim {
             if let DmEventKind::SaveDue { effect } = &e.kind {
                 if let Some(ev) = self.state.effect(*effect).cloned() {
                     if let Some(rs) = ev.spec.repeat_save {
-                        let bonus = self
-                            .sheets
-                            .get(&ev.spec.target)
-                            .map_or(0, |s| s.save(rs.ability));
-                        let m = rules::save_mode(
-                            &self.state,
-                            &ev.spec.target,
-                            rs.ability,
-                            false,
-                            false,
-                        );
-                        let roll = if m.auto_fail {
-                            D20Input::typed_natural(1 + bonus, 1)
-                        } else {
-                            d20(bonus, m.mode)
-                        };
+                        let roll =
+                            self.save_input(&ev.spec.target, rs.ability, ev.spec.spell.is_some());
                         if let Ok(more) = self.exec(&Command::ResolveEffectSave {
                             effect: *effect,
                             roll,
@@ -581,10 +606,10 @@ impl Sim {
             .find(|c| !c.pending_concentration.is_empty())
             .map(|c| c.id.clone())
         {
-            let bonus = self.sheets.get(&c).map_or(0, |s| s.con_save);
+            let roll = self.save_input(&c, party_combat::AbilityName::Con, false);
             match self.exec(&Command::ResolveConcentration {
                 id: c.clone(),
-                roll: d20(bonus, RollMode::Normal),
+                roll,
             }) {
                 Ok(more) => all.extend(more),
                 Err(_) => {
@@ -595,6 +620,69 @@ impl Sim {
             }
         }
         Ok(all)
+    }
+
+    /// A save of `id`, as the engine's save rules give it (the save bonus, advantage, automatic failure, Magic
+    /// Resistance against spells, roll dice such as Bless). Dice the d20 input can't carry are rolled with the
+    /// seeded die and the save is sent as a typed total.
+    fn save_input(
+        &mut self,
+        id: &CombatantId,
+        ability: party_combat::AbilityName,
+        spell: bool,
+    ) -> D20Input {
+        let sm = derive::save_mod(&self.state, id, ability, spell);
+        if sm.auto_fail {
+            return D20Input::typed_natural(1 + sm.bonus, 1);
+        }
+        if sm.dice.is_empty() {
+            return d20(sm.bonus, sm.mode);
+        }
+        let label = format!("{} save", ability.as_str().to_uppercase());
+        self.typed_with_dice(id, &label, d20(sm.bonus, sm.mode), &sm.dice)
+    }
+
+    /// A d20 roll plus extra dice, rolled with the engine on the seeded die and returned as a typed total with its
+    /// natural die (so natural 20s and 1s still count).
+    fn typed_with_dice(
+        &mut self,
+        id: &CombatantId,
+        label: &str,
+        roll: D20Input,
+        dice: &[party_combat::spell::DiceTerm],
+    ) -> D20Input {
+        let ev = self
+            .exec(&Command::Roll {
+                id: id.clone(),
+                label: label.to_string(),
+                roll: RollInput::D20(roll),
+            })
+            .unwrap_or_default();
+        let Some((mut total, natural)) = ev.iter().rev().find_map(|e| match &e.kind {
+            DmEventKind::Rolled {
+                result: RollOutcome::D20(r),
+                ..
+            } => Some((r.total, r.natural)),
+            _ => None,
+        }) else {
+            return D20Input::typed(0);
+        };
+        for t in dice {
+            let ev = self
+                .exec(&Command::Roll {
+                    id: id.clone(),
+                    label: format!("{label} {t}"),
+                    roll: RollInput::Dice(DiceInput::app(format!("{}d{}", t.count, t.sides))),
+                })
+                .unwrap_or_default();
+            let n = Self::rolled_total(&ev).unwrap_or(0);
+            if t.sign == party_combat::party_dice::Sign::Minus {
+                total -= n;
+            } else {
+                total += n;
+            }
+        }
+        D20Input::Typed { total, natural }
     }
 
     /// Log lines and tallies of events.
@@ -1154,13 +1242,17 @@ impl Sim {
             if opt.kind == OptKind::Adjudicate && !self.alive_ids().contains(&id) {
                 return Err(Refusal(format!("target {} is not in the fight", clean(t))));
             }
-            if !targets.contains(&id) {
+            if !targets.contains(&id) || opt.repeat_targets {
                 targets.push(id);
             }
         }
+        // A self spell needs no target list.
+        if opt.kind == OptKind::Spell && targets.is_empty() && opt.targets == [actor.clone()] {
+            targets.push(actor.clone());
+        }
         let needs_target = matches!(
             opt.kind,
-            OptKind::Attack | OptKind::Multiattack | OptKind::Save | OptKind::Heal
+            OptKind::Attack | OptKind::Multiattack | OptKind::Save | OptKind::Heal | OptKind::Spell
         );
         if needs_target && targets.is_empty() {
             return Err(Refusal(format!("{} needs targets from its list", opt.o)));
@@ -1240,7 +1332,7 @@ impl Sim {
         });
         match by {
             By::Fallback => self.fallback_streak += 1,
-            By::Agent | By::Assistant => self.fallback_streak = 0,
+            By::Agent => self.fallback_streak = 0,
             By::Basic => {}
         }
         if self.fallback_streak >= 3 {
@@ -1405,6 +1497,16 @@ impl Sim {
                 let Some(a) = self.sheets.get(actor).map(|s| s.actions[i].clone()) else {
                     return;
                 };
+                if matches!(a.def, Def::Spell(_)) {
+                    // The tracker's command: it spends the economy, the slot or use, and starts concentration.
+                    let adjudicated = adj.is_some();
+                    if self.cast(actor, &a, opt.slot, targets, adjudicated) {
+                        if let Some((r, src)) = adj {
+                            self.run_adjudicated(actor, &src, r, targets);
+                        }
+                    }
+                    return;
+                }
                 if self
                     .exec(&Command::UseAbility {
                         id: actor.clone(),
@@ -1511,6 +1613,267 @@ impl Sim {
         }
     }
 
+    /// Cast a spell with the tracker's `CastSpell`: every save, attack and amount rolled in the app on the seeded die
+    /// (one command, one undo step), except a save of a creature with Legendary Resistance left, which is rolled
+    /// first so the policy can spend it. `adjudicated`: a text-only spell, cast for its cost (slot, economy,
+    /// concentration) before its adjudicated effect runs. `false` when the engine refused it.
+    fn cast(
+        &mut self,
+        actor: &CombatantId,
+        a: &ActionDef,
+        slot: Option<u8>,
+        chosen: &[CombatantId],
+        adjudicated: bool,
+    ) -> bool {
+        use party_combat::command::{AmountRoll, RowInput, RowRoll};
+        use party_combat::spell::{CastChoices, Delivery, Primitive, Targeting};
+        let Def::Spell(sd) = &a.def else {
+            return false;
+        };
+        let spec = sd.spec.as_ref().clone();
+        let m = &spec.mech;
+        let alive = self.alive_ids();
+        let mut targets: Vec<CombatantId> = if adjudicated {
+            vec![]
+        } else if matches!(m.targeting, Targeting::SelfOnly) {
+            vec![actor.clone()]
+        } else {
+            chosen
+                .iter()
+                .filter(|t| alive.contains(t))
+                .cloned()
+                .collect()
+        };
+        let (max, rays) = crate::spells::max_targets(&spec, slot);
+        if rays && !targets.is_empty() {
+            // Every ray, shared out over the chosen targets in order.
+            let distinct: Vec<CombatantId> = targets.clone();
+            targets = (0..max as usize)
+                .map(|k| distinct[k % distinct.len()].clone())
+                .collect();
+        } else {
+            targets.truncate(max as usize);
+        }
+        if !adjudicated && targets.is_empty() {
+            return false;
+        }
+        // Close in when a target is beyond the 60 feet the simulation gives spells.
+        if targets.iter().any(|t| self.space.feet(actor, t) > 60) {
+            self.do_move(actor, &Move::Near);
+            if !self.standing(actor) {
+                return false;
+            }
+        }
+        let save = match m.delivery {
+            Delivery::Save { ability, .. } => Some(ability),
+            _ => None,
+        };
+        let lr: Vec<CombatantId> = match save {
+            Some(_) => {
+                let mut v: Vec<CombatantId> = Vec::new();
+                for t in &targets {
+                    let left = self
+                        .state
+                        .combatant(t)
+                        .and_then(|c| c.legendary_resistance)
+                        .is_some_and(|p| p.remaining > 0);
+                    if left && !v.contains(t) {
+                        v.push(t.clone());
+                    }
+                }
+                v
+            }
+            None => vec![],
+        };
+        let mut rows = Vec::new();
+        for (k, t) in targets.iter().enumerate() {
+            if lr.contains(t) {
+                continue;
+            }
+            let ray = u32::try_from(targets[..k].iter().filter(|x| *x == t).count()).unwrap_or(0);
+            rows.push(RowInput {
+                target: t.clone(),
+                ray,
+                roll: RowRoll::App,
+                use_lr: false,
+            });
+        }
+        let n = crate::spells::amount_count(m);
+        let amounts = if lr.is_empty() {
+            vec![AmountRoll::App; n]
+        } else {
+            vec![]
+        };
+        let damage_type = crate::spells::prims(m).find_map(|p| match p {
+            Primitive::Damage {
+                damage_type: None,
+                choice,
+                ..
+            } => choice.first().copied(),
+            _ => None,
+        });
+        let me = self.name(actor);
+        self.cur = Some((actor.clone(), format!("{me} {}", a.name), false));
+        let ev = match self.exec(&Command::CastSpell {
+            caster: actor.clone(),
+            ability: Some(a.key.clone()),
+            spec: None,
+            slot,
+            targets: targets.clone(),
+            rows,
+            amounts,
+            crit_amounts: vec![],
+            choices: CastChoices { damage_type },
+            precast: false,
+            force: false,
+            id: None,
+        }) {
+            Ok(ev) => ev,
+            Err(r) => {
+                self.cur = None;
+                self.line(format!(
+                    "{me} can't cast {}: {}",
+                    a.name,
+                    clean_text(&r.0, 120)
+                ));
+                return false;
+            }
+        };
+        self.count_spell(actor, &a.name, slot);
+        let cast_id = ev.iter().find_map(|e| match &e.kind {
+            DmEventKind::CastStarted { cast, .. } => Some(cast.clone()),
+            _ => None,
+        });
+        if let (Some(cast), Some(ability)) = (cast_id.clone(), save) {
+            let vars = spec.vars(slot);
+            let condition = m
+                .on_land
+                .iter()
+                .any(|p| matches!(p, Primitive::Condition { .. }));
+            let dmg: i32 = m
+                .on_land
+                .iter()
+                .filter_map(|p| match p {
+                    Primitive::Damage { dice, .. } => Some(crate::spells::avg2(dice, &vars) / 2),
+                    _ => None,
+                })
+                .sum();
+            let dc = i32::try_from(spec.dc.unwrap_or(10)).unwrap_or(10);
+            for t in &lr {
+                let sm = derive::save_mod(&self.state, t, ability, true);
+                let (roll, failed) = if sm.auto_fail {
+                    (
+                        RowRoll::Outcome {
+                            outcome: party_combat::RowOutcome::Failed,
+                        },
+                        true,
+                    )
+                } else {
+                    match self.save_input(t, ability, true) {
+                        D20Input::Typed { total, natural } => {
+                            (RowRoll::Typed { total, natural }, total < dc)
+                        }
+                        D20Input::App { .. } => (RowRoll::App, false),
+                    }
+                };
+                let hp = self.state.combatant(t).map_or(0, |c| c.hp.current);
+                let use_lr = failed && (condition || (dmg * 2 >= hp && hp > 0));
+                let _ = self.exec(&Command::ResolveCastRow {
+                    cast: cast.clone(),
+                    target: t.clone(),
+                    ray: 0,
+                    roll,
+                    use_lr,
+                });
+                if use_lr {
+                    let tn = self.name(t);
+                    let round = self.state.round;
+                    self.timeline
+                        .push(format!("R{round} {tn} spends Legendary Resistance"));
+                    self.tallies
+                        .entry(t.clone())
+                        .or_default()
+                        .legendary_resistance_spent += 1;
+                }
+            }
+            if self.state.casts.iter().any(|c| c.id == cast) {
+                let _ = self.exec(&Command::ApplyCast {
+                    cast,
+                    amounts: vec![],
+                    crit_amounts: vec![],
+                    force: true,
+                });
+            }
+        }
+        if crate::spells::summon_only(m) {
+            self.line(format!(
+                "{} adds no creatures in the simulation (summons give their options only)",
+                a.name
+            ));
+        }
+        self.cur = None;
+        true
+    }
+
+    fn count_spell(&mut self, actor: &CombatantId, name: &str, slot: Option<u8>) {
+        let round = self.state.round;
+        let t = self.tallies.entry(actor.clone()).or_default();
+        *t.abilities_used.entry(name.to_string()).or_default() += 1;
+        t.first_used.entry(name.to_string()).or_insert(round);
+        if let Some(l) = slot {
+            *t.slots_spent.entry(l).or_default() += 1;
+        }
+    }
+
+    /// A reaction that raises the target's AC (Shield), cast when it turns this hit into a miss: the lowest slot
+    /// that works, the reaction spent through the engine. `true` when the attack now misses.
+    fn ac_reaction(&mut self, target: &CombatantId, total: i32) -> bool {
+        let Some(c) = self.state.combatant(target).cloned() else {
+            return false;
+        };
+        if c.economy.reaction
+            || !self.standing(target)
+            || derive::incapacitated(&self.state, target)
+        {
+            return false;
+        }
+        let ac = derive::effective_ac(&self.state, &c).total.unwrap_or(10);
+        let Some(sheet) = self.sheets.get(target).cloned() else {
+            return false;
+        };
+        for a in &sheet.actions {
+            let Def::Spell(sd) = &a.def else { continue };
+            let Some(n) = crate::spells::ac_reaction(&sd.spec.mech) else {
+                continue;
+            };
+            if total >= ac + n || a.coverage != sheet::Coverage::Automated {
+                continue;
+            }
+            let Some(ability) = c.ability(&a.key) else {
+                continue;
+            };
+            let slotless = ability
+                .spell
+                .as_ref()
+                .is_some_and(|l| l.frequency != party_combat::spell::SpellFrequency::Slot)
+                || ability.uses.is_some();
+            let Some(slot) = crate::spells::slots(&c, ability, &sd.spec)
+                .into_iter()
+                .find(|s| {
+                    derive::cast_status(&self.state, &c, &sd.spec, *s, slotless, false).is_ok()
+                })
+            else {
+                continue;
+            };
+            if self.cast(target, a, slot, std::slice::from_ref(target), false) {
+                let tn = self.name(target);
+                self.line(format!("{tn}'s {} turns the hit into a miss", a.name));
+                return true;
+            }
+        }
+        false
+    }
+
     fn run_adjudicated(
         &mut self,
         actor: &CombatantId,
@@ -1522,8 +1885,13 @@ impl Sim {
             .adjudications
             .last()
             .is_some_and(|x| x.adj.concentration)
-            || matches!(&a.def, Def::Spell(s) if s.concentration);
-        if concentration {
+            || matches!(&a.def, Def::Spell(s) if s.concentration());
+        let held = self
+            .state
+            .combatant(actor)
+            .and_then(|c| c.concentration.as_ref())
+            .is_some_and(|c| c.name == a.name);
+        if concentration && !held {
             let _ = self.exec(&Command::SetConcentration {
                 id: actor.clone(),
                 name: a.name.clone(),
@@ -1639,11 +2007,15 @@ impl Sim {
         }
         let cx = self.context(actor, target, ranged, x);
         let mode = rules::attack_mode(&self.state, actor, target, cx);
-        let roll = D20Input::App {
+        let mut roll = D20Input::App {
             modifier: x.to_hit,
             mode: mode.mode,
             crit_range: x.crit_range,
         };
+        if !mode.dice.is_empty() {
+            // Roll dice on the attack (Bless): the d20 and the dice on the seeded die, sent as a typed total.
+            roll = self.typed_with_dice(actor, label, roll, &mode.dice);
+        }
         let Ok(ev) = self.exec(&Command::Attack {
             attacker: actor.clone(),
             target: target.clone(),
@@ -1652,16 +2024,23 @@ impl Sim {
         }) else {
             return false;
         };
-        let (hit, crit) = ev
+        let (hit, crit, total, nat20) = ev
             .iter()
             .find_map(|e| match &e.kind {
-                DmEventKind::Attack { hit, critical, .. } => {
-                    Some((hit.unwrap_or(false), *critical))
-                }
+                DmEventKind::Attack {
+                    hit,
+                    critical,
+                    roll,
+                    ..
+                } => Some((hit.unwrap_or(false), *critical, roll.total, roll.is_nat20)),
                 _ => None,
             })
-            .unwrap_or((false, false));
+            .unwrap_or((false, false, 0, false));
         if !hit {
+            return false;
+        }
+        // A reaction spell like Shield, when it turns the hit into a miss (a natural 20 still hits).
+        if !nat20 && self.ac_reaction(target, total) {
             return false;
         }
         let crit = crit || mode.auto_crit;
@@ -1708,11 +2087,8 @@ impl Sim {
         spell: bool,
         stakes: (bool, i32),
     ) -> bool {
-        let sheet = self.sheets.get(target);
-        let bonus = sheet.map_or(0, |s| s.save(ability));
-        let mr = sheet.is_some_and(|s| s.traits.magic_resistance);
-        let m = rules::save_mode(&self.state, target, ability, spell, mr);
-        let success = if m.auto_fail {
+        let sm = derive::save_mod(&self.state, target, ability, spell);
+        let success = if sm.auto_fail {
             let n = self.name(target);
             self.line(format!(
                 "{n} fails the {} save automatically",
@@ -1720,14 +2096,21 @@ impl Sim {
             ));
             false
         } else {
-            let ev = self
-                .exec(&Command::Roll {
-                    id: target.clone(),
-                    label: format!("{} save DC {dc}", ability.as_str().to_uppercase()),
-                    roll: RollInput::D20(d20(bonus, m.mode)),
-                })
-                .unwrap_or_default();
-            Self::rolled_total(&ev).unwrap_or(0) >= dc
+            // The engine's save: the bonus, its mode and roll dice such as Bless (rolled on the same die).
+            let total = match self.save_input(target, ability, spell) {
+                D20Input::Typed { total, .. } => total,
+                roll => {
+                    let ev = self
+                        .exec(&Command::Roll {
+                            id: target.clone(),
+                            label: format!("{} save DC {dc}", ability.as_str().to_uppercase()),
+                            roll: RollInput::D20(roll),
+                        })
+                        .unwrap_or_default();
+                    Self::rolled_total(&ev).unwrap_or(0)
+                }
+            };
+            total >= dc
         };
         if success {
             return true;

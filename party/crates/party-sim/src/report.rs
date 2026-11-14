@@ -54,7 +54,6 @@ pub struct CreatureReport {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Steering {
     pub agent: u32,
-    pub assistant: u32,
     pub basic: u32,
     pub fallback: u32,
 }
@@ -79,6 +78,17 @@ pub struct DecisionOut {
     pub why_ai_reasoning_not_rules: Option<String>,
 }
 
+/// A builder draft from an adjudicated spell: shown for the DM to review in the effect builder, never saved by the
+/// simulation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Draft {
+    pub step: u32,
+    pub spell: String,
+    pub key: String,
+    pub status: String,
+    pub mech: party_combat::spell::SpellMech,
+}
+
 /// The report of one run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
@@ -89,6 +99,9 @@ pub struct Report {
     pub pcs: Vec<PcReport>,
     pub creatures: Vec<CreatureReport>,
     pub adjudications: Vec<AdjRec>,
+    /// Adjudicated spells as effect builder drafts (unreviewed, never saved).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drafts: Vec<Draft>,
     pub steering: Steering,
     pub coverage: Coverage,
     pub assumptions: Vec<String>,
@@ -108,6 +121,7 @@ pub fn assumptions(sim: &Sim) -> Vec<String> {
     out.push("Each side plays to win with only what it can see; Basic plays every combatant no agent controls.".into());
     out.push("Creatures use their average HP. Initiative is rolled by the engine.".into());
     out.push("Area effects are aimed at enemies only.".into());
+    out.push("Spells cast with the combat tracker's own definitions and rolls; they reach 60 feet, an area catches the creatures in one band up to its size's limit, summons add no creatures, and a Shield-like reaction is cast only when it turns a hit into a miss.".into());
     if sim.opts.fog {
         out.push(
             "Fog: a side sees enemies' health as unhurt / bloodied / down, not their HP.".into(),
@@ -119,12 +133,41 @@ pub fn assumptions(sim: &Sim) -> Vec<String> {
     out
 }
 
+/// The drafts of the run's adjudicated spells, once per spell.
+fn drafts(sim: &Sim) -> Vec<Draft> {
+    let mut out: Vec<Draft> = Vec::new();
+    for r in &sim.adjudications {
+        let Some(a) = sim
+            .sheets
+            .get(&r.actor)
+            .and_then(|s| s.actions.iter().find(|a| a.name == r.option))
+        else {
+            continue;
+        };
+        let crate::sheet::Def::Spell(s) = &a.def else {
+            continue;
+        };
+        if out.iter().any(|d| d.key == s.spec.mech.key) {
+            continue;
+        }
+        if let Some(mech) = crate::adjudicate::draft(&r.adj, &r.numbers, &s.spec) {
+            out.push(Draft {
+                step: r.step,
+                spell: a.name.clone(),
+                key: s.spec.mech.key.clone(),
+                status: "unreviewed: open it in the effect builder to check and save it".into(),
+                mech,
+            });
+        }
+    }
+    out
+}
+
 fn steering(decisions: &[DecisionRec]) -> Steering {
     let mut s = Steering::default();
     for d in decisions {
         match d.by {
             By::Agent => s.agent += 1,
-            By::Assistant => s.assistant += 1,
             By::Basic => s.basic += 1,
             By::Fallback => s.fallback += 1,
         }
@@ -202,6 +245,7 @@ pub fn report(sim: &Sim) -> Report {
         pcs,
         creatures,
         adjudications: sim.adjudications.clone(),
+        drafts: drafts(sim),
         steering: steering(&sim.decisions),
         coverage: sim.coverage.clone(),
         assumptions: assumptions(sim),

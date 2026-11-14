@@ -54,6 +54,7 @@ pub fn creature(id: &str, name: &str, ruleset: &str, label: &str) -> CreatureInp
         snapshot: snap,
         overrides: Default::default(),
         label: label.into(),
+        automation: None,
     }
 }
 
@@ -88,10 +89,10 @@ pub fn pcs() -> Vec<PcInput> {
             ],
             "spellcasting": {
                 "classes": [{ "className": "Cleric", "saveDc": 13, "attackBonus": 5, "spells": [
-                    {"id": "s1", "name": "Sacred Flame", "level": 0},
-                    {"id": "s2", "name": "Healing Word", "level": 1, "prepared": true},
-                    {"id": "s3", "name": "Cure Wounds", "level": 1, "prepared": true},
-                    {"id": "s4", "name": "Bless", "level": 1, "prepared": true, "concentration": true}
+                    {"id": "ID_2024_SPELL_SACRED_FLAME", "name": "Sacred Flame", "level": 0},
+                    {"id": "ID_2024_SPELL_HEALING_WORD", "name": "Healing Word", "level": 1, "prepared": true},
+                    {"id": "ID_2024_SPELL_CURE_WOUNDS", "name": "Cure Wounds", "level": 1, "prepared": true},
+                    {"id": "ID_2024_SPELL_BLESS", "name": "Bless", "level": 1, "prepared": true, "concentration": true}
                 ]}],
                 "slots": [{"level": 1, "total": 4}, {"level": 2, "total": 2}]
             },
@@ -116,9 +117,9 @@ pub fn pcs() -> Vec<PcInput> {
             ],
             "spellcasting": {
                 "classes": [{ "className": "Wizard", "saveDc": 13, "attackBonus": 5, "spells": [
-                    {"id": "s1", "name": "Fire Bolt", "level": 0},
-                    {"id": "s2", "name": "Magic Missile", "level": 1, "prepared": true},
-                    {"id": "s3", "name": "Shield", "level": 1, "prepared": true}
+                    {"id": "ID_2024_SPELL_FIRE_BOLT", "name": "Fire Bolt", "level": 0},
+                    {"id": "ID_2024_SPELL_MAGIC_MISSILE", "name": "Magic Missile", "level": 1, "prepared": true},
+                    {"id": "ID_2024_SPELL_SHIELD", "name": "Shield", "level": 1, "prepared": true}
                 ]}],
                 "slots": [{"level": 1, "total": 4}, {"level": 2, "total": 2}]
             },
@@ -152,5 +153,6 @@ pub fn ogre_setup(seed: u32, agent: &str) -> SimSetup {
             ..SimOpts::default()
         },
         seed,
+        spells: Default::default(),
     }
 }

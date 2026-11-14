@@ -678,6 +678,113 @@ async fn scope_matrix(t: &Table) {
     assert_eq!(s, StatusCode::FORBIDDEN);
 }
 
+/// The spell read tools (0.3.3): `encounters:read` (or write) and nothing else; the DM's mechanics, one copy per
+/// spell, coverage and spellbooks, with no XP; another account's encounter creature is not found.
+async fn spell_tools(t: &Table) {
+    let r = &t.router;
+    let args = |tool: &str| -> Value {
+        match tool {
+            "spell_search" => json!({ "text": "fireball" }),
+            "spell_get" => json!({ "key": SPELL_KEY }),
+            _ => json!({ "id": DRAGON }),
+        }
+    };
+    for name in crate::spell_tools::NAMES {
+        for scopes in [
+            "bestiary:read",
+            "encounters:simulate characters:read homebrew:write",
+        ] {
+            let tok = testing::token(&t.state.db, &t.dm.id, scopes).await;
+            let (s, _, b) = rpc(
+                r,
+                &tok,
+                &modern(
+                    2,
+                    "tools/call",
+                    json!({ "name": name, "arguments": args(name) }),
+                ),
+            )
+            .await;
+            assert_eq!(s, StatusCode::FORBIDDEN, "{name} with {scopes}: {b}");
+        }
+        for scopes in ["encounters:read", "encounters:write"] {
+            let tok = testing::token(&t.state.db, &t.dm.id, scopes).await;
+            let (_, _, list) = rpc(r, &tok, &modern(1, "tools/list", json!({}))).await;
+            assert!(
+                list.to_string().contains(name),
+                "{name} listed with {scopes}"
+            );
+            let (s, b) = call(r, &tok, name, args(name)).await;
+            assert_eq!(s, StatusCode::OK, "{name}: {b}");
+            assert_eq!(b["result"]["isError"], false, "{name}: {b}");
+        }
+    }
+    let tok = testing::token(&t.state.db, &t.dm.id, "encounters:read").await;
+    // One copy per spell per edition.
+    let found = data(
+        r,
+        &tok,
+        "spell_search",
+        json!({ "text": "fireball", "ruleset": "dnd2024" }),
+    )
+    .await;
+    let fireballs: Vec<&Value> = found["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| s["name"] == "Fireball")
+        .collect();
+    assert_eq!(fireballs.len(), 1, "{found}");
+    assert_eq!(fireballs[0]["key"], SPELL_KEY);
+    // Its mechanics, tier and source; its text only as a data leaf.
+    let spell = data(r, &tok, "spell_get", json!({ "key": SPELL_KEY })).await;
+    assert_eq!(spell["coverage"]["tier"], "auto", "{spell}");
+    assert_eq!(spell["coverage"]["from"], "srd", "{spell}");
+    assert!(spell["mechanics"]["def"]["delivery"].is_object(), "{spell}");
+    assert!(spell["text"]["untrusted_spell_text"].is_string(), "{spell}");
+    // Spellbooks: the bestiary creature, and the DM's encounter creature with its overrides.
+    let book = data(r, &tok, "creature_spellbook", json!({ "id": DRAGON })).await;
+    let spells = book["book"]["spells"].as_array().unwrap();
+    assert!(!spells.is_empty(), "{book}");
+    assert!(
+        spells.iter().all(|s| s["coverage"]["tier"].is_string()),
+        "{book}"
+    );
+    let mine = data(
+        r,
+        &tok,
+        "creature_spellbook",
+        json!({ "encounterId": t.encounter, "creatureId": t.hidden_ids[0] }),
+    )
+    .await;
+    assert_eq!(mine["book"]["spells"], book["book"]["spells"], "{mine}");
+    for v in [&found, &spell, &book, &mine] {
+        let text = v.to_string().to_lowercase();
+        assert!(
+            !text.contains("\"xp\"") && !text.contains("difficulty"),
+            "D16: {text}"
+        );
+    }
+    // Another account's encounter creature: not found, like an unknown id; never a combat.
+    let out = testing::token(&t.state.db, &t.outsider.id, "encounters:read").await;
+    let (_, b) = call(
+        r,
+        &out,
+        "creature_spellbook",
+        json!({ "encounterId": t.encounter, "creatureId": t.hidden_ids[0] }),
+    )
+    .await;
+    assert!(b.to_string().contains("not_found"), "{b}");
+    let (_, b) = call(
+        r,
+        &tok,
+        "spell_get",
+        json!({ "key": SPELL_KEY, "combatId": "c1" }),
+    )
+    .await;
+    assert_eq!(b["result"]["isError"], true, "{b}");
+}
+
 /// Every tool the player-owned token can name, with hidden, random and malformed arguments.
 async fn leak_suite(t: &Table) {
     let r = &t.router;
@@ -721,11 +828,20 @@ async fn leak_suite(t: &Table) {
             ("encounter_remove_creature", json!({ "requestId": request_id(), "encounterId": id, "creatureId": id })),
             ("character_get", json!({ "characterId": id })),
             ("character_get", json!({ "characterId": id, "partyId": t.party, "ownerId": t.dm.id })),
+            ("spell_get", json!({ "key": id })),
+            ("creature_spellbook", json!({ "id": id })),
+            ("creature_spellbook", json!({ "encounterId": t.encounter, "creatureId": id })),
+            ("creature_spellbook", json!({ "encounterId": id, "creatureId": id })),
         ]);
     }
+    calls.push(("spell_search", json!({ "text": "spell alias" })));
     // Malformed: wrong types, unknown keys, huge strings, arrays, nulls.
     let huge = "x".repeat(100_000);
-    for tool in party_tools::spec::all().iter().map(|s| s.name) {
+    for tool in party_tools::spec::all()
+        .iter()
+        .map(|s| s.name)
+        .chain(crate::spell_tools::NAMES)
+    {
         for bad in [
             json!(null),
             json!([1, 2]),
@@ -971,7 +1087,9 @@ async fn mcp_protocol_conformance() {
 #[tokio::test(flavor = "multi_thread")]
 async fn every_tool_needs_its_scope() {
     let dir = tempfile::tempdir().unwrap();
-    scope_matrix(&memory_table(dir.path()).await).await;
+    let t = memory_table(dir.path()).await;
+    scope_matrix(&t).await;
+    spell_tools(&t).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1010,7 +1128,10 @@ async fn mcp_on_postgres() {
         let t = table(mcp_state(&dir.path().join(format!("{i}")), db)).await;
         match *flow {
             "conformance" => conformance(&t).await,
-            "scopes" => scope_matrix(&t).await,
+            "scopes" => {
+                scope_matrix(&t).await;
+                spell_tools(&t).await;
+            }
             "leaks" => leak_suite(&t).await,
             "combats" => no_combat_tools(&t).await,
             _ => idempotency(&t).await,

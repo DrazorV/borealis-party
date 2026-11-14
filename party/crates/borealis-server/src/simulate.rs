@@ -11,20 +11,22 @@
 //!   account.
 //! * **Off the async threads.** The fight itself runs in `spawn_blocking` under the combat module's per-account job
 //!   semaphore.
-//! * **The assistant.** `sim_auto {oracle: "assistant"}` plays the agent's combatants with the account's own model
-//!   (part C), one structured answer per card, as a background run whose progress `sim_state` shows.
+//! * **No model calls (0.3.3).** The server never calls an AI service: an MCP client plays with its own model
+//!   through `sim_act` (the Agent oracle), and everything else is the Basic heuristic or a transcript.
+//! * **Spells (0.3.3).** Casts use the tracker's own definitions: the DM's mechanics for the party's edition (their
+//!   definitions and links, then the curated SRD rows) and their chosen copy of each printed spell name, read once
+//!   per setup; their revisions are in the run's fingerprints, so a replay after an edit reports the divergence.
 //!
 //! The tool table ([`tool_defs`]) and the dispatcher ([`call`]) know nothing of the tool registry; the adapter in
-//! `simulate_tools.rs` plugs them into `party-tools`; `simulate_ai.rs` installs the account's model as the
-//! assistant oracle at start-up.
+//! `simulate_tools.rs` plugs them into `party-tools`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use party_sim::oracle::{AssistantStats, Profile};
 use party_sim::runner::{Entry, Pending};
 use party_sim::setup::{AgentControl, Band, Control, PcHp, Start};
+use party_sim::spells::{SpellDefn, SpellDefs};
 use party_sim::{By, CreatureInput, Decision, PcInput, Sim, SimOpts, SimSetup, Until};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -52,7 +54,6 @@ pub enum SimError {
     NotFound,
     Invalid(String),
     Busy(String),
-    Unavailable(String),
     Internal,
 }
 
@@ -168,18 +169,18 @@ fn defs() -> Vec<ToolDef> {
         ToolDef {
             name: "sim_auto",
             title: "Let the simulation play",
-            description: "Let the Basic heuristic play (until the end of this turn, this round, or the fight), for everyone or only `who`. With oracle \"assistant\" your own AI model plays your combatants instead, in the background (see sim_state).".into(),
+            description: "Let the Basic heuristic play (until the end of this turn, this round, or the fight), for everyone or only `who`. The server never calls an AI model: to play with your own, answer the cards with sim_act.".into(),
             heavy: true,
             schema: json!({ "type": "object", "additionalProperties": false, "required": ["simId", "step", "until"], "properties": {
                 "simId": sim, "step": step,
                 "until": { "type": "string", "enum": ["turn", "round", "end"] },
                 "who": { "type": "array", "items": { "type": "string", "maxLength": 24 }, "maxItems": 40, "description": "Hand only these combatants to Basic, for the rest of the run." },
-                "oracle": { "type": "string", "enum": ["basic", "assistant"] } } }),
+                "oracle": { "type": "string", "enum": ["basic"] } } }),
         },
         ToolDef {
             name: "sim_state",
             title: "Read a simulation's board",
-            description: "The whole board for the DM (not fogged): HP, positions, conditions, resources, the recent log, and the assistant's progress if it plays.".into(),
+            description: "The whole board for the DM (not fogged): HP, positions, conditions, concentration, slots, resources and the recent log.".into(),
             heavy: false,
             schema: json!({ "type": "object", "additionalProperties": false, "required": ["simId"], "properties": { "simId": sim } }),
         },
@@ -230,6 +231,14 @@ struct StartBands {
 struct ControlArg {
     agent: Option<AgentControl>,
     rest: Option<String>,
+}
+
+/// How much a client's model is asked to do: `small` skips text-only options instead of adjudicating them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum Profile {
+    Small,
+    Frontier,
 }
 
 /// `opts` of sim_start, sim_batch and sim_replay.
@@ -380,53 +389,6 @@ fn parse<T: serde::de::DeserializeOwned>(args: Map<String, Value>) -> SimResult<
 
 // ----- Sessions -----
 
-/// How the account's model plays, as part C supplies it. Called from a blocking thread (an implementation may use
-/// `tokio::runtime::Handle::block_on` for its async provider call).
-pub trait Decider: Send + Sync {
-    /// One structured completion with no tools and no history: `system` is fixed text, `user` holds the card, and
-    /// the answer must fit `schema` (Ollama `format`, OpenAI `response_format`, an Anthropic forced tool, Gemini
-    /// `responseSchema`; temperature 0). Errors and a reply later than `timeout` are `Err`.
-    fn decide(
-        &self,
-        system: &str,
-        user: &str,
-        schema: &Value,
-        timeout: Duration,
-    ) -> Result<Value, String>;
-    /// The model's name (picks the profile).
-    fn model(&self) -> String;
-    /// A local model (Ollama, LM Studio on loopback or the LAN): 8 s timeouts and the small profile.
-    fn is_local(&self) -> bool;
-    /// The profile the account chose (Your AI), if any; otherwise it follows the model's name.
-    fn profile(&self) -> Option<Profile> {
-        None
-    }
-}
-
-/// What a [`DeciderSource`] answers: the account's model, once its settings are read.
-pub type DeciderFuture =
-    std::pin::Pin<Box<dyn std::future::Future<Output = Option<Arc<dyn Decider>>> + Send>>;
-
-/// Where part C's provider plugs in: the account's own model, if it set one up and opted in.
-pub type DeciderSource = fn(AppState, User) -> DeciderFuture;
-
-static DECIDERS: LazyLock<Mutex<Option<DeciderSource>>> = LazyLock::new(|| Mutex::new(None));
-
-/// Install the assistant's provider (part C calls this at start-up).
-pub fn install_decider(source: DeciderSource) {
-    if let Ok(mut d) = DECIDERS.lock() {
-        *d = Some(source);
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AssistantRun {
-    state: &'static str,
-    model: String,
-    profile: Profile,
-    stats: AssistantStats,
-}
-
 struct Session {
     account: String,
     party: String,
@@ -434,14 +396,6 @@ struct Session {
     setup: SimSetup,
     sim: Sim,
     last_used: i64,
-    /// The assistant's run, shared with its background thread (which plays a copy and puts it back at the end).
-    assistant: Option<Arc<Mutex<AssistantRun>>>,
-}
-
-fn running(s: &Session) -> bool {
-    s.assistant
-        .as_ref()
-        .is_some_and(|a| a.lock().is_ok_and(|a| a.state == "running"))
 }
 
 type Shared = Arc<Mutex<Session>>;
@@ -460,13 +414,10 @@ fn lock(s: &Shared) -> std::sync::MutexGuard<'_, Session> {
     s.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Drop idle sessions (an assistant run in progress keeps its session).
+/// Drop idle sessions.
 fn sweep() {
     let cut = now() - IDLE_SECONDS;
-    store().retain(|_, s| {
-        let s = lock(s);
-        s.last_used > cut || running(&s)
-    });
+    store().retain(|_, s| lock(s).last_used > cut);
 }
 
 fn session_of(user: &User, sim_id: &str) -> SimResult<Shared> {
@@ -532,7 +483,7 @@ async fn load(
     };
     let mut creatures = Vec::new();
     for row in sqlx::query(
-        "SELECT id, dm_label, statblock_json, overrides_json, element_id FROM encounter_creatures
+        "SELECT id, dm_label, statblock_json, overrides_json, element_id, automation_json FROM encounter_creatures
          WHERE encounter_id = $1 ORDER BY sort, id",
     )
     .bind(encounter)
@@ -544,6 +495,7 @@ async fn load(
         let block: String = row.try_get(2)?;
         let overrides: String = row.try_get(3)?;
         let element: String = row.try_get(4).unwrap_or_default();
+        let automation: Option<String> = row.try_get(5).ok().flatten();
         let Ok(snapshot) = serde_json::from_str(&block) else {
             tracing::warn!("simulate: an unreadable stat block copy in {encounter}");
             continue;
@@ -554,6 +506,7 @@ async fn load(
             snapshot,
             overrides: serde_json::from_str(&overrides).unwrap_or_default(),
             label,
+            automation,
         });
     }
     if creatures.is_empty() {
@@ -637,6 +590,7 @@ async fn load(
         }
     }
     let pcs = party_pcs(state, &party).await?;
+    let spells = spell_defs(state, user, edition, &creatures, &pcs).await;
     Ok((
         SimSetup {
             edition,
@@ -646,9 +600,96 @@ async fn load(
             rules,
             opts,
             seed,
+            spells,
         },
         party,
     ))
+}
+
+/// The DM's spell mechanics for the spells this setup can cast: every spell of the creatures' spellbooks (the
+/// printed block, the kept 5etools spellcasting, the DM's added spells) and of the PCs' sheets, resolved like a
+/// combat start (`spells::Library`: the account's definition or link, then the curated SRD row; unlinked stat block
+/// names go to the DM's chosen copy). When the account's content can't be read now, the curated SRD rows still
+/// apply (party-sim's own fallback) and the run says nothing different.
+async fn spell_defs(
+    state: &AppState,
+    user: &User,
+    edition: party_combat::Edition,
+    creatures: &[CreatureInput],
+    pcs: &[PcInput],
+) -> SpellDefs {
+    let lib = match crate::spells::library(state, &user.id).await {
+        Ok(lib) => lib,
+        Err(e) => {
+            tracing::warn!("simulate: spells unreadable, using the SRD rows: {e:?}");
+            return SpellDefs::default();
+        }
+    };
+    let ruleset = crate::spells::ruleset_of(edition);
+    let mut out = SpellDefs::default();
+    let mut keys: Vec<String> = Vec::new();
+    for cr in creatures {
+        let f = party_encounter::combatant::fighter_from_snapshot(&cr.snapshot, &cr.overrides);
+        let mut c = party_encounter::combatant::creature_of("x", &cr.label, &cr.label, &f, 1);
+        party_encounter::spellbook::equip_start(
+            &mut c,
+            f.data.as_ref(),
+            cr.automation.as_deref(),
+            &cr.overrides,
+        );
+        for a in &c.abilities {
+            let Some(link) = &a.spell else { continue };
+            let key = match &link.key {
+                Some(k) => Some(k.clone()),
+                None => {
+                    let found = lib.resolve(&a.name, ruleset);
+                    if let Some(k) = &found {
+                        out.names
+                            .insert(party_spells::canonical::normalize(&a.name), k.clone());
+                    }
+                    found
+                }
+            };
+            keys.extend(key);
+        }
+    }
+    for pc in pcs {
+        for cl in &pc.spellcasting.classes {
+            keys.extend(
+                cl.spells
+                    .iter()
+                    .map(|s| s.id.clone())
+                    .filter(|k| !k.is_empty()),
+            );
+        }
+    }
+    keys.sort();
+    keys.dedup();
+    for key in keys {
+        let Some(r) = lib.mechanics(ruleset, &key) else {
+            continue;
+        };
+        let Ok(mech) = serde_json::from_value::<party_combat::spell::SpellMech>(r.def) else {
+            tracing::warn!(
+                "simulate: a saved spell effect no longer fits; the spell is ruled instead"
+            );
+            continue;
+        };
+        let rev = u32::try_from(r.rev).unwrap_or(u32::MAX);
+        let origin = if r.origin == "srd" {
+            party_combat::spell::MechOrigin::Srd {
+                key: r.from_key,
+                rev,
+            }
+        } else {
+            party_combat::spell::MechOrigin::Def {
+                id: r.from_key,
+                rev,
+            }
+        };
+        out.defs.insert(key, SpellDefn { mech, origin });
+    }
+    out
 }
 
 /// The party's characters: each member's sheet read like the DM's sheet view (no roster card written), or its
@@ -750,7 +791,6 @@ fn board(s: &Session) -> Value {
         "step": sim.step, "round": sim.state.round, "current": sim.state.current, "ended": sim.outcome,
         "combatants": combatants,
         "log": sim.log[start..].iter().map(|l| l.dm.clone()).collect::<Vec<_>>(),
-        "assistant": s.assistant.as_ref().and_then(|a| a.lock().ok().map(|a| serde_json::to_value(&*a).unwrap_or(Value::Null))),
     })
 }
 
@@ -810,11 +850,6 @@ pub async fn call(
             let a: SimIdArgs = parse(args)?;
             let s = session_of(user, &a.sim_id)?;
             still_dm(state, user, &s).await?;
-            if running(&lock(&s)) {
-                return Err(SimError::Busy(
-                    "The assistant is still playing; read sim_state, then report.".into(),
-                ));
-            }
             store().remove(&a.sim_id);
             let g = lock(&s);
             let mut v = serde_json::to_value(party_sim::report(&g.sim)).map_err(internal)?;
@@ -867,7 +902,6 @@ async fn start(state: &AppState, user: &User, a: StartArgs) -> SimResult<Value> 
                 setup,
                 sim,
                 last_used: now(),
-                assistant: None,
             })),
         );
         Ok((id, out))
@@ -893,9 +927,6 @@ async fn act(state: &AppState, user: &User, a: ActArgs) -> SimResult<Value> {
     blocking(move || {
         let mut g = lock(&s);
         g.last_used = now();
-        if running(&g) {
-            return Err(SimError::Busy("The assistant is playing this simulation.".into()));
-        }
         let card = next_card(&mut g.sim);
         if card.is_null() {
             return Ok(json!({ "step": g.sim.step, "lines": [], "card": null, "ended": g.sim.outcome }));
@@ -926,11 +957,10 @@ async fn act(state: &AppState, user: &User, a: ActArgs) -> SimResult<Value> {
 async fn auto(state: &AppState, user: &User, a: AutoArgs) -> SimResult<Value> {
     let s = session_of(user, &a.sim_id)?;
     still_dm(state, user, &s).await?;
-    if a.oracle.as_deref() == Some("assistant") {
-        return assistant(state, user, s, a.step).await;
-    }
     if a.oracle.as_deref().is_some_and(|o| o != "basic") {
-        return Err(SimError::Invalid("oracle is basic or assistant".into()));
+        return Err(SimError::Invalid(
+            "oracle is basic: the server never calls an AI model; play with your own through sim_act".into(),
+        ));
     }
     let _job = crate::combat::job_slot(&user.id)
         .await
@@ -938,11 +968,6 @@ async fn auto(state: &AppState, user: &User, a: AutoArgs) -> SimResult<Value> {
     blocking(move || {
         let mut g = lock(&s);
         g.last_used = now();
-        if running(&g) {
-            return Err(SimError::Busy(
-                "The assistant is playing this simulation.".into(),
-            ));
-        }
         let _ = next_card(&mut g.sim);
         if a.step != g.sim.step {
             let card = next_card(&mut g.sim);
@@ -969,83 +994,6 @@ async fn auto(state: &AppState, user: &User, a: AutoArgs) -> SimResult<Value> {
         Ok(json!({ "step": g.sim.step, "lines": lines, "card": card, "ended": g.sim.outcome }))
     })
     .await?
-}
-
-/// The assistant plays the agent's combatants in the background, one structured answer per card. It plays a copy
-/// of the session's fight (so the session is never locked while the model thinks) and puts it back when done.
-async fn assistant(state: &AppState, user: &User, s: Shared, step: u32) -> SimResult<Value> {
-    let source = DECIDERS.lock().ok().and_then(|d| *d);
-    let decider = match source {
-        Some(f) => f(state.clone(), user.clone()).await,
-        None => None,
-    };
-    let Some(decider) = decider else {
-        return Err(SimError::Unavailable(
-            "Set up your own AI model (Account, Your AI) and opt in to use it here.".into(),
-        ));
-    };
-    let job = crate::combat::job_slot(&user.id)
-        .await
-        .ok_or_else(|| SimError::Busy("Too many heavy calls at once.".into()))?;
-    let (mut sim, run) = {
-        let mut g = lock(&s);
-        if running(&g) {
-            return Ok(json!({ "assistant": { "state": "running" } }));
-        }
-        let _ = next_card(&mut g.sim);
-        if step != g.sim.step {
-            let card = next_card(&mut g.sim);
-            return Ok(json!({ "stale": true, "step": g.sim.step, "card": card }));
-        }
-        let profile = decider
-            .profile()
-            .unwrap_or_else(|| Profile::for_model(&decider.model(), decider.is_local()));
-        let run = Arc::new(Mutex::new(AssistantRun {
-            state: "running",
-            model: decider.model(),
-            profile,
-            stats: AssistantStats::default(),
-        }));
-        g.assistant = Some(Arc::clone(&run));
-        let mut sim = g.sim.clone();
-        if profile == Profile::Small {
-            sim.opts.adjudicate = false;
-        }
-        (sim, run)
-    };
-    let back = Arc::clone(&s);
-    tokio::task::spawn_blocking(move || {
-        let _job = job;
-        let profile = run.lock().map_or(Profile::Small, |a| a.profile);
-        let timeout = if decider.is_local() {
-            Duration::from_secs(8)
-        } else {
-            Duration::from_secs(20)
-        };
-        let mut stats = AssistantStats::default();
-        let progress = Arc::clone(&run);
-        let mut ask = |system: &str, user: &str, schema: &Value| -> Result<Value, String> {
-            let out = decider.decide(system, user, schema, timeout);
-            if let Ok(mut p) = progress.lock() {
-                p.stats.calls += 1;
-                if out.is_err() {
-                    p.stats.errors += 1;
-                }
-            }
-            out
-        };
-        party_sim::oracle::run_assistant(&mut sim, profile, &mut ask, &mut stats);
-        let mut g = lock(&back);
-        g.sim = sim;
-        g.last_used = now();
-        if let Ok(mut a) = run.lock() {
-            a.state = "done";
-            a.stats = stats;
-        }
-    });
-    Ok(
-        json!({ "assistant": { "state": "running" }, "note": "Read sim_state for progress; sim_report when it is done." }),
-    )
 }
 
 async fn batch(state: &AppState, user: &User, a: BatchArgs) -> SimResult<Value> {

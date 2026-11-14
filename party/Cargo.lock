@@ -3673,6 +3673,7 @@ dependencies = [
  "borealis-content",
  "party-combat",
  "party-encounter",
+ "party-spells",
  "regex",
  "serde",
  "serde_json",

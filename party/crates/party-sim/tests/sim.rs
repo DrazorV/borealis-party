@@ -4,11 +4,10 @@ mod common;
 
 use common::{creature, ogre_setup, pcs};
 use party_combat::CombatantId;
-use party_sim::oracle::{run_assistant, AssistantStats, Profile};
 use party_sim::runner::Oracle;
 use party_sim::sheet::{Coverage, Def};
 use party_sim::{batch, replay, report, By, Decision, Outcome, Pending, Sim, SimOpts, SimSetup};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 const BANNED: [&str; 12] = [
     "xp",
@@ -202,23 +201,28 @@ fn transcripts_replay_identically_and_divergence_is_reported() {
         .any(|d| d["why_ai_reasoning_not_rules"] == "scripted"));
 }
 
+/// An oracle that answers garbage: refused, so the runner falls back to Basic.
+struct Garbage;
+
+impl Oracle for Garbage {
+    fn decide(&mut self, _: &Sim, _: &CombatantId, _: &Value) -> Option<(Decision, By)> {
+        Some((
+            Decision {
+                o: "zz9".into(),
+                t: vec!["c99".into()],
+                ..Decision::default()
+            },
+            By::Agent,
+        ))
+    }
+}
+
 #[test]
-fn a_weak_oracle_repairs_then_falls_back_and_still_reports() {
+fn a_weak_oracle_falls_back_and_still_reports() {
     let setup = ogre_setup(5, "foes");
     let mut sim = Sim::new(&setup).unwrap();
-    let mut stats = AssistantStats::default();
-    let mut n = 0;
-    let mut ask = |_: &str, _: &str, _: &Value| -> Result<Value, String> {
-        n += 1;
-        match n % 3 {
-            0 => Err("timeout".into()),
-            1 => Ok(json!({ "o": "zz9", "t": ["c99"] })),
-            _ => Ok(json!("not an object")),
-        }
-    };
-    let out = run_assistant(&mut sim, Profile::Small, &mut ask, &mut stats);
+    let out = sim.run_with(&mut Garbage);
     let r = report(&sim);
-    assert!(stats.repairs > 0 && stats.fallbacks > 0, "{stats:?}");
     assert!(r.steering.fallback > 0);
     assert!(sim.all_basic, "three fallbacks in a row switch to Basic");
     assert!(matches!(
@@ -228,40 +232,12 @@ fn a_weak_oracle_repairs_then_falls_back_and_still_reports() {
             | Outcome::RoundCap
             | Outcome::BothWithdrew
     ));
-    // And the run replays from its transcript.
+    // Refused answers never reach the transcript; the run replays from it.
     let again = replay(&setup, &r.transcript).unwrap();
     assert_eq!(
         serde_json::to_string(&report(&again)).unwrap(),
         serde_json::to_string(&r).unwrap()
     );
-}
-
-#[test]
-fn a_good_oracle_answering_from_the_schema_is_accepted() {
-    let setup = ogre_setup(9, "foes");
-    let mut sim = Sim::new(&setup).unwrap();
-    let mut stats = AssistantStats::default();
-    // Picks the first non-generic option and its first target, using only the schema's enums.
-    let mut ask = |_: &str, _: &str, schema: &Value| -> Result<Value, String> {
-        let os = schema["properties"]["o"]["enum"].as_array().unwrap();
-        let o = os
-            .iter()
-            .find(|o| {
-                !matches!(
-                    o.as_str(),
-                    Some("dodge" | "dash" | "disengage" | "end" | "pass" | "yield")
-                )
-            })
-            .unwrap_or(&os[0]);
-        let ts = schema["properties"]["t"]["items"]["enum"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
-        Ok(json!({ "o": o, "t": ts.first().map_or(vec![], |t| vec![t.clone()]) }))
-    };
-    run_assistant(&mut sim, Profile::Small, &mut ask, &mut stats);
-    let r = report(&sim);
-    assert!(r.steering.assistant > 0, "{stats:?} {:?}", r.steering);
 }
 
 #[test]
@@ -288,6 +264,7 @@ fn the_2014_save_text_is_read_when_the_importer_left_save_empty() {
         rules: vec![],
         opts: SimOpts::default(),
         seed: 21,
+        spells: Default::default(),
     };
     setup.opts.control.agent = party_sim::setup::AgentControl::Side("none".into());
     let sim = Sim::new(&setup).unwrap();
@@ -468,10 +445,8 @@ fn cards_stay_small() {
     let mut sim = Sim::new(&ogre_setup(8, "foes")).unwrap();
     let card = first_foe_card(&mut sim);
     let full = card.to_string().len();
-    let small = party_sim::oracle::user_message(&card, Profile::Small).len();
-    eprintln!("card: {full} bytes, small-profile message: {small} bytes");
-    assert!(small < full);
-    assert!(small < 6000, "about 1.5k tokens at most: {small}");
+    eprintln!("card: {full} bytes");
+    assert!(full < 12_000, "about 3k tokens at most: {full}");
 }
 
 #[test]
