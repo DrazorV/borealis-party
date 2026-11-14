@@ -15,12 +15,16 @@ export function expectCast(caster: string): void {
   want = { caster, at: Date.now() };
 }
 
-/** The sheet to show for these open casts: the one already open, or a new one this device asked for. */
-export function castToShow(casts: PendingCast[], now = Date.now()): string | null {
+/**
+ * The sheet to show for these open casts: the one already open, or a new one this device asked for, or (0.3.3) a new
+ * one `auto` picks: a player's cast that waits on the DM's creatures' saves.
+ */
+export function castToShow(casts: PendingCast[], now = Date.now(), auto?: (k: PendingCast) => boolean): string | null {
   for (const k of casts) {
     if (seen.has(k.id)) continue;
     seen.add(k.id);
     if (want && k.caster === want.caster && now - want.at < WANT_MS) { open = k.id; want = null; }
+    else if (!open && auto?.(k)) open = k.id;
   }
   if (open && !casts.some((k) => k.id === open)) open = null;
   return open;

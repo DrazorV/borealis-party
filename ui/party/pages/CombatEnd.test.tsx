@@ -105,7 +105,7 @@ describe("ending a combat", () => {
 });
 
 describe("fightOver", () => {
-  it("counts a PC's creatures with the party, and an all-down party too", () => {
+  it("counts a PC's creatures with the party; never says the party is down (the DM never sees players' HP)", () => {
     start();
     const s = structuredClone(state());
     for (const c of s.combatants) if (HOSTILE.includes(c.id)) c.removed = true;
@@ -113,7 +113,8 @@ describe("fightOver", () => {
     expect(fightOver(s)).toBe("enemies");
     const t = structuredClone(state());
     for (const c of t.combatants) if (c.kind === "character") c.life = { state: "dying", successes: 0, failures: 0 };
-    expect(fightOver(t)).toBe("party");
+    for (const c of t.combatants) if (c.kind === "character") c.hp.current = 0;
+    expect(fightOver(t)).toBeNull();
     expect(fightOver(state())).toBeNull();
   });
 });

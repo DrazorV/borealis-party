@@ -171,8 +171,10 @@ export function fakeCombatServer(parties: FakeCombatServer["parties"]): FakeComb
           case "roll": {
             const who = c.me.find((x) => x.id === args.id);
             if (!who) throw fail("not_found", NOT_FOUND);
-            const total = rolled(args.roll!.d20!);
-            who.rolls = [{ id: `r${(who.rolls ?? []).length}`, name: args.label ?? "Roll", total, source: args.roll!.d20!.kind, breakdown: `${total}` }, ...(who.rolls ?? [])].slice(0, 10);
+            // A d20, or dice (an attack's damage, typed or rolled: 7 when the server rolls).
+            const dice = (args.roll as { dice?: { kind: string; total?: number } } | undefined)?.dice;
+            const total = dice ? (dice.kind === "typed" ? dice.total ?? 0 : 7) : rolled(args.roll!.d20!);
+            who.rolls = [{ id: `r${(who.rolls ?? []).length}`, name: args.label ?? "Roll", total, source: dice?.kind ?? args.roll!.d20!.kind, breakdown: `${total}` }, ...(who.rolls ?? [])].slice(0, 10);
             break;
           }
           case "set_initiative":
@@ -195,6 +197,20 @@ export function fakeCombatServer(parties: FakeCombatServer["parties"]): FakeComb
             if (!own.concentrationChecks?.length) throw fail("conflict", "No concentration check is waiting.");
             own.concentrationChecks = own.concentrationChecks.slice(1);
             break;
+          // 0.3.3: a player's cast from their own sheet, and an attack roll (combat-api.md, role-views.md).
+          case "cast_spell": {
+            const caster = (args as { caster?: string }).caster;
+            if (!c.me.some((x) => x.id === caster)) throw fail("not_found", NOT_FOUND);
+            break;
+          }
+          case "attack": {
+            const by = (args as { attacker?: string }).attacker;
+            const mineAt = c.me.find((x) => x.id === by);
+            if (!mineAt) throw fail("not_found", NOT_FOUND);
+            const total = args.roll?.kind === "typed" ? args.roll.total : 11;
+            mineAt.rolls = [{ id: `r${c.pseq}`, name: String(args.label ?? "Attack"), total, source: args.roll?.kind ?? "app", breakdown: `${total}` }, ...(mineAt.rolls ?? [])];
+            break;
+          }
           case "resolve_prompt": {
             const holder = c.me.find((x) => (x.prompts ?? []).some((p) => p.id === args.promptId));
             if (!holder) throw fail("not_found", NOT_FOUND);

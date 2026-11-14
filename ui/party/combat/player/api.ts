@@ -350,6 +350,38 @@ export const resolveConcentration = (combat: string, combatant: string, roll: D2
 export const resolvePrompt = (combat: string, promptId: string, applied: boolean, hp?: { current: number; max: number; temp: number }, ctx?: WireContext) =>
   act(combat, "resolve_prompt", { promptId, applied, ...(hp ? { hp } : {}) }, ctx);
 
+/**
+ * 0.3.3: the player casts a spell from their own sheet in the live combat (party/docs/role-views.md). The server
+ * compiles its effect from the spell's mechanics and the caster's sheet numbers; what it applies (Bless on allies,
+ * a save the DM's creatures make) reaches the DM, never the player's slots: the player spends the slot on their
+ * own sheet.
+ */
+export interface PlayerCast {
+  /** My PC's combatant id. */
+  caster: string;
+  /** The spell element's id on the sheet. */
+  spellKey: string;
+  name: string;
+  level: number;
+  /** The slot level spent (none for a cantrip, a ritual or a free cast). */
+  slot?: number;
+  targets: string[];
+  /** How it's cast: action, bonus or reaction (it spends that). */
+  economy?: "action" | "bonus" | "reaction";
+  /** The caster's numbers from the sheet, for a save DC or a spell attack. */
+  saveDc?: number;
+  attackBonus?: number;
+  concentration?: boolean;
+}
+
+/**
+ * The `cast_spell` args a player sends (the engine command's own names): the server compiles the definition from
+ * `spellKey` and the caster; the rest of {@link PlayerCast} is what this device uses (the economy, the sheet).
+ */
+export const castArgs = (c: PlayerCast): Record<string, unknown> => ({
+  caster: c.caster, spellKey: c.spellKey, targets: c.targets, ...(c.slot != null ? { slot: c.slot } : {}),
+});
+
 const COMBAT_EVENT = "party://combat";
 const PARTY_EVENT = "party://party";
 const RESYNC_EVENT = "party://resync";

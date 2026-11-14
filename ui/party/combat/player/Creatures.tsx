@@ -178,7 +178,7 @@ function SummonDialog({ combat, me, s, onClose }: { combat: PlayerCombat; me: Pl
           </div>
           <label className="combat-check"><input type="checkbox" checked={own} onChange={(e) => setOwn(e.target.checked)} /> Its own initiative (else it acts right after you)</label>
           {own
-            ? <RollOrType label="Its initiative" busy={busy || !valid} onRoll={(input) => summon(quick, input)} rollLabel="Summon, roll in app" typeLabel="Summon, type its roll" />
+            ? <RollOrType label="Its initiative" busy={busy || !valid} onRoll={(input) => summon(quick, input)} rollLabel="Summon, roll for me" />
             : <Button variant="primary" disabled={busy || !valid} onClick={() => void summon(quick)}>Summon</Button>}
         </section>
         {error && <Alert tone="danger">{error}</Alert>}

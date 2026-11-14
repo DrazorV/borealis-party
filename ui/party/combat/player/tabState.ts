@@ -1,9 +1,9 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * Whether the Play tab shows its Combat sub-tab. Upstream's Play page keeps its own sub-tab state and doesn't know
- * the Combat tab, so the party's Tabs and TabPanel (playTabs.tsx) keep this choice beside it. The Live chip and the
- * "Your turn" banner set it from anywhere.
+ * A combat link is waiting to be followed (0.3.3): the Live chip and the "Your turn" banner set it from anywhere; the
+ * Play page then opens its Play sub-tab (playTabsCore.tsx) and scrolls its live combat section into view
+ * (../../play/PlayTop.tsx), which clears it. The names keep the 0.3.0 Combat sub-tab's, which this replaced.
  */
 let selected = false;
 const subscribers = new Set<() => void>();

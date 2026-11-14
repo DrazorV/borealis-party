@@ -123,3 +123,28 @@ html.phone .combat-creature-row > .btn, html.phone .combat-creature-row select.i
 /* Upstream's phone inputs are full width; an amount box is a few digits beside its buttons. */
 .combat-creature-row input.input.combat-amount, html.phone .combat-creature-row input.input.combat-amount { flex: 0 0 6.5em; width: 6.5em; min-width: 0; }
 .combat-creature-row > .field-label { flex: 0 0 auto; }
+
+/* 0.3.3: the player's own turn panel (../player/TurnPanel.tsx), phone first. */
+.combat-turn { display: flex; flex-direction: column; gap: var(--sp-2); }
+.combat-turn-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.combat-econ { display: inline-flex; gap: 6px; }
+.combat-econ-pip { min-width: 36px; min-height: 36px; border-radius: 50%; border: 2px solid var(--accent); background: var(--accent-20); color: var(--text); font-weight: 700; cursor: pointer; }
+.combat-econ-pip.spent { border-color: var(--text-muted); background: transparent; color: var(--text-muted); text-decoration: line-through; }
+html.phone .combat-econ-pip { min-width: var(--ph-hit, 44px); min-height: var(--ph-hit, 44px); }
+.combat-slotpips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.combat-slot { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-xs); }
+.combat-slot-l { font-weight: 700; margin-right: 2px; }
+.combat-slot-pip { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--accent); }
+.combat-slot-pip.on { background: var(--accent); }
+.combat-turn-group { display: flex; flex-direction: column; gap: 6px; }
+.combat-turn-title { margin: 0; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+.combat-turn-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+html.phone .combat-turn-buttons > .btn { flex: 1 1 calc(50% - 6px); min-height: var(--ph-hit, 44px); justify-content: center; white-space: normal; text-align: center; }
+.combat-turn-note { margin: 0; font-size: var(--fs-xs); }
+.combat-sheet { display: flex; flex-direction: column; gap: var(--sp-2); }
+.combat-sheet-lead { margin: 0; }
+.combat-targets { display: flex; flex-wrap: wrap; gap: 6px; }
+.combat-target { min-height: 36px; padding: 0 12px; border: 1px solid var(--accent-base, var(--accent)); background: transparent; color: var(--text); border-radius: var(--radius, 4px); cursor: pointer; }
+.combat-target.on { background: var(--accent); color: var(--on-accent, #fff); }
+html.phone .combat-target { min-height: var(--ph-hit, 44px); }
+.bp-play-combat { margin: 0 0 var(--sp-3, 12px); scroll-margin-top: 8px; }

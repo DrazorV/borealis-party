@@ -1,0 +1,7 @@
+/* Short Rest and Long Rest on the stat tiles' row, as tall as a tile (StatRowWithRests.tsx). */
+.bp-stat-row { align-items: stretch; }
+.bp-rests { margin-left: auto; display: flex; gap: var(--sp-2); align-items: stretch; }
+.bp-rests > .btn { height: auto; min-height: 56px; padding: 0 20px; font-size: var(--fs-md, 15px); font-weight: 600; }
+/* Phones: the tiles are a 3-column grid; the rests take a full row under them, side by side. */
+html.phone .bp-stat-row .bp-rests { grid-column: 1 / -1; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+html.phone .bp-rests > .btn { min-height: 52px; justify-content: center; font-size: var(--ph-t-body, 16px); }

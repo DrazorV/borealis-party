@@ -3,12 +3,14 @@ import { Button, IconButton } from "../../../src/components/Button";
 import { HpBar } from "./HpBar";
 import { conditionWord } from "./common";
 import { conditionsOf, effectiveAc, effectiveInitiative, effectsOn, followDepth, isCharacter, isDefeated, leader, poolOf, rosterOrder, byId } from "./derive";
+import { isDown, playerSide } from "./privacy";
 import type { Combatant, Command, CombatState } from "./types";
 
 /**
  * The roster (C1–C7): everyone sorted by initiative, PCs in the same list. A PC with no initiative is not in this
- * fight yet (blank means absent, C1). A follower shows its leader's initiative (C3). Each row has the quick −5/+5,
- * its economy, and reveal/hide for creatures (D20 b).
+ * fight yet (blank means absent, C1). A follower shows its leader's initiative (C3). A creature's row has the quick
+ * −5/+5, its HP, its economy, and reveal/hide (D20 b). A player's row (a PC, or a creature its player controls) shows
+ * only its name, initiative, AC, conditions, effects and concentration: the DM never sees players' HP (./privacy.ts).
  */
 export function Roster({ state, selected, onSelect, send, disabled, onAdd }: {
   state: CombatState;
@@ -34,6 +36,12 @@ export function Roster({ state, selected, onSelect, send, disabled, onAdd }: {
       <p className="muted cb-small cb-pad">Sorted by initiative. A player's character with no initiative is not in this fight.</p>
     </section>
   );
+}
+
+/** "Bless, from Aria": who an effect came from, on its chip. */
+function fxTitle(state: CombatState, e: { name: string; source?: string }): string {
+  const from = byId(state, e.source);
+  return from ? `${e.name}, from ${from.label}` : e.name;
 }
 
 function InitBox({ c, state, send, disabled }: { c: Combatant; state: CombatState; send: (c: Command) => void; disabled: boolean }) {
@@ -62,6 +70,7 @@ function Row({ c, state, selected, onSelect, send, disabled }: {
   c: Combatant; state: CombatState; selected: boolean; onSelect: (id: string) => void; send: (c: Command) => void; disabled: boolean;
 }) {
   const pc = isCharacter(c);
+  const mine = playerSide(c);
   const current = state.current === c.id;
   const out = pc && c.initiative == null;
   const effects = effectsOn(state, c.id);
@@ -71,7 +80,7 @@ function Row({ c, state, selected, onSelect, send, disabled }: {
   const depth = Math.min(followDepth(state, c), 3);
   const owner = byId(state, c.owner_id);
   const pool = pc ? null : poolOf(state, c.id)?.[1];
-  const cls = [`cb-row cb-depth-${depth}`, c.owner_id && "pet", pc && "pc", selected && "selected", current && "active", dead && "dead", out && "out", c.absent && "out"].filter(Boolean).join(" ");
+  const cls = [`cb-row cb-depth-${depth}`, c.owner_id && "pet", pc && "pc", mine && "player-side", selected && "selected", current && "active", dead && "dead", out && "out", c.absent && "out"].filter(Boolean).join(" ");
   return (
     <li className={cls} data-combatant={c.id} aria-current={current ? "true" : undefined}>
       <button type="button" className="cb-row-main" onClick={() => onSelect(c.id)} aria-label={`${c.label}${current ? ", current turn" : ""}`}>
@@ -83,7 +92,9 @@ function Row({ c, state, selected, onSelect, send, disabled }: {
           {owner && <span className="cb-pet-mark" title={`Controlled by ${c.controller?.kind === "player" ? `${owner.label}'s player` : "the DM"}`}>{c.controller?.kind === "player" ? "Player's" : "Summon"}</span>}
         </span>
         <span className="cb-row-meta">
-          {pc ? <span>Player · {c.absent ? "absent" : out ? "no initiative" : "PC"}</span> : <span>AC <b>{effectiveAc(state, c).total ?? "—"}</b></span>}
+          {pc && <span>Player · {c.absent ? "absent" : out ? "no initiative" : "PC"}</span>}
+          {mine && isDown(c) && <span className="cb-row-conds">Down</span>}
+          <span>AC <b>{effectiveAc(state, c).total ?? "—"}</b></span>
           {owner && <span>↳ {owner.label}</span>}
           {pool && (
             <span className="cb-la-mini" aria-label={`${c.label} legendary actions: ${pool.remaining} of ${pool.max} left`}
@@ -93,6 +104,11 @@ function Row({ c, state, selected, onSelect, send, disabled }: {
           )}
           {conds.length > 0 && <span className="cb-row-conds">{conds.map(conditionWord).join(", ")}</span>}
         </span>
+        {effects.length > 0 && (
+          <span className="cb-row-fx" aria-label={`${c.label} effects`}>
+            {[...new Set(effects.map((x) => x.name))].slice(0, 4).map((name) => <span key={name} className="cb-fx-chip" title={fxTitle(state, effects.find((x) => x.name === name)!)}>{name}</span>)}
+          </span>
+        )}
       </button>
       <div className="cb-row-side">
         <InitBox c={c} state={state} send={send} disabled={disabled} />
@@ -101,14 +117,14 @@ function Row({ c, state, selected, onSelect, send, disabled }: {
             disabled={disabled || dead} onClick={() => send({ command: c.visible ? "hide" : "reveal", id: c.id })} />
         )}
       </div>
-      <div className="cb-row-hp">
-        {!pc && <button type="button" className="cb-quick" disabled={disabled || dead} aria-label={`5 damage to ${c.label}`}
-          onClick={() => send({ command: "damage", target: c.id, parts: [{ amount: { kind: "typed", total: 5 } }] })}>−5</button>}
+      {!mine && <div className="cb-row-hp">
+        <button type="button" className="cb-quick" disabled={disabled || dead} aria-label={`5 damage to ${c.label}`}
+          onClick={() => send({ command: "damage", target: c.id, parts: [{ amount: { kind: "typed", total: 5 } }] })}>−5</button>
         <HpBar current={c.hp.current} max={c.hp.max} temp={c.hp.temp} label={`${c.label} hit points`} />
-        {!pc && <button type="button" className="cb-quick" disabled={disabled || dead} aria-label={`5 healing to ${c.label}`}
-          onClick={() => send({ command: "heal", target: c.id, amount: { kind: "typed", total: 5 } })}>+5</button>}
-      </div>
-      {state.status === "active" && !pc && (
+        <button type="button" className="cb-quick" disabled={disabled || dead} aria-label={`5 healing to ${c.label}`}
+          onClick={() => send({ command: "heal", target: c.id, amount: { kind: "typed", total: 5 } })}>+5</button>
+      </div>}
+      {state.status === "active" && !mine && (
         <div className="cb-econ-mini" aria-label={`${c.label} economy`}>
           <span className={e.action ? "spent" : ""} title={e.action ? "Action spent" : "Action ready"}>A</span>
           <span className={e.bonus_action ? "spent" : ""} title={e.bonus_action ? "Bonus action spent" : "Bonus action ready"}>B</span>

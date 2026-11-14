@@ -3,6 +3,7 @@ import { useToast } from "../../../src/components/Toast";
 import { combatDeps } from "../../api/overrides/combat";
 import { CombatClient, defaultClientDeps, type ClientDeps, type ClientState } from "./client";
 import { browserSharing, mockCombatServer, mockWanted } from "./mockServer";
+import { redactDmView } from "./privacy";
 import type { Command } from "./types";
 
 // Trying the tracker before the server has its routes: the mock answers them in this browser, shared by its tabs
@@ -29,6 +30,9 @@ export function useCombat(id: string) {
     () => client.snapshot,
   );
   const send = useCallback((command: Command) => client.send(command), [client]);
-  // The screen shows the optimistic state: the server's with the writes on their way applied (./client.ts).
-  return { ...state, view: state.shown, server: state.view, client, send, accepting: client.accepting };
+  // The screen shows the optimistic state: the server's with the writes on their way applied (./client.ts), with
+  // every player's HP and resources stripped first (./privacy.ts: the DM screen never knows them).
+  const view = useMemo(() => (state.shown ? redactDmView(state.shown) : null), [state.shown]);
+  const server = useMemo(() => (state.view ? redactDmView(state.view) : null), [state.view]);
+  return { ...state, view, server, client, send, accepting: client.accepting };
 }

@@ -14,6 +14,7 @@ import { HealthBand } from "../shared/HealthBand";
 import { RollOrType } from "../shared/RollOrType";
 import { StatBlockView } from "../shared/StatBlockView";
 import { Creatures } from "./Creatures";
+import { TurnPanel } from "./TurnPanel";
 import { deviceDeps, playerWrite, useCombatStore } from "./store";
 import "../shared/combat.css";
 
@@ -122,7 +123,7 @@ function PromptCard({ combat, prompt, me, modifier, saveOf }: { combat: PlayerCo
       <section className="combat-prompt" role="alertdialog" aria-label={what}>
         <p className="combat-prompt-q">{what}</p>
         <p className="muted combat-prompt-from">{prompt.from ? `From ${prompt.from}` : "From an unseen creature"}</p>
-        <TableRoll label={what} modifier={saveOf?.(prompt.ability) ?? 0} busy={busy} onRoll={send} />
+        <RollOrType label={what} modifier={saveOf?.(prompt.ability) ?? 0} busy={busy} onRoll={send} />
         {error && <Alert tone="danger">{error}</Alert>}
       </section>
     );
@@ -137,23 +138,6 @@ function PromptCard({ combat, prompt, me, modifier, saveOf }: { combat: PlayerCo
     );
   }
   return null;
-}
-
-/**
- * A roll at the table first (0.3.2, the user's "promote actual rolls on table"): the typed total is the main action;
- * "Roll for me" is for players without dice.
- */
-function TableRoll({ label, modifier, busy, onRoll }: { label: string; modifier: number; busy: boolean; onRoll: (input: D20Input) => void }) {
-  const [text, setText] = useState("");
-  const total = /^-?\d+$/.test(text.trim()) ? Number(text.trim()) : null;
-  return (
-    <form className="combat-table-roll" onSubmit={(e) => { e.preventDefault(); if (total !== null) onRoll({ kind: "typed", total }); }}>
-      <input className="input" inputMode="numeric" enterKeyHint="send" autoFocus placeholder="Your roll" aria-label={`${label}: my table roll`}
-        value={text} onChange={(e) => setText(e.target.value)} disabled={busy} />
-      <Button type="submit" variant="primary" disabled={busy || total === null}>Send</Button>
-      <Button variant="ghost" icon="dice" disabled={busy} onClick={() => onRoll({ kind: "app", modifier })}>Roll for me ({modifier >= 0 ? `+${modifier}` : modifier})</Button>
-    </form>
-  );
 }
 
 function Pips({ label, filled, tone }: { label: string; filled: number; tone: "success" | "danger" }) {
@@ -290,7 +274,12 @@ function Log({ combat }: { combat: PlayerCombat }) {
   );
 }
 
-/** The Play tab's Combat sub-tab (plan 4.4 "Player combat view"): phone first, the player's projection only. */
+/**
+ * The player's live combat section (plan 4.4 "Player combat view"; 0.3.3: at the top of the Play tab's Play sub-tab,
+ * ../../play/PlayTop.tsx, which retired the separate Combat sub-tab). Phone first, the player's projection only:
+ * whose turn it is and the order, prompts to answer (typed rolls first), their own turn panel, their own HP and death
+ * saves, and their summons and pets.
+ */
 export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSnapshot }) {
   const me = myCombatant(combat, { id: s.id, name: s.name });
   const [sheet, setSheet] = useState<PlayerCombatant | null>(null);
@@ -315,6 +304,7 @@ export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSn
         <PromptCard key={p.id} combat={combat} prompt={p} me={me} modifier={conSave}
           saveOf={(a) => (s.abilities.save as Record<string, { bonus?: number } | undefined>)[a]?.bonus ?? 0} />
       ))}
+      {me && <TurnPanel combat={combat} me={me} s={s} />}
       {me && <Me combat={combat} me={me} s={s} />}
       {me && <Creatures combat={combat} me={me} s={s} />}
       <section className="card combat-order-card" aria-label="Initiative">

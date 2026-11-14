@@ -259,3 +259,12 @@ html.phone .cb-page .cb-type-select, html.phone .cb-page .cb-cond-add { flex: 1 
 @media (max-height: 480px) and (orientation: landscape) {
   .cb-right { position: static; max-height: none; box-shadow: none; }
 }
+
+/* 0.3.3 role screens: a player's row shows no HP; its effects show as chips (a player's Bless on the party). */
+.cb-row-fx { display: flex; flex-wrap: wrap; gap: 4px; }
+.cb-fx-chip { font-size: 11px; line-height: 1.5; border: 1px solid var(--info); color: var(--info); border-radius: 4px; padding: 0 6px; }
+.cb-send { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) 0; }
+.cb-send .cb-group-title { margin: 0; }
+.cb-sent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-sm, 13px); }
+.cb-sent li { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
+.cb-cast-note { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }
