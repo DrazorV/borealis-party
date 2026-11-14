@@ -7,7 +7,7 @@ import { defineConfig, devices } from "@playwright/test";
  *  - iphone: WebKit as iOS Safari at 390x844;
  *  - desktop: Chromium at 1280x800 without the phone layer, for unify-imports.spec.ts, combat-tracker.spec.ts,
  *    content-refresh.spec.ts and content-compact.spec.ts (which sets 1440x900);
- *  - desktop-wide: Chromium at 1440x900, a DM's big screen, for encounter-tab.spec.ts, spell-combat.spec.ts, combat-end.spec.ts, ai-guides.spec.ts, source-restrict.spec.ts, spell-cast-live.spec.ts, party-card.spec.ts, equal-height.spec.ts, update-all.spec.ts, build-notice.spec.ts and role-screens.spec.ts.
+ *  - desktop-wide: Chromium at 1440x900, a DM's big screen, for encounter-tab.spec.ts, spell-combat.spec.ts, combat-end.spec.ts, ai-guides.spec.ts, source-restrict.spec.ts, spell-cast-live.spec.ts, party-card.spec.ts, equal-height.spec.ts, update-all.spec.ts, build-notice.spec.ts, role-screens.spec.ts and sheet-frame.spec.ts.
  * The server is a throwaway local one (server/start.ts).
  */
 const ANDROID_UA =
@@ -46,6 +46,6 @@ export default defineConfig({
     // A desktop browser window, for the specs that cover phones and desktops alike.
     { name: "desktop", testMatch: /(unify-imports|combat-tracker|content-refresh|content-compact|branding)\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } } },
     // A DM's big screen for session prep (0.3.1): the Encounters and Combat tabs use the whole width.
-    { name: "desktop-wide", testMatch: /(encounter-tab|spell-combat|combat-end|ai-guides|source-restrict|spell-cast-live|party-card|equal-height|update-all|build-notice|role-screens)\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
+    { name: "desktop-wide", testMatch: /(encounter-tab|spell-combat|combat-end|ai-guides|source-restrict|spell-cast-live|party-card|equal-height|update-all|build-notice|role-screens|sheet-frame)\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
   ],
 });
