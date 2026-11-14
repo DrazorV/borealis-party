@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { Button } from "../../src/components/Button";
 import { useConfirm } from "../../src/components/Confirm";
 import { Dialog } from "../../src/components/controls/Dialog";
@@ -11,6 +11,8 @@ import { addCreature, combatPath, exportCombat, importCombat } from "../api/over
 import { CombatantCard } from "../combat/dm/CombatantCard";
 import { byId, isCharacter, ownerDefeated, rosterOrder, takesTurn, turnOrder } from "../combat/dm/derive";
 import { EffectBuilder } from "../combat/dm/EffectBuilder";
+import { fightOver, outKey } from "../combat/dm/fightOver";
+import { encounterPath } from "./EncountersPage";
 import { ResolutionSheet } from "../combat/dm/ResolutionSheet";
 import { addCreatureFromBestiary } from "../combat/dm/spellApi";
 import { castToShow, showCast } from "../combat/dm/castFocus";
@@ -43,6 +45,8 @@ export function CombatTracker() {
   const [dialog, setDialog] = useState<"add" | "export" | "import" | null>(null);
   const [exported, setExported] = useState("");
   const [logOpen, setLogOpen] = useState(false);
+  /** Who was down when the DM chose "Keep going": the banner stays away until that changes. */
+  const [waved, setWaved] = useState<string | null>(null);
   /** 0.3.2: the open resolution sheet (a pending cast's id), Add creature's summon preset, the effect builder. */
   const [, setFocusTick] = useState(0);
   const [addPreset, setAddPreset] = useState<AddPreset | undefined>(undefined);
@@ -117,6 +121,7 @@ export function CombatTracker() {
       if (r === "confirm") await combat.client.undo(true);
     } else if (out === "done") toast.push("Undone.");
   };
+  const over = fightOver(state);
   const end = async () => {
     const r = await confirm({ title: "End this combat?", body: "Players' Combat tab closes. The log stays for 90 days. A new fight needs a new combat.", confirmLabel: "End combat", danger: true });
     if (r === "confirm") send({ command: "end" });
@@ -177,8 +182,25 @@ export function CombatTracker() {
           {state.status === "active" && <Button small disabled={disabled} onClick={() => send({ command: "previous_turn" })}>◀ Back</Button>}
           <Button small disabled={view.undo.length === 0 || connection !== "live" || state.status === "ended"} onClick={() => void undo()} title={view.undo[0] ? `Undo: ${view.undo[0]}` : "Nothing to undo"}>↶ Undo</Button>
           <Button small variant="ghost" disabled={disabled} onClick={() => void rollAll()}>Roll initiatives</Button>
+          {!phone && state.status !== "ended" && <Button small variant="danger" disabled={disabled} onClick={() => void end()}>End combat</Button>}
+          {phone && state.status !== "ended" && <HeaderMenu disabled={disabled} onEnd={() => void end()} />}
         </div>
       </header>
+
+      {state.status === "ended" && (
+        <section className="cb-ended" role="status" aria-label="Combat ended">
+          <span>This combat has ended.{view.encounter ? ` ${view.encounter.name} is marked Ended.` : ""} Players' Combat tab has closed; the log stays for 90 days.</span>
+          <Link className="btn btn-sm btn-primary" to={view.encounter ? encounterPath(view.partyId, view.encounter.id) : "/combat"}>
+            {view.encounter ? "Back to encounters" : "Back to Combat"}</Link>
+        </section>
+      )}
+      {over && outKey(state) !== waved && (
+        <section className="cb-over" role="status" aria-label={over === "enemies" ? "All enemies are down" : "Every player character is down"}>
+          <span>{over === "enemies" ? "All enemies are down." : "Every player character is down."}</span>
+          <Button small variant="danger" disabled={disabled} onClick={() => void end()}>End combat</Button>
+          <Button small onClick={() => setWaved(outKey(state))}>Keep going</Button>
+        </section>
+      )}
 
       <ConnectionBanner connection={connection} queued={combat.queue.length} />
       {held.length > 0 && (
@@ -216,7 +238,6 @@ export function CombatTracker() {
               <div className="cb-tool-row">
                 <Button small onClick={() => void doExport()}>Export combat</Button>
                 <Button small onClick={() => setDialog("import")}>Import combat</Button>
-                {state.status !== "ended" && <Button small variant="danger" disabled={disabled} onClick={() => void end()}>End combat</Button>}
               </div>
               <div className="cb-tool-row">
                 <label className="cb-check"><input type="checkbox" disabled={disabled} checked={state.settings?.auto_recharge !== false}
@@ -265,6 +286,21 @@ export function CombatTracker() {
         } catch (e) { toast.push(errorMessage(e), "error"); }
       }} />}
     </div>
+  );
+}
+
+/** Phones: the header's More menu, so End combat is one tap away without crowding the header row. */
+function HeaderMenu({ disabled, onEnd }: { disabled: boolean; onEnd: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="cb-menu">
+      <Button small aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen(!open)}>⋯ More</Button>
+      {open && (
+        <span className="cb-menu-list" role="menu" aria-label="More combat actions">
+          <Button small variant="danger" role="menuitem" disabled={disabled} onClick={() => { setOpen(false); onEnd(); }}>End combat</Button>
+        </span>
+      )}
+    </span>
   );
 }
 

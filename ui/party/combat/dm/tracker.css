@@ -35,6 +35,15 @@
 .cb-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-2); }
 .cb-brand h1 { margin: 2px 0; font-size: var(--fs-xl, 20px); line-height: 1.15; }
 .cb-top-actions { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+/* End of a fight (0.3.2): the "All enemies are down" hint, never automatic, and the ended note with the way back. */
+.cb-over, .cb-ended { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius); font-size: var(--fs-sm); }
+.cb-over { border: var(--border-w) solid var(--gold); background: var(--gold-soft); }
+.cb-over > span, .cb-ended > span { flex: 1 1 14em; }
+.cb-ended { border: var(--border-w) solid var(--border); background: var(--surface); }
+.cb-menu { position: relative; display: inline-flex; }
+.cb-menu-list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; display: flex; flex-direction: column; gap: 4px; min-width: 12em; padding: var(--sp-2);
+  background: var(--surface); border: var(--border-w) solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 18px rgba(0, 0, 0, 0.25); }
+.cb-menu-list .btn { justify-content: flex-start; }
 .cb-round { font-weight: 700; color: var(--gold); border: var(--border-w) solid var(--gold); border-radius: var(--radius); padding: 4px 10px; background: var(--gold-soft); white-space: nowrap; font-size: var(--fs-sm); }
 .cb-conn { padding: var(--sp-2) var(--sp-3); border-radius: var(--radius); font-size: var(--fs-sm); border: var(--border-w) solid var(--warning); background: var(--warning-soft); }
 .cb-conn.offline { border-color: var(--danger); background: var(--danger-soft); }
