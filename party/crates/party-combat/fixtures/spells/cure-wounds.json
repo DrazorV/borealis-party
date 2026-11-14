@@ -1,0 +1,19 @@
+[
+  {
+    "v": 1, "key": "ID_PHB_SPELL_CURE_WOUNDS", "edition": "2014", "name": "Cure Wounds", "rev": 1,
+    "level": 1, "cast": "action",
+    "targeting": { "kind": "creatures", "max": "1", "include_self": true },
+    "delivery": { "kind": "auto" },
+    "on_land": [{ "kind": "heal", "dice": "1d8+(slot_above)d8", "add_mod": true }],
+    "tier": "auto",
+    "notes": ["No effect on undead or constructs."]
+  },
+  {
+    "v": 1, "key": "ID_2024_SPELL_CURE_WOUNDS", "edition": "2024", "name": "Cure Wounds", "rev": 1,
+    "level": 1, "cast": "action",
+    "targeting": { "kind": "creatures", "max": "1", "include_self": true },
+    "delivery": { "kind": "auto" },
+    "on_land": [{ "kind": "heal", "dice": "2d8+(2*slot_above)d8", "add_mod": true }],
+    "tier": "auto"
+  }
+]

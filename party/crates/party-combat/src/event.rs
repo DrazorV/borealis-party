@@ -1,7 +1,9 @@
 //! What a command did: DM events (the DM-only log) and player events (only what the projection may show).
 
+use crate::command::StandardActionKind;
 use crate::damage::DamageResult;
-use crate::model::{CombatantId, DamageType, EffectId};
+use crate::model::{AbilityName, CastId, CombatantId, DamageType, EffectId, RowOutcome};
+use crate::spell::{RulingButton, SummonInfo};
 use crate::visibility::TurnPointer;
 use party_dice::{D20Result, DiceResult, RollSource};
 use serde::{Deserialize, Serialize};
@@ -226,6 +228,75 @@ pub enum DmEventKind {
         /// The owner.
         owner: CombatantId,
     },
+    /// A spell was cast (or a stat block action used, or a zone applied): its rows are open until resolved.
+    CastStarted {
+        /// The cast.
+        cast: CastId,
+        /// The spell or action name.
+        spell: String,
+        /// The slot spent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slot: Option<u8>,
+        /// It waits for rolls (otherwise it applied at once).
+        pending: bool,
+        /// The definition's reminders.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        notes: Vec<String>,
+    },
+    /// One row of a cast was resolved.
+    CastRow {
+        /// The cast.
+        cast: CastId,
+        /// The target.
+        target: CombatantId,
+        /// The outcome.
+        outcome: RowOutcome,
+        /// The roll, if any.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        roll: Option<D20Result>,
+    },
+    /// A cast's amounts and effects were applied.
+    CastApplied {
+        /// The cast.
+        cast: CastId,
+        /// The amounts rolled or typed, in order.
+        amounts: Vec<DiceResult>,
+    },
+    /// A pending cast was dropped.
+    CastCancelled {
+        /// The cast.
+        cast: CastId,
+        /// Its slot came back.
+        refunded: bool,
+    },
+    /// A summon or conjure spell was cast: the options for the DM's Add creature dialog (nothing spawns).
+    SummonOptions {
+        /// The caster (the "Controlled by" preset).
+        caster: CombatantId,
+        /// The spell.
+        spell: String,
+        /// The slot.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slot: Option<u8>,
+        /// The options.
+        info: SummonInfo,
+        /// The caster concentrates on it: offer to bind the creatures (default on).
+        concentration: bool,
+    },
+    /// A ruling row: the DM taps one of the buttons.
+    RulingNeeded {
+        /// The cast.
+        cast: CastId,
+        /// The question.
+        question: String,
+        /// The buttons.
+        buttons: Vec<RulingButton>,
+    },
+    /// Dodge, Dash, Disengage or Help.
+    StandardAction {
+        /// Which.
+        action: StandardActionKind,
+    },
     /// The last change was undone.
     Undone {
         /// The undone command's label.
@@ -326,6 +397,30 @@ pub enum PlayerEvent {
         /// A critical hit.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         critical: bool,
+    },
+    /// A save against a spell or a stat block action: "DEX save DC 15 from an unseen creature". Sent to the PC's
+    /// player only; the player rolls at the table and types it (or the DM does), with `resolve_cast_row`.
+    SaveRequest {
+        /// The PC (or its creature).
+        id: CombatantId,
+        /// The player's account.
+        owner: String,
+        /// The cast to answer.
+        cast: CastId,
+        /// The ray.
+        #[serde(default)]
+        ray: u32,
+        /// The save.
+        ability: AbilityName,
+        /// The DC, if known.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dc: Option<u32>,
+        /// The spell's name; `None` when the caster is hidden.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spell: Option<String>,
+        /// The caster; `None` when hidden ("an unseen creature").
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<CombatantId>,
     },
     /// The turn of the player's PC, or of a creature it controls, started ("Your turn" and a vibration).
     YourTurn {

@@ -3,6 +3,7 @@
 
 use crate::derive::{conditions, turn_order};
 use crate::model::{CombatState, CombatantId, Controller, Status};
+use crate::spell::Delivery;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -113,17 +114,12 @@ pub fn player_view_of(state: &CombatState, id: &CombatantId) -> Option<Value> {
     let seen = |other: &CombatantId| is_visible(state, other, ViewerKind::Player);
     let mut v = serde_json::to_value(c).ok()?;
     let o = v.as_object_mut()?;
-    for dm_only in [
-        "label",
-        "notes",
-        "tiebreak",
-        "ever_revealed",
-        "visible",
-        "removed",
-        // Legendary counts are DM only (user, 2026-11-13): a pool shared with a hidden creature would show its uses.
-        "legendary_resistance",
-    ] {
-        o.remove(dm_only);
+    // An allowlist (0.3.2): a field added later stays DM only until it is classified here.
+    o.retain(|k, _| COMBATANT_PLAYER.contains(&k.as_str()));
+    if let Some(Value::Array(abilities)) = o.get_mut("abilities") {
+        for a in abilities.iter_mut().filter_map(Value::as_object_mut) {
+            a.retain(|k, _| ABILITY_PLAYER.contains(&k.as_str()));
+        }
     }
     for (field, target) in [("owner_id", &c.owner_id), ("linked_to", &c.linked_to)] {
         if target.as_ref().is_some_and(|t| !seen(t)) {
@@ -165,6 +161,160 @@ pub fn player_view_of(state: &CombatState, id: &CombatantId) -> Option<Value> {
     );
     Some(v)
 }
+
+/// The open cast rows a player answers: saves their own PCs (and its creatures) make against pending casts, each
+/// `{cast, target, ray, ability, dc, spell?, from?, resolved}`. The spell and caster are left out when the
+/// caster is hidden ("DEX save DC 15 from an unseen creature"). Nothing else of a cast reaches players.
+#[must_use]
+pub fn player_casts(state: &CombatState, account: &str) -> Vec<Value> {
+    let mut out = Vec::new();
+    for cast in &state.casts {
+        let Delivery::Save { ability, .. } = cast.spec.mech.delivery else {
+            continue;
+        };
+        let seen = is_visible(state, &cast.caster, ViewerKind::Player);
+        for r in &cast.rows {
+            let mine = state
+                .combatant(&r.target)
+                .filter(|c| !c.removed)
+                .and_then(|c| crate::engine::account_of(state, c))
+                .is_some_and(|a| a == account);
+            if !mine {
+                continue;
+            }
+            let mut row = serde_json::json!({
+                "cast": cast.id,
+                "target": r.target,
+                "ray": r.ray,
+                "ability": ability,
+                "dc": cast.spec.dc,
+                "resolved": r.outcome.is_some(),
+            });
+            if seen {
+                row["spell"] = Value::String(cast.spec.mech.name.clone());
+                row["from"] = serde_json::to_value(&cast.caster).unwrap_or(Value::Null);
+            }
+            out.push(row);
+        }
+    }
+    out
+}
+
+/// Combatant keys players may see (subject to the hidden-reference rules of [`player_view_of`]).
+pub const COMBATANT_PLAYER: &[&str] = &[
+    "id",
+    "kind",
+    "owner",
+    "public_name",
+    "initiative",
+    "initiative_bonus",
+    "initiative_advantage",
+    "absent",
+    "linked_to",
+    "surprised",
+    "owner_id",
+    "controller",
+    "initiative_mode",
+    "hp",
+    "hp_authority",
+    "zero_hp",
+    "life",
+    "ac",
+    "speed",
+    "defenses",
+    "exhaustion",
+    "concentration",
+    "pending_concentration",
+    "economy",
+    "abilities",
+    "spell_slots",
+    "resources",
+    "group",
+];
+
+/// Combatant keys that stay with the DM: the label and notes, bookkeeping, Legendary Resistance counts (user,
+/// 2026-11-13: a pool shared with a hidden creature would show its uses), and the 0.3.2 casting data (save
+/// bonuses, DCs, links and compiled mechanics).
+pub const COMBATANT_DM_ONLY: &[&str] = &[
+    "label",
+    "notes",
+    "tiebreak",
+    "ever_revealed",
+    "visible",
+    "removed",
+    "legendary_resistance",
+    "stats",
+    "casting",
+    "spell_turn",
+];
+
+/// Ability keys players may see.
+pub const ABILITY_PLAYER: &[&str] = &[
+    "key",
+    "name",
+    "kind",
+    "text",
+    "legendary_cost",
+    "recharge",
+    "uses",
+    "group_limit",
+    "requires_effect",
+];
+
+/// Ability keys that stay with the DM: the spell link and compiled mechanics.
+pub const ABILITY_DM_ONLY: &[&str] = &["spell", "mech"];
+
+/// Effect keys players see, in [`player_view_of`]'s `effects` (`source` and `duration` only when the source is
+/// visible).
+pub const EFFECT_PLAYER: &[&str] = &[
+    "name",
+    "detail",
+    "concentration",
+    "conditions",
+    "modifiers",
+    "charges",
+    "repeat_save",
+    "source",
+    "duration",
+];
+
+/// Effect keys that stay with the DM.
+pub const EFFECT_DM_ONLY: &[&str] = &[
+    "id",
+    "origin",
+    "target",
+    "ends_on_defeat_of",
+    "follow_up",
+    "spell",
+    "dismiss_on_end",
+    "ends_on_damage",
+];
+
+/// Combat state keys that reach players only through this module's functions (the turn pointer, the visible
+/// order, [`player_view_of`] and [`player_casts`]).
+pub const STATE_PROJECTED: &[&str] = &[
+    "edition",
+    "status",
+    "round",
+    "current",
+    "combatants",
+    "effects",
+];
+
+/// Combat state keys that never reach players: legendary pools (live counts), rules, limits, counters, pending
+/// casts (only each player's own rows, through [`player_casts`]) and settings.
+pub const STATE_DM_ONLY: &[&str] = &[
+    "settings",
+    "last_visible",
+    "legendary_pools",
+    "legendary_per_creature",
+    "rules",
+    "group_limits",
+    "next_effect",
+    "next_tiebreak",
+    "casts",
+    "next_cast",
+];
 
 /// A coarse summary of everything players may see. Two states with the same summary are the same to players, so
 /// a command whose before and after summaries match produces no player events.

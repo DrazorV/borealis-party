@@ -187,6 +187,21 @@ lowercase_enum! {
     }
 }
 
+impl AbilityName {
+    /// The index in a six-ability array (STR, DEX, CON, INT, WIS, CHA).
+    #[must_use]
+    pub fn index(self) -> usize {
+        match self {
+            AbilityName::Str => 0,
+            AbilityName::Dex => 1,
+            AbilityName::Con => 2,
+            AbilityName::Int => 3,
+            AbilityName::Wis => 4,
+            AbilityName::Cha => 5,
+        }
+    }
+}
+
 /// One clause of a damage immunity, resistance or vulnerability list. Same shape as
 /// `borealis_content::monster_types::DamageClause`, so a stat block's clauses deserialize into it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -504,6 +519,103 @@ pub struct Ability {
     /// Usable only while an effect of this name is on the combatant, or it concentrates on it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requires_effect: Option<String>,
+    /// The spell this entry casts, linked to an installed spell element (0.3.2). DM only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spell: Option<crate::spell::SpellLink>,
+    /// What it does, compiled for this combatant on the server: a spell, or a stat block attack or save. DM only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mech: Option<Box<crate::spell::CastSpec>>,
+}
+
+impl Ability {
+    /// An ability with a key, a name and a kind; everything else empty.
+    #[must_use]
+    pub fn new(key: impl Into<String>, name: impl Into<String>, kind: AbilityKind) -> Self {
+        Self {
+            key: key.into(),
+            name: name.into(),
+            kind,
+            text: String::new(),
+            legendary_cost: None,
+            recharge: None,
+            uses: None,
+            group_limit: None,
+            requires_effect: None,
+            spell: None,
+            mech: None,
+        }
+    }
+}
+
+/// The numbers a save or a spell needs (0.3.2): ability modifiers, save bonuses and creature facts. DM only.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CombatStats {
+    /// Ability modifiers: STR, DEX, CON, INT, WIS, CHA.
+    #[serde(default)]
+    pub mods: [i32; 6],
+    /// Saving throw bonuses, same order (the modifier, or the proficient save).
+    #[serde(default)]
+    pub saves: [i32; 6],
+    /// Advantage on saves against spells.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub magic_resistance: bool,
+    /// The creature type, lowercase (`"humanoid"`), for target filters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creature_type: Option<String>,
+    /// What the printed AC comes from (`"leather armor"`, `"natural armor"`): wearing armor blocks Mage Armor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub armor: Option<String>,
+}
+
+impl CombatStats {
+    /// The modifier of `ability`.
+    #[must_use]
+    pub fn modifier(&self, ability: AbilityName) -> i32 {
+        self.mods[ability.index()]
+    }
+
+    /// The save bonus of `ability`.
+    #[must_use]
+    pub fn save(&self, ability: AbilityName) -> i32 {
+        self.saves[ability.index()]
+    }
+}
+
+/// One spellcasting block of a stat block or a character (0.3.2). DM only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Casting {
+    /// The spellcasting ability.
+    pub ability: AbilityName,
+    /// The save DC.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dc: Option<u32>,
+    /// The spell attack bonus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attack: Option<i32>,
+    /// The caster level (2014 blocks), for cantrip scaling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caster_level: Option<u8>,
+    /// The cantrip tier the DM picked once (2024 blocks print no caster level).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cantrip_tier: Option<u8>,
+}
+
+/// Spells cast in one turn, for the edition rules (2014: the bonus action spell rule; 2024: one slot per turn).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpellTurn {
+    /// The round of the turn.
+    pub round: u32,
+    /// Whose turn it was.
+    pub turn: CombatantId,
+    /// A spell slot was spent.
+    #[serde(default)]
+    pub slot_spent: bool,
+    /// A bonus action spell was cast.
+    #[serde(default)]
+    pub bonus_spell: bool,
+    /// A spell other than a cantrip was cast with the action.
+    #[serde(default)]
+    pub leveled_action_spell: bool,
 }
 
 /// Concentration on one spell or effect (C11).
@@ -656,6 +768,15 @@ pub struct Combatant {
     /// The DM's notes. DM only.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub notes: String,
+    /// Ability modifiers, saves and creature facts for spells and saves (0.3.2). DM only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stats: Option<CombatStats>,
+    /// Spellcasting blocks (0.3.2). DM only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub casting: Vec<Casting>,
+    /// The spells cast this turn, for the edition rules. DM only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spell_turn: Option<SpellTurn>,
 }
 
 impl Combatant {
@@ -711,6 +832,9 @@ impl Combatant {
             resources: BTreeMap::new(),
             group: None,
             notes: String::new(),
+            stats: None,
+            casting: vec![],
+            spell_turn: None,
         }
     }
 
@@ -839,6 +963,51 @@ pub enum Modifier {
     SpeedZero,
     /// Cover: the best cover counts, covers don't stack.
     Cover(Cover),
+    /// The base AC becomes `base` (+ DEX) when that beats the printed AC; the best base counts (Mage Armor).
+    AcBase {
+        /// The base.
+        base: i32,
+        /// Add the DEX modifier.
+        add_dex: bool,
+    },
+    /// AC can't be lower than this (Barkskin 2014).
+    AcMin(i32),
+    /// A die added to rolls (Bless).
+    RollDice {
+        /// Which rolls.
+        on: crate::spell::RollOn,
+        /// Only this ability's saves or checks.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ability: Option<AbilityName>,
+        /// The die.
+        term: crate::spell::DiceTerm,
+    },
+    /// Advantage or disadvantage.
+    RollMode {
+        /// Which rolls.
+        on: crate::spell::ModeOn,
+        /// Only this ability's saves or checks.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ability: Option<AbilityName>,
+        /// Which.
+        mode: crate::spell::AdvDis,
+    },
+    /// A damage resistance, immunity or vulnerability to one type.
+    Defense {
+        /// Which.
+        defense: crate::spell::DefenseKind,
+        /// The type.
+        damage_type: DamageType,
+    },
+    /// +N max HP while it lasts (added to max and current HP when it starts, taken off when it ends).
+    MaxHp(i32),
+    /// Gives (or raises) one movement mode's speed.
+    SpeedSetMode {
+        /// The mode.
+        mode: crate::spell::SpeedMode,
+        /// Feet.
+        ft: u32,
+    },
 }
 
 /// A save repeated at a turn boundary of the target; a success ends the effect.
@@ -890,6 +1059,16 @@ pub struct EffectSpec {
     /// removes it with `skip_follow_up`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub follow_up: Option<Box<EffectSpec>>,
+    /// The spell it comes from (0.3.2). DM only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spell: Option<crate::spell::SpellTag>,
+    /// When it ends, its target is dismissed: a creature bound to its caster's concentration (a conjured beast).
+    /// Undo brings it back.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dismiss_on_end: bool,
+    /// It ends when its target takes damage.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ends_on_damage: bool,
 }
 
 impl EffectSpec {
@@ -909,6 +1088,9 @@ impl EffectSpec {
             repeat_save: None,
             ends_on_defeat_of: vec![],
             follow_up: None,
+            spell: None,
+            dismiss_on_end: false,
+            ends_on_damage: false,
         }
     }
 }
@@ -1092,6 +1274,108 @@ pub struct CombatState {
     /// The next tie-break number.
     #[serde(default)]
     pub next_tiebreak: u32,
+    /// Casts waiting for saves, attack rolls or damage (0.3.2). DM only; each target PC's player sees its own
+    /// rows through [`crate::visibility::player_casts`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub casts: Vec<PendingCast>,
+    /// The next cast number, for casts the command gives no id.
+    #[serde(default)]
+    pub next_cast: u32,
+}
+
+/// A cast's id. The server gives random ones (so players can't count casts); the engine numbers the casts it
+/// isn't given an id for.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CastId(pub String);
+
+impl fmt::Display for CastId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// How one target of a cast fared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RowOutcome {
+    /// Failed the save.
+    Failed,
+    /// Made the save.
+    Saved,
+    /// Hit.
+    Hit,
+    /// A critical hit.
+    Crit,
+    /// Missed.
+    Miss,
+    /// No roll: it lands (auto delivery).
+    Lands,
+}
+
+impl RowOutcome {
+    /// The spell lands fully (`on_land` applies).
+    #[must_use]
+    pub fn lands(self) -> bool {
+        matches!(
+            self,
+            RowOutcome::Failed | RowOutcome::Hit | RowOutcome::Crit | RowOutcome::Lands
+        )
+    }
+}
+
+/// One target (one ray) of a pending cast.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CastRow {
+    /// The target.
+    pub target: CombatantId,
+    /// The ray, for several rays at one target (0 otherwise).
+    #[serde(default)]
+    pub ray: u32,
+    /// The outcome, once resolved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<RowOutcome>,
+    /// The roll, if one was made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roll: Option<party_dice::D20Result>,
+    /// Legendary Resistance turned a failure into a success.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub used_lr: bool,
+}
+
+/// A cast waiting for its rolls (D21: typed first). Its slot, economy and concentration are already spent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingCast {
+    /// The id.
+    pub id: CastId,
+    /// Who casts.
+    pub caster: CombatantId,
+    /// The ability it came from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ability: Option<String>,
+    /// The compiled definition.
+    pub spec: Box<crate::spell::CastSpec>,
+    /// The slot spent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u8>,
+    /// The formula variables at that slot.
+    #[serde(default)]
+    pub vars: crate::spell::FormulaVars,
+    /// Choices made at cast time.
+    #[serde(default)]
+    pub choices: crate::spell::CastChoices,
+    /// The targets.
+    #[serde(default)]
+    pub rows: Vec<CastRow>,
+    /// The round it was cast in.
+    #[serde(default)]
+    pub round: u32,
+    /// A zone's application: the effect whose zone it is (nothing was spent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone_of: Option<EffectId>,
+    /// A stat block attack or save (`perform_statblock`) rather than a spell.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub statblock: bool,
 }
 
 impl CombatState {
@@ -1113,6 +1397,8 @@ impl CombatState {
             group_limits: BTreeMap::new(),
             next_effect: 1,
             next_tiebreak: 0,
+            casts: vec![],
+            next_cast: 1,
         }
     }
 

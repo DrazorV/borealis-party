@@ -26,10 +26,14 @@ pub mod event;
 pub mod export;
 pub mod legendary;
 pub mod model;
+pub mod spell;
 pub mod visibility;
 
 pub use combat::{Combat, LOG_RETENTION_DAYS, UNDO_LIMIT};
-pub use command::{Actor, Command, DamagePart, DamageTaken, RollInput};
+pub use command::{
+    Actor, AmountRoll, Command, DamagePart, DamageTaken, RollInput, RowInput, RowRoll,
+    StandardActionKind,
+};
 pub use engine::{account_of, apply, player_may, Outcome};
 pub use error::{CombatError, Unavailable};
 pub use event::{DmEvent, DmEventKind, Events, PlayerEvent, RollOutcome};
@@ -37,5 +41,5 @@ pub use export::{export_json, import_json, SCHEMA_VERSION};
 pub use model::*;
 pub use party_dice;
 pub use visibility::{
-    is_visible, player_view_of, turn_pointer, visible_order, TurnPointer, ViewerKind,
+    is_visible, player_casts, player_view_of, turn_pointer, visible_order, TurnPointer, ViewerKind,
 };
