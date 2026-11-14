@@ -122,7 +122,8 @@ describe("encounters on a big screen", () => {
     expect(screen.queryByRole("link", { name: "Back to encounters" })).toBeNull();
     expect(document.querySelector(".enc-builder.is-wide .enc-cols .enc-col-side")!.textContent).toContain("Players and combat");
     expect(screen.getByText("Set the status to Ready to start its combat.")).toBeTruthy();
-    expect(document.querySelector(".enc-head-actions")).toBeTruthy();
+    // No edition notes, so no empty actions slot in the header (0.3.3).
+    expect(document.querySelector(".enc-head-actions")).toBeNull();
   });
 
   it("docks the picker beside the creatures: search has the focus, Enter adds the highlighted one, the panel stays", async () => {

@@ -205,12 +205,12 @@ export function EncounterBuilder() {
       {statusChip}
       {enc.visibleToPlayers && <Chip tone="gold" title="Players see this encounter">Shown</Chip>}
       <span className="grow" />
-      {/* Actions on the whole encounter. */}
-      <div className="enc-head-actions">
-        {wide && enc.warnings.length > 0 && (
+      {/* Actions on the whole encounter; no empty slot when there are none. */}
+      {wide && enc.warnings.length > 0 && (
+        <div className="enc-head-actions">
           <Button small icon="info" onClick={() => setDialog({ kind: "warnings" })} aria-label={`Edition notes (${enc.warnings.length})`}>Edition notes ({enc.warnings.length})</Button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 

@@ -74,7 +74,7 @@ async function prepare(request: APIRequestContext, testInfo: TestInfo) {
 
 const box = async (page: Page, selector: string) => (await page.locator(selector).first().boundingBox())!;
 
-/** The list's heading row: ENCOUNTERS and New encounter, apart (0.3.2); no Assistant since 0.3.3. */
+/** The list's heading row: ENCOUNTERS left and New encounter right on one line; no Assistant since 0.3.3. */
 async function headingRow(page: Page, testInfo: TestInfo) {
   const head = page.locator(".enc-list-card .card-head").first();
   const title = await head.locator("h2").boundingBox();
@@ -84,11 +84,10 @@ async function headingRow(page: Page, testInfo: TestInfo) {
   const apart = (p: { x: number; y: number; width: number; height: number }, q: typeof p) =>
     p.x + p.width <= q.x + 0.5 || q.x + q.width <= p.x + 0.5 || p.y + p.height <= q.y + 0.5 || q.y + q.height <= p.y + 0.5;
   expect(apart(title!, add!), "New encounter doesn't sit on the heading").toBe(true);
-  // Beside the heading when the column has room, else under it.
+  // One line: the heading on the left, the button on the right, no second row (0.3.3).
   const mid = (b: { y: number; height: number }) => b.y + b.height / 2;
-  const beside = Math.abs(mid(add!) - mid(title!)) <= 8;
-  const under = add!.y >= title!.y + title!.height + 4;
-  expect(beside || under, `the button is on the heading's line or clearly under it (${testInfo.project.name})`).toBe(true);
+  expect(Math.abs(mid(add!) - mid(title!)), `New encounter is on the heading's line (${testInfo.project.name})`).toBeLessThanOrEqual(4);
+  expect(add!.x, "the button is right of the heading").toBeGreaterThan(title!.x + title!.width);
   // Nothing of the list's card sits above its own heading row.
   const card = await page.locator(".enc-list-card").first().boundingBox();
   expect(Math.min(title!.y, add!.y)).toBeGreaterThanOrEqual(card!.y - 0.5);

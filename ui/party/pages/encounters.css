@@ -193,7 +193,7 @@ html.phone .cbh-item .btn { min-height: var(--ph-hit); }
 .enc-builder.is-wide .enc-creature > .enc-creature-head { flex: 1 1 auto; min-width: 0; align-items: center; }
 .enc-builder.is-wide .enc-creature > .enc-creature-controls { margin-top: 0; flex: none; flex-wrap: nowrap; }
 .enc-result-text { flex: 1 1 auto; }
-/* The list's heading row: ENCOUNTERS on the left, Assistant and New encounter on the right (0.3.2). */
-.enc-list-card > .card-head { flex-wrap: wrap; row-gap: var(--sp-2); }
-/* The buttons stay together: in a narrow column the pair moves under the heading as one, right-aligned. */
-.enc-list-actions { display: inline-flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); margin-left: auto; }
+/* The list's heading row (0.3.3): ENCOUNTERS on the left and New encounter on the right, always one line. */
+.enc-list-card > .card-head { flex-wrap: nowrap; }
+.enc-list-card > .card-head > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.enc-list-actions { display: inline-flex; flex: none; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); margin-left: auto; }

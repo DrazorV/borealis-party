@@ -155,3 +155,32 @@ test("the page has no Assistant section: AI apps connect to Borealis Party inste
   await expect(page.getByRole("region", { name: "Assistant" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Assistant" })).toHaveCount(0);
 });
+
+test("the three Import cards: one height on a big screen, each field with its button on one line, stacked on a phone (0.3.3)", async ({ page }, testInfo) => {
+  await openContent(page, testInfo);
+  const card = (title: string) => page.locator(".party-import > .body > .card").filter({ has: page.getByRole("heading", { name: title, exact: true }) });
+  const files = card("Files"), code = card("Share code"), link = card("Paste a link");
+  await expect(link).toBeVisible({ timeout: 30_000 });
+  const boxes = await Promise.all([files, code, link].map(async (c) => (await c.boundingBox())!));
+  const field = await page.getByLabel("Share code to enter").boundingBox();
+  const enter = await code.getByRole("button", { name: "Enter a share code" }).boundingBox();
+  const url = await page.getByLabel("Link to import").boundingBox();
+  const imp = await link.getByRole("button", { name: "Import", exact: true }).boundingBox();
+  const mid = (b: { y: number; height: number }) => b.y + b.height / 2;
+  if (desktop(testInfo)) {
+    for (const b of boxes) expect(Math.abs(b.height - boxes[0].height), "the cards have one height").toBeLessThanOrEqual(1);
+    for (const b of boxes) expect(Math.abs(b.y - boxes[0].y), "the cards share a row").toBeLessThanOrEqual(1);
+    expect(Math.abs(mid(enter!) - mid(field!)), "Enter a share code is beside its field").toBeLessThanOrEqual(2);
+    expect(enter!.x).toBeGreaterThan(field!.x + field!.width - 1);
+    expect(Math.abs(mid(imp!) - mid(url!)), "Import is beside its field").toBeLessThanOrEqual(2);
+  } else {
+    // Stacked, each at its own height.
+    expect(boxes[1].y).toBeGreaterThanOrEqual(boxes[0].y + boxes[0].height);
+    expect(boxes[2].y).toBeGreaterThanOrEqual(boxes[1].y + boxes[1].height);
+  }
+  const o = await measureOverflow(page);
+  expect(o.page, "the page scrolls sideways").toBeLessThanOrEqual(0);
+  await page.locator(".party-import").scrollIntoViewIfNeeded();
+  const dir = process.env.PARTY_SHOTS;
+  if (dir) await page.screenshot({ path: `${dir}/${testInfo.project.name}-import-cards.png` });
+});
