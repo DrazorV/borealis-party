@@ -8,3 +8,9 @@
 .bp-presets-label { font-size: var(--fs-sm); opacity: 0.8; }
 html.phone .bp-death-card, html.phone .bp-conc-save { margin: 0 0 8px; }
 html.phone .bp-death-hurt > .btn, html.phone .bp-presets > .btn, html.phone .bp-conc-save > .btn { min-height: var(--ph-hit, 44px); }
+/* The outcome buttons (combat/shared/OutcomeButtons.tsx) in these two cards: natural widths on a wide screen; on a
+   phone a two-column grid of equal buttons, "Roll for me" across the first row, so five never squeeze into one line. */
+:is(.bp-death-card, .bp-conc-save) .roll-outcomes-row > .btn { flex: 0 0 auto; min-width: 7em; }
+html.phone :is(.bp-death-card, .bp-conc-save) .roll-outcomes-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+html.phone :is(.bp-death-card, .bp-conc-save) .roll-outcomes-row > .btn { min-width: 0; min-height: var(--ph-hit, 44px); justify-content: center; }
+html.phone :is(.bp-death-card, .bp-conc-save) .roll-outcomes-row > .btn:first-child:has(.icon) { grid-column: 1 / -1; }
