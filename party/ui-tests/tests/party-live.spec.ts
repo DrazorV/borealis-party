@@ -8,8 +8,9 @@ import { expect, measureOverflow, minTap, open, smallTargets, test } from "./fix
 /**
  * The live party (release 0.2.1) with two accounts at once, each in its own phone: `admin` runs the party as its DM,
  * `player` plays a character in it. The DM's roster follows the player's damage within about two seconds without a
- * reload, the DM's read-only sheet follows it too, and the player sees the DM's character only as name, class, level
- * and level, with no health band outside combat (plan D6). The S26 Ultra's portrait size (384x832) only: the other phones run the 0.2.0 specs.
+ * reload, the DM's read-only sheet follows it too (outside combat the DM sees the numbers), and the player sees the DM's
+ * character only as name, class, level and health band, never its numbers (D6 as the user set it on 2026-11-14:
+ * members always see bands). The S26 Ultra's portrait size (384x832) only: the other phones run the 0.2.0 specs.
  */
 
 const FIXTURES = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../e2e/fixtures");
@@ -104,12 +105,13 @@ test.describe("The live party (0.2.1)", () => {
       await expect(member.getByRole("listitem", { name: new RegExp(`^Hit points ${now - 1} of ${max}`) })).toBeVisible({ timeout: LIVE_MS });
       testInfo.annotations.push({ type: "live", description: `roster updated in ${Date.now() - started} ms` });
 
-      // D6 on the player's phone: the DM's character is a name, class and level; no band outside combat, no
-      // numbers, no sheet.
+      // D6 on the player's phone (the user, 2026-11-14): the DM's character is a name, class, level and its health
+      // band, in and out of combat; never its numbers, never its sheet.
       const dmCard = theirs.getByRole("listitem").filter({ hasText: "the DM's character" });
       await expect(dmCard).toBeVisible();
-      await expect(dmCard.getByText(/Unhurt|Bloodied|Down/)).toHaveCount(0);
+      await expect(dmCard.getByText(/Unhurt|Bloodied|Down/)).toHaveCount(1);
       await expect(dmCard.getByRole("list", { name: "Numbers" })).toHaveCount(0);
+      await expect(dmCard.getByRole("listitem", { name: hitPoints })).toHaveCount(0);
       await expect(theirs.getByRole("link", { name: /^View / })).toHaveCount(0);
       // Their own card is whole.
       await expect(theirs.getByRole("listitem").filter({ hasText: "your character" }).getByRole("listitem", { name: hitPoints })).toBeVisible();
