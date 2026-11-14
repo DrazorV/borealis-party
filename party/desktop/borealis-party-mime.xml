@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The .borealis bundle type for the Borealis Party packages (installed to /usr/share/mime/packages as
+     borealis-party.xml). Same type as desktop Borealis's borealis.xml, under another file name, so both packages
+     install side by side; .dnd5e stays desktop Borealis's. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-borealis-bundle">
+    <comment>Borealis bundle</comment>
+    <sub-class-of type="application/zip"/>
+    <generic-icon name="borealis-party"/>
+    <glob pattern="*.borealis"/>
+  </mime-type>
+</mime-info>

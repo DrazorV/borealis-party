@@ -179,6 +179,14 @@ impl<R: Runtime> Window<R> {
         Ok(())
     }
 
+    /// No window to restore.
+    ///
+    /// # Errors
+    /// Never.
+    pub fn unminimize(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// No window to focus.
     ///
     /// # Errors

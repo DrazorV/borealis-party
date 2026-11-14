@@ -120,6 +120,11 @@ block2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSArray", "NSData", "NSError", "NSFileCoordinator", "NSFileManager", "NSObject", "NSString", "NSURL"] }
 objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIDocumentPickerViewController", "UIPresentationController", "UIResponder", "UIViewController"] }
 
+# One app at a time on Windows and Linux: a second launch forwards its file arguments to the running one
+# (macOS hands opened files to the running app itself, RunEvent::Opened).
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = "2"
+
 # Phones only: opens the download page in the system browser (desktop spawns the OS opener itself).
 # The .index downloader verifies TLS against the bundled Mozilla roots (webpki-roots), not the OS
 # verifier, which needs JNI glue on Android (spike S0.3).

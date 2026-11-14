@@ -48,3 +48,13 @@ src-tauri/src/settings.rs branch:feat/hidden-elements
 # so the HTTPS client checks the address it actually connects to (after its own lookup and after every redirect)
 # and the refusal reaches the Indexes tab in words. The party server checks before fetching (net_guard.rs) and relies
 # on the container's egress firewall for the rest. No file is changed for it yet, so no line names one.
+
+# Desktop "Open with" (Windows and Linux): one app at a time, a second launch hands its file to the running app
+# (tauri-plugin-single-instance); without device-link, an opened .borealis waits with the other opened files
+# instead of being dropped (the party apps import it from there). Not sent upstream yet.
+Cargo.lock branch:fix/single-instance
+src-tauri/Cargo.toml branch:fix/single-instance
+src-tauri/src/commands_content.rs branch:fix/single-instance
+src-tauri/src/content_preview.rs branch:fix/single-instance
+src-tauri/src/lib.rs branch:fix/single-instance
+src-tauri/tests/opened_args.rs branch:fix/single-instance

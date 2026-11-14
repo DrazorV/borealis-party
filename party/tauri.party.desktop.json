@@ -47,6 +47,16 @@
   },
   "bundle": {
     "createUpdaterArtifacts": false,
-    "fileAssociations": []
+    "fileAssociations": [
+      {
+        "ext": [
+          "borealis"
+        ],
+        "name": "BorealisParty.Bundle",
+        "description": "Borealis bundle",
+        "role": "Editor",
+        "mimeType": "application/x-borealis-bundle"
+      }
+    ]
   }
 }
