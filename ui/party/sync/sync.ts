@@ -1,5 +1,6 @@
 import type { Api, ApiError, ContentPack, ContentSource } from "../../src/api/contract";
 import { SKIP_KEY } from "../api/personality";
+import { asCopy, clearChoice, loadChoices } from "./conflicts";
 import { addNotices, emptyMirror, heldByOthers, loadMirror, saveMirror, type Mirror } from "./mirror";
 
 /**
@@ -11,6 +12,8 @@ import { addNotices, emptyMirror, heldByOthers, loadMirror, saveMirror, type Mir
  * when packs are installed.
  * Edits made here offline (api/offline.ts) are sent first (`party_sync_push`, with the server file they were made
  * from and the edit time on the server's clock); until the server has taken one, nothing replaces or removes its copy.
+ * Since 0.3.6 they are sent with `ask`: a server copy that changed meanwhile is a conflict the server takes nothing
+ * of, and the copy here waits until the user chooses (./conflicts.ts); the next sync carries the choice out.
  */
 
 /** The app's own backend, as far as a sync uses it. */
@@ -47,11 +50,13 @@ export interface SyncReport {
   pushed: number;
   /** Edits made here that the server did not take (a newer edit or a delete won), for the Account page. */
   notices: string[];
+  /** Server ids of the characters changed in two places, waiting for the user's choice (0.3.6). */
+  conflicts: string[];
 }
 
 /** The server's answer to `party_sync_push`: the digest of its file afterwards (none when deleted). */
 interface PushAnswer {
-  result: "applied" | "identical" | "kept-server" | "deleted";
+  result: "applied" | "identical" | "kept-server" | "deleted" | "conflict";
   sha256: string | null;
 }
 
@@ -241,7 +246,7 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
   const now = deps.now ?? Date.now;
   const known = loadMirror(userId);
   const mirror = known ?? emptyMirror(userId);
-  const report: SyncReport = { first: !known, pulled: 0, removed: 0, packs: 0, waiting: [], problems: {}, notes: [], pushed: 0, notices: [] };
+  const report: SyncReport = { first: !known, pulled: 0, removed: 0, packs: 0, waiting: [], problems: {}, notes: [], pushed: 0, notices: [], conflicts: [] };
 
   const t0 = now();
   const st = await server("party_sync_state") as ServerState;
@@ -293,21 +298,61 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
   // The edits go to the server before anything comes from it. Unreachable: the sync stops, and every push can be
   // sent again. Refused: a problem, and the copy stays as it is (nothing is fetched over it).
   const names = new Map(localList.map((c) => [c.id, c.name]));
+  const choices = loadChoices(userId);
+  // A conflict whose copy here is no edit any more (or is gone) needs no choice.
+  for (const s of Object.keys(mirror.conflicts)) {
+    if (!edits.has(s) && !waiting.has(s)) { delete mirror.conflicts[s]; clearChoice(userId, s); }
+  }
   for (const [s, copy] of edits) {
     const m = mirror.characters[s]!;
     const name = names.get(m.local) || "A character";
     const updatedAt = listed.get(m.local) ?? "";
     const editedAtMs = Math.max(0, Math.round((Date.parse(updatedAt) || now()) + mirror.offsetMs));
+    const conflict = mirror.conflicts[s];
+    const choice = conflict ? choices[s] : undefined;
+    if (choice === "server" || choice === "both") {
+      if (choice === "both" && !conflict!.deleted) {
+        // The copy here goes up as a character of its own first; only then is it replaced here.
+        try {
+          const made = await server("import_character", { fileName: `${s}.device.json`, contentBase64: asCopy(copy.data, name) }) as
+            { summary?: { id?: string } };
+          const id = made.summary?.id;
+          if (id && !onServer.has(id)) { st.characters.push({ id, sha256: "" }); onServer.add(id); }
+          report.notes.push(`${name}: this device's copy was kept beside the server's, as "${name} (this device)".`);
+        } catch (e) {
+          if (String((e as Partial<ApiError>)?.code) === "network") throw e;
+          report.problems[s] = `Your copy of ${name} could not be kept beside the server's: ${message(e)}`;
+          continue;
+        }
+      }
+      // The server's copy is fetched over this one below (or, deleted there, this one goes).
+      waiting.delete(s);
+      mirror.characters[s] = { ...m, serverSha: "", baseUnknown: undefined };
+      delete mirror.conflicts[s];
+      clearChoice(userId, s);
+      saveMirror(mirror);
+      continue;
+    }
     let answer: PushAnswer;
     try {
       answer = await server("party_sync_push", {
         id: s, baseSha: m.baseUnknown ? null : m.serverSha, editedAtMs, contentBase64: copy.data,
+        ask: true, force: choice === "mine",
       }) as PushAnswer;
     } catch (e) {
       if (String((e as Partial<ApiError>)?.code) === "network") throw e;
       report.problems[s] = `Your changes to ${name} could not be sent: ${message(e)}`;
       continue;
     }
+    if (answer.result === "conflict") {
+      // Nothing was taken on either side: the copy here waits, and the user chooses.
+      mirror.conflicts[s] = { name, deleted: answer.sha256 === null };
+      report.conflicts.push(s);
+      saveMirror(mirror);
+      continue;
+    }
+    delete mirror.conflicts[s];
+    clearChoice(userId, s);
     waiting.delete(s);
     // What the server holds now: the steps below compare with that, not with the state read before.
     if (answer.sha256) {

@@ -139,6 +139,10 @@ struct Pushed {
     /// When it was last edited on the device, on the server's clock.
     edited_at_ms: u64,
     bytes: Vec<u8>,
+    /// A stale push is answered `conflict` and never applied (0.3.6 devices); without it, the newest edit wins.
+    ask: bool,
+    /// The device's user chose their copy over the server's: it is written whatever the server holds.
+    force: bool,
 }
 
 impl Pushed {
@@ -163,11 +167,14 @@ impl Pushed {
             .ok_or_else(|| {
                 ApiError::Invalid("The character's content is not valid base64.".into())
             })?;
+        let flag = |name: &str| args.get(name).and_then(Value::as_bool).unwrap_or(false);
         Ok(Self {
             id,
             base_sha,
             edited_at_ms,
             bytes,
+            ask: flag("ask"),
+            force: flag("force"),
         })
     }
 }
@@ -180,10 +187,12 @@ enum Outcome {
     Write(u64),
     /// The server's copy is newer, or the character was deleted after the edit: it goes to the trash.
     Lost(&'static str),
+    /// The server's file changed since the device's copy was made, and the device asks its user: nothing is written.
+    Conflict,
 }
 
-/// `party_sync_push`. Answers `{ result, sha256, editedAtMs }`: `applied`, `identical`, `kept-server` or `deleted`,
-/// with the server file's digest and stamp afterwards (none when deleted).
+/// `party_sync_push`. Answers `{ result, sha256, editedAtMs }`: `applied`, `identical`, `kept-server`, `deleted` or
+/// (with `ask`) `conflict`, with the server file's digest and stamp afterwards (none when deleted).
 fn push(app: &AppHandle, sent: &Pushed) -> ApiResult<Value> {
     let backend = app.state::<Backend>();
     let id = sent.id.as_str();
@@ -215,9 +224,12 @@ fn push(app: &AppHandle, sent: &Pushed) -> ApiResult<Value> {
                 };
                 if local.sha256 == incoming_sha {
                     Outcome::Identical
-                } else if sent.base_sha.as_deref() == Some(local.sha256.as_str()) {
-                    // Only the device changed it: its copy goes on, after the server's whatever the clocks say.
+                } else if sent.force || sent.base_sha.as_deref() == Some(local.sha256.as_str()) {
+                    // Only the device changed it (or its user chose it): its copy goes on, after the server's
+                    // whatever the clocks say.
                     Outcome::Write(edited.max(local.edited_at_ms + 1))
+                } else if sent.ask {
+                    Outcome::Conflict
                 } else {
                     match decide(&incoming_sha, edited, Some(&local)) {
                         Action::ReplaceWithIncoming => Outcome::Write(edited),
@@ -227,7 +239,9 @@ fn push(app: &AppHandle, sent: &Pushed) -> ApiResult<Value> {
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 match deleted(&trash, &BTreeSet::new()).get(id) {
-                    Some(&at) if edited <= at => Outcome::Lost("deleted"),
+                    // Deleted here after the device's copy was made: its user decides whether it comes back.
+                    Some(_) if sent.ask && !sent.force => Outcome::Conflict,
+                    Some(&at) if edited <= at && !sent.force => Outcome::Lost("deleted"),
                     _ => Outcome::Write(edited),
                 }
             }
@@ -235,6 +249,12 @@ fn push(app: &AppHandle, sent: &Pushed) -> ApiResult<Value> {
         };
         match outcome {
             Outcome::Identical => false,
+            Outcome::Conflict => {
+                let (sha256, edited_at_ms) = file_stamp(&file);
+                return Ok(
+                    json!({ "result": "conflict", "sha256": sha256, "editedAtMs": edited_at_ms }),
+                );
+            }
             Outcome::Write(stamp) => {
                 // An open session takes the new copy in place, as upstream's `reload_if_open` would, but under this
                 // same lock: no edit can land on the old copy between the write and the reload and be dropped.

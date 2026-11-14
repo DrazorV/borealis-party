@@ -29,6 +29,18 @@ export interface Mirror {
   pending: string[];
   /** What the last sync could not do, by character or pack id (the Account page shows it). */
   problems: Record<string, string>;
+  /**
+   * Characters edited here whose server copy changed meanwhile (0.3.6): the server took nothing, the copy here waits
+   * until the user picks one (./conflicts.ts). By server id.
+   */
+  conflicts: Record<string, SyncConflict>;
+}
+
+/** A character changed in two places. */
+export interface SyncConflict {
+  name: string;
+  /** Deleted on the server, rather than changed: there is no server copy to use or keep beside it. */
+  deleted: boolean;
 }
 
 const key = (userId: string) => `party.mirror.${userId}`;
@@ -36,7 +48,7 @@ const noticesKey = (userId: string) => `party.notices.${userId}`;
 const MAX_NOTICES = 20;
 
 export function emptyMirror(userId: string): Mirror {
-  return { userId, offsetMs: 0, lastSyncMs: 0, characters: {}, packs: {}, pending: [], problems: {} };
+  return { userId, offsetMs: 0, lastSyncMs: 0, characters: {}, packs: {}, pending: [], problems: {}, conflicts: {} };
 }
 
 /**
@@ -71,6 +83,7 @@ export function loadMirror(userId: string): Mirror | null {
       ...emptyMirror(userId), ...m,
       pending: Array.isArray(m.pending) ? m.pending : [],
       problems: m.problems && typeof m.problems === "object" ? m.problems : {},
+      conflicts: m.conflicts && typeof m.conflicts === "object" ? m.conflicts : {},
     } as Mirror;
   } catch { return null; }
 }

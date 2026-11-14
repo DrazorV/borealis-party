@@ -274,3 +274,9 @@ html.phone .party-edition-line { order: 2; flex-basis: 100%; }
 html.phone .party-actions > .btn, html.phone .party-actions > .enc-link { flex: 1 1 calc(50% - var(--sp-2)); justify-content: center; }
 html.phone .party-actions-end { margin-left: 0 !important; }
 html.phone .party-member-body > .party-member-actions { margin-left: 0; flex: 1 1 100%; }
+
+/* Changed in two places (0.3.6, SyncConflicts.tsx): the choices are full-width buttons, the same size, stacked. */
+.party-conflict .party-conflict-text { margin: 0 0 var(--sp-3); }
+.party-conflict .party-conflict-choices { display: grid; gap: var(--sp-2); }
+.party-conflict .party-conflict-choices .btn { width: 100%; min-height: var(--ph-hit, 40px); justify-content: center; }
+.party-conflict .party-conflict-hint { margin: var(--sp-3) 0 0; color: var(--text-muted); font-size: var(--fs-sm); }
