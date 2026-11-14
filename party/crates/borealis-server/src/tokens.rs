@@ -391,6 +391,49 @@ pub(crate) fn take(key: &str, allowed: usize, window: i64) -> bool {
     true
 }
 
+// Revoking everything.
+
+/// How many AI credentials [`revoke_all`] ended.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Revoked {
+    /// Personal `bpt_` tokens.
+    pub tokens: u64,
+    /// Connected apps (OAuth grants; their access and refresh tokens go with them).
+    pub apps: u64,
+}
+
+/// End every personal token and every connected app of `user`, at once: on a password change, a password reset and
+/// "Sign out everywhere". Pending authorization codes go too, so an approval in flight can't bring an app back. The
+/// apps have to connect (and the account approve) again.
+pub async fn revoke_all(state: &AppState, user: &str) -> ApiResult<Revoked> {
+    let mut tx = state.db.pool().begin().await?;
+    let tokens = sqlx::query("DELETE FROM api_tokens WHERE user_id = $1")
+        .bind(user)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    sqlx::query("DELETE FROM oauth_codes WHERE user_id = $1")
+        .bind(user)
+        .execute(&mut *tx)
+        .await?;
+    // The grants' access and refresh tokens go with them (ON DELETE CASCADE).
+    let apps = sqlx::query("DELETE FROM oauth_grants WHERE user_id = $1")
+        .bind(user)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    tx.commit().await?;
+    Ok(Revoked { tokens, apps })
+}
+
+impl Revoked {
+    /// For an activity entry: counts only.
+    #[must_use]
+    pub fn detail(self) -> String {
+        format!("{} api tokens, {} apps", self.tokens, self.apps)
+    }
+}
+
 // The MCP resource.
 
 /// The MCP endpoint's canonical URL (the OAuth resource and the tokens' audience), or `None` without

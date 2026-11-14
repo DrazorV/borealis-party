@@ -79,6 +79,10 @@ export async function endSession(session: Pick<ServerSession, "baseUrl" | "token
 export const fetchMe = () => call<ServerUser>("GET", "/api/me");
 export const changeEmail = (email: string) => call<ServerUser>("PATCH", "/api/me", { email });
 export const changePassword = (current: string, password: string) => call<ServerUser>("POST", "/api/me/password", { current, password });
+/** What "Sign out everywhere" ended: other sessions, personal API tokens and connected AI apps. */
+export interface SignedOutEverywhere { sessions: number; apiTokens: number; apps: number }
+/** Ends every other session, API token and connected AI app of the account; this one stays signed in. */
+export const signOutEverywhereElse = () => call<SignedOutEverywhere>("POST", "/api/me/sign-out-everywhere", {});
 
 // The admin page.
 
@@ -163,7 +167,8 @@ export const setAccountStatus = (id: string, status: AccountStatus) => call<Acco
 export const setAccountAdmin = (id: string, admin: boolean) => call<Account>("POST", `/api/admin/accounts/${id}/admin`, { admin });
 /** With a password, that becomes a temporary one; without, the current one has to be changed at the next sign-in. */
 export const resetPassword = (id: string, password?: string) => call<Account>("POST", `/api/admin/accounts/${id}/password`, password ? { password } : {});
-export const signOutEverywhere = (id: string) => call<{ ended: number }>("POST", `/api/admin/accounts/${id}/sign-out`, {});
+/** Ends every session, API token and connected AI app of the account. */
+export const signOutEverywhere = (id: string) => call<{ ended: number; apiTokens: number; apps: number }>("POST", `/api/admin/accounts/${id}/sign-out`, {});
 export const deleteAccount = (id: string) => call<void>("DELETE", `/api/admin/accounts/${id}`);
 export const adminSettings = () => call<AdminSettings>("GET", "/api/admin/settings");
 export const saveAdminSettings = (changes: Partial<SignUpSettings>) => call<AdminSettings>("PATCH", "/api/admin/settings", changes);
@@ -187,3 +192,17 @@ export const adminProxies = () => call<ProxySettings>("GET", "/api/admin/proxies
 /** Saves the list, or with null goes back to config.toml. */
 export const saveAdminProxies = (proxies: string[] | null) => call<ProxySettings>("POST", "/api/admin/proxies", { proxies });
 export const adminActivity = (page: number, perPage: number) => call<Paged<ActivityEntry>>("GET", `/api/admin/activity${query({ page, perPage })}`);
+/** A deleted character in an account's trash: names and dates only, never the sheet. */
+export interface TrashItem {
+  accountId: string;
+  username: string;
+  kind: "character";
+  characterId: string;
+  /** null when the kept copy doesn't read. */
+  name: string | null;
+  deletedAtMs: number;
+  purgeAtMs: number;
+}
+export const adminTrash = () => call<{ items: TrashItem[]; retentionDays: number }>("GET", "/api/admin/trash");
+export const restoreFromTrash = (accountId: string, characterId: string) =>
+  call<{ characterId: string; name: string | null }>("POST", "/api/admin/trash/restore", { accountId, characterId });

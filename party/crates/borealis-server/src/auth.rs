@@ -754,7 +754,55 @@ pub struct PasswordForm {
     password: String,
 }
 
-/// `POST /api/me/password`: choose a new password; every other session of the account ends.
+/// End the account's other sessions (all of them without a current one) and every AI credential (personal tokens and
+/// connected apps); the session making the request stays.
+async fn end_everything_else(
+    state: &AppState,
+    headers: &HeaderMap,
+    user: &User,
+) -> ApiResult<(u64, crate::tokens::Revoked)> {
+    let ended = match bearer(headers) {
+        Some(token) => {
+            let hash = token_hash(token);
+            let ended = state.db.delete_other_sessions(&user.id, &hash).await?;
+            state.hub.close_sessions_except(&user.id, &hash);
+            ended
+        }
+        None => {
+            let ended = state.db.delete_sessions_of(&user.id).await?;
+            state.hub.close_user(&user.id);
+            ended
+        }
+    };
+    let revoked = crate::tokens::revoke_all(state, &user.id).await?;
+    Ok((ended, revoked))
+}
+
+/// `POST /api/me/sign-out-everywhere`: end every other session, personal API token and connected AI app of the
+/// account. This session stays signed in.
+pub async fn sign_out_everywhere(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    user: User,
+) -> ApiResult<Json<Value>> {
+    let (ended, revoked) = end_everything_else(&state, &headers, &user).await?;
+    record(
+        &state,
+        Activity::new("signed_out_everywhere")
+            .by(&user)
+            .on(&user.id, &user.username)
+            .detail(format!("{ended} other sessions, {}", revoked.detail())),
+    )
+    .await;
+    Ok(Json(json!({
+        "sessions": ended,
+        "apiTokens": revoked.tokens,
+        "apps": revoked.apps,
+    })))
+}
+
+/// `POST /api/me/password`: choose a new password; every other session of the account ends, and so does every
+/// personal API token and connected AI app (they connect again with the new password).
 pub async fn change_password(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -770,12 +818,14 @@ pub async fn change_password(
     validate_password(&user.username, &form.password)?;
     let hash = hash_password(&form.password).await?;
     state.db.set_password(&user.id, Some(&hash), false).await?;
-    if let Some(token) = bearer(&headers) {
-        let hash = token_hash(token);
-        state.db.delete_other_sessions(&user.id, &hash).await?;
-        state.hub.close_sessions_except(&user.id, &hash);
-    }
-    record(&state, Activity::new("password_changed").by(&user)).await;
+    let (_, revoked) = end_everything_else(&state, &headers, &user).await?;
+    record(
+        &state,
+        Activity::new("password_changed")
+            .by(&user)
+            .detail(revoked.detail()),
+    )
+    .await;
     Ok(Json(User {
         must_change_password: false,
         ..user
@@ -831,4 +881,5 @@ pub fn routes() -> axum::Router<AppState> {
         .route("/api/auth/confirm/{token}", get(confirm))
         .route("/api/me", get(me).patch(update_me))
         .route("/api/me/password", post(change_password))
+        .route("/api/me/sign-out-everywhere", post(sign_out_everywhere))
 }

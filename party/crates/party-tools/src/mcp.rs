@@ -90,8 +90,8 @@ pub fn server_info() -> Value {
 }
 
 /// What a connected app is told about using these tools (`initialize` and `server/discover`): a short workflow for a
-/// DM's assistant. The one source of the text: the Account page shows it (`GET /api/me/ai`), and the in-app assistant's
-/// system prompt includes it (`ai_assistant::system_prompt`).
+/// DM's assistant. The one source of the text: the Account page shows it (`GET /api/me/ai`), and MCP clients also read
+/// it as the resource [`INSTRUCTIONS_URI`].
 pub const INSTRUCTIONS: &str = include_str!("instructions.md");
 
 /// The same text as an MCP resource, for clients that don't show `instructions` to the model (or drop it after a
