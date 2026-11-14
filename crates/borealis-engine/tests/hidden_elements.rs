@@ -373,6 +373,24 @@ fn a_held_hidden_copy_is_not_offered_again_as_its_stand_in() {
     assert!(options(&snap, "Keeper Ward Again").is_empty());
 }
 
+/// Without a stand-in, a prepared spell whose copy is hidden drops off the list, as before stand-ins.
+#[test]
+fn without_stand_ins_a_prepared_hidden_copy_stays_out() {
+    let store = stand_in_store();
+    let plain = Engine::new(&store);
+    let s = with_class(&plain, "ID_T_KEEPER");
+    let s = commands::set_prepared(&plain, &s, "Keeper", WARD_B, true)
+        .expect("prepare the copy")
+        .state;
+    let e = hiding_with(&store, &[WARD_B], &[]);
+    assert!(spells_of(&e.derive(&s), "Keeper").is_empty());
+    let e = hiding_with(&store, &[WARD_A], &[]);
+    assert_eq!(
+        spells_of(&e.derive(&s), "Keeper"),
+        [(WARD_B.to_string(), false)]
+    );
+}
+
 #[test]
 fn without_stand_ins_hiding_works_as_before() {
     let store = stand_in_store();

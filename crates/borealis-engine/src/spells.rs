@@ -415,8 +415,13 @@ pub fn spellcasting_snapshots(
                 let mut out = Vec::new();
                 let prepared = state.prepared_for(&info.name);
                 for cand in uni.by_type("Spell").filter(|c| {
-                    // a hidden copy the character already prepared still replays
-                    (graph.offers_edition(c) || c.hidden && prepared.contains(&c.el.id))
+                    // a hidden copy of a stand-in group (hidden_stand_ins) the character already
+                    // prepared still replays; without a stand-in, hidden copies stay out as before
+                    (graph.offers_edition(c)
+                        || c.hidden
+                            && !c.copy_ids.is_empty()
+                            && prepared.contains(&c.el.id)
+                            && graph.edition_allows(c))
                         && !graph
                             .restricted
                             .is_restricted_element(&c.el.source, &c.el.ty)
