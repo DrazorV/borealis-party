@@ -469,4 +469,205 @@ async fn recently_deleted_on_postgres() {
     round_trip(db.clone(), &dir.path().join("data")).await;
     db.pool().close().await;
     drop_all(&url).await;
+    let db = Db::open(&Location::Postgres(url.clone())).await.unwrap();
+    follow_ups(db.clone(), &dir.path().join("more")).await;
+    no_child_row_lost_to_a_concurrent_insert(db.clone(), &dir.path().join("race")).await;
+    db.pool().close().await;
+    drop_all(&url).await;
+}
+
+// Review follow-ups (ee1cb7b review).
+
+async fn sync_deleted(client: &Client) -> Value {
+    ok(client, "POST", "/api/rpc/party_sync_state", json!({})).await["deleted"].clone()
+}
+
+/// 1: "Delete forever" keeps the delete record as a sheetless tombstone, so an offline device can't push it back.
+/// 2: a party comes back without a member whose character was deleted meanwhile.
+/// 4: an encounter deleted mid-fight and restored while its combat goes on stays live.
+async fn follow_ups(db: Db, data: &Path) {
+    use base64::Engine as _;
+    let router = router_on(data.to_path_buf(), db.clone());
+    let dm = sign_up(&router, "fu-dm").await;
+    let player = sign_up(&router, "fu-player").await;
+
+    // 1. The phone still has the character after it is deleted forever on the web.
+    let hero = character(&player, "Ghost").await;
+    let file = data
+        .join("users")
+        .join(&player.id)
+        .join("characters")
+        .join(format!("{hero}.json"));
+    let phone_copy = std::fs::read(&file).unwrap();
+    ok(
+        &player,
+        "POST",
+        "/api/rpc/delete_character",
+        json!({ "characterId": hero }),
+    )
+    .await;
+    let before = sync_deleted(&player).await;
+    let deleted_at = before[0]["deletedAtMs"].as_u64().unwrap();
+    ok(
+        &player,
+        "DELETE",
+        &format!("/api/me/deleted/character/{hero}"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(
+        sync_deleted(&player).await,
+        before,
+        "the delete record stays for sync"
+    );
+    let trash = data
+        .join("users")
+        .join(&player.id)
+        .join("sync")
+        .join("trash");
+    let left: Vec<Vec<u8>> = std::fs::read_dir(&trash)
+        .unwrap()
+        .flatten()
+        .map(|e| std::fs::read(e.path()).unwrap())
+        .collect();
+    assert_eq!(
+        left,
+        vec![crate::admin::trash::TOMBSTONE.to_vec()],
+        "only a tombstone, no sheet"
+    );
+    assert!(deleted(&player).await.is_empty(), "not listed");
+    let (status, _) = restore(&player, "character", &hero).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "nothing to restore");
+    let (status, _) = player
+        .delete(&format!("/api/me/deleted/character/{hero}"))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "deleted forever once");
+    let out = ok(
+        &player,
+        "POST",
+        "/api/rpc/party_sync_push",
+        json!({
+            "id": hero,
+            "baseSha": borealis_bundle::sha256_hex(&phone_copy),
+            "editedAtMs": deleted_at - 1,
+            "contentBase64": base64::engine::general_purpose::STANDARD.encode(&phone_copy),
+        }),
+    )
+    .await;
+    assert_eq!(out["result"], "deleted", "{out}");
+    assert!(!file.exists(), "the offline phone doesn't bring it back");
+
+    // 2. A member's character deleted while its party waits: the party comes back without it.
+    let party = new_party(&dm, "Hollow").await;
+    let gone = join(&dm, &party, &player, "fu-player", "Fading").await;
+    let other = sign_up(&router, "fu-other").await;
+    let kept = join(&dm, &party, &other, "fu-other", "Staying").await;
+    ok(&dm, "DELETE", &format!("/api/parties/{party}"), Value::Null).await;
+    ok(
+        &player,
+        "POST",
+        "/api/rpc/delete_character",
+        json!({ "characterId": gone }),
+    )
+    .await;
+    let (status, out) = restore(&dm, "party", &party).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let members: Vec<String> =
+        sqlx::query("SELECT character_id FROM party_members WHERE party_id = $1")
+            .bind(&party)
+            .fetch_all(db.pool())
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.try_get(0).unwrap())
+            .collect();
+    assert_eq!(
+        members,
+        vec![kept.clone()],
+        "the deleted character stays out"
+    );
+
+    // 4. Deleted mid-fight, restored while the fight goes on: still live (players keep seeing it).
+    let fight = new_encounter(&dm, &party, "Ongoing").await;
+    ok(
+        &dm,
+        "PATCH",
+        &format!("/api/encounters/{fight}"),
+        json!({ "status": "ready", "playerVisible": true }),
+    )
+    .await;
+    ok(
+        &dm,
+        "POST",
+        &format!("/api/encounters/{fight}/start"),
+        json!({ "requestId": uuid::Uuid::new_v4().to_string() }),
+    )
+    .await;
+    ok(
+        &dm,
+        "DELETE",
+        &format!("/api/encounters/{fight}"),
+        Value::Null,
+    )
+    .await;
+    let (status, out) = restore(&dm, "encounter", &fight).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let state: String = sqlx::query("SELECT status FROM encounters WHERE id = $1")
+        .bind(&fight)
+        .fetch_one(db.pool())
+        .await
+        .unwrap()
+        .try_get(0)
+        .unwrap();
+    assert_eq!(state, "live");
+    let (status, seen) = other.get(&format!("/api/encounters/{fight}")).await;
+    assert_eq!(status, StatusCode::OK, "{seen}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn review_follow_ups() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(&Location::Sqlite(dir.path().join("party.db")))
+        .await
+        .unwrap();
+    follow_ups(db, &dir.path().join("data")).await;
+}
+
+/// 3 (PostgreSQL): a child row committed while the party is being deleted waits for the delete's row lock, so it
+/// is in the snapshot instead of being cascaded away unseen.
+async fn no_child_row_lost_to_a_concurrent_insert(db: Db, data: &Path) {
+    let router = router_on(data.to_path_buf(), db.clone());
+    let dm = sign_up(&router, "race-dm").await;
+    let party = new_party(&dm, "Racing").await;
+    let mut other = db.pool().begin().await.unwrap();
+    sqlx::query("INSERT INTO party_members (owner_id, character_id, party_id, joined_at) VALUES ($1, $2, $3, $4)")
+        .bind(&dm.id)
+        .bind("c_racing")
+        .bind(&party)
+        .bind(crate::db::now())
+        .execute(&mut *other)
+        .await
+        .unwrap();
+    let deleting = {
+        let (db, dm, party) = (db.clone(), dm.id.clone(), party.clone());
+        tokio::spawn(async move { crate::recently_deleted::delete_party(&db, &dm, &party).await })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(
+        !deleting.is_finished(),
+        "the delete waits for the insert's transaction"
+    );
+    other.commit().await.unwrap();
+    assert!(deleting.await.unwrap().unwrap());
+    let snap: String = sqlx::query("SELECT snapshot_json FROM deleted_items WHERE id = $1")
+        .bind(&party)
+        .fetch_one(db.pool())
+        .await
+        .unwrap()
+        .try_get(0)
+        .unwrap();
+    assert!(
+        snap.contains("c_racing"),
+        "the member committed meanwhile is kept"
+    );
 }

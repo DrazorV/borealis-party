@@ -8,7 +8,8 @@
 //!   whose character joined another party meanwhile, or whose account is gone, stays out; a combat that was live
 //!   comes back ended. An encounter comes back only into its party (restore the party first).
 //! - **Characters**: as before, a deleted character's file is in the account's sync trash (`admin_trash.rs`); this
-//!   lists those too and restores them the same way.
+//!   lists those too and restores them the same way. "Delete forever" leaves its delete record as a sheetless
+//!   tombstone until the sweep, so sync keeps telling devices it is deleted.
 //!
 //! Rows older than [`RETENTION_DAYS`] go in the sweep ([`sweep_loop`], and on every list); "Delete forever" removes
 //! one at once (a party takes its deleted encounters with it).
@@ -24,7 +25,7 @@ use serde_json::{json, Map, Value};
 use sqlx::{AnyConnection, Row};
 use tauri::Manager;
 
-use crate::admin::trash::{deleted_in, name_of, now_ms, restore_now};
+use crate::admin::trash::{deleted_in, name_of, now_ms, restore_now, TOMBSTONE};
 use crate::auth::User;
 use crate::db::{now, Db};
 use crate::error::{ApiError, ApiResult};
@@ -150,13 +151,16 @@ async fn snapshot(
 }
 
 /// Put a snapshot's rows back, in `tables`' order (the only tables it may write). A row that would clash with one
-/// there now (a character in another party, an invite code taken) or whose account is gone stays out. A live combat
-/// comes back ended, and an encounter that was in one with it.
+/// there now (a character in another party, an invite code taken) or whose account is gone stays out, and so does a
+/// member whose character is no longer a live file (`live_character(owner, character)`): deleted meanwhile. A live
+/// combat comes back ended, and an encounter that was live comes back ended unless a live combat still uses it (an
+/// encounter deleted mid-fight and restored while its fight goes on).
 async fn put_back(
     conn: &mut AnyConnection,
     sqlite: bool,
     tables: &[(&str, &str)],
     snapshot: &Value,
+    live_character: &(dyn Fn(&str, &str) -> bool + Sync),
 ) -> ApiResult<()> {
     let at = now();
     for (table, _) in tables {
@@ -181,6 +185,19 @@ async fn put_back(
                     continue;
                 }
             }
+            if *table == "party_members" {
+                let owner = obj
+                    .get("owner_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let character = obj
+                    .get("character_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if !live_character(owner, character) {
+                    continue;
+                }
+            }
             if obj.get("status").and_then(Value::as_str) == Some("live") {
                 match *table {
                     "combats" => {
@@ -188,7 +205,16 @@ async fn put_back(
                         obj.insert("ended_at".into(), json!(at));
                     }
                     "encounters" => {
-                        obj.insert("status".into(), json!("ended"));
+                        let id = obj.get("id").and_then(Value::as_str).unwrap_or_default();
+                        let fighting = sqlx::query(
+                            "SELECT 1 FROM combats WHERE encounter_id = $1 AND status = 'live'",
+                        )
+                        .bind(id)
+                        .fetch_optional(&mut *conn)
+                        .await?;
+                        if fighting.is_none() {
+                            obj.insert("status".into(), json!("ended"));
+                        }
                     }
                     _ => {}
                 }
@@ -223,6 +249,36 @@ async fn put_back(
     Ok(())
 }
 
+/// `FOR UPDATE` on PostgreSQL: it conflicts with the key-share lock every child row's insert takes on its parent, so
+/// nothing is added under a parent between its snapshot and its cascade.
+fn lock(sqlite: bool) -> &'static str {
+    if sqlite {
+        ""
+    } else {
+        " FOR UPDATE"
+    }
+}
+
+/// On SQLite, make the transaction the writer before it reads: a no-op update takes the database's write lock, so
+/// the snapshot and the delete see the same rows. (PostgreSQL locks rows instead, [`lock`].)
+async fn hold(
+    conn: &mut AnyConnection,
+    sqlite: bool,
+    table: &str,
+    filter: &str,
+    id: &str,
+) -> sqlx::Result<()> {
+    if sqlite {
+        sqlx::query(&format!(
+            "UPDATE {table} SET updated_at = updated_at WHERE {filter}"
+        ))
+        .bind(id)
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(())
+}
+
 /// Delete a party its DM runs, keeping it in Recently deleted. False when `dm` runs no such party (nothing done).
 ///
 /// # Errors
@@ -230,15 +286,31 @@ async fn put_back(
 pub async fn delete_party(db: &Db, dm: &str, party: &str) -> ApiResult<bool> {
     let sqlite = db.kind() == "sqlite";
     let mut tx = db.pool().begin().await?;
-    let Some(row) = sqlx::query("SELECT name FROM parties WHERE id = $1 AND dm_id = $2")
-        .bind(party)
-        .bind(dm)
-        .fetch_optional(&mut *tx)
-        .await?
+    hold(&mut tx, sqlite, "parties", "id = $1", party).await?;
+    let Some(row) = sqlx::query(&format!(
+        "SELECT name FROM parties WHERE id = $1 AND dm_id = $2{}",
+        lock(sqlite)
+    ))
+    .bind(party)
+    .bind(dm)
+    .fetch_optional(&mut *tx)
+    .await?
     else {
         return Ok(false);
     };
     let name: String = row.try_get(0)?;
+    // The rows the other tables' children point at: no new log line, member or creature lands between the
+    // snapshot and the cascade (it waits, then fails on the missing parent).
+    if !sqlite {
+        for table in ["encounters", "combats"] {
+            sqlx::query(&format!(
+                "SELECT id FROM {table} WHERE party_id = $1 FOR UPDATE"
+            ))
+            .bind(party)
+            .fetch_all(&mut *tx)
+            .await?;
+        }
+    }
     let snap = snapshot(&mut tx, sqlite, PARTY_TABLES, party).await?;
     keep(&mut tx, PARTY, party, dm, None, &name, "", &snap).await?;
     sqlx::query("DELETE FROM parties WHERE id = $1 AND dm_id = $2")
@@ -257,9 +329,11 @@ pub async fn delete_party(db: &Db, dm: &str, party: &str) -> ApiResult<bool> {
 pub async fn delete_encounter(db: &Db, dm: &str, encounter: &str) -> ApiResult<()> {
     let sqlite = db.kind() == "sqlite";
     let mut tx = db.pool().begin().await?;
-    let Some(row) = sqlx::query(
-        "SELECT e.name, e.party_id, p.name FROM encounters e JOIN parties p ON p.id = e.party_id WHERE e.id = $1",
-    )
+    hold(&mut tx, sqlite, "encounters", "id = $1", encounter).await?;
+    let Some(row) = sqlx::query(&format!(
+        "SELECT e.name, e.party_id, p.name FROM encounters e JOIN parties p ON p.id = e.party_id WHERE e.id = $1{}",
+        if sqlite { "" } else { " FOR UPDATE OF e" }
+    ))
     .bind(encounter)
     .fetch_optional(&mut *tx)
     .await?
@@ -472,6 +546,20 @@ pub async fn restore(
     ))
 }
 
+/// Whether an account's character is a live file now (not deleted, nor deleted forever).
+fn live_characters(state: &AppState) -> impl Fn(&str, &str) -> bool + Sync + '_ {
+    move |owner: &str, character: &str| {
+        is_plain_key(owner)
+            && is_plain_key(character)
+            && state
+                .workspaces
+                .dir(owner)
+                .join("characters")
+                .join(format!("{character}.json"))
+                .is_file()
+    }
+}
+
 async fn restore_party(state: &AppState, user: &User, id: &str) -> ApiResult<String> {
     let (name, _, snap) = mine(state, &user.id, PARTY, id).await?;
     crate::parties::may_restore(state, &user.id).await?;
@@ -484,7 +572,8 @@ async fn restore_party(state: &AppState, user: &User, id: &str) -> ApiResult<Str
     if there.is_some() {
         return Err(ApiError::Conflict("That party is there already.".into()));
     }
-    put_back(&mut tx, sqlite, PARTY_TABLES, &snap).await?;
+    let live = live_characters(state);
+    put_back(&mut tx, sqlite, PARTY_TABLES, &snap, &live).await?;
     sqlx::query("DELETE FROM deleted_items WHERE kind = $1 AND id = $2")
         .bind(PARTY)
         .bind(id)
@@ -537,7 +626,8 @@ async fn restore_encounter(state: &AppState, user: &User, id: &str) -> ApiResult
             "That encounter is there already.".into(),
         ));
     }
-    put_back(&mut tx, sqlite, ENCOUNTER_TABLES, &snap).await?;
+    let live = live_characters(state);
+    put_back(&mut tx, sqlite, ENCOUNTER_TABLES, &snap, &live).await?;
     sqlx::query("DELETE FROM deleted_items WHERE kind = $1 AND id = $2")
         .bind(ENCOUNTER)
         .bind(id)
@@ -619,10 +709,22 @@ async fn forget_character(state: &AppState, user: &User, id: &str) -> ApiResult<
             let backend = app.state::<Backend>();
             let characters = crate::sync::characters_dir(&backend)?;
             let trash = trash_dir(&backend.paths.data);
-            if !deleted_in(&trash, &characters, now_ms()).contains_key(&id) {
+            let Some((_, record)) = deleted_in(&trash, &characters, now_ms()).remove(&id) else {
                 return Err(not_found());
+            };
+            // The newest delete record stays, by name, as a tombstone until the sweep: sync still reports the
+            // character deleted, so a device that has it drops it rather than pushing it back. Its sheet goes.
+            let temp = trash.join(format!(
+                ".party-tombstone-{}.tmp",
+                uuid::Uuid::new_v4().simple()
+            ));
+            if let Err(e) =
+                std::fs::write(&temp, TOMBSTONE).and_then(|()| std::fs::rename(&temp, &record))
+            {
+                let _ = std::fs::remove_file(&temp);
+                return Err(internal(e));
             }
-            // Every copy of it: the delete record, older replaced versions and device copies.
+            // Every other copy: older replaced versions and device copies.
             let suffixes: BTreeSet<String> =
                 [format!("-{id}.json"), format!("-{id}.device.json")].into();
             for entry in std::fs::read_dir(&trash).into_iter().flatten().flatten() {
@@ -631,7 +733,10 @@ async fn forget_character(state: &AppState, user: &User, id: &str) -> ApiResult<
                     name.strip_suffix(s.as_str())
                         .is_some_and(|ms| !ms.is_empty() && ms.bytes().all(|b| b.is_ascii_digit()))
                 });
-                if ours && entry.path().symlink_metadata().is_ok_and(|m| m.is_file()) {
+                if ours
+                    && entry.path() != record
+                    && entry.path().symlink_metadata().is_ok_and(|m| m.is_file())
+                {
                     std::fs::remove_file(entry.path()).map_err(internal)?;
                 }
             }

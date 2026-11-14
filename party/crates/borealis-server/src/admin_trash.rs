@@ -48,7 +48,19 @@ pub(crate) fn entry_of(name: &str) -> Option<(u64, &str)> {
     is_plain_key(id).then_some((ms, id))
 }
 
-/// The newest entry per deleted character (no live file in `characters`), still within the retention.
+/// What "Delete forever" leaves of a deleted character (recently_deleted.rs, 0.3.6): its delete record keeps its name
+/// (`<ms>-<id>.json`, which sync reads as "deleted at ms", so a device that still has the character drops it instead
+/// of pushing it back) until the 30-day sweep, but holds no sheet. It is never listed nor restored.
+pub(crate) const TOMBSTONE: &[u8] = b"{\"borealisConnect\":\"deleted forever\"}";
+
+/// Whether a trash file is a [`TOMBSTONE`].
+pub(crate) fn is_tombstone(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| m.len() == TOMBSTONE.len() as u64)
+        && std::fs::read(path).is_ok_and(|b| b == TOMBSTONE)
+}
+
+/// The newest entry per deleted character (no live file in `characters`), still within the retention. A character
+/// whose newest entry is a [`TOMBSTONE`] was deleted forever: it isn't there.
 pub(crate) fn deleted_in(
     trash: &Path,
     characters: &Path,
@@ -75,6 +87,7 @@ pub(crate) fn deleted_in(
             }
         }
     }
+    found.retain(|_, (_, path)| !is_tombstone(path));
     found
 }
 
