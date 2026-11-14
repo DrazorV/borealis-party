@@ -1066,6 +1066,13 @@ pub struct EffectSpec {
     /// Undo brings it back.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub dismiss_on_end: bool,
+    /// It ends when its target takes damage.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ends_on_damage: bool,
+    /// It ends when its target attacks or casts a spell (Invisibility): the DM's "It attacked: end" reminder,
+    /// never automatic.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ends_on_attack: bool,
 }
 
 impl EffectSpec {
@@ -1087,6 +1094,8 @@ impl EffectSpec {
             follow_up: None,
             spell: None,
             dismiss_on_end: false,
+            ends_on_damage: false,
+            ends_on_attack: false,
         }
     }
 }

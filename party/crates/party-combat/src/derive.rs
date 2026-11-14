@@ -3,9 +3,12 @@
 
 use crate::error::Unavailable;
 use crate::model::{
-    Ability, AbilityKind, CombatState, Combatant, CombatantId, Condition, Edition, InitiativeMode,
-    Modifier, RuleTarget, Speeds,
+    Ability, AbilityKind, AbilityName, CombatState, Combatant, CombatantId, Condition, Cover,
+    DamageClause, Defenses, Edition, Effect, InitiativeMode, Modifier, RuleTarget, Speeds,
+    SpellTurn,
 };
+use crate::spell::{AdvDis, CastSpec, CastTime, DefenseKind, DiceTerm, ModeOn, RollOn, SpeedMode};
+use party_dice::RollMode;
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
 
@@ -150,48 +153,593 @@ pub fn incapacitated(state: &CombatState, id: &CombatantId) -> bool {
     conditions(state, id).iter().any(|c| c.incapacitates())
 }
 
-/// AC: the base, effect modifiers and the best cover (C13).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// One line of an AC breakdown.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcPart {
+    /// "Mage Armor 13", "DEX", "Shield", "half cover".
+    pub label: String,
+    /// Its value.
+    pub value: i32,
+}
+
+/// AC (C13, 0.3.2): `max(printed, best base effect) + Σ AC bonuses`, then at least the best minimum, then cover.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcBreakdown {
     /// The stat block's AC (`None` when unknown).
     pub base: Option<i32>,
-    /// The sum of effect modifiers.
+    /// The sum of AC bonus modifiers.
     pub effects: i32,
     /// The best cover's bonus.
     pub cover: i32,
-    /// The total (`None` when the base is unknown).
+    /// The total (`None` when no base is known).
     pub total: Option<i32>,
+    /// The base effect that beat the printed AC (Mage Armor), with its value (DEX included).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_effect: Option<AcPart>,
+    /// A minimum that raised the AC (Barkskin).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<i32>,
+    /// The lines that add up to the total.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<AcPart>,
+    /// "15 = Mage Armor 13 + DEX 2", or "15" when nothing changes it.
+    #[serde(default)]
+    pub text: String,
 }
 
-/// The effective AC of a combatant.
+fn targeted<'a>(state: &'a CombatState, id: &'a CombatantId) -> impl Iterator<Item = &'a Effect> {
+    state.effects.iter().filter(move |e| &e.spec.target == id)
+}
+
+/// The effective AC of a combatant, with its breakdown.
 #[must_use]
 pub fn effective_ac(state: &CombatState, c: &Combatant) -> AcBreakdown {
-    let mods = || {
-        state
-            .effects
-            .iter()
-            .filter(|e| e.spec.target == c.id)
-            .flat_map(|e| e.spec.modifiers.iter())
-    };
-    let effects: i32 = mods()
-        .map(|m| if let Modifier::Ac(n) = m { *n } else { 0 })
-        .sum();
-    let cover = mods()
-        .filter_map(|m| {
-            if let Modifier::Cover(c) = m {
-                Some(*c)
-            } else {
-                None
+    let dex = c.stats.as_ref().map_or(0, |s| s.modifier(AbilityName::Dex));
+    let mut best: Option<(i32, i32, &str)> = None; // (total, base, effect name)
+    let mut bonus = Vec::new();
+    let mut min: Option<(i32, &str)> = None;
+    let mut cover: Option<Cover> = None;
+    for e in targeted(state, &c.id) {
+        for m in &e.spec.modifiers {
+            match *m {
+                Modifier::AcBase { base, add_dex } => {
+                    let v = base + if add_dex { dex } else { 0 };
+                    if best.is_none_or(|(b, _, _)| v > b) {
+                        best = Some((v, base, &e.spec.name));
+                    }
+                }
+                Modifier::Ac(n) => bonus.push(AcPart {
+                    label: e.spec.name.clone(),
+                    value: n,
+                }),
+                Modifier::AcMin(n) if min.is_none_or(|(m, _)| n > m) => {
+                    min = Some((n, &e.spec.name));
+                }
+                Modifier::Cover(k) => cover = cover.max(Some(k)),
+                _ => {}
             }
-        })
-        .max();
-    let cover = cover.map_or(0, |c| c.ac_bonus());
+        }
+    }
+    let mut parts = Vec::new();
+    let mut base_effect = None;
+    let start = match (c.ac, best) {
+        (printed, Some((v, base, name))) if printed.is_none_or(|p| v > p) => {
+            parts.push(AcPart {
+                label: name.to_string(),
+                value: base,
+            });
+            if v != base {
+                parts.push(AcPart {
+                    label: "DEX".into(),
+                    value: v - base,
+                });
+            }
+            base_effect = Some(AcPart {
+                label: name.to_string(),
+                value: v,
+            });
+            Some(v)
+        }
+        (Some(p), _) => {
+            parts.push(AcPart {
+                label: "AC".into(),
+                value: p,
+            });
+            Some(p)
+        }
+        (None, _) => None,
+    };
+    let effects: i32 = bonus.iter().map(|p| p.value).sum();
+    parts.extend(bonus);
+    let mut total = start.map(|s| s + effects);
+    let mut min_used = None;
+    if let (Some(t), Some((m, name))) = (total, min) {
+        if m > t {
+            total = Some(m);
+            min_used = Some(m);
+            parts = vec![AcPart {
+                label: format!("{name} minimum"),
+                value: m,
+            }];
+        }
+    }
+    let cover_bonus = cover.map_or(0, Cover::ac_bonus);
+    if let Some(k) = cover {
+        parts.push(AcPart {
+            label: match k {
+                Cover::Half => "half cover".into(),
+                Cover::ThreeQuarters => "three-quarters cover".into(),
+            },
+            value: cover_bonus,
+        });
+    }
+    let total = total.map(|t| t + cover_bonus);
+    let text = match total {
+        None => "AC unknown".to_string(),
+        Some(t) if parts.len() <= 1 && base_effect.is_none() && min_used.is_none() => t.to_string(),
+        Some(t) => {
+            let mut s = format!("{t} =");
+            for (i, p) in parts.iter().enumerate() {
+                if i == 0 {
+                    s.push_str(&format!(" {} {}", p.label, p.value));
+                } else {
+                    s.push_str(&format!(
+                        " {} {} {}",
+                        if p.value < 0 { "-" } else { "+" },
+                        p.label,
+                        p.value.unsigned_abs()
+                    ));
+                }
+            }
+            s
+        }
+    };
     AcBreakdown {
         base: c.ac,
         effects,
-        cover,
-        total: c.ac.map(|ac| ac + effects + cover),
+        cover: cover_bonus,
+        total,
+        base_effect,
+        min: min_used,
+        parts,
+        text,
     }
+}
+
+/// The SRD armor names a printed AC source may mention ("leather armor", "chain mail"). A creature wearing one of
+/// these can't benefit from Mage Armor; the DM may apply it anyway.
+pub const SRD_ARMOR: &[&str] = &[
+    "padded",
+    "leather",
+    "studded leather",
+    "hide",
+    "chain shirt",
+    "scale mail",
+    "breastplate",
+    "half plate",
+    "ring mail",
+    "chain mail",
+    "splint",
+    "plate",
+];
+
+/// The armor the combatant wears, read from its printed AC source ("natural armor" is none).
+#[must_use]
+pub fn wears_armor(c: &Combatant) -> Option<String> {
+    let src = c.stats.as_ref()?.armor.as_ref()?.to_lowercase();
+    if src.contains("natural") || src.contains("mage armor") {
+        return None;
+    }
+    SRD_ARMOR
+        .iter()
+        .find(|a| src.contains(*a))
+        .map(|a| (*a).to_string())
+}
+
+/// The combatant's defenses with the effects' resistances, immunities and vulnerabilities added (as plain
+/// clauses).
+#[must_use]
+pub fn effective_defenses(state: &CombatState, c: &Combatant) -> Defenses {
+    let mut d = c.defenses.clone();
+    for e in targeted(state, &c.id) {
+        for m in &e.spec.modifiers {
+            if let Modifier::Defense {
+                defense,
+                damage_type,
+            } = *m
+            {
+                let list = match defense {
+                    DefenseKind::Resist => &mut d.resistances,
+                    DefenseKind::Immune => &mut d.immunities,
+                    DefenseKind::Vuln => &mut d.vulnerabilities,
+                };
+                list.push(DamageClause::plain(&[damage_type]));
+            }
+        }
+    }
+    d
+}
+
+// ----- d20 tests: the advantage tables (moved from party-sim's rules.rs) and bonuses -----
+
+/// The name of the Dodge effect (the standard action and the simulation add it).
+pub const DODGE: &str = "Dodge";
+
+fn dodging(state: &CombatState, id: &CombatantId) -> bool {
+    targeted(state, id).any(|e| e.spec.name == DODGE) && !incapacitated(state, id)
+}
+
+/// How an attack is rolled, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttackMode {
+    /// Normal, advantage or disadvantage.
+    pub mode: RollMode,
+    /// A hit is a critical hit (a paralyzed or unconscious target hit in melee).
+    pub auto_crit: bool,
+    /// Why ("target restrained", "Bless").
+    pub reasons: Vec<String>,
+    /// Dice added to the roll (Bless).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dice: Vec<DiceTerm>,
+}
+
+/// What the table needs to know about an attack's circumstances.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttackContext {
+    /// A ranged attack.
+    pub ranged: bool,
+    /// A conscious enemy is next to the attacker (ranged attacks).
+    pub engaged: bool,
+    /// Beyond normal range.
+    pub long_range: bool,
+    /// An ally of the attacker is next to the target (Pack Tactics).
+    pub ally_adjacent: bool,
+    /// The attacker has Pack Tactics.
+    pub pack_tactics: bool,
+    /// The target is next to the attacker (melee within 5 feet).
+    pub adjacent: bool,
+}
+
+fn mode_mods<'a>(
+    state: &'a CombatState,
+    id: &'a CombatantId,
+    on: ModeOn,
+    ability: Option<AbilityName>,
+) -> impl Iterator<Item = (AdvDis, &'a str)> + 'a {
+    targeted(state, id).flat_map(move |e| {
+        e.spec.modifiers.iter().filter_map(move |m| match *m {
+            Modifier::RollMode {
+                on: o,
+                ability: a,
+                mode,
+            } if o == on && (a.is_none() || a == ability) => Some((mode, e.spec.name.as_str())),
+            _ => None,
+        })
+    })
+}
+
+fn dice_mods(
+    state: &CombatState,
+    id: &CombatantId,
+    on: RollOn,
+    ability: Option<AbilityName>,
+) -> Vec<(DiceTerm, String)> {
+    targeted(state, id)
+        .flat_map(|e| {
+            e.spec.modifiers.iter().filter_map(move |m| match *m {
+                Modifier::RollDice {
+                    on: o,
+                    ability: a,
+                    term,
+                } if o == on && (a.is_none() || a == ability) => Some((term, e.spec.name.clone())),
+                _ => None,
+            })
+        })
+        .collect()
+}
+
+/// The attack table: conditions, Dodge, range, Pack Tactics, roll-mode effects on both sides, exhaustion, and the
+/// attacker's roll dice (Bless). SRD 5.1 and 5.2.1 agree on the conditions.
+#[must_use]
+pub fn attack_mode(
+    state: &CombatState,
+    attacker: &CombatantId,
+    target: &CombatantId,
+    cx: AttackContext,
+) -> AttackMode {
+    let a = conditions(state, attacker);
+    let t = conditions(state, target);
+    let mut adv: Vec<String> = Vec::new();
+    let mut dis: Vec<String> = Vec::new();
+    for c in &a {
+        match c {
+            Condition::Blinded => dis.push("attacker blinded".into()),
+            Condition::Poisoned => dis.push("attacker poisoned".into()),
+            Condition::Prone => dis.push("attacker prone".into()),
+            Condition::Restrained => dis.push("attacker restrained".into()),
+            Condition::Frightened => dis.push("attacker frightened".into()),
+            Condition::Invisible => adv.push("attacker unseen".into()),
+            _ => {}
+        }
+    }
+    if cx.ranged && cx.engaged {
+        dis.push("ranged attack while engaged".into());
+    }
+    if cx.ranged && cx.long_range {
+        dis.push("long range".into());
+    }
+    for c in &t {
+        match c {
+            Condition::Blinded => adv.push("target blinded".into()),
+            Condition::Restrained => adv.push("target restrained".into()),
+            Condition::Stunned => adv.push("target stunned".into()),
+            Condition::Paralyzed => adv.push("target paralyzed".into()),
+            Condition::Unconscious => adv.push("target unconscious".into()),
+            Condition::Petrified => adv.push("target petrified".into()),
+            Condition::Invisible => dis.push("target unseen".into()),
+            Condition::Prone if cx.ranged => dis.push("target prone, ranged".into()),
+            Condition::Prone => adv.push("target prone, melee".into()),
+            _ => {}
+        }
+    }
+    if dodging(state, target) {
+        dis.push("target dodging".into());
+    }
+    if cx.pack_tactics && cx.ally_adjacent {
+        adv.push("pack tactics".into());
+    }
+    for (mode, name) in mode_mods(state, attacker, ModeOn::AttacksBy, None) {
+        let list = if mode == AdvDis::Advantage {
+            &mut adv
+        } else {
+            &mut dis
+        };
+        list.push(name.to_string());
+    }
+    for (mode, name) in mode_mods(state, target, ModeOn::AttacksAgainst, None) {
+        if name == DODGE {
+            continue;
+        }
+        let list = if mode == AdvDis::Advantage {
+            &mut adv
+        } else {
+            &mut dis
+        };
+        list.push(format!("target {name}"));
+    }
+    if state.edition == Edition::Srd51
+        && state.combatant(attacker).is_some_and(|c| c.exhaustion >= 3)
+    {
+        dis.push("exhaustion".into());
+    }
+    let auto_crit = !cx.ranged
+        && cx.adjacent
+        && t.iter()
+            .any(|c| matches!(c, Condition::Paralyzed | Condition::Unconscious));
+    let dice_mods = dice_mods(state, attacker, RollOn::Attacks, None);
+    let mut reasons = adv.clone();
+    reasons.extend(dis.iter().cloned());
+    reasons.extend(dice_mods.iter().map(|(t, n)| format!("{n} {t}")));
+    AttackMode {
+        mode: RollMode::combine(!adv.is_empty(), !dis.is_empty()),
+        auto_crit,
+        reasons,
+        dice: dice_mods.into_iter().map(|(t, _)| t).collect(),
+    }
+}
+
+/// A saving throw: its bonus, extra dice, mode, automatic failure, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SaveMod {
+    /// The flat bonus: the save from the stat block (`stats`), cover for DEX, 2024 exhaustion.
+    pub bonus: i32,
+    /// Dice added (Bless +1d4, Bane −1d4).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dice: Vec<DiceTerm>,
+    /// Normal, advantage or disadvantage.
+    pub mode: RollMode,
+    /// It fails without a roll (STR and DEX while paralyzed, stunned, unconscious or petrified).
+    pub auto_fail: bool,
+    /// Why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reasons: Vec<String>,
+    /// The save bonus is known (`stats` present); otherwise `bonus` has only the situational parts.
+    pub known: bool,
+}
+
+impl SaveMod {
+    /// The d20 input for an app roll (`dice` are rolled separately).
+    #[must_use]
+    pub fn d20(&self) -> party_dice::D20Input {
+        party_dice::D20Input::app(self.bonus, self.mode)
+    }
+}
+
+/// The saving throw of `id` with `ability`; `spell` for a save against a spell (Magic Resistance).
+#[must_use]
+pub fn save_mod(
+    state: &CombatState,
+    id: &CombatantId,
+    ability: AbilityName,
+    spell: bool,
+) -> SaveMod {
+    let c = state.combatant(id);
+    let t = conditions(state, id);
+    let mut reasons = Vec::new();
+    let physical = matches!(ability, AbilityName::Str | AbilityName::Dex);
+    let auto_fail = physical
+        && t.iter().any(|c| {
+            matches!(
+                c,
+                Condition::Paralyzed
+                    | Condition::Stunned
+                    | Condition::Unconscious
+                    | Condition::Petrified
+            )
+        });
+    if auto_fail {
+        reasons.push(format!("automatic failure ({})", ability));
+    }
+    let stats = c.and_then(|c| c.stats.as_ref());
+    let mut bonus = stats.map_or(0, |s| s.save(ability));
+    let mut adv = Vec::new();
+    let mut dis = Vec::new();
+    if ability == AbilityName::Dex && dodging(state, id) {
+        adv.push("dodging".to_string());
+    }
+    if spell && stats.is_some_and(|s| s.magic_resistance) {
+        adv.push("Magic Resistance".to_string());
+    }
+    if ability == AbilityName::Dex && t.contains(&Condition::Restrained) {
+        dis.push("restrained".to_string());
+    }
+    for (mode, name) in mode_mods(state, id, ModeOn::Saves, Some(ability)) {
+        if name == DODGE {
+            continue;
+        }
+        let list = if mode == AdvDis::Advantage {
+            &mut adv
+        } else {
+            &mut dis
+        };
+        list.push(name.to_string());
+    }
+    if let Some(c) = c {
+        match state.edition {
+            Edition::Srd51 if c.exhaustion >= 3 => dis.push("exhaustion".to_string()),
+            Edition::Srd521 if c.exhaustion > 0 => {
+                let pen = 2 * i32::from(c.exhaustion);
+                bonus -= pen;
+                reasons.push(format!("exhaustion -{pen}"));
+            }
+            _ => {}
+        }
+        if ability == AbilityName::Dex {
+            let cover = targeted(state, id)
+                .flat_map(|e| e.spec.modifiers.iter())
+                .filter_map(|m| {
+                    if let Modifier::Cover(k) = m {
+                        Some(*k)
+                    } else {
+                        None
+                    }
+                })
+                .max();
+            if let Some(k) = cover {
+                bonus += k.ac_bonus();
+                reasons.push(format!("cover +{}", k.ac_bonus()));
+            }
+        }
+    }
+    let dice = dice_mods(state, id, RollOn::Saves, Some(ability));
+    reasons.extend(adv.iter().cloned());
+    reasons.extend(dis.iter().cloned());
+    reasons.extend(dice.iter().map(|(t, n)| format!("{n} {t}")));
+    SaveMod {
+        bonus,
+        dice: dice.into_iter().map(|(t, _)| t).collect(),
+        mode: RollMode::combine(!adv.is_empty(), !dis.is_empty()),
+        auto_fail,
+        reasons,
+        known: stats.is_some(),
+    }
+}
+
+/// Whether the caster may cast `spec` now at `slot` (0.3.2). `slotless` is an at-will or per-day use of a
+/// levelled spell; `precast` skips the economy and edition rules (cast before the fight). The edition rules:
+/// - 2014: after a bonus action spell, only a cantrip with a casting time of one action this turn; and no bonus
+///   action spell after a levelled action spell;
+/// - 2024: one spell slot per turn (reactions on other turns included).
+///
+/// `Err` says why not; the DM's `force` overrides everything but a missing or too-low slot.
+pub fn cast_status(
+    state: &CombatState,
+    c: &Combatant,
+    spec: &CastSpec,
+    slot: Option<u8>,
+    slotless: bool,
+    precast: bool,
+) -> Result<(), Unavailable> {
+    slot_status(c, spec, slot, slotless)?;
+    if precast {
+        return Ok(());
+    }
+    rules_status(state, c, spec, slot)
+}
+
+/// The slot part of [`cast_status`] (never overridden).
+pub fn slot_status(
+    c: &Combatant,
+    spec: &CastSpec,
+    slot: Option<u8>,
+    slotless: bool,
+) -> Result<(), Unavailable> {
+    let level = spec.mech.level;
+    match slot {
+        Some(l) if l < level || level == 0 => return Err(Unavailable::SlotTooLow(level)),
+        Some(l) if c.spell_slots.get(&l).is_none_or(|p| p.remaining == 0) => {
+            return Err(Unavailable::NoSlot(l))
+        }
+        None if level > 0 && !slotless => return Err(Unavailable::NeedsSlot(level)),
+        _ => {}
+    }
+    Ok(())
+}
+
+/// The economy and edition part of [`cast_status`] (the DM's `force` overrides it).
+pub fn rules_status(
+    state: &CombatState,
+    c: &Combatant,
+    spec: &CastSpec,
+    slot: Option<u8>,
+) -> Result<(), Unavailable> {
+    if c.is_defeated() {
+        return Err(Unavailable::Defeated);
+    }
+    if !c.life.is_alive() {
+        return Err(Unavailable::Down);
+    }
+    if incapacitated(state, &c.id) {
+        return Err(Unavailable::Incapacitated);
+    }
+    let cast = spec.mech.cast;
+    match cast {
+        CastTime::Action | CastTime::Minute if c.economy.action => {
+            return Err(Unavailable::ActionSpent)
+        }
+        CastTime::Bonus if c.economy.bonus_action => return Err(Unavailable::BonusActionSpent),
+        CastTime::Reaction if c.economy.reaction => return Err(Unavailable::ReactionSpent),
+        _ => {}
+    }
+    let Some(turn) = this_turn(state, c) else {
+        return Ok(());
+    };
+    match state.edition {
+        Edition::Srd51 => {
+            let cantrip_action = spec.mech.level == 0 && cast == CastTime::Action;
+            if turn.bonus_spell && cast != CastTime::Reaction && !cantrip_action {
+                return Err(Unavailable::BonusSpellRule);
+            }
+            if cast == CastTime::Bonus && turn.leveled_action_spell {
+                return Err(Unavailable::BonusSpellRule);
+            }
+        }
+        Edition::Srd521 => {
+            if slot.is_some() && turn.slot_spent {
+                return Err(Unavailable::OneSlotPerTurn);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The caster's spell record for the current turn, if it cast this turn.
+#[must_use]
+pub fn this_turn<'a>(state: &CombatState, c: &'a Combatant) -> Option<&'a SpellTurn> {
+    let cur = state.current.as_ref()?;
+    c.spell_turn
+        .as_ref()
+        .filter(|t| t.round == state.round && &t.turn == cur)
 }
 
 /// The effective speeds (C13): additions, then multiplications and halving, then zeroing by an effect, a condition
@@ -230,7 +778,22 @@ pub fn effective_speed(state: &CombatState, c: &Combatant) -> Speeds {
         }
         v.clamp(0, i64::from(u32::MAX)) as u32
     };
-    let s = c.speed;
+    let mut s = c.speed;
+    for m in &mods {
+        if let Modifier::SpeedSetMode { mode, ft } = *m {
+            let slot = match mode {
+                SpeedMode::Walk => {
+                    s.walk = s.walk.max(ft);
+                    continue;
+                }
+                SpeedMode::Fly => &mut s.fly,
+                SpeedMode::Swim => &mut s.swim,
+                SpeedMode::Climb => &mut s.climb,
+                SpeedMode::Burrow => &mut s.burrow,
+            };
+            *slot = Some(slot.unwrap_or(0).max(ft));
+        }
+    }
     Speeds {
         walk: adjust(s.walk),
         fly: s.fly.map(adjust),

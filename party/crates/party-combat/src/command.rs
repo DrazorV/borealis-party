@@ -529,7 +529,7 @@ pub enum Command {
         /// Rolls or outcomes for the rows, if known now.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         rows: Vec<RowInput>,
-        /// The amounts (damage, healing, temp HP) in the order of the definition's amount primitives, if known now.
+        /// The amounts (damage, healing, temp HP), in definition order: `on_land`, then `on_resist`, then `always`.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         amounts: Vec<AmountRoll>,
         /// Critical-hit amounts for crit rows (typed); `app` or absent rolls the doubled dice in the app.
@@ -582,7 +582,7 @@ pub enum Command {
         force: bool,
     },
     /// Drops a pending cast (countered, or a mistake). With `refund` its slot and per-day use come back; the
-    /// economy and concentration stay as they are.
+    /// economy stays spent; concentration on the spell ends if nothing holds it yet.
     CancelCast {
         /// The cast.
         cast: CastId,
@@ -632,6 +632,9 @@ pub enum Command {
         /// The DM's override (target filters).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         force: bool,
+        /// Spend the reaction instead of the ability's own kind (an opportunity attack with a melee action).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        as_reaction: bool,
         /// The pending cast's id.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cast_id: Option<CastId>,
