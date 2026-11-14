@@ -1,5 +1,6 @@
 //! The admin page: accounts waiting for approval, account management, statistics, runtime settings (sign-up and the
-//! trusted proxies) and the activity log. Every route here answers 403 to anyone but an active admin.
+//! trusted proxies), the activity log and the trash of deleted characters (`admin_trash.rs`). Every route here answers
+//! 403 to anyone but an active admin.
 
 use std::net::SocketAddr;
 
@@ -14,6 +15,9 @@ use crate::db::{now, AccountRow, Activity};
 use crate::error::{ApiError, ApiResult};
 use crate::net_guard::Cidr;
 use crate::AppState;
+
+#[path = "admin_trash.rs"]
+mod trash;
 
 /// Keys in `server_settings`.
 const OPEN_REGISTRATION: &str = "open_registration";
@@ -315,6 +319,7 @@ pub async fn reset_password(
     state.db.set_password(&id, hash.as_deref(), true).await?;
     state.db.delete_sessions_of(&id).await?;
     state.hub.close_user(&id);
+    let revoked = crate::tokens::revoke_all(&state, &id).await?;
     let detail = if temporary.is_some() {
         "temporary password set"
     } else {
@@ -325,13 +330,14 @@ pub async fn reset_password(
         Activity::new("password_reset")
             .by(&admin)
             .on(&id, &before.user.username)
-            .detail(detail),
+            .detail(format!("{detail}; {}", revoked.detail())),
     )
     .await;
     Ok(Json(account_json(&target(&state, &id).await?)))
 }
 
-/// `POST /api/admin/accounts/{id}/sign-out`: end every session of the account.
+/// `POST /api/admin/accounts/{id}/sign-out`: end every session, personal API token and connected AI app of the
+/// account.
 pub async fn sign_out_everywhere(
     State(state): State<AppState>,
     Admin(admin): Admin,
@@ -340,15 +346,18 @@ pub async fn sign_out_everywhere(
     let before = target(&state, &id).await?;
     let ended = state.db.delete_sessions_of(&id).await?;
     state.hub.close_user(&id);
+    let revoked = crate::tokens::revoke_all(&state, &id).await?;
     record(
         &state,
         Activity::new("signed_out_everywhere")
             .by(&admin)
             .on(&id, &before.user.username)
-            .detail(format!("{ended} sessions")),
+            .detail(format!("{ended} sessions, {}", revoked.detail())),
     )
     .await;
-    Ok(Json(json!({ "ended": ended })))
+    Ok(Json(
+        json!({ "ended": ended, "apiTokens": revoked.tokens, "apps": revoked.apps }),
+    ))
 }
 
 /// `DELETE /api/admin/accounts/{id}`: the account goes, with its sessions, its characters and its content.
@@ -668,6 +677,8 @@ pub fn routes() -> axum::Router<AppState> {
         .route("/api/admin/settings", get(settings).patch(save_settings))
         .route("/api/admin/proxies", get(proxies).post(save_proxies))
         .route("/api/admin/activity", get(activity))
+        .route("/api/admin/trash", get(trash::list))
+        .route("/api/admin/trash/restore", post(trash::restore))
         .route("/api/admin/accounts", get(accounts))
         .route("/api/admin/accounts/{id}", delete(delete_account))
         .route("/api/admin/accounts/{id}/status", post(set_status))

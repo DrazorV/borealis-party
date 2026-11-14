@@ -1080,14 +1080,14 @@ impl Db {
         Ok(done.rows_affected())
     }
 
-    /// Sign an account out everywhere but one session.
-    pub async fn delete_other_sessions(&self, user: &str, keep: &str) -> ApiResult<()> {
-        sqlx::query("DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2")
+    /// Sign an account out everywhere but one session; how many sessions ended.
+    pub async fn delete_other_sessions(&self, user: &str, keep: &str) -> ApiResult<u64> {
+        let done = sqlx::query("DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2")
             .bind(user)
             .bind(keep)
             .execute(&self.pool)
             .await?;
-        Ok(())
+        Ok(done.rows_affected())
     }
 
     /// Confirm the email address an emailed link belongs to; the account, or `None` for an unknown or old link.

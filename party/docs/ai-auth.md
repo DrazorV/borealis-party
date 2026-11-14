@@ -177,6 +177,16 @@ fall back to DCR. Adding CIMD needs an SSRF-guarded fetch (`net_guard.rs`).
   `ai_app_disconnected`) hold scope names only.
 - Deleting an account removes its tokens and grants (foreign keys cascade). A disabled account's tokens stop working
   at once and work again if it is re-enabled before they expire.
+- **Revoke everything (0.3.3):** `tokens::revoke_all` deletes the account's personal tokens, pending codes and OAuth
+  grants (their access and refresh tokens cascade) in one transaction. It runs on:
+  - a password change (`POST /api/me/password`; the session that changed it stays);
+  - **Sign out everywhere** on the Account page (`POST /api/me/sign-out-everywhere`, answers
+    `{ sessions, apiTokens, apps }`; this session stays, every other one ends);
+  - the admin's password reset and **Sign out everywhere** (`/api/admin/accounts/{id}/password` and `/sign-out`,
+    every session ends too).
+
+  Connected apps get a 401 with the usual challenge on their next call and go through OAuth again; personal tokens
+  have to be made again. Activity entries hold counts only.
 
 ## Emergency switch (D40)
 

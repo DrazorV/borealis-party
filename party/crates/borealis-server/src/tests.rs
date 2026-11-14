@@ -24,6 +24,8 @@ mod sync_tests;
 #[path = "jobs_tests.rs"]
 mod jobs_tests;
 
+#[path = "admin_trash_tests.rs"]
+mod admin_trash_tests;
 #[path = "ai_auth_tests.rs"]
 mod ai_auth_tests;
 #[path = "backup_tests.rs"]

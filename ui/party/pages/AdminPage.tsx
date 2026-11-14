@@ -12,6 +12,7 @@ import {
   type Account, type AccountStatus, type ActivityEntry, type AdminSettings, type Paged, type ServerStats,
 } from "../api/party";
 import { loadSession } from "../api/session";
+import { Trash } from "./AdminTrash";
 import { DefaultFiveToolsSource } from "./DefaultFiveToolsSource";
 import { TrustedProxies } from "./TrustedProxies";
 import "./party.css";
@@ -20,7 +21,7 @@ const message = (e: unknown): string => (e as { message?: string }).message ?? "
 
 const PER_PAGE = 25;
 
-type Section = "accounts" | "stats" | "settings" | "activity";
+type Section = "accounts" | "stats" | "settings" | "activity" | "trash";
 
 const STATUS_TONE: Record<AccountStatus, ChipTone> = { pending: "warning", active: "success", rejected: "danger", disabled: "default" };
 const STATUS_LABEL: Record<AccountStatus, string> = { pending: "Waiting", active: "Active", rejected: "Rejected", disabled: "Disabled" };
@@ -59,12 +60,14 @@ export function AdminPage() {
           { id: "stats", label: "Statistics" },
           { id: "settings", label: "Settings" },
           { id: "activity", label: "Activity" },
+          { id: "trash", label: "Trash" },
         ]}
       />
       {section === "accounts" && <Accounts />}
       {section === "stats" && <Statistics />}
       {section === "settings" && <Settings />}
       {section === "activity" && <ActivityLog />}
+      {section === "trash" && <Trash />}
     </div>
   );
 }
@@ -182,7 +185,7 @@ function AccountRow({ account: a, act, onReset }: { account: Account; act: (work
           ? <Button small onClick={() => void act(() => setAccountAdmin(a.id, false), `${a.username} is no longer an admin.`)}>Remove admin</Button>
           : <Button small onClick={() => void act(() => setAccountAdmin(a.id, true), `${a.username} is now an admin.`)}>Make admin</Button>)}
         <Button small onClick={onReset}>Reset password</Button>
-        <Button small disabled={a.sessions === 0} onClick={() => void act(() => signOutEverywhere(a.id), `${a.username} signed out everywhere.`)}>Sign out everywhere</Button>
+        <Button small onClick={() => void act(() => signOutEverywhere(a.id), `${a.username} signed out everywhere, AI apps and API tokens included.`)}>Sign out everywhere</Button>
         <span className="spacer" />
         <Button small variant="danger" onClick={() => void remove()}>Delete</Button>
       </div>
@@ -357,6 +360,7 @@ const KIND_LABEL: Record<string, string> = {
   password_reset: "Reset password",
   password_changed: "Changed password",
   signed_out_everywhere: "Signed out everywhere",
+  character_restored: "Restored a character for",
   account_deleted: "Deleted account",
   setting_changed: "Changed setting",
 };

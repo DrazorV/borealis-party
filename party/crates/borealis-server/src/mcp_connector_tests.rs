@@ -8,6 +8,8 @@
 //!    signed-in account, the `iss` check (RFC 9207), the code for tokens.
 //! 4. `initialize` (instructions present, also as a resource), `tools/list`, a tool call, in every protocol revision.
 //! 5. Refresh (rotation, 90 days), then revoke.
+//! 6. A password change, "Sign out everywhere" and the admin's reset and sign-out revoke every token at once; the
+//!    connector gets the 401 and connects again.
 //!
 //! And the refusals: a wrong `resource`, a missing PKCE, an authorization answer from another issuer, a token meant
 //! for another server, and browser origins. Runs on SQLite, and on PostgreSQL when `BOREALIS_TEST_POSTGRES_URL` names
@@ -907,6 +909,207 @@ async fn origins(router: &Router) {
     }
 }
 
+/// A personal token for `user`, made on the Account page.
+async fn personal_token(router: &Router, user: &Client) -> String {
+    let (status, made) = send(
+        router,
+        Some(&user.token),
+        "POST",
+        "/api/me/ai/tokens",
+        json!({ "name": "revocation" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{made}");
+    text(&made["token"])
+}
+
+/// The connector path from the 401 to a token pair, for `user`: what ChatGPT does again after a revoke.
+async fn connect(router: &Router, user: &Client) -> (String, String, String) {
+    let d = discover(router, BASE).await;
+    let client = register(router, &d, "ChatGPT", CHATGPT_CALLBACK).await;
+    let (verifier, challenge) = pkce();
+    let answer = consent(
+        router,
+        BASE,
+        user,
+        &authorize_url(&d, &client, CHATGPT_CALLBACK, Some(&challenge), Some(MCP)),
+    )
+    .await;
+    let code = code_from(&answer, CHATGPT_CALLBACK, BASE).unwrap();
+    let r = exchange(
+        router,
+        &d,
+        &client,
+        CHATGPT_CALLBACK,
+        &code,
+        Some(&verifier),
+        MCP,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    (
+        client,
+        text(&r.body["access_token"]),
+        text(&r.body["refresh_token"]),
+    )
+}
+
+/// A second sign-in of `name` (another device).
+async fn another_device(router: &Router, name: &str, password: &str) -> Client {
+    let (status, out) = super::login(router, name, password).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    Client {
+        router: router.clone(),
+        token: text(&out["token"]),
+        id: text(&out["user"]["id"]),
+    }
+}
+
+async fn mcp_status(router: &Router, token: &str) -> StatusCode {
+    let r = mcp(router, Some(token), &initialize("2025-11-25"), &[]).await;
+    if r.status == StatusCode::UNAUTHORIZED {
+        // Still the challenge a connector starts again from.
+        assert!(www_authenticate(&r.headers).contains_key("resource_metadata"));
+    }
+    r.status
+}
+
+/// Everything `user` gave AI apps: a personal token and a connected app. Both work.
+struct Access {
+    personal: String,
+    client: String,
+    access: String,
+    refresh: String,
+}
+
+async fn give_access(router: &Router, user: &Client) -> Access {
+    let personal = personal_token(router, user).await;
+    let (client, access, refresh) = connect(router, user).await;
+    assert_eq!(mcp_status(router, &personal).await, StatusCode::OK);
+    assert_eq!(mcp_status(router, &access).await, StatusCode::OK);
+    Access {
+        personal,
+        client,
+        access,
+        refresh,
+    }
+}
+
+/// Every token is refused, the refresh token is dead, and the connected app is gone from the Account page.
+async fn assert_revoked(router: &Router, user: &Client, a: &Access) {
+    assert_eq!(
+        mcp_status(router, &a.personal).await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        mcp_status(router, &a.access).await,
+        StatusCode::UNAUTHORIZED
+    );
+    let d = discover(router, BASE).await;
+    let r = refresh(router, &d, &a.client, &a.refresh).await;
+    assert_eq!(r.body["error"], "invalid_grant", "{}", r.body);
+    let (status, apps) = send(
+        router,
+        Some(&user.token),
+        "GET",
+        "/api/me/ai/apps",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{apps}");
+    assert_eq!(apps["apps"], json!([]), "{apps}");
+}
+
+/// A password change, "Sign out everywhere", and the admin's reset and sign-out each end every personal token and
+/// connected app of the account at once, while the session that asked stays. The connector then has to go through
+/// OAuth again, and that works.
+async fn revocation(router: &Router) {
+    const NEW_PASSWORD: &str = "a brand new passphrase 9";
+
+    // A password change.
+    let me = sign_up(router, "revoke-password").await;
+    let phone = another_device(router, "revoke-password", super::PASSWORD).await;
+    let a = give_access(router, &me).await;
+    let (status, out) = send(
+        router,
+        Some(&me.token),
+        "POST",
+        "/api/me/password",
+        json!({ "current": super::PASSWORD, "password": NEW_PASSWORD }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_revoked(router, &me, &a).await;
+    assert_eq!(me.get("/api/me").await.0, StatusCode::OK);
+    assert_eq!(phone.get("/api/me").await.0, StatusCode::UNAUTHORIZED);
+    // ChatGPT notices the 401 and connects again.
+    let (_, access, _) = connect(router, &me).await;
+    assert_eq!(mcp_status(router, &access).await, StatusCode::OK);
+    use_tools(router, &access).await;
+
+    // "Sign out everywhere" on the Account page.
+    let me = sign_up(router, "revoke-everywhere").await;
+    let phone = another_device(router, "revoke-everywhere", super::PASSWORD).await;
+    let a = give_access(router, &me).await;
+    let (status, out) = me.post("/api/me/sign-out-everywhere", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out, json!({ "sessions": 1, "apiTokens": 1, "apps": 1 }));
+    assert_revoked(router, &me, &a).await;
+    assert_eq!(me.get("/api/me").await.0, StatusCode::OK);
+    assert_eq!(phone.get("/api/me").await.0, StatusCode::UNAUTHORIZED);
+    let (_, access, _) = connect(router, &me).await;
+    assert_eq!(mcp_status(router, &access).await, StatusCode::OK);
+    // Nothing else left: the counts are zero.
+    let (_, out) = me.post("/api/me/sign-out-everywhere", json!({})).await;
+    assert_eq!(out, json!({ "sessions": 0, "apiTokens": 0, "apps": 1 }));
+    assert_eq!(mcp_status(router, &access).await, StatusCode::UNAUTHORIZED);
+    // Signed out, the route is 401.
+    let (status, _) = send(
+        router,
+        None,
+        "POST",
+        "/api/me/sign-out-everywhere",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // The admin page: sign-out, then a password reset. (The first account on the server is its admin.)
+    let admin = another_device(router, "connector-dm", super::PASSWORD).await;
+    let target = sign_up(router, "revoke-by-admin").await;
+    let a = give_access(router, &target).await;
+    let (status, out) = admin
+        .post(
+            &format!("/api/admin/accounts/{}/sign-out", target.id),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(
+        (out["apiTokens"].clone(), out["apps"].clone()),
+        (json!(1), json!(1)),
+        "{out}"
+    );
+    let target = another_device(router, "revoke-by-admin", super::PASSWORD).await;
+    assert_revoked(router, &target, &a).await;
+    let a = give_access(router, &target).await;
+    let (status, out) = admin
+        .post(
+            &format!("/api/admin/accounts/{}/password", target.id),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(
+        mcp_status(router, &a.personal).await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        mcp_status(router, &a.access).await,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
 async fn everything(dir: &Path, db: &Db) {
     let (_, ours) = server(&dir.join("ours"), db.clone(), BASE);
     let (_, theirs) = server(&dir.join("theirs"), db.clone(), OTHER);
@@ -914,6 +1117,7 @@ async fn everything(dir: &Path, db: &Db) {
     refusals(&ours).await;
     issuer_mixup(&ours, &theirs).await;
     origins(&ours).await;
+    revocation(&ours).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

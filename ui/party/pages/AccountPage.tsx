@@ -2,6 +2,7 @@ import { type FormEvent, useState } from "react";
 import { Button } from "../../src/components/Button";
 import { Alert, Card } from "../../src/components/Card";
 import { useToast } from "../../src/components/Toast";
+import { SignOutEverywhereCard } from "./SignOutEverywhere";
 import { isTauri } from "../../src/lib/tauri";
 import { changeEmail, changePassword, checkServer, sameAccountAt } from "../api/party";
 import { isLocalAddress, loadSession, normaliseAddress, setServerAddress, updateUser } from "../api/session";
@@ -85,7 +86,7 @@ export function AccountPage() {
       updateUser(await changePassword(current, password));
       setCurrent("");
       setPassword("");
-      toast.push("Password changed. Your other devices are signed out.", "info");
+      toast.push("Password changed. Your other devices, AI apps and API tokens are signed out.", "info");
     } catch (err) { toast.push(message(err), "error"); }
   };
   const saveAddress = async (e: FormEvent) => {
@@ -113,6 +114,7 @@ export function AccountPage() {
           <Button type="submit">Change password</Button>
         </form>
       </Card>
+      <SignOutEverywhereCard />
       <DungeonMasterCard />
       <AiAppsCard />
       {isTauri() && user && <SyncNotes userId={user.id} />}
