@@ -92,8 +92,12 @@ pub enum DmEventKind {
     Revived,
     /// A death save was made.
     DeathSave {
-        /// The roll.
-        roll: D20Result,
+        /// The roll; none for an outcome pressed at the table (0.3.5).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        roll: Option<D20Result>,
+        /// The outcome pressed at the table, when there was no number (0.3.5).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outcome: Option<party_dice::TableOutcome>,
     },
     /// Became stable.
     Stabilized,
@@ -104,8 +108,12 @@ pub enum DmEventKind {
     },
     /// A concentration save was made.
     ConcentrationSave {
-        /// The roll.
-        roll: D20Result,
+        /// The roll; none for an outcome pressed at the table (0.3.5).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        roll: Option<D20Result>,
+        /// The outcome pressed at the table, when there was no number (0.3.5).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outcome: Option<party_dice::TableOutcome>,
         /// Kept concentrating.
         kept: bool,
     },
@@ -144,8 +152,12 @@ pub enum DmEventKind {
     EffectSave {
         /// Which effect.
         effect: EffectId,
-        /// The roll.
-        roll: D20Result,
+        /// The roll; none for an outcome pressed at the table (0.3.5).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        roll: Option<D20Result>,
+        /// The outcome pressed at the table, when there was no number (0.3.5).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outcome: Option<party_dice::TableOutcome>,
         /// It succeeded.
         success: bool,
     },

@@ -119,14 +119,15 @@ function PromptCard({ combat, prompt, me, modifier, saveOf }: { combat: PlayerCo
   if (prompt.kind === "cast_save") {
     const what = `${prompt.ability.toUpperCase()} save${prompt.dc != null ? ` DC ${prompt.dc}` : ""}${prompt.spell ? ` against ${prompt.spell}` : ""}`;
     const send = (input: D20Input) => go(() => playerWrite(combat, "resolve_cast_row", { cast: prompt.cast, target: prompt.combatant, ...(prompt.ray != null ? { ray: prompt.ray } : {}),
-      roll: input.kind === "typed" ? { kind: "typed", total: input.total } : { kind: "app" } },
+      roll: input.kind === "typed" ? { kind: "typed", total: input.total }
+        : input.kind === "outcome" ? { kind: "outcome", outcome: input.outcome === "pass" ? "saved" : "failed" } : { kind: "app" } },
       (c) => ({ ...c, prompts: c.prompts.filter((p) => p.id !== prompt.id) })));
     return (
       <section className="combat-prompt" role="alertdialog" aria-label={what}>
         <p className="combat-prompt-q">{what}</p>
         <p className="muted combat-prompt-from">{prompt.from ? `From ${prompt.from}` : "From an unseen creature"}</p>
         {prompt.dc != null
-          ? <OutcomeButtons label={what} disabled={busy} outcomes={passFail(prompt.dc)} onPick={send}
+          ? <OutcomeButtons label={what} disabled={busy} outcomes={passFail()} onPick={send}
             rollLabel={`Roll for me (${signedMod(saveOf?.(prompt.ability) ?? 0)})`} onRoll={() => send({ kind: "app", modifier: saveOf?.(prompt.ability) ?? 0, mode: "normal" })} />
           : <RollOrType label={what} modifier={saveOf?.(prompt.ability) ?? 0} busy={busy} onRoll={send} />}
         {error && <Alert tone="danger">{error}</Alert>}
@@ -137,7 +138,7 @@ function PromptCard({ combat, prompt, me, modifier, saveOf }: { combat: PlayerCo
     return (
       <section className="combat-prompt" role="alertdialog" aria-label={`Concentration save, DC ${prompt.dc}`}>
         <p className="combat-prompt-q">Concentration save, DC {prompt.dc}</p>
-        <OutcomeButtons label="Concentration save" disabled={busy} outcomes={passFail(prompt.dc, "Kept it", "Lost it")} onPick={roll}
+        <OutcomeButtons label="Concentration save" disabled={busy} outcomes={passFail("Kept it", "Lost it")} onPick={roll}
           rollLabel={`Roll for me (${signedMod(modifier)})`} onRoll={() => roll({ kind: "app", modifier, mode: "normal" })} />
         {error && <Alert tone="danger">{error}</Alert>}
       </section>

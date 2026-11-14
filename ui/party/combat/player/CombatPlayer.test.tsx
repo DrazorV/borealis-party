@@ -341,7 +341,7 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     expect(within(saves).queryByLabelText("Death save: my table roll"), "0.3.5: outcome buttons, no number box").toBeNull();
     await user.click(within(saves).getByRole("button", { name: "Success" }));
     await waitFor(() => expect(within(screen.getByRole("group", { name: "Death saves" })).getByRole("img", { name: "Successes: 2 of 3" })).toBeTruthy());
-    expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "typed", total: 10 } } });
+    expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "outcome", outcome: "pass" } } });
     await user.click(within(screen.getByRole("group", { name: "Death saves" })).getByRole("button", { name: /^Roll for me/ }));
     await waitFor(() => expect(screen.getByText("Stable")).toBeTruthy());
     expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "app", modifier: 0, mode: "normal" } } });
@@ -372,7 +372,7 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     const prompt = await screen.findByRole("alertdialog", { name: "Concentration save, DC 12" });
     await user.click(within(prompt).getByRole("button", { name: "Kept it" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog", { name: /Concentration save/ })).toBeNull());
-    expect(server.calls.at(-1)).toEqual({ method: "POST", path: "/api/combats/c-p1/resolve_concentration", body: { requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "typed", total: 12 } } } });
+    expect(server.calls.at(-1)).toEqual({ method: "POST", path: "/api/combats/c-p1/resolve_concentration", body: { requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "outcome", outcome: "pass" } } } });
   });
 
   it("a spell's save waits for the player: the table roll is typed first (0.3.2)", async () => {
@@ -385,7 +385,7 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     expect(within(prompt).getByText("From Goblin")).toBeTruthy();
     await user.click(within(prompt).getByRole("button", { name: "Saved" }));
     await waitFor(() => expect(server.calls.some((c) => c.path === "/api/combats/c-p1/resolve_cast_row")).toBe(true));
-    expect(server.calls.find((c) => c.path === "/api/combats/c-p1/resolve_cast_row")).toEqual({ method: "POST", path: "/api/combats/c-p1/resolve_cast_row", body: { requestId: expect.stringMatching(/^req-/), args: { cast: "cast-1", target: "me1", roll: { kind: "typed", total: 14 } } } });
+    expect(server.calls.find((c) => c.path === "/api/combats/c-p1/resolve_cast_row")).toEqual({ method: "POST", path: "/api/combats/c-p1/resolve_cast_row", body: { requestId: expect.stringMatching(/^req-/), args: { cast: "cast-1", target: "me1", roll: { kind: "outcome", outcome: "saved" } } } });
   });
 
   it("a hidden caster's spell stays unnamed: only the save and its DC (0.3.2)", async () => {

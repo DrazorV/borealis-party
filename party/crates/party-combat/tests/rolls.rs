@@ -297,3 +297,52 @@ fn input_shapes_are_app_and_typed() {
     );
     assert_eq!(serde_json::to_value(RollSource::App).unwrap(), "app");
 }
+
+/// 0.3.5: a pass/fail roll pressed at the table is the outcome itself: no made-up number reaches the log.
+#[test]
+fn outcomes_pressed_at_the_table_carry_no_number() {
+    use party_combat::party_dice::TableOutcome;
+    let mut combat = small_fight(Edition::Srd521);
+    // A creature that makes death saves, at 0 HP.
+    let mut z = goblin("z");
+    z.zero_hp = ZeroHpRule::DeathSaves;
+    add(&mut combat, z);
+    init(&mut combat, "z", 3);
+    dm(&mut combat, hit("z", 7, None));
+    let save = |o| Command::DeathSave {
+        id: id("z"),
+        roll: D20Input::Outcome { outcome: o },
+    };
+    let ev = dm(&mut combat, save(TableOutcome::Pass));
+    let DmEventKind::DeathSave { roll, outcome } = &ev.dm[0].kind else {
+        panic!("{:?}", ev.dm)
+    };
+    assert_eq!((roll.is_none(), *outcome), (true, Some(TableOutcome::Pass)));
+    assert_eq!(ev.dm[0].text, "Goblin z death save: success");
+    dm(&mut combat, save(TableOutcome::Nat1));
+    assert!(
+        matches!(
+            c(&combat, "z").life,
+            Life::Dying {
+                successes: 1,
+                failures: 2
+            }
+        ),
+        "{:?}",
+        c(&combat, "z").life
+    );
+    dm(&mut combat, save(TableOutcome::Nat20));
+    assert_eq!(c(&combat, "z").hp.current, 1);
+    // An outcome where the number matters is refused.
+    assert!(dm_err(
+        &mut combat,
+        Command::SetInitiative {
+            id: id("z"),
+            roll: D20Input::Outcome {
+                outcome: TableOutcome::Pass
+            }
+        }
+    )
+    .to_string()
+    .contains("needs its number"));
+}

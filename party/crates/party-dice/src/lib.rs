@@ -34,6 +34,9 @@ const MAX_TEXT: usize = 200;
 /// Why a notation could not be read or a roll could not be made. The messages are the UI's.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DiceError {
+    /// An outcome where a number is needed (initiative, an attack).
+    #[error("This roll needs its number, not just pass or fail.")]
+    OutcomeOnly,
     /// Empty text.
     #[error("No dice to roll.")]
     Empty,
@@ -743,6 +746,34 @@ pub enum D20Input {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         crit_range: Option<u32>,
     },
+    /// 0.3.5: a pass/fail roll's result as pressed at the table, with no number (a death save, a save against a
+    /// known DC). Only the commands that take an outcome accept it; [`resolve_d20`] refuses it.
+    Outcome {
+        /// What the table's die gave.
+        outcome: TableOutcome,
+    },
+}
+
+/// The result of a pass/fail roll pressed at the table (0.3.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TableOutcome {
+    /// Made it (a save, a death save of 10 or more).
+    Pass,
+    /// Missed it.
+    Fail,
+    /// A natural 20 (a death save: back up with 1 HP).
+    Nat20,
+    /// A natural 1 (a death save: two failures).
+    Nat1,
+}
+
+impl TableOutcome {
+    /// Whether it passes (a natural 20 does; a natural 1 doesn't).
+    #[must_use]
+    pub fn passed(self) -> bool {
+        matches!(self, TableOutcome::Pass | TableOutcome::Nat20)
+    }
 }
 
 impl D20Input {
@@ -790,6 +821,7 @@ pub fn resolve_d20(input: &D20Input, die: &mut dyn DieRoller) -> Result<D20Resul
             mode,
             crit_range,
         } => roll_d20(modifier, mode, die, crit_range),
+        D20Input::Outcome { .. } => Err(DiceError::OutcomeOnly),
         D20Input::Typed { total, natural } => {
             check_typed(total)?;
             if let Some(n) = natural {
