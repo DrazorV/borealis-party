@@ -28,6 +28,7 @@ mod content_events;
 mod db;
 mod encounters;
 mod error;
+mod health;
 mod homebrew;
 mod hub;
 mod import_source;
@@ -176,7 +177,9 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
         .merge(mcp::routes())
         .merge(homebrew::routes())
         .merge(spells::routes())
+        .merge(health::routes())
         .route("/api/{*rest}", any(no_such_route))
+        .layer(axum::middleware::from_fn(health::count))
         .layer(DefaultBodyLimit::max(max_upload))
         .with_state(state)
 }
@@ -346,6 +349,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
     backup::set_dir(Settings::resolve(dir, &settings.backup.dir));
+    health::set_config_dir(dir.clone());
     let sqlite_file = Settings::resolve(dir, &settings.sqlite.path);
     if let Some(Command::MigrateSqlite { from }) = &args.command {
         if !matches!(location, db::Location::Postgres(_)) {

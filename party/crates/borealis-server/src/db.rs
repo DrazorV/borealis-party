@@ -511,8 +511,7 @@ const MIGRATIONS: &[&[&str]] = &[
     ],
 ];
 
-/// How many steps [`MIGRATIONS`] has: the schema version a database is at after [`Db::open`].
-#[cfg(test)]
+/// How many steps [`MIGRATIONS`] has: the schema version a database is at after [`Db::open`] (also `/api/health`).
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
 
 /// The table each step from 2 on creates, by step number (1-based). A database whose `schema_version` says a step ran

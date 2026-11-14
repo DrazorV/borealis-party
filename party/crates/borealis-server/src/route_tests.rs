@@ -19,6 +19,7 @@ use crate::{api_routes, AppState, Config};
 /// (method, path) of each route, with a made-up value for each path parameter.
 const ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/server"),
+    ("GET", "/api/health"),
     ("POST", "/api/auth/register"),
     ("POST", "/api/auth/login"),
     ("POST", "/api/auth/logout"),
