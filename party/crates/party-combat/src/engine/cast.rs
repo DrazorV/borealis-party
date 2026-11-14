@@ -128,6 +128,15 @@ fn party_side(c: &crate::model::Combatant) -> bool {
 
 impl Cx<'_> {
     pub(super) fn spell_command(&mut self, cmd: &Command) -> Result<(), CombatError> {
+        // A private cast stays private to its end (0.3.3).
+        if let Command::ResolveCastRow { cast, .. }
+        | Command::ApplyCast { cast, .. }
+        | Command::CancelCast { cast, .. } = cmd
+        {
+            if self.s.casts.iter().any(|c| &c.id == cast && c.private) {
+                self.quiet = true;
+            }
+        }
         match cmd {
             Command::CastSpell {
                 caster,
@@ -301,7 +310,35 @@ impl Cx<'_> {
         let slotless = link.is_some_and(|l| l.frequency != SpellFrequency::Slot)
             || ab.as_ref().is_some_and(|a| a.uses.is_some());
         let c = &self.s.combatants[i];
-        derive::slot_status(c, &spec, slot, slotless).map_err(CombatError::Unavailable)?;
+        // 0.3.3: a PC's slots are on its player's sheet (the player spends them there): only the level is checked.
+        let sheet = c.hp_authority == HpAuthority::Player;
+        if sheet {
+            let level = spec.mech.level;
+            match slot {
+                Some(l) if l < level || level == 0 => {
+                    return Err(CombatError::Unavailable(crate::Unavailable::SlotTooLow(
+                        level,
+                    )))
+                }
+                None if level > 0 && !slotless => {
+                    return Err(CombatError::Unavailable(crate::Unavailable::NeedsSlot(
+                        level,
+                    )))
+                }
+                _ => {}
+            }
+        } else {
+            derive::slot_status(c, &spec, slot, slotless).map_err(CombatError::Unavailable)?;
+        }
+        let shown_targets: Vec<CombatantId> = if matches!(spec.mech.targeting, Targeting::SelfOnly)
+        {
+            vec![caster.clone()]
+        } else {
+            open.targets.to_vec()
+        };
+        if crate::visibility::cast_private(&self.s, caster, &spec, &shown_targets) {
+            self.quiet = true;
+        }
         if !precast && !open.force {
             derive::rules_status(&self.s, c, &spec, slot).map_err(CombatError::Unavailable)?;
         }
@@ -357,7 +394,7 @@ impl Cx<'_> {
                 t.leveled_action_spell |= cast_time == CastTime::Action && level > 0;
             }
         }
-        if let Some(l) = slot {
+        if let Some(l) = slot.filter(|_| !sheet) {
             if let Some(p) = c.spell_slots.get_mut(&l) {
                 p.remaining -= 1;
             }
@@ -549,6 +586,7 @@ impl Cx<'_> {
             round: self.s.round,
             zone_of: o.zone_of,
             statblock: o.statblock,
+            private: self.quiet,
         });
         let cn = self.name(&o.caster);
         let slot_text = o

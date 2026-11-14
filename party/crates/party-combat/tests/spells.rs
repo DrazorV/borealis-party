@@ -770,7 +770,8 @@ fn counterspell_is_a_ruling_and_cancel_refunds() {
         .cmd(),
     );
     let theirs = pending(&cb).id.clone();
-    assert_eq!(c(&cb, "w").spell_slots[&3].remaining, 1);
+    // 0.3.3: a PC's slots are on the player's sheet: the combat never spends them.
+    assert_eq!(c(&cb, "w").spell_slots[&3].remaining, 2);
     let ev = dm(
         &mut cb,
         cast("m", spec_of("counterspell", E24, 14, None), Some(3), &["w"]).cmd(),
@@ -796,7 +797,7 @@ fn counterspell_is_a_ruling_and_cancel_refunds() {
     assert_eq!(
         c(&cb, "w").spell_slots[&3].remaining,
         2,
-        "2024: the slot isn't spent"
+        "a PC's slot is never spent in the combat"
     );
 }
 
@@ -1149,6 +1150,63 @@ fn every_projected_field_is_classified() {
     for fx in view["effects"].as_array().unwrap() {
         assert!(fx.get("spell").is_none());
     }
+
+    // 0.3.3, the DM's side: every combatant key is classified for a player's combatant too (the DM sees it, or it
+    // is the player's number), and the DM view of a PC and of a player's creature holds only the allowlist.
+    for k in v.as_object().unwrap().keys() {
+        let dm = COMBATANT_DM_OF_PLAYER.contains(&k.as_str());
+        let private = COMBATANT_PLAYER_PRIVATE.contains(&k.as_str());
+        assert!(
+            dm != private,
+            "combatant field {k} is not classified for the DM (or is in both lists)"
+        );
+    }
+    let mut pc = full.clone();
+    pc.id = id("pc-full");
+    pc.kind = CombatantKind::Character {
+        owner: ALICE.into(),
+    };
+    pc.hp = Hp {
+        current: 17,
+        max: 31,
+        temp: 4,
+    };
+    pc.life = Life::Dying {
+        successes: 1,
+        failures: 2,
+    };
+    let mut pet = full.clone();
+    pet.id = id("pet-full");
+    pet.controller = Controller::Player { pc: id("pc-full") };
+    s.combatants.push(pc);
+    s.combatants.push(pet);
+    let dm_view = dm_view_of(&s);
+    for who in ["pc-full", "pet-full"] {
+        let entry = dm_view["combatants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == who)
+            .unwrap();
+        for k in entry.as_object().unwrap().keys() {
+            assert!(
+                COMBATANT_DM_OF_PLAYER.contains(&k.as_str()) || k == "down",
+                "{k} of a player's combatant reached the DM"
+            );
+        }
+        for k in COMBATANT_PLAYER_PRIVATE {
+            assert!(entry.get(*k).is_none(), "{k} reached the DM");
+        }
+        assert_eq!(entry["concentration"], true, "yes/no only");
+    }
+    // The DM's own creature is untouched.
+    let mage = dm_view["combatants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "a")
+        .unwrap();
+    assert!(mage.get("hp").is_some());
 }
 
 #[test]
@@ -1183,4 +1241,195 @@ fn a_revealed_caster_is_named_in_the_save_request() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["spell"], "Fireball");
     assert_eq!(rows[0]["target"], "f");
+}
+
+// ----- players cast (0.3.3: the DM's screen and the player's screen) -----
+
+#[test]
+fn a_player_casts_fireball_and_the_dm_resolves_the_creatures_saves() {
+    use party_combat::visibility::dm_may_see;
+    let mut cb = fight(E24);
+    dm(&mut cb, Command::Reveal { id: id("a") });
+    dm(&mut cb, Command::Reveal { id: id("o") });
+    let ev = cb
+        .execute(
+            &alice(),
+            &cast(
+                "w",
+                spec_of("fireball", E24, 15, None),
+                Some(3),
+                &["a", "o"],
+            )
+            .cmd(),
+        )
+        .unwrap();
+    // The slot is spent on the sheet, never in the combat (the DM never sees the player's slots).
+    assert_eq!(c(&cb, "w").spell_slots[&3].remaining, 2);
+    // The DM hears of it: the cast and its open rows.
+    assert!(ev.dm.iter().any(|e| !e.private
+        && dm_may_see(&cb.state, e)
+        && matches!(&e.kind, DmEventKind::CastStarted { spell, .. } if spell == "Fireball")));
+    let theirs = pending(&cb).id.clone();
+    assert!(!pending(&cb).private);
+    // The creatures' saves are the DM's to roll, not the player's.
+    let row = |t: &str| Command::ResolveCastRow {
+        cast: theirs.clone(),
+        target: id(t),
+        ray: 0,
+        roll: RowRoll::Typed {
+            total: 5,
+            natural: Some(5),
+        },
+        use_lr: false,
+    };
+    assert_eq!(
+        cb.execute(&alice(), &row("a")),
+        Err(CombatError::NotAllowed)
+    );
+    dm(&mut cb, row("a"));
+    dm(&mut cb, row("o"));
+    // The player rolls their own damage.
+    cb.execute(
+        &alice(),
+        &Command::ApplyCast {
+            cast: theirs,
+            amounts: vec![AmountRoll::Typed { total: 20 }],
+            crit_amounts: vec![],
+            force: false,
+        },
+    )
+    .unwrap();
+    assert!(c(&cb, "a").hp.current < c(&cb, "a").hp.max);
+}
+
+#[test]
+fn a_player_cannot_cast_for_others_or_force_or_precast() {
+    let mut cb = fight(E24);
+    dm(&mut cb, Command::Reveal { id: id("a") });
+    dm(&mut cb, Command::Reveal { id: id("o") });
+    for cmd in [
+        cast("f", spec_of("fireball", E24, 15, None), Some(3), &["a"]).cmd(),
+        cast("m", spec_of("fireball", E24, 15, None), Some(3), &["a"]).cmd(),
+        cast("w", spec_of("fireball", E24, 15, None), Some(3), &["a"])
+            .force()
+            .cmd(),
+    ] {
+        assert_eq!(cb.execute(&alice(), &cmd), Err(CombatError::NotAllowed));
+    }
+    // A hidden creature is no target for a player.
+    dm(&mut cb, Command::Hide { id: id("o") });
+    assert_eq!(
+        cb.execute(
+            &alice(),
+            &cast("w", spec_of("fireball", E24, 15, None), Some(3), &["o"]).cmd()
+        ),
+        Err(CombatError::NotAllowed)
+    );
+}
+
+#[test]
+fn cure_wounds_on_an_ally_never_reaches_the_dm() {
+    use party_combat::visibility::{dm_may_see, dm_view_of};
+    let mut cb = fight(E24);
+    let ev = cb
+        .execute(
+            &alice(),
+            &cast("w", spec_of("cure-wounds", E24, 15, None), Some(1), &["f"])
+                .amount(AmountRoll::Typed { total: 9 })
+                .cmd(),
+        )
+        .unwrap();
+    assert!(!ev.dm.is_empty());
+    assert!(ev.dm.iter().all(|e| e.private && !dm_may_see(&cb.state, e)));
+    assert!(ev
+        .players
+        .iter()
+        .any(|p| matches!(p, PlayerEvent::HealPrompt { owner, amount: 9, .. } if owner == BOB)));
+    assert!(
+        dm_view_of(&cb.state).get("casts").is_none(),
+        "no open cast for the DM"
+    );
+}
+
+#[test]
+fn shield_on_yourself_is_shown_to_the_dm() {
+    use party_combat::visibility::{dm_may_see, dm_view_of};
+    let mut cb = fight(E24);
+    let ev = cb
+        .execute(
+            &alice(),
+            &cast("w", spec_of("shield", E24, 15, None), Some(1), &[]).cmd(),
+        )
+        .unwrap();
+    assert!(ev.dm.iter().any(|e| dm_may_see(&cb.state, e)
+        && matches!(&e.kind, DmEventKind::CastStarted { spell, .. } if spell == "Shield")));
+    // The chip is on the PC, and the DM sees the AC it resolves attacks against.
+    let view = dm_view_of(&cb.state);
+    assert!(view["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["name"] == "Shield" && e["target"] == "w"));
+    assert!(derive::effective_ac(&cb.state, c(&cb, "w")).total >= Some(17));
+}
+
+#[test]
+fn a_pcs_hp_and_rolls_stay_private_and_the_dms_damage_is_a_prompt() {
+    use party_combat::visibility::{dm_may_see, dm_view_of};
+    let mut cb = fight(E24);
+    let ev = cb
+        .execute(
+            &Actor::System,
+            &Command::SyncPlayerHp {
+                id: id("w"),
+                current: 9,
+                max: 22,
+                temp: 3,
+                damage: None,
+            },
+        )
+        .unwrap();
+    assert!(ev.dm.iter().all(|e| !dm_may_see(&cb.state, e)));
+    let ev = dm(&mut cb, hit("w", 13, Some(DamageType::Bludgeoning)));
+    assert!(
+        ev.dm.iter().all(|e| dm_may_see(&cb.state, e)),
+        "the DM knows what it sent"
+    );
+    assert!(ev.players.iter().any(
+        |p| matches!(p, PlayerEvent::DamagePrompt { owner, amount: 13, .. } if owner == ALICE)
+    ));
+    let ev = cb
+        .execute(
+            &alice(),
+            &Command::Roll {
+                id: id("w"),
+                label: "Perception".into(),
+                roll: RollInput::D20(party_combat::party_dice::D20Input::typed(14)),
+            },
+        )
+        .unwrap();
+    assert!(ev.dm.iter().all(|e| !dm_may_see(&cb.state, e)));
+    let view = dm_view_of(&cb.state);
+    let w = view["combatants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "w")
+        .unwrap()
+        .clone();
+    for k in [
+        "hp",
+        "life",
+        "spell_slots",
+        "resources",
+        "pending_concentration",
+    ] {
+        assert!(w.get(k).is_none(), "{k} reached the DM");
+    }
+    assert_eq!(w["down"], false);
+    assert!(w.get("ac").is_some());
+    // Legacy log rows (no flag) are filtered by kind.
+    let mut legacy = ev.dm[0].clone();
+    legacy.private = false;
+    assert!(!dm_may_see(&cb.state, &legacy));
 }

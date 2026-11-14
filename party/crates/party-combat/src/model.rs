@@ -1381,6 +1381,10 @@ pub struct PendingCast {
     /// A stat block attack or save (`perform_statblock`) rather than a spell.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub statblock: bool,
+    /// A player's cast with nothing the DM sees or resolves (0.3.3): all its events are private
+    /// ([`crate::visibility::cast_private`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub private: bool,
 }
 
 impl CombatState {

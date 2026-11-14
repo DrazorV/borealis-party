@@ -72,7 +72,7 @@ pub async fn command(
         name if jobs::COMMANDS.contains(&name) => {
             jobs::call(
                 state.workspaces.jobs(),
-                &state.hub,
+                &state,
                 &user.id,
                 &workspace,
                 name,

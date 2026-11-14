@@ -349,7 +349,7 @@ impl Jobs {
 /// Run a job command for `account` on its own `workspace`.
 pub async fn call(
     jobs: &Arc<Jobs>,
-    hub: &Arc<crate::hub::PartyHub>,
+    state: &crate::AppState,
     account: &str,
     workspace: &Arc<Workspace>,
     command: &str,
@@ -371,15 +371,23 @@ pub async fn call(
             let asked = Value::Object(call_args.clone());
             let on = Arc::clone(workspace);
             let run = name.clone();
-            let hub = Arc::clone(hub);
+            let app = state.clone();
             let owner = account.to_string();
             let (record, started) =
                 jobs.start(account, workspace, &name, asked.clone(), async move {
                     let ended = crate::sync::call_upstream(&on, &run, call_args).await;
                     // A failed update may still have changed some packs: the lists are fetched again either way.
                     if let Some(kind) = crate::content_events::kind_of(&run) {
-                        crate::content_events::changed(&hub, &owner, kind, &run);
+                        crate::content_events::changed(&app.hub, &owner, kind, &run);
                     }
+                    // 0.3.3: the party cards are read again when the import ENDS (the RPC's refresh ran at its start).
+                    crate::parties::after_command(
+                        &app,
+                        &owner,
+                        &on,
+                        crate::parties::CardTarget::All,
+                    )
+                    .await;
                     ended
                 })?;
             // `same`: the running job is this very call (a start sent again after no answer came, say), so its

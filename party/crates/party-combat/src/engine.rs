@@ -47,6 +47,8 @@ pub fn apply(
         die,
         dm: Vec::new(),
         prompts: Vec::new(),
+        actor: actor.clone(),
+        quiet: false,
     };
     cx.run(cmd)?;
     let mut players = before.diff(&PlayerSummary::of(&cx.s));
@@ -62,9 +64,38 @@ fn authorize(state: &CombatState, actor: &Actor, cmd: &Command) -> Result<(), Co
         return Err(CombatError::Ended);
     }
     match actor {
+        Actor::Dm if !dm_may(state, cmd) => Err(invalid(
+            "That number is on the player's side: the player changes it (the DM never sees a player's HP or \
+             resources).",
+        )),
         Actor::Dm | Actor::System => Ok(()),
         Actor::Player { account } if player_may(state, account, cmd) => Ok(()),
         Actor::Player { .. } => Err(CombatError::NotAllowed),
+    }
+}
+
+/// Whether the DM may issue `cmd` (0.3.3, the user's rule of 2026-11-14: "DM should never know players HP and
+/// resources"). The DM never writes a number of a player character or of a creature a player controls: its HP,
+/// temporary HP, rolled HP, slots, resources, death saves or concentration saves. Damage and healing are still the
+/// DM's to send: for those they become a prompt the player applies.
+#[must_use]
+pub fn dm_may(state: &CombatState, cmd: &Command) -> bool {
+    let player_side = |id: &CombatantId| {
+        state
+            .combatant(id)
+            .is_some_and(crate::visibility::player_owned)
+    };
+    match cmd {
+        Command::SetHp { id, .. }
+        | Command::GrantTempHp { id, .. }
+        | Command::RollHp { id, .. }
+        | Command::AdjustSlot { id, .. }
+        | Command::SetSlots { id, .. }
+        | Command::AdjustResource { id, .. }
+        | Command::DeathSave { id, .. }
+        | Command::SetDeathSaves { id, .. }
+        | Command::ResolveConcentration { id, .. } => !player_side(id),
+        _ => true,
     }
 }
 
@@ -100,6 +131,7 @@ pub fn player_may(state: &CombatState, account: &str, cmd: &Command) -> bool {
     match cmd {
         Command::SetInitiative { id, .. }
         | Command::DeathSave { id, .. }
+        | Command::SetDeathSaves { id, .. }
         | Command::SetConcentration { id, .. }
         | Command::EndConcentration { id }
         | Command::ResolveConcentration { id, .. }
@@ -139,7 +171,9 @@ pub fn player_may(state: &CombatState, account: &str, cmd: &Command) -> bool {
         Command::RemoveEffect { effect, .. } | Command::UseCharge { effect } => {
             effect_target(effect).is_some_and(|t| my_creature(&t))
         }
-        // A player answers their own PC's save row (typed or in the app), never sets an outcome.
+        // A player answers their own PC's save row (typed or in the app), and the attack rows of their own casts
+        // (the attack roll is theirs); never an outcome, never Legendary Resistance. The DM resolves the saves of
+        // the DM's creatures against a player's spell.
         Command::ResolveCastRow {
             cast,
             target,
@@ -147,13 +181,45 @@ pub fn player_may(state: &CombatState, account: &str, cmd: &Command) -> bool {
             use_lr,
             ..
         } => {
-            mine(target)
-                && !use_lr
+            !use_lr
                 && !matches!(roll, crate::command::RowRoll::Outcome { .. })
                 && state.casts.iter().any(|c| {
                     &c.id == cast
-                        && matches!(c.spec.mech.delivery, crate::spell::Delivery::Save { .. })
                         && c.rows.iter().any(|r| &r.target == target)
+                        && match c.spec.mech.delivery {
+                            crate::spell::Delivery::Save { .. } => mine(target),
+                            crate::spell::Delivery::Attack { .. } => mine(&c.caster),
+                            crate::spell::Delivery::Auto => false,
+                        }
+                })
+        }
+        // 0.3.3: a player casts for their own PC (its slots are on the sheet) and the creatures it controls, from the
+        // definition the server compiled (never a precast, never the DM's override), against creatures they can see.
+        Command::CastSpell {
+            caster,
+            targets,
+            precast,
+            force,
+            ..
+        } => {
+            mine(caster)
+                && !precast
+                && !force
+                && targets.iter().all(|t| {
+                    crate::visibility::is_visible(state, t, crate::visibility::ViewerKind::Player)
+                })
+        }
+        // Their own casts: roll the amounts, or drop it.
+        Command::ApplyCast { cast, force, .. } => {
+            !force && state.casts.iter().any(|c| &c.id == cast && mine(&c.caster))
+        }
+        Command::CancelCast { cast, .. } => {
+            state.casts.iter().any(|c| &c.id == cast && mine(&c.caster))
+        }
+        Command::StandardAction { id, target, .. } => {
+            mine(id)
+                && target.as_ref().is_none_or(|t| {
+                    crate::visibility::is_visible(state, t, crate::visibility::ViewerKind::Player)
                 })
         }
         _ => false,
@@ -165,6 +231,10 @@ struct Cx<'a> {
     die: &'a mut dyn DieRoller,
     dm: Vec<DmEvent>,
     prompts: Vec<PlayerEvent>,
+    /// Who issued the command.
+    actor: Actor,
+    /// Every event of this command is private (a player's cast with nothing the DM sees or resolves).
+    quiet: bool,
 }
 
 fn clamp_delta(value: u32, delta: i32, max: u32) -> u32 {
@@ -189,12 +259,42 @@ impl Cx<'_> {
     }
 
     fn ev(&mut self, subject: Option<&CombatantId>, kind: K, text: impl Into<String>) {
+        let private = self.quiet || self.private_event(subject, &kind);
         self.dm.push(DmEvent {
             round: self.s.round,
             subject: subject.cloned(),
             kind,
             text: text.into(),
+            private,
         });
+    }
+
+    /// 0.3.3: an event the DM never sees. Any event about a number of the player's side (HP, temporary HP, death
+    /// saves, slots, resources, their rolls; [`crate::visibility::private_kind`]), and, when the player (or the
+    /// server's sync) acts, the player's own damage, healing and ability uses on their side.
+    fn private_event(&self, subject: Option<&CombatantId>, kind: &K) -> bool {
+        let Some(c) = subject.and_then(|id| self.s.combatant(id)) else {
+            return false;
+        };
+        if !crate::visibility::player_owned(c) {
+            return false;
+        }
+        crate::visibility::private_kind(kind)
+            || (!matches!(self.actor, Actor::Dm)
+                && matches!(
+                    kind,
+                    K::Damage { .. } | K::Healed { .. } | K::TempHp | K::AbilityUsed { .. }
+                ))
+    }
+
+    /// Damage or healing on this combatant becomes a prompt to its player instead of changing HP: a PC always (D7:
+    /// its HP is on the sheet), and a creature a player controls when someone else (the DM) sends it (0.3.3: "the
+    /// player owns their numbers").
+    fn prompts_player(&self, i: usize) -> bool {
+        let c = &self.s.combatants[i];
+        c.hp_authority == HpAuthority::Player
+            || (matches!(c.controller, Controller::Player { .. })
+                && matches!(self.actor, Actor::Dm))
     }
 
     fn effect_idx(&self, id: EffectId) -> Result<usize, CombatError> {
@@ -1428,9 +1528,8 @@ impl Cx<'_> {
                 format!("{}{ty}{how}", p.amount)
             })
             .collect();
-        let c = &self.s.combatants[i];
-        if c.hp_authority == HpAuthority::Player {
-            let owner = c.owner().unwrap_or_default().to_string();
+        if self.prompts_player(i) {
+            let owner = account_of(&self.s, &self.s.combatants[i]).unwrap_or_default();
             let prompt_parts = result
                 .parts
                 .iter()
@@ -1699,8 +1798,8 @@ impl Cx<'_> {
             return Err(CombatError::Dead);
         }
         let name = self.name(target);
-        if c.hp_authority == HpAuthority::Player {
-            let owner = c.owner().unwrap_or_default().to_string();
+        if self.prompts_player(i) {
+            let owner = account_of(&self.s, &self.s.combatants[i]).unwrap_or_default();
             self.prompts.push(PlayerEvent::HealPrompt {
                 id: target.clone(),
                 owner,

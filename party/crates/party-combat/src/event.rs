@@ -22,6 +22,12 @@ pub struct DmEvent {
     pub kind: DmEventKind,
     /// One line for the log ("Goblin 2 takes 7 slashing (resisted) · 0/7").
     pub text: String,
+    /// The player's own business (0.3.3, the user's rule of 2026-11-14: "DM should never know players HP and
+    /// resources"): a number of a player character or of a creature a player controls, or a player's cast with
+    /// nothing the DM sees or resolves. Kept in the log, never shown to the DM
+    /// ([`crate::visibility::dm_may_see`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub private: bool,
 }
 
 /// The kinds of [`DmEvent`], with the data a DM card shows.

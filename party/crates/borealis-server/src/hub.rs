@@ -204,13 +204,22 @@ impl PartyHub {
 
     /// Move a party's sequences: the DM's, and the players' when `players`. The new values.
     pub fn bump(&self, party: &str, players: bool) -> (u64, Option<u64>) {
+        let (dm, players) = self.bump_for(party, true, players);
+        (dm.unwrap_or_default(), players)
+    }
+
+    /// Move the DM's sequence when `dm` and the players' when `players` (0.3.3: a change only the players see, like
+    /// a health band in combat, moves nothing the DM can count or time). The new values.
+    pub fn bump_for(&self, party: &str, dm: bool, players: bool) -> (Option<u64>, Option<u64>) {
         let mut inner = self.lock();
         let seqs = inner.parties.entry(party.to_string()).or_default();
-        seqs.dm += 1;
+        if dm {
+            seqs.dm += 1;
+        }
         if players {
             seqs.players += 1;
         }
-        (seqs.dm, players.then_some(seqs.players))
+        (dm.then_some(seqs.dm), players.then_some(seqs.players))
     }
 
     /// A party's current sequence for an audience (what a fetch of its view is as new as).
@@ -473,21 +482,55 @@ pub fn health_band(card: &Card) -> Option<&'static str> {
 /// Who looks at a member character.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Viewer {
-    /// The party's DM.
-    Dm,
-    /// The character's owner.
-    Owner,
-    /// Another player in the party; `in_combat` while the party is in a combat ([`crate::parties::in_combat`]).
-    Member {
-        /// The party is in a combat: the health band is shown.
+    /// The party's DM; `in_combat` while the party is in a combat ([`crate::parties::in_combat`]).
+    Dm {
+        /// The party is in a combat: the DM sees a health band, not the hit points.
         in_combat: bool,
     },
+    /// The character's owner.
+    Owner,
+    /// Another player in the party: name, classes, level and the health band (always, in and out of combat).
+    Member,
 }
 
-/// The one projection of a member character's card for a viewer (plan 3.5, D6). Every response that shows a card
-/// goes through here. The DM and the owner get it all; another member gets the name, classes and level, the edition
-/// and whether it can be read, and during a combat only, a health band (the user's D6 choice: no `band` field at all
-/// outside combat).
+/// The [`Stats`] keys the DM sees of a member character while the party is in a combat (0.3.3, the user's rule of
+/// 2026-11-14: "while in combat we want to hide it because realistically in a fight you cant know how healthy
+/// someone is"): its AC, initiative bonus, speed, passive Perception, spell save DCs, exhaustion, whether it
+/// concentrates, and Heroic Inspiration. Never its hit points: the health band instead. Outside combat the DM sees
+/// the whole card (max HP when building the party, the build).
+pub const DM_STATS: &[&str] = &[
+    "armorClass",
+    "initiative",
+    "speed",
+    "passivePerception",
+    "spellDcs",
+    "exhaustion",
+    "concentration",
+    "inspiration",
+];
+
+/// The [`Stats`] keys the DM never sees during a combat.
+pub const OWNER_ONLY_STATS: &[&str] = &["hp", "hpMax", "tempHp"];
+
+fn dm_stats(stats: Option<&Stats>) -> Value {
+    let Some(stats) = stats else {
+        return Value::Null;
+    };
+    let mut v = json!(stats);
+    if let Some(o) = v.as_object_mut() {
+        o.retain(|k, _| DM_STATS.contains(&k.as_str()) && !OWNER_ONLY_STATS.contains(&k.as_str()));
+        o.insert("concentration".into(), json!(stats.concentration.is_some()));
+    }
+    v
+}
+
+/// The one projection of a member character's card for a viewer (plan 3.5, D6 as the user set it on 2026-11-14).
+/// Every response that shows a card goes through here.
+/// - The owner gets it all.
+/// - The DM gets it all outside combat; during a combat its stats are [`DM_STATS`] (no hit points) plus the
+///   health band.
+/// - Another member gets the name, classes and level, the edition, whether it can be read, and the health band,
+///   always (never numbers).
 pub fn card_view_for(viewer: Viewer, card: &Card, state: &str) -> Map<String, Value> {
     let mut out = Map::new();
     out.insert("name".into(), json!(card.name));
@@ -499,14 +542,16 @@ pub fn card_view_for(viewer: Viewer, card: &Card, state: &str) -> Map<String, Va
     out.insert("classes".into(), json!(card.classes));
     out.insert("state".into(), json!(state));
     match viewer {
-        Viewer::Dm | Viewer::Owner => {
+        Viewer::Owner | Viewer::Dm { in_combat: false } => {
             out.insert("stats".into(), json!(card.stats));
             out.insert("readAt".into(), json!(card.read_at));
         }
-        Viewer::Member { in_combat } => {
-            if in_combat {
-                out.insert("band".into(), json!(health_band(card)));
-            }
+        Viewer::Dm { in_combat: true } => {
+            out.insert("stats".into(), dm_stats(card.stats.as_ref()));
+            out.insert("band".into(), json!(health_band(card)));
+        }
+        Viewer::Member => {
+            out.insert("band".into(), json!(health_band(card)));
         }
     }
     out
@@ -515,7 +560,9 @@ pub fn card_view_for(viewer: Viewer, card: &Card, state: &str) -> Map<String, Va
 /// What changed when a card was stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Changed {
-    /// The DM's view of it.
+    /// The card itself (kept again; a combat syncs the PC's HP from it).
+    pub stored: bool,
+    /// The DM's view of it (0.3.3: it has no hit points, so a change of HP alone is no change for the DM).
     pub dm: bool,
     /// The other members' view of it.
     pub players: bool,
@@ -583,22 +630,32 @@ impl CardCache {
     }
 
     /// Store a card (blocking: writes its file when it changed), and say what changed for whom. `in_combat`: the
-    /// party is in a combat, so the other members see the health band and a change of band is a change for them.
+    /// party is in a combat, so the DM sees a band instead of the hit points and a change of HP within a band is no
+    /// change for the DM (the members always see the band).
     pub fn put(&self, owner: &str, character: &str, card: Card, in_combat: bool) -> Changed {
-        let member = Viewer::Member { in_combat };
+        let member = Viewer::Member;
         let before = self.get(owner, character);
         let changed = match &before {
             None => Changed {
+                stored: true,
                 dm: true,
                 players: true,
             },
             Some(old) if old.same(&card) => Changed::default(),
             Some(old) => Changed {
-                dm: true,
+                stored: true,
+                dm: {
+                    let dm = |c: &Card| {
+                        let mut v = card_view_for(Viewer::Dm { in_combat }, c, "ok");
+                        v.remove("readAt");
+                        v
+                    };
+                    dm(old) != dm(&card)
+                },
                 players: card_view_for(member, old, "ok") != card_view_for(member, &card, "ok"),
             },
         };
-        if changed.dm {
+        if changed.stored {
             if let Some(file) = self.file(owner, character) {
                 if let Err(e) = write_card(&file, &card) {
                     tracing::warn!("party: writing a card of {owner}: {e}");
@@ -678,30 +735,10 @@ mod tests {
     }
 
     #[test]
-    fn another_member_sees_only_the_d6_fields() {
+    fn another_member_sees_only_the_band() {
         let full = card(7, 20);
-        // Outside combat: no band field at all.
-        let member = card_view_for(Viewer::Member { in_combat: false }, &full, "ok");
-        let keys: Vec<&str> = member.keys().map(String::as_str).collect();
-        assert_eq!(
-            keys,
-            ["classes", "level", "name", "ruleset", "state"],
-            "{member:?}"
-        );
-        let text = Value::Object(member).to_string();
-        for secret in [
-            "16",
-            "armorClass",
-            "stats",
-            "hp",
-            "readAt",
-            "band",
-            "bloodied",
-        ] {
-            assert!(!text.contains(secret), "{secret} in {text}");
-        }
-        // In combat: the band too, and still no numbers.
-        let member = card_view_for(Viewer::Member { in_combat: true }, &full, "ok");
+        // Always the band (the user, 2026-11-14), never a number.
+        let member = card_view_for(Viewer::Member, &full, "ok");
         let keys: Vec<&str> = member.keys().map(String::as_str).collect();
         assert_eq!(
             keys,
@@ -713,59 +750,73 @@ mod tests {
         for secret in ["16", "armorClass", "stats", "hp", "readAt"] {
             assert!(!text.contains(secret), "{secret} in {text}");
         }
-        for viewer in [Viewer::Dm, Viewer::Owner] {
+        // The owner, and the DM outside combat: the whole card (max HP when building the party, the build).
+        for viewer in [Viewer::Dm { in_combat: false }, Viewer::Owner] {
             let all = card_view_for(viewer, &full, "ok");
             assert_eq!(all["stats"]["armorClass"], 16);
             assert_eq!(all["stats"]["hp"], 7);
             assert!(all.get("band").is_none());
         }
+        // The DM during a combat: the band, never the hit points.
+        let dm = card_view_for(Viewer::Dm { in_combat: true }, &full, "ok");
+        assert_eq!(dm["band"], "bloodied");
+        for k in dm["stats"].as_object().unwrap().keys() {
+            assert!(DM_STATS.contains(&k.as_str()), "{k} reached the DM");
+        }
+        for k in OWNER_ONLY_STATS {
+            assert!(dm["stats"].get(*k).is_none(), "{k} reached the DM");
+        }
+        // Every stat is classified: the DM's in combat, or not.
+        for k in serde_json::to_value(full.stats.as_ref().unwrap())
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .keys()
+        {
+            assert!(
+                DM_STATS.contains(&k.as_str()) != OWNER_ONLY_STATS.contains(&k.as_str()),
+                "stat {k} is not classified"
+            );
+        }
     }
 
     #[test]
-    fn the_players_view_moves_only_when_the_band_does() {
+    fn the_views_move_only_when_what_they_show_does() {
         let dir = tempfile::tempdir().unwrap();
         let cache = CardCache::new(dir.path().to_path_buf());
-        let first = cache.put("o-1", "c_1", card(20, 20), true);
-        assert_eq!(
-            first,
-            Changed {
-                dm: true,
-                players: true
-            }
-        );
+        let all = Changed {
+            stored: true,
+            dm: true,
+            players: true,
+        };
+        assert_eq!(cache.put("o-1", "c_1", card(20, 20), true), all);
         // The same numbers, read later: nothing changed.
         let mut again = card(20, 20);
         again.read_at = Some(99);
         assert_eq!(cache.put("o-1", "c_1", again, true), Changed::default());
-        // Hurt, still unhurt: the DM's view only.
+        // In combat, hurt but still unhurt: stored (the combat syncs it), nobody's view changed.
         assert_eq!(
             cache.put("o-1", "c_1", card(15, 20), true),
             Changed {
-                dm: true,
-                players: false
+                stored: true,
+                dm: false,
+                players: false,
             }
         );
-        // Bloodied in combat: both.
+        // Bloodied in combat: the band, for the DM and the members.
+        assert_eq!(cache.put("o-1", "c_1", card(10, 20), true), all);
+        // Outside combat the DM sees the numbers; down is a new band for the members.
+        assert_eq!(cache.put("o-1", "c_1", card(0, 20), false), all);
+        assert_eq!(cache.put("o-1", "c_1", card(9, 20), true), all);
+        // A change only the DM sees (the AC).
+        let mut armored = card(9, 20);
+        armored.stats.as_mut().unwrap().armor_class = 18;
         assert_eq!(
-            cache.put("o-1", "c_1", card(10, 20), true),
+            cache.put("o-1", "c_1", armored, true),
             Changed {
+                stored: true,
                 dm: true,
-                players: true
-            }
-        );
-        // Outside combat the players see no band, so down is no change for them.
-        assert_eq!(
-            cache.put("o-1", "c_1", card(0, 20), false),
-            Changed {
-                dm: true,
-                players: false
-            }
-        );
-        assert_eq!(
-            cache.put("o-1", "c_1", card(9, 20), true),
-            Changed {
-                dm: true,
-                players: true
+                players: false,
             }
         );
         // Kept on file: a new cache reads it back.
