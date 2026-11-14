@@ -31,26 +31,35 @@ function writeLocal(): void {
   } catch { /* a private window: the account setting still has it */ }
 }
 
+/** How long the card waits for every fact before it shows what it has. */
+export const PATIENCE = 4000;
+/** Nothing read yet: every step not done, the optional AI step shown. */
+const UNKNOWN: Facts = { content: null, character: null, party: null, encounter: null, ai: false };
+
 const yes = (p: Promise<boolean>): Promise<boolean | null> => p.catch(() => null);
 
-/** What the account has, read in parallel; a failed read is "not known". */
-export async function readFacts(api: Api): Promise<Facts> {
+/**
+ * What the account has, read in parallel; a failed read is "not known". Each fact is handed to `onFact` as soon as it
+ * is read, so a slow one (a new account's first content work can hold the server for a while) doesn't hold the others.
+ */
+export async function readFacts(api: Api, onFact: (fact: Partial<Facts>) => void = () => undefined): Promise<Facts> {
   const parties = listParties().catch(() => null);
+  const tell = <K extends keyof Facts>(key: K, p: Promise<Facts[K]>) => p.then((v) => { onFact({ [key]: v } as Partial<Facts>); return v; });
   const [content, character, party, encounter, ai] = await Promise.all([
-    yes(Promise.all([api.listPacks(), api.listIndexes().catch(() => [])])
-      .then(([packs, indexes]) => packs.some((p) => p.kind !== "bundled") || indexes.length > 0)),
-    yes(api.listCharacters().then((l) => l.length > 0)),
-    parties.then((l) => (l ? l.parties.length > 0 : null)),
-    parties.then(async (l) => {
+    tell("content", yes(Promise.all([api.listPacks(), api.listIndexes().catch(() => [])])
+      .then(([packs, indexes]) => packs.some((p) => p.kind !== "bundled") || indexes.length > 0))),
+    tell("character", yes(api.listCharacters().then((l) => l.length > 0))),
+    tell("party", parties.then((l) => (l ? l.parties.length > 0 : null))),
+    tell("encounter", parties.then(async (l) => {
       if (!l) return null;
       for (const p of l.parties.filter((x) => x.role === "dm")) {
         const list = await listEncounters(p.id).catch(() => null);
         if (list && list.encounters.length > 0) return true;
       }
       return false;
-    }),
+    })),
     // A server without AI apps answers 404: the step is left out.
-    Promise.all([listTokens(), listApps()]).then(([t, a]) => t.length > 0 || a.length > 0, () => null),
+    tell("ai", Promise.all([listTokens(), listApps()]).then(([t, a]) => t.length > 0 || a.length > 0, () => null)),
   ]);
   return { content, character, party, encounter, ai };
 }
@@ -58,14 +67,16 @@ export async function readFacts(api: Api): Promise<Facts> {
 /**
  * The first-run checklist on the Characters page (./checklist.ts): a card above the characters until every required
  * step is done or the account closes it. Nothing shows offline, or until the account's facts are read (no flash of
- * unticked steps for an account that has done them all).
+ * unticked steps for an account that has done them all), or {@link PATIENCE} ms have passed: then the card shows what
+ * is known, the facts still being read count as not done, and their steps tick when they arrive.
  */
 export function OnboardingCard() {
   const api = useApi();
   const nav = useNavigate();
   const { settings, loaded, update } = useSettings();
   const dm = useDmRole() === true;
-  const [facts, setFacts] = useState<Facts | null>(null);
+  const [facts, setFacts] = useState<Facts>(UNKNOWN);
+  const [ready, setReady] = useState(false);
   const [local, setLocal] = useState(readLocal);
   const offline = isOffline();
   const dismissed = isDismissed(settings, local);
@@ -73,14 +84,16 @@ export function OnboardingCard() {
   useEffect(() => {
     if (offline || dismissed) return;
     let live = true;
-    const read = () => void readFacts(api).then((f) => { if (live) setFacts(f); });
+    const read = () => void readFacts(api, (f) => { if (live) setFacts((was) => ({ ...was, ...f })); })
+      .then((f) => { if (live) { setFacts(f); setReady(true); } });
     read();
+    const patience = setTimeout(() => { if (live) setReady(true); }, PATIENCE);
     // A party made or joined in another tab, or a DM switch change, ticks its step here too.
     const off = onPartiesChanged(read);
-    return () => { live = false; off(); };
+    return () => { live = false; clearTimeout(patience); off(); };
   }, [api, offline, dismissed, dm]);
 
-  if (offline || !loaded || !facts) return null;
+  if (offline || !loaded || !ready) return null;
   const steps = buildSteps(facts, dm);
   if (!showChecklist(steps, dismissed)) return null;
   const { done, total } = progress(steps);
