@@ -124,6 +124,42 @@ describe("through the page's API", () => {
     stop();
   });
 
+  it("desktop: a .borealis double-clicked while the app runs (the backend's content:open-file) asks, then imports", async () => {
+    // The backend's event, as Tauri's `listen` registers it: `plugin:event|listen` with a callback id.
+    const callbacks = new Map<number, (e: unknown) => void>();
+    const listening: number[] = [];
+    queued = [];
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+      invoke: vi.fn(async (cmd: string, args: Record<string, unknown>) => {
+        invoked.push(cmd);
+        if (cmd === "take_opened_files") return queued.splice(0);
+        if (cmd === "plugin:event|listen" && args.event === "borealis://open-file") listening.push(args.handler as number);
+        return 0;
+      }),
+      transformCallback: (cb: (e: unknown) => void) => { callbacks.set(callbacks.size + 1, cb); return callbacks.size; },
+    };
+    const w = window as unknown as Record<string, unknown>;
+    w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => undefined };
+    const went: string[] = [];
+    setImportNavigate((to) => went.push(to));
+    const stop = watchOpened(session);
+    await waitFor(() => expect(listening).toHaveLength(1));
+    await waitFor(() => expect(invoked).toContain("take_opened_files"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // The second launch's file is in the queue; the running app is told.
+    queued.push(file("Borealis characters.borealis"));
+    callbacks.get(listening[0])?.({ event: "borealis://open-file", id: 1, payload: null });
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain("Import Borealis characters.borealis into alice?");
+    expect(takeInbox().files).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    await waitFor(() => expect(went).toEqual(["/content"]));
+    expect(takeInbox().files.map((f) => f.name)).toEqual(["Borealis characters.borealis"]);
+    stop();
+    await waitFor(() => expect(invoked).toContain("plugin:event|unlisten"));
+    delete w.__TAURI_EVENT_PLUGIN_INTERNALS__;
+  });
+
   it("never asks the device for bundles: take_opened_bundles is not in the apps", async () => {
     expect(await createHttpApi(session).takeOpenedBundles()).toEqual([]);
     expect(invoked).toEqual([]);

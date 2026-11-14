@@ -13,8 +13,10 @@ import { override } from "./registry";
  * device's queue (Android's activity, or Rust on iOS and the desktop) until the page asks with `take_opened_files`.
  * The apps are built without device-link, so that is the only queue: `take_opened_bundles` does not exist.
  * - Android reads every opened file into that queue as bytes, `.borealis` included.
- * - iOS and the desktop read only `.xml`, `.index`, `.zip`, `.dnd5e` and `.json` (content_preview.rs
- *   `push_opened_file`) and drop a `.borealis` without a word, so party/ios/Info.plist no longer claims `.borealis`.
+ * - The desktop (Windows and Linux) does too: without device-link, content_preview.rs `push_opened_file` keeps a
+ *   `.borealis` with the other files. The installers register `.borealis` for the app (party/tauri.party.desktop.json),
+ *   and a second launch hands its file to the running app (single-instance), which sends `content:open-file`.
+ * - iOS reads the same files as the desktop, but party/ios/Info.plist does not claim `.borealis` (not tried on a Mac).
  *
  * Online, the files are taken from the device and, after an app dialog ("Import X into <account>?"), handed to the
  * Import section (../../import/door.ts), which sniffs them and lists each result, as it does for files chosen or dropped
@@ -26,7 +28,7 @@ import { override } from "./registry";
  * queue, and this module says they will be imported when the app is connected (the online page takes them on start).
  */
 
-/** Names the device queue takes in (content_preview.rs `push_opened_file`, plus `.borealis` on Android). */
+/** Names the device queue takes in (content_preview.rs `push_opened_file` without device-link, and Android's). */
 const IMPORTABLE = [".dnd5e", ".xml", ".index", ".zip", ".json", ".borealis"];
 
 const importable = (name: string) => IMPORTABLE.some((e) => name.toLowerCase().endsWith(e));
@@ -148,6 +150,6 @@ watchOffline();
 override("opened", (methods) => {
   // Upstream's GlobalImport asks on start and when nudged: the party has taken the files already (watchOpened).
   methods.takeOpenedFiles = async () => [] as OpenedFile[];
-  // Nothing is ever set aside as a bundle here: Android hands `.borealis` over with the other files (above).
+  // Nothing is ever set aside as a bundle here: Android and the desktop hand `.borealis` over with the other files.
   methods.takeOpenedBundles = async () => [] as Awaited<ReturnType<Api["takeOpenedBundles"]>>;
 });

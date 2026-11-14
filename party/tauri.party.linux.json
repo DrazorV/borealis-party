@@ -2,13 +2,22 @@
   "bundle": {
     "linux": {
       "deb": {
-        "files": { "/usr/share/mime/packages/borealis.xml": null }
+        "files": {
+          "/usr/share/mime/packages/borealis.xml": null,
+          "/usr/share/mime/packages/borealis-party.xml": "../party/desktop/borealis-party-mime.xml"
+        }
       },
       "rpm": {
-        "files": { "/usr/share/mime/packages/borealis.xml": null }
+        "files": {
+          "/usr/share/mime/packages/borealis.xml": null,
+          "/usr/share/mime/packages/borealis-party.xml": "../party/desktop/borealis-party-mime.xml"
+        }
       },
       "appimage": {
-        "files": { "/usr/share/mime/packages/borealis.xml": null }
+        "files": {
+          "/usr/share/mime/packages/borealis.xml": null,
+          "/usr/share/mime/packages/borealis-party.xml": "../party/desktop/borealis-party-mime.xml"
+        }
       }
     }
   }

@@ -679,7 +679,12 @@ pub fn push_opened_file(path: &Path) {
         return;
     }
     let lower = path.to_string_lossy().to_lowercase();
+    // Without device-link there is no bundle inbox: a `.borealis` waits here with the other files, so the
+    // UI can say what to do with it instead of the file vanishing.
+    #[cfg(feature = "device-link")]
     let known = [".xml", ".index", ".zip", ".dnd5e", ".json"];
+    #[cfg(not(feature = "device-link"))]
+    let known = [".xml", ".index", ".zip", ".dnd5e", ".json", ".borealis"];
     if !known.iter().any(|e| lower.ends_with(e)) {
         return;
     }
@@ -710,4 +715,15 @@ pub fn take_opened_files() -> Vec<OpenedFile> {
         .lock()
         .map(|mut q| std::mem::take(&mut *q))
         .unwrap_or_default()
+}
+
+/// The files named in a launch's arguments (the program name skipped), relative ones resolved against
+/// `cwd`: what a second launch hands the running app (Windows and Linux "Open with" and double-click).
+#[must_use]
+pub fn opened_arg_paths(argv: &[String], cwd: &Path) -> Vec<std::path::PathBuf> {
+    argv.iter()
+        .skip(1)
+        .filter(|a| !a.starts_with('-'))
+        .map(|a| cwd.join(a))
+        .collect()
 }

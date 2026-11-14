@@ -653,6 +653,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-haptics",
  "tauri-plugin-opener",
+ "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tempfile",
  "thiserror 2.0.21",
@@ -5582,6 +5583,13 @@ dependencies = [
  "url",
  "windows 0.62.2",
  "zbus",
+]
+
+[[package]]
+name = "tauri-plugin-single-instance"
+version = "2.99.0"
+dependencies = [
+ "tauri",
 ]
 
 [[package]]

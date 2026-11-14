@@ -228,6 +228,21 @@ pub fn take_opened_files(app: AppHandle) -> Vec<OpenedFile> {
     files
 }
 
+/// Windows and Linux: a second launch (a file double-clicked while the app runs) handed its arguments
+/// to this instance and exited. Queue its files, tell the UI and bring the window forward.
+#[cfg(any(windows, target_os = "linux"))]
+pub fn handle_second_instance(app: &AppHandle, argv: &[String], cwd: &str) {
+    for path in crate::content_preview::opened_arg_paths(argv, std::path::Path::new(cwd)) {
+        crate::content_preview::push_opened_file(&path);
+    }
+    let _ = app.emit(EVENT_OPEN_FILE, ());
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 /// Queue files from `RunEvent::Opened` and tell the UI.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub fn handle_opened(app: &AppHandle, urls: &[tauri::Url]) {

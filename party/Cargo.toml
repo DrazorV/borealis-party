@@ -17,6 +17,7 @@ members = [
   "crates/tauri-macros",
   "crates/tauri-build",
   "crates/tauri-plugin-dialog",
+  "crates/tauri-plugin-single-instance",
   "crates/tauri-plugin-updater",
 ]
 
@@ -38,6 +39,7 @@ all = { level = "warn", priority = -1 }
 tauri = { path = "crates/tauri" }
 tauri-build = { path = "crates/tauri-build" }
 tauri-plugin-dialog = { path = "crates/tauri-plugin-dialog" }
+tauri-plugin-single-instance = { path = "crates/tauri-plugin-single-instance" }
 tauri-plugin-updater = { path = "crates/tauri-plugin-updater" }
 
 [profile.release]

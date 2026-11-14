@@ -462,6 +462,41 @@ jobs:
           fi
           ls -l dist
 
+      # .borealis opens with the app (party/tauri.party.desktop.json): the installer registers it with the app's icon
+      # and uninstalling removes it; the MSI's tables name it; the Linux packages carry its MIME type and claim it in
+      # the desktop entry. .dnd5e stays desktop Borealis's.
+      - name: Check the .borealis file type (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          NAME: ${{ matrix.name }}
+        run: |
+          $msi = "dist/borealis-party-$env:NAME.msi"
+          $extra = if (Test-Path $msi) { @{ Msi = $msi } } else { @{} }
+          ./party/desktop/check-file-type.ps1 -Setup "dist/borealis-party-$env:NAME-setup.exe" @extra
+
+      - name: Check the .borealis file type (Linux)
+        if: runner.os == 'Linux'
+        env:
+          DEB_ARCH: ${{ matrix.deb }}
+        run: |
+          set -euo pipefail
+          deb="dist/borealis-party-linux-$DEB_ARCH.deb"
+          x=$(mktemp -d)
+          dpkg-deb -x "$deb" "$x"
+          mime="$x/usr/share/mime/packages/borealis-party.xml"
+          [ -f "$mime" ] || { echo "::error::the deb has no borealis-party.xml MIME file"; exit 1; }
+          if ! grep -q 'type="application/x-borealis-bundle"' "$mime" || ! grep -q 'pattern="\*.borealis"' "$mime"; then
+            echo "::error::borealis-party.xml does not define *.borealis"; exit 1
+          fi
+          if grep -q 'dnd5e' "$mime"; then echo "::error::borealis-party.xml claims .dnd5e"; exit 1; fi
+          desktop=$(find "$x/usr/share/applications" -name '*.desktop' | head -n 1)
+          cat "$desktop"
+          if ! grep -q '^MimeType=application/x-borealis-bundle;\?$' "$desktop"; then
+            echo "::error::the desktop entry does not claim application/x-borealis-bundle"; exit 1
+          fi
+          grep -q '^Exec=.* %F$' "$desktop" || { echo "::error::the desktop entry does not pass files (%F)"; exit 1; }
+
       - uses: actions/upload-artifact@v4
         with:
           name: party-desktop-${{ matrix.name }}

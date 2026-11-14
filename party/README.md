@@ -424,12 +424,20 @@ A player shares characters and content packs with another player from any device
 
 ## Open with, and web links, in the apps
 
-- **Open with / Share to Borealis Party** (Android and iOS): the app asks first, in its own dialog, "Import
+- **Open with / Share to Borealis Party** (Android, iOS and the desktop apps): the app asks first, in its own dialog, "Import
   Hero.dnd5e into alice?", and Import opens the Import section with the file, as if it had been chosen there (see
   "One import page" below). Cancel drops it. The upload size limits above apply, with the same messages.
-- A `.borealis` opened on Android goes to the Import section too, which uploads it and opens the Open bundle window.
-  The party apps are built without device transfer, and without it iOS (and the desktop app) would drop an
-  opened `.borealis` without a word, so the iOS app doesn't offer to open `.borealis` files: use File > Open bundle....
+- A `.borealis` opened on Android or on the desktop goes to the Import section too, which uploads it and opens the
+  Open bundle window. The iOS app doesn't offer to open `.borealis` files yet (not tried on a Mac): use File > Open
+  bundle....
+- **Double-clicking a `.borealis` file** (Windows and Linux, from 0.3.3): the installers register the type as
+  "Borealis bundle" with the app's icon (`party/tauri.party.desktop.json`; on Linux the MIME file
+  `party/desktop/borealis-party-mime.xml` and the desktop entry's `MimeType`). If the app is already running, the
+  file goes to that window (upstream's single-instance plugin, carried as `branch:fix/single-instance`), which comes
+  to the front and asks. Uninstalling removes the type. `.dnd5e` stays desktop Borealis's: the party apps don't claim
+  it. If Windows still opens `.borealis` with something else, the user picked that once in "Open with" (right-click >
+  Open with > Choose another app > Borealis Party > Always). `party/desktop/check-file-type.ps1` checks the installers'
+  registry entries (run by party-apps.yml; it installs and uninstalls the app, so not on a PC that uses it).
 - Offline, an opened file stays on the device and the app says it will import it when it is connected; the online
   app takes it when it starts. (On Android a file opened while the app was closed is taken on the next online start.)
 - Web links: the apps open Borealis's own pages as before, and any other web page (this server's pages, the app
@@ -581,7 +589,7 @@ How that works:
   network text) into upstream's Info.plist while Tauri builds; `party/ios/build-ios.sh` puts upstream's Xcode project
   back afterwards.
 - **Tauri.** `party/tauri.party.json` overrides the front end and network policy, and `party/tauri.party.desktop.json`
-  the desktop app's name, identifier, update feed and file associations.
+  the desktop app's name, identifier, update feed and file associations (`.borealis` only, under its own type name).
 
 After a merge, build and run the tests (on Linux, from `party/`):
 
@@ -620,8 +628,8 @@ The desktop apps are built as `party/desktop/build-desktop.ps1 -Installer` build
 `app.borealis.party`, apart from desktop Borealis. They are not code-signed. Windows SmartScreen therefore shows
 "Windows protected your PC" with "Unknown publisher" when the installer starts; choose More info > Run anyway.
 Some browsers also warn that the file is not commonly downloaded. The AppImage needs `chmod +x` before it runs. The
-Linux packages leave out desktop Borealis's file types, so both can be installed side by side
-(`party/tauri.party.linux.json`).
+Linux packages leave out desktop Borealis's MIME file and carry their own for `.borealis` only, so both can be
+installed side by side (`party/tauri.party.linux.json`).
 
 The Windows installer and the AppImages update themselves from the newest release: the app offers Install and
 restart when a newer version is out. The `.deb` and the MSI don't. See `party/desktop/updates.md`, including the one
@@ -737,7 +745,9 @@ party/desktop/build-desktop.ps1 -Installer   # also an NSIS installer
 `party/tauri.party.desktop.json` names the app "Borealis Party" with its own identifier, `app.borealis.party`, so it
 keeps its data in `%APPDATA%\app.borealis.party`, and the app window never touches desktop Borealis's
 `%APPDATA%\app.borealis` on the same computer. The exe still has upstream's `--mcp` and command-line modes; those read
-(never write) desktop Borealis's library and search index in `%APPDATA%\app.borealis`, so don't use them. It also leaves out upstream's update feed and file associations, which belong to desktop Borealis.
+(never write) desktop Borealis's library and search index in `%APPDATA%\app.borealis`, so don't use them. It also leaves out upstream's update feed and file associations, which belong to desktop Borealis, except
+`.borealis`, which it registers under its own type name (`BorealisParty.Bundle`): whichever app was installed last
+opens it.
 Like the Android app it is built without device transfer or on-device semantic search. Set `CARGO_HOME` to a short
 path such as `C:\c` first, as for the Android app.
 

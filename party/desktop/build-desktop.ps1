@@ -6,8 +6,8 @@
 # Built from the main Cargo workspace (src-tauri), not party/Cargo.toml: that one swaps tauri for the server's stand-ins.
 # tauri.party.desktop.json gives the app its own identifier, app.borealis.party, so its data folder is
 # %APPDATA%\app.borealis.party and never desktop Borealis's %APPDATA%\app.borealis. It also gives upstream's updater the
-# party release feed and key (party/desktop/updates.md) and turns off file associations, which belong to desktop
-# Borealis. The app's version is the party version (party/Cargo.toml), which the updater compares with the feed.
+# party release feed and key (party/desktop/updates.md) and turns off desktop Borealis's file associations, except
+# .borealis, which it registers under its own type name (check-file-type.ps1 checks the installer's). The app's version is the party version (party/Cargo.toml), which the updater compares with the feed.
 #
 # With TAURI_SIGNING_PRIVATE_KEY (and _PASSWORD) set, -Installer also writes the signed update file next to the
 # installer (`*-setup.exe.sig`).

@@ -319,6 +319,13 @@ pub fn run() {
         content_preview::push_opened_file(std::path::Path::new(&arg));
     }
     let builder = tauri::Builder::default();
+    // Windows and Linux: one app at a time. A second launch (a file double-clicked while the app runs)
+    // hands its arguments to this one and exits, so the file opens here and two windows never share
+    // the library. Registered first, as the plugin asks.
+    #[cfg(any(windows, target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+        commands_content::handle_second_instance(app, &argv, &cwd);
+    }));
     // Opt-in import bug reports: previews wait here until the user presses Send.
     #[cfg(ai_cli)]
     let builder = builder.manage(std::sync::Arc::new(
