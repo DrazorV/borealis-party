@@ -48,3 +48,21 @@ src-tauri/src/settings.rs branch:feat/hidden-elements
 # so the HTTPS client checks the address it actually connects to (after its own lookup and after every redirect)
 # and the refusal reaches the Indexes tab in words. The party server checks before fetching (net_guard.rs) and relies
 # on the container's egress firewall for the rest. No file is changed for it yet, so no line names one.
+
+# Sources page: Source elements found by name (playtest flag works), "Restrict playtest / third-party content"
+# toggles kept in settings.
+src-tauri/src/content_dto.rs https://github.com/TeamBorealis/borealis/pull/48
+src-tauri/src/content_packs.rs https://github.com/TeamBorealis/borealis/pull/48
+src-tauri/src/settings.rs https://github.com/TeamBorealis/borealis/pull/48
+src-tauri/tests/source_flags.rs https://github.com/TeamBorealis/borealis/pull/48
+ui/src/api/generated/contract.json https://github.com/TeamBorealis/borealis/pull/48
+ui/src/api/mock/content-service.ts https://github.com/TeamBorealis/borealis/pull/48
+ui/src/api/mock/default-settings.ts https://github.com/TeamBorealis/borealis/pull/48
+ui/src/api/types/content.ts https://github.com/TeamBorealis/borealis/pull/48
+ui/src/api/types/settings.ts https://github.com/TeamBorealis/borealis/pull/48
+ui/src/pages/content/SourcesPage.tsx https://github.com/TeamBorealis/borealis/pull/48
+ui/src/pages/content/applySources.ts https://github.com/TeamBorealis/borealis/pull/48
+ui/src/pages/content/content.css https://github.com/TeamBorealis/borealis/pull/48
+ui/src/pages/content/sourceFilters.ts https://github.com/TeamBorealis/borealis/pull/48
+ui/src/test/fx5-content-sheet.test.tsx https://github.com/TeamBorealis/borealis/pull/48
+ui/src/test/source-restrict-toggles.test.tsx https://github.com/TeamBorealis/borealis/pull/48
