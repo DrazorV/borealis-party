@@ -1053,7 +1053,10 @@ async fn list_extensions_reach_a_visible_copy_in_installed_content() {
     assert!(
         counts.iter().all(|c| c.4 == 0),
         "a hidden copy named by a list extension has no stand-in"
+    );
+}
 
+// ---------------------------------------------------------------------------------------------------------------
 // The DM tools follow the account's content rules (0.3.5): sources, toggles, one copy, edition
 // ---------------------------------------------------------------------------------------------------------------
 
