@@ -34,7 +34,7 @@ jobs:
     if: >-
       github.repository == 'TeamBorealis/borealis' &&
       (github.event_name != 'issues' || startsWith(github.event.issue.body, '<!-- discord-thread:'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -61,7 +61,7 @@ jobs:
       github.repository == 'TeamBorealis/borealis' &&
       ((github.event_name == 'release' && !github.event.release.prerelease) ||
        (github.event_name == 'workflow_dispatch' && inputs.announce_tag != ''))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read

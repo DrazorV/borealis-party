@@ -71,7 +71,7 @@ env:
 jobs:
   verify-version:
     name: verify tag matches tauri.conf.json
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
@@ -171,7 +171,9 @@ jobs:
       matrix:
         # Linux x86_64: deb + rpm + AppImage (targets "all"); Windows x64: NSIS only
         # (tauri.windows.conf.json). macOS, iOS and Android have their own jobs below.
-        os: [ubuntu-latest, windows-latest]
+        # ubuntu-24.04, not ubuntu-latest: 26.04's compiler fails the llama.cpp x86 levels check and would raise the
+        # glibc a Linux build needs. Move on purpose (pinned 2026-11-14, like rust-toolchain.toml).
+        os: [ubuntu-24.04, windows-latest]
     steps:
       - name: Keep LF line endings (Windows)
         if: runner.os == 'Windows'
@@ -303,7 +305,7 @@ jobs:
     name: signed Android APK
     needs: verify-version
     if: ${{ !inputs.macos_resume_run && !inputs.play_only }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       VERSION: ${{ needs.verify-version.outputs.version }}
     steps:
@@ -386,7 +388,7 @@ jobs:
     name: signed Google Play bundle
     needs: verify-version
     if: ${{ !inputs.attach_to_existing && !inputs.macos_resume_run }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       VERSION: ${{ needs.verify-version.outputs.version }}
       BUILD_NUMBER: ${{ needs.verify-version.outputs.build_number }}
@@ -852,7 +854,7 @@ jobs:
     name: add APK to existing release
     needs: [verify-version, android]
     if: ${{ inputs.attach_to_existing && !inputs.dry_run }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
@@ -875,7 +877,7 @@ jobs:
     name: draft release
     needs: [verify-version, build, android]
     if: ${{ !inputs.attach_to_existing && !inputs.macos_resume_run && !inputs.play_only && !inputs.dry_run }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
@@ -935,7 +937,7 @@ jobs:
       ${{ !cancelled() && !inputs.dry_run && needs.verify-version.result == 'success' &&
       ((needs.macos.result == 'success' && needs.publish-draft.result == 'success') ||
       needs.macos-resume.result == 'success') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
