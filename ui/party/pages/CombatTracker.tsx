@@ -313,7 +313,8 @@ function usePlayerCastNotes(state: CombatState | undefined, feed: FeedEntry[] | 
     if (lastSeq.current === null) { lastSeq.current = top; return; }
     const fresh = feed.filter((e) => e.seq > lastSeq.current! && e.author === "player" && e.event?.text).sort((a, b) => a.seq - b.seq);
     lastSeq.current = Math.max(lastSeq.current, top);
-    for (const e of fresh) push(e.event.text);
+    // One note per change, oldest first ("Aria casts Bless at level 1 · Aria concentrates on Bless · Bless applied").
+    if (fresh.length > 0) push(fresh.map((e) => e.event.text).join(" · "));
   }, [feed, push]);
   useEffect(() => {
     if (!state || feed) return;
