@@ -274,3 +274,13 @@ html.phone .party-edition-line { order: 2; flex-basis: 100%; }
 html.phone .party-actions > .btn, html.phone .party-actions > .enc-link { flex: 1 1 calc(50% - var(--sp-2)); justify-content: center; }
 html.phone .party-actions-end { margin-left: 0 !important; }
 html.phone .party-member-body > .party-member-actions { margin-left: 0; flex: 1 1 100%; }
+
+/* Account › Recently deleted (0.3.6): name, chip, then Restore / Delete forever; on a phone the buttons take a row. */
+.bp-deleted-row .bp-deleted-name { min-width: 0; overflow-wrap: anywhere; }
+.bp-deleted-actions { display: inline-flex; gap: var(--sp-2); flex-wrap: wrap; }
+@media (max-width: 600px) {
+  .bp-deleted-row .bp-deleted-name { flex: 1 1 100%; }
+  .bp-deleted-row .spacer { display: none; }
+  .bp-deleted-actions { flex: 1 1 100%; }
+  .bp-deleted-actions > .btn { flex: 1 1 0; min-height: 44px; }
+}

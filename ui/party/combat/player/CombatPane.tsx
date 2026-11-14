@@ -291,7 +291,11 @@ function Log({ combat }: { combat: PlayerCombat }) {
  * whose turn it is and the order, prompts to answer (typed rolls first), their own turn panel, their own HP and death
  * saves, and their summons and pets.
  */
-export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSnapshot }) {
+export function CombatPane({ combat, s, creatures = true }: {
+  combat: PlayerCombat; s: CharacterSnapshot;
+  /** False on the Play tab: my creatures' cards are on its Companions card (play/Companions.tsx, 0.3.6). */
+  creatures?: boolean;
+}) {
   const me = myCombatant(combat, { id: s.id, name: s.name });
   const acting = actingId(combat);
   const yours = acting != null && combat.combatants.some((x) => x.mine && x.id === acting);
@@ -324,7 +328,7 @@ export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSn
       <MyCasts combat={combat} />
       {me && <TurnPanel combat={combat} me={me} s={s} />}
       {me && <Me combat={combat} me={me} s={s} />}
-      {me && <Creatures combat={combat} me={me} s={s} />}
+      {me && <Creatures combat={combat} me={me} s={s} list={creatures} />}
       <section className="card combat-order-card" aria-label="Initiative">
         <h2 className="combat-h">Turn order</h2>
         <Order combat={combat} />

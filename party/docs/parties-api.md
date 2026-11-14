@@ -242,6 +242,24 @@ Party events come on the account's existing event stream (no second connection),
   password reset, disabling or deleting the account ends all of its streams. Streams also re-check their session every
   60 s. `X-Accel-Buffering: no` is sent so proxies don't hold events back.
 
+## Recently deleted (0.3.6)
+
+A deleted party (`DELETE /api/parties/{party}`) or encounter (`DELETE /api/encounters/{encounter}`) leaves every list
+and route at once and waits 30 days in its DM's Recently deleted (`recently_deleted.rs`, table `deleted_items`,
+migration step 11). The delete moves the rows into one JSON snapshot, so no other query has to skip them. A party keeps
+its members, invites, encounters and combats; entered join codes and pending character offers are not kept. Deleted
+characters are their sync trash copies, as before (Admin › Trash lists every account's).
+
+- `GET /api/me/deleted`: `{ items: [{ kind: "party"|"encounter"|"character", id, name, detail, deletedAtMs,
+  purgeAtMs }], retentionDays: 30 }`, newest first, the caller's own only. `detail` is an encounter's party name.
+- `POST /api/me/deleted/restore` `{ kind, id }`: `{ kind, id, name }`. A party needs DM tools on and room under the
+  party limit (`dm_required`, 429); its members come back unless their character joined another party or their account
+  is gone; a combat that was live comes back ended. An encounter comes back only into its party: 409 "Restore the party
+  first" while the party is deleted too, 409 when the party is gone for good. 404 for anything not the caller's.
+- `DELETE /api/me/deleted/{kind}/{id}`: "Delete forever", `{ deleted: true }`. A party takes its deleted encounters with
+  it; a character loses every trash copy.
+- After 30 days an hourly sweep (and every list) removes them for good.
+
 ## Kill switch
 
 Server config only (no admin page switch, D40): `[features] parties = false` in `config.toml`, or

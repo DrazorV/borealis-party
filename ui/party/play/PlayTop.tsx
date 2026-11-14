@@ -32,5 +32,5 @@ export function RestBar(props: { hp: PlayHitPoints }) {
   if (!snapshot) return null;
   // Only for a character in the fight's initiative (user, 2026-11-14): the server says when one isn't.
   if (!combat || myCombatant(combat, { id: snapshot.id, name: snapshot.name })?.inInitiative === false) return <DeathSavesCard s={snapshot} />;
-  return <div ref={ref} className="bp-play-combat"><CombatPane combat={combat} s={snapshot} /></div>;
+  return <div ref={ref} className="bp-play-combat"><CombatPane combat={combat} s={snapshot} creatures={false} /></div>;
 }

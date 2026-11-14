@@ -22,6 +22,7 @@ import { EncounterPicker } from "./EncounterPicker";
 import { useWide } from "./EncounterToolPanel";
 import { encountersPath } from "./EncountersPage";
 import { EncounterStatBlock } from "./EncounterStatBlock";
+import { KEPT_NOTE } from "./RecentlyDeleted";
 import "./party.css";
 import "./encounters.css";
 
@@ -165,11 +166,11 @@ export function EncounterBuilder() {
     }
   };
   const destroy = async () => {
-    const answer = await confirm({ title: `Delete ${enc.name}?`, danger: true, confirmLabel: "Delete", body: "Its creatures, effects and rules go with it. This can't be undone." });
+    const answer = await confirm({ title: `Delete ${enc.name}?`, danger: true, confirmLabel: "Delete", body: `Its creatures, effects and rules go with it. ${KEPT_NOTE}` });
     if (answer !== "confirm") return;
     try {
       await deleteEncounter(enc.id);
-      toast.push(`${enc.name} was deleted.`, "info");
+      toast.push(`${enc.name} was moved to Recently deleted.`, "info");
       void navigate(encountersPath(partyId));
     } catch (e) { toast.push(errorMessage(e), "error"); }
   };

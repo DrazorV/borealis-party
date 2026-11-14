@@ -56,6 +56,8 @@ mod mcp_tests;
 mod no_vendor_calls_tests;
 #[path = "parties_tests.rs"]
 mod parties_tests;
+#[path = "recently_deleted_tests.rs"]
+mod recently_deleted_tests;
 #[path = "retired_steps_tests.rs"]
 mod retired_steps_tests;
 #[path = "shares_tests.rs"]

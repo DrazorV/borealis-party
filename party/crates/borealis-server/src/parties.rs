@@ -787,7 +787,8 @@ pub async fn update(
     ))
 }
 
-/// `DELETE /api/parties/{party}`: invites, offers and memberships go with it; no character file is touched.
+/// `DELETE /api/parties/{party}`: invites, offers and memberships go with it; no character file is touched. The party
+/// waits in its DM's Recently deleted for 30 days (offers and entered join codes are not kept).
 pub async fn remove(
     State(state): State<AppState>,
     user: User,
@@ -805,12 +806,8 @@ pub async fn remove(
     .iter()
     .map(|r| Ok((r.try_get(0)?, r.try_get(1)?)))
     .collect::<sqlx::Result<Vec<(String, String)>>>()?;
-    let done = sqlx::query("DELETE FROM parties WHERE id = $1 AND dm_id = $2")
-        .bind(&party)
-        .bind(&user.id)
-        .execute(state.db.pool())
-        .await?;
-    if done.rows_affected() == 0 {
+    // Kept in the DM's Recently deleted for 30 days (recently_deleted.rs); gone from every other query now.
+    if !crate::recently_deleted::delete_party(&state.db, &user.id, &party).await? {
         return Err(not_found());
     }
     tracing::info!("party: party_deleted {party} by {}", user.id);
@@ -1715,6 +1712,44 @@ pub(crate) fn snapshot_of(
 /// during combat only). True while the party has a live combat (`combat.rs`).
 pub(crate) fn in_combat(party: &str) -> bool {
     crate::combat::party_in_combat(party)
+}
+
+/// Whether `dm` may get a deleted party back: DM tools on, and room for one more party.
+pub(crate) async fn may_restore(state: &AppState, dm: &str) -> ApiResult<()> {
+    if !is_dm_capable(state, dm).await? {
+        return Err(ApiError::Refused(
+            "dm_required",
+            "Switch on Dungeon Master tools on your Account page to restore a party.".into(),
+        ));
+    }
+    let running: i64 = sqlx::query("SELECT COUNT(*) FROM parties WHERE dm_id = $1")
+        .bind(dm)
+        .fetch_one(state.db.pool())
+        .await?
+        .try_get(0)?;
+    if running >= MAX_PARTIES {
+        return Err(ApiError::TooMany);
+    }
+    Ok(())
+}
+
+/// A party is back (Recently deleted): its DM's and members' lists change; cards are read again when it is opened.
+pub(crate) async fn restored(state: &AppState, dm: &str, party: &str) {
+    let mut owners: Vec<String> =
+        sqlx::query("SELECT owner_id FROM party_members WHERE party_id = $1")
+            .bind(party)
+            .fetch_all(state.db.pool())
+            .await
+            .map(|rows| rows.iter().filter_map(|r| r.try_get(0).ok()).collect())
+            .unwrap_or_default();
+    owners.push(dm.to_string());
+    owners.sort();
+    owners.dedup();
+    crate::combat::forget_live(party);
+    for owner in &owners {
+        tell_mine(state, owner, "parties");
+    }
+    tracing::info!("party: party_restored {party} by {dm}");
 }
 
 /// Read a member character's card again from its owner's workspace, keep it, and tell the party when it changed.

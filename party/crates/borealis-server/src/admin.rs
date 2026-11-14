@@ -17,7 +17,7 @@ use crate::net_guard::Cidr;
 use crate::AppState;
 
 #[path = "admin_trash.rs"]
-mod trash;
+pub(crate) mod trash;
 
 /// Keys in `server_settings`.
 const OPEN_REGISTRATION: &str = "open_registration";

@@ -8,6 +8,8 @@ import { RollOrType } from "../shared/RollOrType";
 import type { D20Input } from "../shared/types";
 import type { PlayerCombat, PlayerCombatant } from "./api";
 import { playerWrite } from "./store";
+import { AttackButtons } from "../../play/CompanionAttackButtons";
+import type { CompanionAttack } from "../../play/companionAttacks";
 
 /**
  * The player's own controlled creatures (summons, pets, companions; plan 4.4 "Controlled creatures", 0.3.0): each acts
@@ -50,7 +52,11 @@ function patch(c: PlayerCombat, id: string, f: (x: PlayerCombatant) => PlayerCom
   return { ...c, combatants: c.combatants.map((x) => (x.id === id ? f(x) : x)) };
 }
 
-function CreatureCard({ combat, c }: { combat: PlayerCombat; c: PlayerCombatant }) {
+/**
+ * One of my creatures in the fight. On the Play tab's Companions card (play/Companions.tsx, 0.3.6) it also has the
+ * sheet companion's attacks as buttons, rolled like the player's own (typed total first).
+ */
+export function CreatureCard({ combat, c, attacks }: { combat: PlayerCombat; c: PlayerCombatant; attacks?: readonly CompanionAttack[] }) {
   const { busy, error, run } = useAction();
   const confirm = useConfirm();
   const [amount, setAmount] = useState("");
@@ -121,6 +127,7 @@ function CreatureCard({ combat, c }: { combat: PlayerCombat; c: PlayerCombatant 
         </select>
         <Button variant="danger" disabled={busy} onClick={() => void dismiss()} aria-label={`Dismiss ${c.name}`}>Dismiss</Button>
       </div>
+      {attacks && attacks.length > 0 && <AttackButtons owner={c.name} attacks={attacks} />}
       <RollOrType label={`${c.name} d20`} busy={busy} onRoll={roll} />
       {c.lastRoll && <p className="muted combat-last-roll">Last roll: {c.lastRoll}</p>}
       {error && <Alert tone="danger">{error}</Alert>}
@@ -150,12 +157,16 @@ function companionsOf(me: PlayerCombatant, s: CharacterSnapshot): { id: string; 
  * The player's creatures, and at the start of a fight the character's companions to bring. There is no generic Summon
  * button (user, 2026-11-14): a summon comes from casting its spell or from the DM's Add creature.
  */
-export function Creatures({ combat, me, s }: { combat: PlayerCombat; me: PlayerCombatant; s: CharacterSnapshot }) {
+export function Creatures({ combat, me, s, list = true }: {
+  combat: PlayerCombat; me: PlayerCombatant; s: CharacterSnapshot;
+  /** False on the Play tab, where the Companions card shows them (play/Companions.tsx); the Bring prompt stays here. */
+  list?: boolean;
+}) {
   const { busy, error, run } = useAction();
   const mine = combat.combatants.filter((c) => c.mine && c.kind === "creature" && c.ownerId === me.id);
   const offers = companionsOf(me, s);
   const missing = combat.status === "setup" ? offers.filter((k) => !mine.some((c) => c.name === k.name)) : [];
-  if (missing.length === 0 && mine.length === 0) return null;
+  if (missing.length === 0 && (mine.length === 0 || !list)) return null;
   return (
     <section className="combat-creatures" aria-label="Your creatures">
       {missing.length > 0 && (
@@ -172,7 +183,7 @@ export function Creatures({ combat, me, s }: { combat: PlayerCombat; me: PlayerC
           {error && <Alert tone="danger">{error}</Alert>}
         </div>
       )}
-      {mine.length > 0 && (
+      {list && mine.length > 0 && (
         <>
           <h2 className="combat-h">Your creatures</h2>
           <ul className="combat-creature-list">{mine.map((c) => <CreatureCard key={c.id} combat={combat} c={c} />)}</ul>

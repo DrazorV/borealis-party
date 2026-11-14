@@ -2,8 +2,9 @@
 //!
 //! The only thing the server keeps after a delete is a character's file: `delete_character` (and a push that loses
 //! to a newer edit) copies it to the account's sync trash, `users/<id>/sync/trash/<ms>-<character>.json`, swept after
-//! [`TRASH_RETENTION_DAYS`] (`sync.rs`). Encounters, parties, packs, homebrew and accounts are deleted for good, so
-//! they have no trash. A trash entry whose character has no live file is a deleted character; the newest entry is
+//! [`TRASH_RETENTION_DAYS`] (`sync.rs`). An account's deleted parties and encounters are in its own "Recently
+//! deleted" (`recently_deleted.rs`, 0.3.6), which lists these characters too; packs, homebrew and accounts are deleted
+//! for good. A trash entry whose character has no live file is a deleted character; the newest entry is
 //! the one restored.
 //!
 //! What the admin sees is the account, the character's name and id, when it was deleted and when it goes: never the
@@ -29,7 +30,7 @@ use crate::AppState;
 
 const DAY_MS: u64 = 24 * 60 * 60 * 1000;
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
@@ -41,14 +42,18 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
 
 /// A trash entry's time and character id: `<ms>-<id>.json` with a plain id. Device copies (`.device.json`) and
 /// anything else don't count.
-fn entry_of(name: &str) -> Option<(u64, &str)> {
+pub(crate) fn entry_of(name: &str) -> Option<(u64, &str)> {
     let (ms, id) = name.strip_suffix(".json")?.split_once('-')?;
     let ms = ms.parse::<u64>().ok()?;
     is_plain_key(id).then_some((ms, id))
 }
 
 /// The newest entry per deleted character (no live file in `characters`), still within the retention.
-fn deleted_in(trash: &Path, characters: &Path, now: u64) -> BTreeMap<String, (u64, PathBuf)> {
+pub(crate) fn deleted_in(
+    trash: &Path,
+    characters: &Path,
+    now: u64,
+) -> BTreeMap<String, (u64, PathBuf)> {
     let cutoff = now.saturating_sub(TRASH_RETENTION_DAYS * DAY_MS);
     let mut found: BTreeMap<String, (u64, PathBuf)> = BTreeMap::new();
     for entry in std::fs::read_dir(trash).into_iter().flatten().flatten() {
@@ -74,7 +79,7 @@ fn deleted_in(trash: &Path, characters: &Path, now: u64) -> BTreeMap<String, (u6
 }
 
 /// The name the sheet gives itself, or `None` when the copy doesn't read.
-fn name_of(path: &Path) -> Option<String> {
+pub(crate) fn name_of(path: &Path) -> Option<String> {
     borealis_character::Character::load(path)
         .ok()
         .map(|c| c.meta.name.clone())
@@ -134,7 +139,7 @@ pub struct RestoreForm {
 }
 
 /// Move the newest trash copy of `id` back as the live file, stamped now. Its name, or an error.
-fn restore_now(backend: &Backend, id: &str) -> ApiResult<Option<String>> {
+pub(crate) fn restore_now(backend: &Backend, id: &str) -> ApiResult<Option<String>> {
     let characters = crate::sync::characters_dir(backend)?;
     let file = characters.join(format!("{id}.json"));
     if file.exists() {

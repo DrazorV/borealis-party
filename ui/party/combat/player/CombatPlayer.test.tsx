@@ -36,6 +36,17 @@ vi.mock("../../../src/pages/play/RestBar", async (importOriginal) => {
   return { ...original, RestBar: (p: { hp: unknown }) => (top ? createElement(top, p) : null) };
 });
 
+// Its rolls go through the party's RollProvider (the companions' attack buttons need it).
+vi.mock("../../../src/pages/play/rolls/RollContext", () => import("../../play/rolls/RollContext"));
+// And its "./HitPointsCard" at play/HitPointsWithCompanions.tsx: my creatures' cards are on the Companions card (0.3.6).
+vi.mock("../../../src/pages/play/HitPointsCard", async (importOriginal) => {
+  const original = await importOriginal<Record<string, unknown>>();
+  let card: ComponentType<{ hp: unknown }> | null = null;
+  void import("../../play/HitPointsWithCompanions").then((m) => { card = m.HitPointsCard as ComponentType<{ hp: unknown }>; });
+  const Upstream = original.HitPointsCard as ComponentType<{ hp: unknown }>;
+  return { ...original, HitPointsCard: (p: { hp: unknown }) => createElement(card ?? Upstream, p) };
+});
+
 const holds: string[] = [];
 vi.mock("../../api/connectivity", async (importOriginal) => {
   const original = await importOriginal<typeof import("../../api/connectivity")>();
@@ -93,6 +104,9 @@ async function start() {
     await store.combatWatchReady();
   });
 }
+
+/** My creatures in the fight: their cards are on the Play tab's Companions card, under Hit Points (0.3.6). */
+const yourCreatures = () => screen.findByRole("list", { name: "Companions" });
 
 /** The live combat section at the top of the Play sub-tab (0.3.3: no Combat sub-tab of its own). */
 async function openCombatTab() {
@@ -650,10 +664,11 @@ describe("summons and pets (controlled creatures)", () => {
     server.combats.set("p1", w);
     await start();
     renderPlay();
-    const pane = await openCombatTab();
-    const prompt = within(pane).getByRole("alertdialog", { name: "Wolf: take 4 piercing damage?" });
+    await openCombatTab();
+    const mineList = await yourCreatures();
+    const prompt = within(mineList).getByRole("alertdialog", { name: "Wolf: take 4 piercing damage?" });
     await user.click(within(prompt).getByRole("button", { name: "Apply" }));
-    await waitFor(() => expect(within(pane).queryByRole("alertdialog", { name: /Wolf: take/ })).toBeNull());
+    await waitFor(() => expect(within(mineList).queryByRole("alertdialog", { name: /Wolf: take/ })).toBeNull());
     expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/resolve_prompt", body: { args: { promptId: "pw", applied: true } } });
   });
 
@@ -668,9 +683,11 @@ describe("summons and pets (controlled creatures)", () => {
     expect(within(rows[2]!).getByText("with Seraphine")).toBeTruthy();
     expect(within(rows[4]!).getByText("with Bram")).toBeTruthy();
     // Only my wolf gets controls.
-    const mineList = within(pane).getByRole("region", { name: "Your creatures" });
+    // The section above leaves their cards to the Companions card.
+    expect(within(pane).queryByRole("region", { name: "Your creatures" })).toBeNull();
+    const mineList = await yourCreatures();
     expect(within(mineList).getByRole("button", { name: "Damage Wolf" })).toBeTruthy();
-    expect(within(pane).queryByRole("button", { name: "Damage Hawk" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Damage Hawk" })).toBeNull();
     expect(within(mineList).getByRole("status", { name: "Wolf hit points: 11 of 11" })).toBeTruthy();
   });
 
@@ -692,8 +709,8 @@ describe("summons and pets (controlled creatures)", () => {
     server.combats.set("p1", withPets());
     await start();
     renderPlay();
-    const pane = await openCombatTab();
-    const card = within(within(pane).getByRole("region", { name: "Your creatures" }).querySelector(".combat-creature") as HTMLElement);
+    await openCombatTab();
+    const card = within(within(await yourCreatures()).getByRole("listitem", { name: "Wolf" }));
     await user.type(card.getByLabelText("Wolf amount"), "4");
     await user.click(card.getByRole("button", { name: "Damage Wolf" }));
     await waitFor(() => expect(card.getByRole("status", { name: "Wolf hit points: 7 of 11" })).toBeTruthy());
@@ -716,7 +733,7 @@ describe("summons and pets (controlled creatures)", () => {
     await start();
     renderPlay();
     const pane = await openCombatTab();
-    const region = within(pane).getByRole("region", { name: "Your creatures" });
+    const region = await yourCreatures();
     await user.selectOptions(within(region).getByRole("combobox", { name: "Add a condition to Wolf" }), "prone");
     const chips = () => within(region).queryByRole("list", { name: "Wolf conditions" });
     await waitFor(() => expect(chips()?.textContent).toContain("Prone"));
