@@ -88,3 +88,19 @@ describe("Multiattack is a feature, not an action (0.3.5)", () => {
     expect(passiveLines(knight, block)).toEqual([{ key: "multiattack", name: "Multiattack", text: "The knight makes two melee attacks." }]);
   });
 });
+
+describe("the DM's stat block dialog (0.3.5)", () => {
+  it("shows the whole block in the classic layout: kind, AC, HP, scores, senses, traits, actions, reactions", async () => {
+    const { StatBlockDialog } = await import("./StatBlockDialog");
+    const { SAMPLE_STATBLOCKS } = await import("./fixtures");
+    const block = { ...SAMPLE_STATBLOCKS.knight!.data, size: ["medium"], creature_type: "humanoid", senses: { passive_perception: 10 }, languages: ["Common"], cr: "3" };
+    render(<StatBlockDialog title="Knight" block={block} onClose={() => {}} />);
+    const sb = screen.getByTestId("stat-block");
+    expect(within(sb).getByText("Armor Class").parentElement!.textContent).toContain("18 (plate armor)");
+    expect(within(sb).getByRole("list", { name: "Ability scores" })).toBeTruthy();
+    expect(within(sb).getByText("Senses").parentElement!.textContent).toContain("passive Perception 10");
+    expect(within(sb).getByRole("region", { name: "Actions" }).textContent).toContain("Multiattack.");
+    expect(within(sb).getByRole("region", { name: "Reactions" }).textContent).toContain("Parry.");
+    expect(within(sb).getByRole("region", { name: "Traits" }).textContent).toContain("Brave.");
+  });
+});

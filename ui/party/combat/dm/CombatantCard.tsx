@@ -13,6 +13,7 @@ import { TextDialog } from "./dialogs";
 import { byId, conditionsOf, effectiveAc, effectiveInitiative, effectiveSpeed, isCharacter, isDefeated, linkActive, sameSpeeds, speedText } from "./derive";
 import { EffectsList } from "./EffectsList";
 import { HpControls } from "./HpControls";
+import { StatBlockDialog } from "./StatBlockDialog";
 import { BandChip } from "./BandChip";
 import { playerName, playerSide } from "./privacy";
 import { SendDamage } from "./SendDamage";
@@ -38,7 +39,7 @@ export function CombatantCard({ state, c, block, blockName, blockOf, send, disab
 }) {
   const confirm = useConfirm();
   const phone = usePhone();
-  const [dialog, setDialog] = useState<"rename" | "public" | "conc" | null>(null);
+  const [dialog, setDialog] = useState<"rename" | "public" | "conc" | "block" | null>(null);
   const pc = isCharacter(c);
   const mine = playerSide(c);
   const ac = effectiveAc(state, c);
@@ -87,6 +88,7 @@ export function CombatantCard({ state, c, block, blockName, blockOf, send, disab
           {!pc && !playerPet && (c.visible
             ? <Button small onClick={() => void hide()} disabled={disabled}>Hide from players</Button>
             : <Button small variant="primary" onClick={() => send({ command: "reveal", id: c.id })} disabled={disabled || dead}>Reveal to players</Button>)}
+          {!pc && !playerPet && block && <Button small onClick={() => setDialog("block")} aria-label={`${c.label} stat block`}>Stat block</Button>}
           <Button small variant="ghost" onClick={() => setDialog("rename")} disabled={disabled}>Rename</Button>
           {!pc && <Button small variant="ghost" onClick={() => setDialog("public")} disabled={disabled}>Public name</Button>}
           {pc && <Button small variant="ghost" disabled={disabled} onClick={() => send({ command: "set_absent", id: c.id, absent: !c.absent })}>{c.absent ? "In this fight" : "Not in this fight"}</Button>}
@@ -188,6 +190,7 @@ export function CombatantCard({ state, c, block, blockName, blockOf, send, disab
           {c.initiative == null && <RollInput kind="d20" label="Initiative (if the player can't)" modifier={c.initiative_bonus ?? 0} disabled={disabled} onSubmit={(roll) => send({ command: "set_initiative", id: c.id, roll })} />}</div>
         : mine ? <div className="cb-tab-body"><p className="cb-small muted">{playerName(state, c)}'s player plays {c.label}: its HP and abilities stay on their screen.</p></div>
         : <AbilityTabs state={state} c={c} block={block} blockOf={blockOf} send={send} disabled={disabled} onDefine={onDefine} onAddCreature={onAddCreature} />}
+      {dialog === "block" && block && <StatBlockDialog title={blockName ?? c.label} block={block} onClose={() => setDialog(null)} />}
       {dialog === "rename" && <TextDialog title={`Rename ${c.label}`} label="Your label (players don't see it)" initial={c.label} confirm="Rename"
         onDone={(v) => { setDialog(null); if (v && v !== c.label) send({ command: "rename", id: c.id, label: v }); }} />}
       {dialog === "public" && <TextDialog title="Public name" label="What players see once it's revealed" initial={c.public_name} confirm="Save"

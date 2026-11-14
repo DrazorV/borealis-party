@@ -117,3 +117,29 @@ test.describe("Combat quick wins (0.3.5): stat block features", () => {
     await shot(page, testInfo, "multiattack");
   });
 });
+
+test.describe("Combat quick wins (0.3.5): the DM's stat block", () => {
+  test.beforeEach(({}, testInfo) => {
+    test.skip(!["android-portrait", "desktop-wide"].includes(testInfo.project.name), "the S26 Ultra and a DM's 1440x900 screen");
+  });
+
+  test("a creature's whole stat block opens in an app dialog that scrolls on a phone", async ({ page, signIn }, testInfo) => {
+    await signIn("admin");
+    await started(page, testInfo.project.name === "android-portrait");
+    const card = page.locator("#cb-card");
+    await card.getByRole("button", { name: "Knight stat block" }).click();
+    const dialog = page.getByRole("dialog", { name: "Knight: stat block" });
+    const sb = dialog.getByTestId("stat-block");
+    await expect(sb.getByText("Armor Class")).toBeVisible();
+    await expect(sb.getByRole("list", { name: "Ability scores" })).toBeVisible();
+    await expect(sb.getByRole("region", { name: "Actions" })).toContainText("Multiattack.");
+    await expect(sb.getByRole("region", { name: "Reactions" })).toContainText("Parry.");
+    expect((await measureOverflow(page)).page, "the page scrolls sideways").toBeLessThanOrEqual(0);
+    await shot(page, testInfo, "stat-block");
+    // The end of the block can be reached (the dialog scrolls, not the page).
+    await sb.getByRole("region", { name: "Reactions" }).scrollIntoViewIfNeeded();
+    await expect(sb.getByRole("region", { name: "Reactions" })).toBeInViewport();
+    await dialog.getByRole("button", { name: /close/i }).first().click();
+    await expect(dialog).toHaveCount(0);
+  });
+});
