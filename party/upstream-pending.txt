@@ -75,3 +75,8 @@ src-tauri/src/commands_content.rs branch:fix/single-instance
 src-tauri/src/content_preview.rs branch:fix/single-instance
 src-tauri/src/lib.rs branch:fix/single-instance
 src-tauri/tests/opened_args.rs branch:fix/single-instance
+# Proxy items: a source name installed under several abbreviations (an Aurora file's and a converted pack's) resolves
+# the proxy ids of each abbreviation (not sent upstream yet).
+crates/borealis-engine/src/proxy.rs branch:fix/proxy-source-aliases
+crates/borealis-engine/tests/proxy_source_aliases.rs branch:fix/proxy-source-aliases
+crates/borealis-engine/tests/corpus_proxy_sources.rs branch:fix/proxy-source-aliases
