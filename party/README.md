@@ -768,6 +768,11 @@ The suite looks for the server in `party/target` (or `$CARGO_TARGET_DIR`); `BORE
 On Windows with the server built in WSL, set `BOREALIS_SERVER_WSL_BIN` to its Linux path instead (from Git Bash, also
 `MSYS_NO_PATHCONV=1`). `test:android` and `test:ios` run one phone only.
 
+Most combat specs run the tracker against its own mock (`party.combatMock`); `spell-cast-live.spec.ts` runs the
+spell-cast flow against the test server's real engine and bundled SRD 5.1 content instead (a 2014 party, the SRD Mage
+and Ogre, the player's PC): Mage Armor and its AC breakdown, Shield as a reaction, Fireball at 3rd level with typed
+table rolls, then the Ogre's HP, the Mage's slots and the player's damage prompt, at 384x832 and 1440x900.
+
 Controls smaller than a comfortable tap target (44 px on iOS, 48 px on Android) and content cut off at the screen's
 edge are reported, not failed, in `party/ui-tests/findings.md`, with the tests marked `test.fail` for fixes that are
 planned. CI runs the suite as the "phone UI" job of `party-ci.yml` and adds `findings.md` to the run's summary.
