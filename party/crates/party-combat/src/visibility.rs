@@ -483,7 +483,17 @@ pub fn dm_view_of(state: &CombatState) -> Value {
                 Value::Bool(c.concentration.is_some()),
             );
             if DM_SEES_PLAYER_DOWN {
+                // The user, 2026-11-14: "DM can have the same information as players, blodied, healthy, down": the
+                // band the party sees and the life state without its death-save counts. Never a number.
                 o.insert("down".into(), Value::Bool(!c.life.is_alive()));
+                o.insert(
+                    "band".into(),
+                    serde_json::to_value(c.hp.band()).unwrap_or(Value::Null),
+                );
+                o.insert(
+                    "life_state".into(),
+                    Value::String(life_state(c.life).into()),
+                );
             }
         }
     }

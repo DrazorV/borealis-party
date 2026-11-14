@@ -155,10 +155,15 @@ for my creatures). A save request (`casts[]`) still names a revealed caster's sp
             "ability": "…" } }                      // a creature's stat block entry, instead of spellKey
 ```
 
-- The server compiles the definition on **any installed content**: the party DM's own definition of that spell when
-  the DM has one (a DM-defined or confirmed draft, e.g. from the user's own 5etools data), else the player's library
-  (the curated SRD rows, their own definitions). A spell with no definition is a **ruling**: the slot is spent on the
-  sheet and the DM gets `ruling_needed` to apply it by hand. A client `spec`, `precast` or `force` is never used.
+- The server compiles the definition on **any installed content**, in this order:
+  1. the party DM's own definition of that spell (a DM-defined or confirmed draft);
+  2. the player's library: their own definitions, then the curated SRD rows (any copy of the same spell counts);
+  3. the same-named spell of the party's edition that has mechanics (a sheet id from another book or edition);
+  4. a draft from the player's own copy (its 5etools data), `spec.origin: { "kind": "draft", "key" }`, unreviewed: the
+     DM sees the cast and confirms the results;
+  5. only then a **ruling**: the slot is spent on the sheet and the DM gets `ruling_needed` to apply it by hand.
+
+  A client `spec`, `precast` or `force` is never used. Send the sheet's spell element id as `spellKey`.
 - **The slot is spent on the sheet** by the app (the player's own `expend_spell_slot`-style write on the Play tab),
   never in the combat: the engine checks only that the level fits. A player's creature spends its own combat slots.
 - **The player's open casts** are in the projection's new `myCasts[]` (casts by their PC or its creatures,

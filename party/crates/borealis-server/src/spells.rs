@@ -1125,6 +1125,19 @@ impl Library {
         }
     }
 
+    /// For a player's cast (0.3.3): when `key` has no mechanics in `ruleset` (a copy from another book, or the
+    /// other edition's id on the sheet), the same-named spell of the party's edition that has some, so a curated or
+    /// defined spell is never a ruling only because of its id. `None` when there is no such spell.
+    #[must_use]
+    pub fn same_spell_with_mechanics(&self, key: &str, ruleset: &str) -> Option<String> {
+        if self.mechanics(ruleset, key).is_some() {
+            return None;
+        }
+        let name = self.book.spell(key)?.name.clone();
+        self.resolve(&name, ruleset)
+            .filter(|k| k != key && self.mechanics(ruleset, k).is_some())
+    }
+
     /// The mechanics of `key` cast in edition `ruleset`. The key is the one spell it is a copy of, so a definition
     /// of any copy counts (an SRD definition applies to the chosen 5etools copy, and back), the key's own first: the
     /// account's def, then its link (one hop, to the target's def or curated row), then the curated row. `None`: a
@@ -1297,6 +1310,46 @@ async fn suggestion(
         edition,
         &raw,
     )))
+}
+
+/// For a player's cast of a spell with no mechanics (0.3.3): the drafter's suggestion over `owner`'s own copy of
+/// `key` (its captured 5etools data, else the element's tags), when it does something (tier `partial`); `None` for
+/// a draft that is only a ruling, or a spell not installed.
+///
+/// # Errors
+/// The workspace or the database.
+pub async fn draft_mech(
+    state: &AppState,
+    owner: &str,
+    key: &str,
+    ruleset: &str,
+) -> ApiResult<Option<SpellMech>> {
+    let workspace = state.workspaces.get(owner).await?;
+    let wanted = key.to_string();
+    let element: Option<Element> = workspace
+        .blocking(move |handle| {
+            let backend = handle.state::<Backend>();
+            let hub = backend.hub().map_err(|e| upstream(&e))?;
+            let found = hub
+                .store
+                .iter()
+                .find(|s| s.element.id == wanted)
+                .map(|s| s.element.clone());
+            Ok(found)
+        })
+        .await?;
+    let Some(element) = element else {
+        return Ok(None);
+    };
+    Ok(suggestion(state, owner, &element, ruleset)
+        .await?
+        .map(|d| d.mech)
+        .filter(|m| {
+            !matches!(
+                m.tier,
+                party_combat::spell::Tier::Ruling | party_combat::spell::Tier::Uncurated
+            )
+        }))
 }
 
 /// The hash of the text a suggestion was drafted from: a def saved from it keeps it, so a changed spell is flagged.

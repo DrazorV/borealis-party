@@ -1190,7 +1190,8 @@ fn every_projected_field_is_classified() {
             .unwrap();
         for k in entry.as_object().unwrap().keys() {
             assert!(
-                COMBATANT_DM_OF_PLAYER.contains(&k.as_str()) || k == "down",
+                COMBATANT_DM_OF_PLAYER.contains(&k.as_str())
+                    || ["down", "band", "life_state"].contains(&k.as_str()),
                 "{k} of a player's combatant reached the DM"
             );
         }
@@ -1427,6 +1428,8 @@ fn a_pcs_hp_and_rolls_stay_private_and_the_dms_damage_is_a_prompt() {
         assert!(w.get(k).is_none(), "{k} reached the DM");
     }
     assert_eq!(w["down"], false);
+    assert_eq!(w["band"], "bloodied", "9 of 22");
+    assert_eq!(w["life_state"], "alive");
     assert!(w.get("ac").is_some());
     // Legacy log rows (no flag) are filtered by kind.
     let mut legacy = ev.dm[0].clone();

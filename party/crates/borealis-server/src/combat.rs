@@ -3419,10 +3419,40 @@ async fn player_cast_command(
                     lib = dm_lib;
                 }
             }
-            lib.compile(st.edition, key, caster, link, fallback)
+            // The same spell by name in the party's edition when this copy has no mechanics; only then a ruling.
+            let key = lib
+                .same_spell_with_mechanics(key, crate::spells::ruleset_of(st.edition))
+                .unwrap_or_else(|| key.clone());
+            lib.compile(st.edition, &key, caster, link, fallback)
         }
         .map_err(|_| Fail::Player(StatusCode::BAD_REQUEST, "That spell can't be cast here."))?,
         None => fallback.cloned(),
+    };
+    // Nobody defined it: a draft from the player's own copy (5etools data), unreviewed, before a ruling.
+    let spec = match (spec, &key) {
+        (Some(s), Some(k)) if s.origin == party_combat::spell::MechOrigin::Ruling => {
+            match crate::spells::draft_mech(
+                state,
+                &user.id,
+                k,
+                crate::spells::ruleset_of(st.edition),
+            )
+            .await?
+            {
+                Some(mut mech) => {
+                    mech.key.clone_from(k);
+                    mech.edition = st.edition;
+                    Some(party_combat::spell::CastSpec {
+                        v: party_combat::spell::MECH_VERSION,
+                        origin: party_combat::spell::MechOrigin::Draft { key: k.clone() },
+                        mech,
+                        ..s
+                    })
+                }
+                None => Some(s),
+            }
+        }
+        (s, _) => s,
     };
     let Some(mut spec) = spec else {
         if key.is_none() {

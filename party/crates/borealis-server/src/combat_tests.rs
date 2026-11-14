@@ -3215,6 +3215,11 @@ async fn role_views(t: &Table) {
     assert_eq!(answered["status"], "accepted");
     let aria_entry = combatant_in(&dm, &aria);
     assert_eq!(aria_entry["down"], false);
+    assert_eq!(aria_entry["life_state"], "alive");
+    assert!(
+        aria_entry.get("band").is_some(),
+        "the DM sees the band: {aria_entry}"
+    );
     assert!(
         aria_entry.get("ac").is_some(),
         "the DM resolves attacks against it"
@@ -3322,6 +3327,37 @@ async fn role_views(t: &Table) {
         "a private cast leaves the DM's feed alone"
     );
     assert!(!dm.to_string().contains("Cure Wounds"), "{dm}");
+    // Bless from the sheet (its element id): the curated SRD row applies, the DM sees the chips on both PCs and the
+    // concentration, never a ruling.
+    for _ in 0..3 {
+        act_ok(&t.dm, &combat, "next_turn", json!({})).await;
+    }
+    act_ok(
+        &t.player,
+        &combat,
+        "cast_spell",
+        json!({ "caster": aria, "spellKey": "ID_PHB_SPELL_BLESS", "slot": 1, "targets": [aria, bran] }),
+    )
+    .await;
+    let (_, dm) = t.dm.get(&format!("/api/combats/{combat}")).await;
+    let blessed: Vec<&str> = dm["state"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["name"] == "Bless")
+        .filter_map(|e| e["target"].as_str())
+        .collect();
+    assert!(
+        blessed.contains(&aria.as_str()) && blessed.contains(&bran.as_str()),
+        "Bless lands on both: {}",
+        dm["state"]["effects"]
+    );
+    assert_eq!(combatant_in(&dm, &aria)["concentration"], true);
+    assert!(
+        !dm["feed"].to_string().contains("ruling_needed"),
+        "a curated spell is no ruling: {}",
+        dm["feed"]
+    );
     // A cast that isn't theirs, or a spell not in their content.
     let (status, _) = act(
         &t.player,
