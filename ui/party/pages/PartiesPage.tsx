@@ -9,12 +9,13 @@ import { useApi } from "../../src/state/ApiContext";
 import { errorMessage } from "../../src/state/useAsync";
 import {
   acceptInvite, addOwnCharacter, BAND_LABEL, cancelInvite, classLine, CONFLICT, charactersInParties, createParty,
-  declineInvite, deleteParty, keepJoinCode, keptJoinCode, listMyInvites, loadParties, loadParty, MAX_PARTIES,
-  onPartiesChanged, redeemJoinCode, removeMember, renameParty, watchParties, type CardStats, type HealthBand,
-  type MyInvite, type Party, type PartyMember, type Ruleset,
+  declineInvite, deleteParty, EDITION_LABEL, editionToSwitchTo, keepJoinCode, keptJoinCode, listMyInvites, loadParties,
+  loadParty, MAX_PARTIES, newestEdition, onPartiesChanged, redeemJoinCode, removeMember, renameParty, watchParties,
+  type CardStats, type HealthBand, type MyInvite, type Party, type PartyMember,
 } from "../api/overrides/parties";
 import { EncounterTeaser } from "./EncountersPage";
-import { InviteDialog, NameDialog, PickCharacterDialog } from "./PartiesDialogs";
+import { InviteDialog, NameDialog, NewPartyDialog, PickCharacterDialog } from "./PartiesDialogs";
+import { ChangeEditionDialog } from "./PartyEdition";
 import "./party.css";
 
 /** What the page loaded. */
@@ -31,12 +32,13 @@ interface Loaded {
 type Open =
   | { kind: "create" }
   | { kind: "rename"; party: Party }
+  | { kind: "edition"; party: Party }
   | { kind: "invite"; party: Party }
   | { kind: "pick"; invite: MyInvite }
   | { kind: "add-own"; party: Party };
 
 const day = (at: number) => new Date(at).toLocaleDateString();
-const EDITION: Record<Ruleset, string> = { dnd2024: "2024 rules", dnd2014: "2014 rules" };
+const EDITION = EDITION_LABEL;
 const memberName = (m: PartyMember) => m.name || (m.state === "missing" ? "A deleted character" : "An unreadable character");
 
 const signed = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
@@ -151,10 +153,17 @@ function PartyCard({ party, act, open }: {
     if (answer === "confirm") await act(() => deleteParty(party.id), `${party.name} was deleted.`);
   };
   const invites = party.invites ?? [];
+  const mismatch = editionToSwitchTo(party);
   return (
     <Card className={`party-card ${dm ? "party-card-dm" : "party-card-player"}`} aria-label={party.name} title={party.name}
       actions={<Chip tone={dm ? "gold" : "accent"}>{dm ? "DM" : "Player"}</Chip>}>
-      <p className="muted party-note">{dm ? EDITION[party.ruleset] : `DM: ${party.dmName} · ${EDITION[party.ruleset]}`}</p>
+      {!dm && <p className="muted party-note">DM: {party.dmName}</p>}
+      <div className="party-edition-line">
+        <span className="grow">Edition: <strong>{EDITION[party.ruleset]}</strong>
+          {mismatch && <span className="muted party-note">Most of its characters use {EDITION[mismatch]}.</span>}
+        </span>
+        {dm && <Button small onClick={() => open({ kind: "edition", party })}>Change edition</Button>}
+      </div>
       <EncounterTeaser partyId={party.id} dm={dm} />
       {dm && (
         <div className="party-actions">
@@ -362,9 +371,13 @@ export function PartiesPage() {
       )}
       {data && <p className="muted party-note">Server admins can read party data on the server.</p>}
 
-      {dialog?.kind === "create" && (
-        <NameDialog title="New party" action="Create" onClose={() => setDialog(null)}
-          onSave={async (name) => { const p = await createParty(name); toast.push(`${p.name} was created.`, "info"); }} />
+      {dialog?.kind === "create" && data && (
+        <NewPartyDialog initial={newestEdition(data.characters)} onClose={() => setDialog(null)}
+          onSave={async (name, ruleset) => { const p = await createParty(name, ruleset); toast.push(`${p.name} was created.`, "info"); }} />
+      )}
+      {dialog?.kind === "edition" && (
+        <ChangeEditionDialog partyId={dialog.party.id} party={dialog.party} onClose={() => setDialog(null)}
+          onChanged={(fresh) => setData((d) => (d ? { ...d, parties: d.parties.map((p) => (p.id === fresh.id ? fresh : p)) } : d))} />
       )}
       {dialog?.kind === "rename" && (
         <NameDialog title={`Rename ${dialog.party.name}`} action="Rename" initial={dialog.party.name} onClose={() => setDialog(null)}

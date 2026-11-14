@@ -11,8 +11,8 @@ use serde_json::{json, Value};
 use sqlx::Row;
 
 use super::{
-    drop_all, make_old, new_character, register, router_on, router_with, send, sign_in, sign_up,
-    Client, Setup, PASSWORD,
+    drop_all, make_old, new_character, register, router_of, router_on, router_with, send, sign_in,
+    sign_up, state_with, Client, Setup, PASSWORD,
 };
 use crate::db::{Db, Location};
 
@@ -944,6 +944,98 @@ async fn parties_invites_joins_and_limits() {
     let dir = tempfile::tempdir().unwrap();
     let data = dir.path().join("data");
     party_flow(super::router(data.clone()).await, &data).await;
+}
+
+/// Events waiting on a subscription.
+fn drain(sub: &mut crate::hub::Subscription) -> Vec<Value> {
+    let mut out = Vec::new();
+    while let Ok(m) = sub.rx.try_recv() {
+        out.push(m.payload);
+    }
+    out
+}
+
+/// The party's edition (0.3.2): a party made without a ruleset still gets 2024 (API clients before 0.3.2), one made
+/// with a ruleset keeps it, and the DM's PATCH changes it and tells the DM and the players, so open encounter
+/// screens read it again.
+#[tokio::test(flavor = "multi_thread")]
+async fn changing_the_edition_updates_the_party_and_tells_everyone() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(&Location::Memory).await.unwrap();
+    let state = state_with(dir.path().join("data"), db, Setup::default());
+    let router = router_of(state.clone(), Setup::default().max_upload);
+    sign_up(&router, "ed-admin").await;
+    let dm = sign_up(&router, "ed-dm").await;
+    let player = sign_up(&router, "ed-player").await;
+    dm_on(&dm).await;
+
+    let (status, out) = dm
+        .post("/api/parties", json!({ "name": "Old Client" }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["ruleset"], "dnd2024", "no ruleset: the old default");
+    let (status, out) = dm
+        .post(
+            "/api/parties",
+            json!({ "name": "Picked", "ruleset": "dnd2014" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["ruleset"], "dnd2014");
+    let party = out["id"].as_str().unwrap().to_string();
+
+    let hero = character(&player, "Hero").await;
+    let (status, out) = invite_name(&dm, &party, "ed-player").await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let invite = my_invite(&player, "Picked").await;
+    let (status, out) = accept(&player, &invite, &hero).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+
+    let mut dm_sub = state.hub.subscribe(&dm.id, "ed-dm", None);
+    let mut player_sub = state.hub.subscribe(&player.id, "ed-player", None);
+    drain(&mut dm_sub);
+    drain(&mut player_sub);
+
+    // A player can't change it.
+    let (status, _) = player
+        .patch(
+            &format!("/api/parties/{party}"),
+            json!({ "ruleset": "dnd2024" }),
+        )
+        .await;
+    assert_ne!(status, StatusCode::OK);
+    assert!(drain(&mut player_sub).is_empty());
+
+    let (status, out) = dm
+        .patch(
+            &format!("/api/parties/{party}"),
+            json!({ "ruleset": "dnd2024" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(
+        (out["ruleset"].as_str(), out["name"].as_str()),
+        (Some("dnd2024"), Some("Picked"))
+    );
+    let (_, out) = player.get(&format!("/api/parties/{party}")).await;
+    assert_eq!(out["ruleset"], "dnd2024", "the players see it too");
+    for (who, sub) in [("DM", &mut dm_sub), ("player", &mut player_sub)] {
+        let events = drain(sub);
+        assert!(
+            events
+                .iter()
+                .any(|e| e["party"] == party.as_str() && e["kind"] == "party"),
+            "the {who} hears of it: {events:?}"
+        );
+    }
+
+    let (status, _) = dm
+        .patch(
+            &format!("/api/parties/{party}"),
+            json!({ "ruleset": "dnd5" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test(flavor = "multi_thread")]

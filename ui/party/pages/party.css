@@ -232,3 +232,12 @@ html.phone .party .party-note a, html.phone .party-dm-offer .btn { display: inli
 html.phone .party-member-actions > .btn { flex: 1 1 auto; justify-content: center; min-height: var(--ph-hit); }
 html.phone .party-sheet .party-line > .btn { min-height: var(--ph-hit); display: inline-flex; align-items: center; }
 @media (min-width: 640px) { .party-sheet-abilities { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+
+/* The party's edition (0.3.2): on the party card, in the New party and Change edition dialogs, and in the encounter's
+   Setup. */
+.party-edition-line { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-1) 0 var(--sp-2); }
+.party-edition-choice { align-self: flex-start; }
+.party-edition-row { flex-direction: row !important; align-items: center; flex-wrap: wrap; gap: var(--sp-2) !important; }
+.party-edition-row .enc-setting-label { flex-basis: 100%; }
+.party-edition-fix { margin-top: var(--sp-3); }
+html.phone .party .party-edition-choice button { min-height: var(--ph-hit); }

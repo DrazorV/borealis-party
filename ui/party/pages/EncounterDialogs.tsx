@@ -358,7 +358,7 @@ export function RuleDialog({ creatures, rule, onSave, onClose }: {
 }
 
 /** The edition notes (D23 b): creatures and characters of the other edition. */
-export function WarningsDialog({ warnings, onClose }: { warnings: Warning[]; onClose: () => void }) {
+export function WarningsDialog({ warnings, onClose, children }: { warnings: Warning[]; onClose: () => void; children?: ReactNode }) {
   return (
     <Modal title="Edition notes" onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
       {warnings.length === 0 ? <p className="muted">Everything uses the party's edition.</p> : (
@@ -366,6 +366,7 @@ export function WarningsDialog({ warnings, onClose }: { warnings: Warning[]; onC
           {warnings.map((w, i) => <li key={`${w.kind}-${i}`} className="party-line"><span className="grow">{w.text}</span></li>)}
         </ul>
       )}
+      {children}
     </Modal>
   );
 }
