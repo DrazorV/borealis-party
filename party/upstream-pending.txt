@@ -36,7 +36,7 @@ ui/src/test/i37-missing-content-list.test.tsx branch:feat/leave-missing-unselect
 
 # Hidden elements: ids never offered for new picks, stored choices still replay (not sent upstream yet).
 # The party server lists every duplicate spell copy but one per edition (party-spells canonical resolver).
-# Stand-ins (hiddenStandIns, not in #49 yet): content that names a hidden copy by id (an <extend> of a class list,
+# Stand-ins (hiddenStandIns, in #49 since aba7786): content that names a hidden copy by id (an <extend> of a class list,
 # a select of named spells) gets the chosen copy instead; the party server fills it from the same resolver.
 crates/borealis-engine/src/engine.rs https://github.com/TeamBorealis/borealis/pull/49
 crates/borealis-engine/src/eval.rs https://github.com/TeamBorealis/borealis/pull/49
