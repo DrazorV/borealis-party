@@ -575,3 +575,50 @@ fn every_srd_monster_spell_is_curated() {
     }
     assert!(missing.is_empty(), "{missing:#?}");
 }
+
+#[test]
+fn start_of_combat_adds_5etools_and_override_spells_once() {
+    use party_encounter::overrides::Overrides;
+    use party_encounter::spellbook::equip_start;
+    // A block whose text lists no spells, with the raw 5etools spellcasting kept in automation_json.
+    let mut ogre = find("srd-5.1-monsters", "ID_SRD51_MONSTER_OGRE");
+    ogre.traits.push(borealis_content::monster_types::Feature {
+        name: "Spellcasting".into(),
+        text: "The ogre casts spells.".into(),
+        usage: None,
+        cost: None,
+        condition: None,
+        attack: None,
+        save: None,
+        spellcasting: None,
+    });
+    let auto = json!({ "v": 1, "fivetools": { "spellcasting": [{
+        "name": "Spellcasting", "headerEntries": ["Spell save {@dc 12}."], "ability": "cha",
+        "spells": { "1": { "slots": 2, "spells": ["{@spell shield}"] } } }] } })
+    .to_string();
+    let mut c = build_creature("o", "Ogre", "Giant", Some(&ogre), 59);
+    let before = c.abilities.len();
+    equip_start(&mut c, Some(&ogre), Some(&auto), &Overrides::default());
+    assert_eq!(c.spell_slots[&1].max, 2);
+    assert_eq!(c.abilities.len(), before + 1);
+    let shield = c.abilities.last().unwrap();
+    assert_eq!(
+        shield.spell.as_ref().unwrap().key.as_deref(),
+        Some("ID_PHB_SPELL_SHIELD")
+    );
+    // Running it again adds nothing.
+    equip_start(&mut c, Some(&ogre), Some(&auto), &Overrides::default());
+    assert_eq!(c.abilities.len(), before + 1);
+    assert!(party_encounter::spellbook::fivetools_of(Some("{}")).is_none());
+}
+
+#[test]
+fn candidates_of_elements() {
+    let el: Element = serde_json::from_value(json!({
+        "id": "ID_TEST_SPELL", "name": "Fireball", "type": "Spell", "source": "SRD 5.1",
+        "setters": [{ "name": "level", "value": "3" }]
+    }))
+    .unwrap();
+    let c = party_encounter::spellbook::candidate_of(&el, "dnd2014", None).unwrap();
+    assert_eq!((c.level, c.date.as_deref()), (Some(3), Some("2016-01")));
+}

@@ -1179,3 +1179,62 @@ pub fn equip(c: &mut Combatant, books: &[Spellbook], edition: party_combat::Edit
         }
     }
 }
+
+/// The resolver's candidate of an installed Spell element; `ruleset` is the element's effective ruleset (its own,
+/// else its file's: `dnd2014`, `dnd2024` or `any`). `None` for any other element type. `date` is the source's
+/// publication date when the caller knows it.
+#[must_use]
+pub fn candidate_of(
+    element: &borealis_content::Element,
+    ruleset: &str,
+    date: Option<String>,
+) -> Option<party_spells::canonical::Candidate> {
+    if element.ty != "Spell" {
+        return None;
+    }
+    Some(party_spells::canonical::Candidate {
+        id: element.id.clone(),
+        name: element.name.clone(),
+        ruleset: ruleset.to_string(),
+        source: element.source.clone(),
+        level: element
+            .setters
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case("level"))
+            .and_then(|s| s.value.trim().parse().ok()),
+        date: date
+            .or_else(|| party_spells::canonical::srd_date(&element.source).map(str::to_string)),
+    })
+}
+
+/// The raw 5etools `spellcasting` array an encounter creature's `automation_json` keeps
+/// (`{"v":1,"fivetools":{"spellcasting":[...]}}`).
+#[must_use]
+pub fn fivetools_of(automation_json: Option<&str>) -> Option<Value> {
+    let v: Value = serde_json::from_str(automation_json?).ok()?;
+    let sc = v.get("fivetools")?.get("spellcasting")?;
+    sc.is_array().then(|| sc.clone())
+}
+
+/// At the start of combat, for a creature from an encounter row: its full spellcasting from the block, the raw
+/// 5etools spellcasting kept in `automation_json` (when the block's text lists none) and the DM's added spells. Call
+/// after [`crate::combatant::creature_of`]; what `build_creature` already added is not added twice.
+pub fn equip_start(
+    c: &mut Combatant,
+    data: Option<&MonsterData>,
+    automation_json: Option<&str>,
+    overrides: &crate::overrides::Overrides,
+) {
+    let five = fivetools_of(automation_json);
+    let spells = overrides.spells.as_ref().filter(|s| !s.is_empty());
+    match data {
+        Some(d) => equip(c, &of_monster(d, five.as_ref(), spells), edition_of(d)),
+        None => {
+            let mut books = five.as_ref().map(from_5etools).unwrap_or_default();
+            if let Some(s) = spells {
+                books.push(s.book());
+            }
+            equip(c, &books, party_combat::Edition::Srd51);
+        }
+    }
+}
