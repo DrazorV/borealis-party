@@ -21,6 +21,7 @@ account's own content only; another account's ids answer the same 404 as unknown
 | `GET /api/bestiary/coverage` | per-pack report: creatures, CR and type counts, what the import skipped or kept in part |
 | `POST /api/bestiary/search` | filtered, paginated creature summaries (the encounter builder's picker) |
 | `GET /api/bestiary/facets` | the values the filters can take, with counts (filter chips) |
+| `POST /api/bestiary/facets` | the same, counted over `{ "enabledSources": [...] }` only (0.3.6) |
 | `GET /api/bestiary/monsters/{id}` | one creature: its full stat block, its pack revision and its extra details |
 
 Errors use the server's usual body `{ "code", "message" }`: 400 `invalid_argument` for a bad filter, 401 when signed
@@ -59,7 +60,8 @@ Request (every field optional):
 - `sources`: pack ids (as `list_packs` names them) or source names (the element's `source`); either matches.
 - `enabledSources` (0.3.5): the source names the account's new characters start on (the Sources page's saved default
   with its Restrict playtest / third-party toggles applied, as the app works it out). Creatures of any other source are
-  never listed. Without it, the account's toggles apply (`content_rules.rs`). The facets are not filtered.
+  never listed. Without it, the account's toggles apply (`content_rules.rs`). Sources unchecked on any of the
+  account's own characters (0.3.6) are left out too, with or without it; another account's characters never count.
 - `ruleset`: `dnd2014` or `dnd2024` (the edition). A creature marked `any` matches both.
 - `legendary`: `true` only creatures with legendary actions, `false` only creatures without; absent for both.
   Companions never have legendary actions.
@@ -113,6 +115,9 @@ Response:
 - `mythic` comes from `monster_meta` (5etools data only).
 
 ### `GET /api/bestiary/facets`
+
+Counts only the creatures the search would list (0.3.6): the account's content rules as above. `POST` takes
+`{ "enabledSources": [...] }` as the search does; `GET` applies the toggles and the characters' sources only.
 
 ```json
 {

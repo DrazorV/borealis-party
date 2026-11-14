@@ -51,6 +51,7 @@ source, packId, packKind }], coverage }`. `chosenBy` is `only`, `dmPick`, `newes
 (`crates/borealis-server/src/content_rules.rs`). `enabledSources` (body only) is the sources a new character starts on, as
 the app works it out (the Sources page's saved default with the Restrict playtest / third-party toggles applied); every
 other installed source is left out, as `set_source_restrictions` does. Without it, the account's toggles apply. A
+source unchecked on any of the account's own characters is left out too (0.3.6). A
 spell whose chosen copy is of a source that is off is not listed (its other copies stay hidden, as in the builder).
 `forRuleset` (`dnd2014` / `dnd2024`): only the spells a new pick of a character of that ruleset may take (the
 engine's edition rule: a 2014 pick takes no 2024 spells, a 2024 one may take 2014 ones). `alsoIn` keeps only copies

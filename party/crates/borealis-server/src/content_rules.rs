@@ -7,12 +7,18 @@
 //!   rule lives in one place). The server turns it into the engine's [`SourceRestriction`] exactly as
 //!   `set_source_restrictions` does (every installed source not in the list). A caller that sends none (the MCP
 //!   tools, an older app) gets the account's toggles only, as a new character with no saved default has.
+//! * **The account's own characters (0.3.6):** a source unchecked on one of the account's characters (its own
+//!   Sources step, not saved as the default) is left out too, in that account's DM tools only. Another player's
+//!   characters never narrow a DM's lists.
 //! * **Edition:** the engine's own edition status of each element in the universe of a ruleset (accepted, not
 //!   superseded, and foreign only where that ruleset's profile allows the other edition by default), as a new pick
 //!   of a character of that ruleset ([`borealis_engine`] `offers_edition`).
 //! * **One copy per spell:** the spell list's [`crate::spells::Book`] already offers only the resolver's chosen copy.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::{LazyLock, Mutex};
+use std::time::SystemTime;
 
 use borealis_content::{is_unrestrictable_source, Ruleset, SourceRestriction};
 use borealis_lib::state::AppState as Backend;
@@ -72,8 +78,68 @@ pub fn ruleset(name: Option<&str>) -> ApiResult<Option<Ruleset>> {
     }
 }
 
-/// The sources left out: those not in `enabled`, else (none sent) the books the account's toggles restrict.
+/// One character file's unchecked sources, kept while the file is unchanged (a picker searches while typing).
+type Cached = (Option<SystemTime>, u64, Vec<String>);
+static CHARACTER_SOURCES: LazyLock<Mutex<HashMap<PathBuf, Cached>>> = LazyLock::new(Mutex::default);
+
+/// The sources unchecked on any of the account's own characters (open ones as they are now, saved ones from file).
+fn character_restrictions(backend: &Backend) -> ApiResult<Vec<String>> {
+    let dir = backend.characters_dir();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(Vec::new());
+    };
+    let mut out: Vec<String> = Vec::new();
+    let sessions = backend.sessions().map_err(|e| upstream(&e))?;
+    let mut cache = CHARACTER_SOURCES
+        .lock()
+        .map_err(|_| ApiError::Internal("character sources lock".into()))?;
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    for path in entries.filter_map(Result::ok).map(|e| e.path()) {
+        if path.extension().is_none_or(|e| e != "json") {
+            continue;
+        }
+        let Some(id) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if let Some(open) = sessions.get(id) {
+            out.extend(open.character.build.restricted_sources.iter().cloned());
+            continue;
+        }
+        let meta = std::fs::metadata(&path).ok();
+        let stamp = (
+            meta.as_ref().and_then(|m| m.modified().ok()),
+            meta.as_ref().map_or(0, std::fs::Metadata::len),
+        );
+        seen.insert(path.clone());
+        if let Some((at, len, list)) = cache.get(&path) {
+            if (*at, *len) == stamp {
+                out.extend(list.iter().cloned());
+                continue;
+            }
+        }
+        let list = match borealis_character::Character::load(&path) {
+            Ok(c) => c.build.restricted_sources,
+            Err(_) => Vec::new(),
+        };
+        out.extend(list.iter().cloned());
+        cache.insert(path, (stamp.0, stamp.1, list));
+    }
+    // Deleted characters of this folder drop out of the cache.
+    cache.retain(|p, _| !p.starts_with(&dir) || seen.contains(p));
+    out.sort();
+    out.dedup();
+    Ok(out)
+}
+
+/// The sources left out: those not in `enabled`, else (none sent) the books the account's toggles restrict; and
+/// those unchecked on one of the account's own characters.
 fn restricted(backend: &Backend, enabled: Option<&[String]>) -> ApiResult<Vec<String>> {
+    let mut out = restricted_by_default(backend, enabled)?;
+    out.extend(character_restrictions(backend)?);
+    Ok(out)
+}
+
+fn restricted_by_default(backend: &Backend, enabled: Option<&[String]>) -> ApiResult<Vec<String>> {
     let hub = backend.hub().map_err(|e| upstream(&e))?;
     if let Some(on) = enabled {
         // As upstream's `restricted_from` (manage.rs): every installed source the list leaves out.

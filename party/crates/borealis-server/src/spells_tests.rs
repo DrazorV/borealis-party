@@ -1244,3 +1244,137 @@ async fn the_dm_tools_offer_only_what_the_accounts_characters_may_pick() {
         "{off}"
     );
 }
+
+fn has_goblin(page: &Value) -> bool {
+    page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|m| m["id"] == GOBLIN)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_source_unchecked_on_one_of_the_dms_characters_is_left_out_of_their_dm_tools() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = router_on(
+        dir.path().to_path_buf(),
+        Db::open(&Location::Memory).await.unwrap(),
+    );
+    let dm = sign_up(&router, "char-rules-dm").await;
+    let other = sign_up(&router, "char-rules-other").await;
+    let query = json!({ "text": "goblin warrior" });
+    let before = ok(&dm, "POST", "/api/bestiary/search", query.clone()).await;
+    assert!(has_goblin(&before), "{before}");
+    let book = before["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == GOBLIN)
+        .unwrap()["source"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let facets_before = ok(&dm, "GET", "/api/bestiary/facets", Value::Null).await;
+
+    // One of the DM's characters leaves the goblin's book out (its own Sources step, not the saved default).
+    let (status, out) = dm
+        .rpc("create_character", super::new_character("Picky"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let id = out["id"].as_str().unwrap().to_string();
+    let on = sources_but(&dm, &[&book]).await;
+    let (status, out) = dm
+        .rpc(
+            "set_source_restrictions",
+            json!({ "characterId": id, "enabledSources": on }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, out) = dm.rpc("save_character", json!({ "characterId": id })).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+
+    // The DM's bestiary, creature pickers and filter chips leave it out, with or without the client's sources.
+    let after = ok(&dm, "POST", "/api/bestiary/search", query.clone()).await;
+    assert!(!has_goblin(&after), "{after}");
+    let all = sources_but(&dm, &[]).await;
+    let sent = ok(
+        &dm,
+        "POST",
+        "/api/bestiary/search",
+        json!({ "text": "goblin warrior", "enabledSources": all }),
+    )
+    .await;
+    assert!(!has_goblin(&sent), "{sent}");
+    let facets = ok(
+        &dm,
+        "POST",
+        "/api/bestiary/facets",
+        json!({ "enabledSources": all }),
+    )
+    .await;
+    assert!(
+        facets["total"].as_u64().unwrap() < facets_before["total"].as_u64().unwrap(),
+        "{facets}"
+    );
+
+    // Another account's lists don't change.
+    let theirs = ok(&other, "POST", "/api/bestiary/search", query).await;
+    assert!(has_goblin(&theirs), "{theirs}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_bestiary_facets_count_only_enabled_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = router_on(
+        dir.path().to_path_buf(),
+        Db::open(&Location::Memory).await.unwrap(),
+    );
+    let dm = sign_up(&router, "facets-dm").await;
+    let page = ok(
+        &dm,
+        "POST",
+        "/api/bestiary/search",
+        json!({ "text": "goblin warrior" }),
+    )
+    .await;
+    let book = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == GOBLIN)
+        .unwrap_or_else(|| panic!("{page}"))["source"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let all = ok(&dm, "GET", "/api/bestiary/facets", Value::Null).await;
+    let every = sources_but(&dm, &[]).await;
+    let same = ok(
+        &dm,
+        "POST",
+        "/api/bestiary/facets",
+        json!({ "enabledSources": every }),
+    )
+    .await;
+    assert_eq!(same["total"], all["total"], "{same}");
+    let on = sources_but(&dm, &[&book]).await;
+    let some = ok(
+        &dm,
+        "POST",
+        "/api/bestiary/facets",
+        json!({ "enabledSources": on }),
+    )
+    .await;
+    assert!(
+        some["total"].as_u64().unwrap() < all["total"].as_u64().unwrap(),
+        "{some}"
+    );
+    let count = |f: &Value| -> u64 {
+        f["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["count"].as_u64().unwrap())
+            .sum()
+    };
+    assert_eq!(count(&some), some["total"].as_u64().unwrap(), "{some}");
+}

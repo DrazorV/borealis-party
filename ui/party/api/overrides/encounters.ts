@@ -461,7 +461,11 @@ export const removeRule = (id: string, rid: string) => call<Encounter>("DELETE",
 /** The creature picker: creatures of the account's enabled sources only (../contentRules.ts). */
 export const searchMonsters = async (query: MonsterQuery) =>
   call<MonsterPage>("POST", "/api/bestiary/search", await withEnabledSources((m, p, b) => call(m, p, b), query));
-export const monsterFacets = () => call<Facets>("GET", "/api/bestiary/facets");
+/** The picker's filter chips, counted over the enabled sources only (an older server: GET, every source). */
+export const monsterFacets = async () => {
+  const body = await withEnabledSources((m, p, b) => call(m, p, b), {});
+  return call<Facets>("POST", "/api/bestiary/facets", body).catch(() => call<Facets>("GET", "/api/bestiary/facets"));
+};
 
 /** A party's encounters changed (`kind: "encounters"` on its party events), or events may have been missed. */
 export function watchEncounters(partyId: string, listener: (encounterId: string | null) => void): () => void {
