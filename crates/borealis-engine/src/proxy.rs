@@ -243,6 +243,9 @@ fn parse(id: &str) -> Option<(Kind, &str, &str, &str)> {
     ))
 }
 
+/// `(kind, ABBR, KEPT PART)`: the exact key of a proxy target.
+type TargetKey = (Kind, String, String);
+
 /// Index of the proxy targets of one universe, and the proxies built so far.
 #[derive(Debug, Default)]
 pub struct ProxyTable {
@@ -277,11 +280,16 @@ struct Listed {
 impl ProxyTable {
     /// Index every element of `uni` that Aurora makes a proxy for.
     pub(crate) fn build(uni: &Universe) -> Self {
-        let mut abbrs: HashMap<&str, String> = HashMap::new();
+        // Every abbreviation a source name has, in content order: two installed packs may name the
+        // same book with different abbreviations (an Aurora file's and a converted one's), and a
+        // proxy id of either must resolve.
+        let mut abbrs: HashMap<&str, Vec<String>> = HashMap::new();
         for s in uni.by_type("Source") {
-            abbrs
-                .entry(s.el.name.as_str())
-                .or_insert_with(|| s.el.setter_value("abbreviation").unwrap_or("").to_string());
+            let abbr = s.el.setter_value("abbreviation").unwrap_or("").to_string();
+            let all = abbrs.entry(s.el.name.as_str()).or_default();
+            if !all.contains(&abbr) {
+                all.push(abbr);
+            }
         }
         let mut casts = vec![String::new()];
         for e in uni.iter() {
@@ -307,6 +315,7 @@ impl ProxyTable {
             ..Self::default()
         };
         let mut base_book: Vec<(Kind, String, usize, usize)> = Vec::new();
+        let mut aliases: Vec<(TargetKey, (usize, usize))> = Vec::new();
         for (i, e) in uni.iter().enumerate() {
             let Some(kind) = Kind::of(&e.el) else {
                 continue;
@@ -328,8 +337,15 @@ impl ProxyTable {
                 }
                 continue;
             }
-            let abbr = source_abbreviation(&abbrs, &e.el, kind).to_uppercase();
+            let mut all = source_abbreviations(&abbrs, &e.el, kind).into_iter();
+            let abbr = all.next().unwrap_or_default();
             table.list(uni, (kind, abbr, kept.to_uppercase()), (i, at));
+            aliases.extend(all.map(|a| ((kind, a, kept.to_uppercase()), (i, at))));
+        }
+        // The source's other abbreviations resolve to the target too (not listed again), unless
+        // an element of a source with that abbreviation of its own claims the id.
+        for (key, at) in aliases {
+            table.targets.entry(key).or_insert(at);
         }
         // An id that no book element claims resolves to the Core element it is listed for; the
         // loose fallback above already did so whenever that element was the only one.
@@ -514,20 +530,41 @@ impl Universe {
     }
 }
 
-/// Aurora's source abbreviation of an element: the `abbreviation` of the first Source element
-/// with the element's source name; a spell with no abbreviation uses the first letter of the
-/// source name when that Source exists.
-fn source_abbreviation(abbrs: &HashMap<&str, String>, el: &Element, kind: Kind) -> String {
-    match abbrs.get(el.source.as_str()) {
-        Some(a) if a.is_empty() && kind == Kind::Spell => el
-            .source
-            .chars()
-            .next()
-            .map(String::from)
-            .unwrap_or_default(),
-        Some(a) => a.clone(),
-        None => String::new(),
+/// Aurora's source abbreviations of an element, upper-cased: those of the Source elements with the
+/// element's source name, the one its id names first (`ID_WOTC_<ABBR>_...`, else content order).
+/// A spell with an empty abbreviation uses the first letter of the source name.
+fn source_abbreviations(
+    abbrs: &HashMap<&str, Vec<String>>,
+    el: &Element,
+    kind: Kind,
+) -> Vec<String> {
+    let Some(all) = abbrs.get(el.source.as_str()) else {
+        return vec![String::new()];
+    };
+    let mut out: Vec<String> = Vec::with_capacity(all.len());
+    for a in all {
+        let a = if a.is_empty() && kind == Kind::Spell {
+            el.source
+                .chars()
+                .next()
+                .map(String::from)
+                .unwrap_or_default()
+        } else {
+            a.clone()
+        };
+        let a = a.to_uppercase();
+        if !out.contains(&a) {
+            out.push(a);
+        }
     }
+    let id = el.id.to_uppercase();
+    if let Some(own) = out
+        .iter()
+        .position(|a| !a.is_empty() && id.contains(&format!("_{a}_")))
+    {
+        out[..=own].rotate_right(1);
+    }
+    out
 }
 
 /// The proxy item for `target` (Aurora's names, setters and single grant rule).

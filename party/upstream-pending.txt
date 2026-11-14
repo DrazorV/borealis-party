@@ -48,3 +48,9 @@ src-tauri/src/settings.rs branch:feat/hidden-elements
 # so the HTTPS client checks the address it actually connects to (after its own lookup and after every redirect)
 # and the refusal reaches the Indexes tab in words. The party server checks before fetching (net_guard.rs) and relies
 # on the container's egress firewall for the rest. No file is changed for it yet, so no line names one.
+
+# Proxy items: a source name installed under several abbreviations (an Aurora file's and a converted pack's) resolves
+# the proxy ids of each abbreviation (not sent upstream yet).
+crates/borealis-engine/src/proxy.rs branch:fix/proxy-source-aliases
+crates/borealis-engine/tests/proxy_source_aliases.rs branch:fix/proxy-source-aliases
+crates/borealis-engine/tests/corpus_proxy_sources.rs branch:fix/proxy-source-aliases
