@@ -40,6 +40,8 @@
 .cb-conn.offline { border-color: var(--danger); background: var(--danger-soft); }
 .cb-hint { padding: var(--sp-2) var(--sp-3); border-radius: var(--radius); font-size: var(--fs-sm); background: var(--info-soft); border: var(--border-w) solid var(--info); }
 .cb-panel { background: var(--surface); border: var(--border-w) solid var(--border); border-radius: var(--radius); overflow: hidden; min-width: 0; }
+/* The card clips its corners without being a scroll container, so the turn panel's reactions strip can stick (0.3.2). */
+.cb-panel.cb-card { overflow: clip; }
 .cb-panel-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-bottom: var(--border-w) solid var(--border); }
 .cb-panel-head strong { flex: 1; }
 
@@ -48,6 +50,7 @@
 .cb-main { grid-area: main; min-width: 0; scroll-margin-top: 12px; }
 .cb-right { grid-area: right; min-width: 0; position: sticky; top: var(--sp-2); max-height: calc(100vh - 24px); overflow-y: auto; }
 .cb-more-toggle { display: none; }
+.cb-res-summary { display: none; }
 
 /* roster */
 .cb-rows { list-style: none; margin: 0; padding: var(--sp-2); display: flex; flex-direction: column; gap: 6px; }
@@ -197,11 +200,22 @@
   .cb-row.cb-depth-2, .cb-row.cb-depth-3 { margin-left: 20px; }
   .cb-page { padding: var(--sp-2) var(--sp-2) 0; gap: var(--sp-2); }
   .cb-layout { display: flex; flex-direction: column; gap: var(--sp-2); }
-  .cb-right { order: 0; position: sticky; top: 0; z-index: 5; max-height: 36vh; box-shadow: 0 8px 14px rgba(0, 0, 0, 0.25); }
+  /*
+   * The sticky resource panel is one full-width line while collapsed (a summary of each creature's legendary actions
+   * and More), so it never covers the turn panel; what sits below it and is sticky or scrolled to starts under its
+   * measured height (--cb-res-h, set by the tracker page).
+   */
+  .cb-right { order: 0; position: sticky; top: 0; z-index: 5; align-self: stretch; max-height: 36vh; box-shadow: 0 8px 14px rgba(0, 0, 0, 0.25); }
   .cb-right:has(.cb-resources.expanded) { max-height: 70vh; }
+  .cb-resources:not(.expanded) > :not(.cb-panel-head) { display: none; }
+  .cb-res-summary { display: flex; flex: 1; min-width: 0; gap: 4px; overflow: hidden; white-space: nowrap; font-size: var(--fs-xs); }
+  .cb-res-summary .chip { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .cb-resources.expanded .cb-res-summary { display: none; }
+  .cb-page.phone .cb-react-strip { top: var(--cb-res-h, 0px); }
+  .cb-page.phone :is(.cb-main, [data-turn-panel], .cb-tb-item, .cb-tb-group, .cb-react-strip) { scroll-margin-top: calc(var(--cb-res-h, 0px) + 8px); }
   .cb-resources:not(.expanded) .cb-res-foot, .cb-resources:not(.expanded) .cb-pips { display: none; }
   .cb-resources .cb-panel-head { padding: 4px var(--sp-2); }
-  .cb-main { order: 1; scroll-margin-top: 140px; }
+  .cb-main { order: 1; }
   .cb-left { order: 2; }
   .cb-more-toggle { display: inline-flex; }
   .cb-resources .cb-res-more { display: none; }

@@ -50,6 +50,8 @@ export function CombatTracker() {
   /** Controlled creatures the DM chose to keep after a defeated owner (asked once each). */
   const [kept, setKept] = useState<Set<string>>(() => new Set());
   const cardRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const resRef = useRef<HTMLDivElement>(null);
   const lastTurn = useRef<string | undefined>(undefined);
   const state = view?.state;
 
@@ -66,6 +68,19 @@ export function CombatTracker() {
       setSelected(state.current ?? rosterOrder(state)[0]?.id ?? null);
     }
   }, [state, selected, phone]);
+
+  // Phones: what scrolls under the sticky resource panel starts below its height (tracker.css --cb-res-h).
+  const hasView = Boolean(view);
+  useEffect(() => {
+    const page = pageRef.current;
+    const res = resRef.current;
+    if (!phone || !page || !res || typeof ResizeObserver === "undefined") return;
+    const sync = () => page.style.setProperty("--cb-res-h", `${Math.ceil(res.getBoundingClientRect().height)}px`);
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(res);
+    return () => { ro.disconnect(); page.style.removeProperty("--cb-res-h"); };
+  }, [phone, hasView]);
 
   if (error && !view) {
     return (
@@ -142,7 +157,7 @@ export function CombatTracker() {
   };
 
   return (
-    <div className={`cb-page${phone ? " phone" : ""}`}>
+    <div className={`cb-page${phone ? " phone" : ""}`} ref={pageRef}>
       <header className="cb-top">
         <div className="cb-brand">
           <div className="cb-overline">Combat · DM</div>
@@ -220,7 +235,7 @@ export function CombatTracker() {
             blockOf={blockOf} onDefine={(a) => setDefining({ a, ruleset: `dnd${mechOf(a)?.edition ?? state.edition}` })} onAddCreature={(p) => { setAddPreset(p); setDialog("add"); }} />
             : <div className="cb-panel cb-pad muted">Pick a combatant.</div>}
         </div>
-        <div className="cb-right">
+        <div className="cb-right" ref={resRef}>
           <ResourcePanel state={state} send={send} disabled={disabled} onSelect={setSelected} />
         </div>
       </div>

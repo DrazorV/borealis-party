@@ -30,6 +30,12 @@ export function ResourcePanel({ state, send, disabled, onSelect }: { state: Comb
     <aside className={`cb-panel cb-resources${more ? " expanded" : ""}`} aria-label="Resources">
       <div className="cb-panel-head">
         <strong>Resources</strong>
+        {/* Phones, collapsed: one line of each creature's legendary actions left; More opens the options (C26). */}
+        {pools.length > 0 && (
+          <span className="cb-res-summary" aria-hidden={more || undefined}>
+            {pools.map(([key, pool]) => <span key={key} className="chip">{poolTitle(state, pool)} {pool.remaining}/{pool.max}</span>)}
+          </span>
+        )}
         <Button small variant="ghost" className="cb-more-toggle" aria-expanded={more} onClick={() => setMore(!more)}>{more ? "▴ Less" : "▾ More"}</Button>
       </div>
       {empty && <p className="muted cb-small cb-pad">No legendary actions, recharges or group limits in this fight.</p>}

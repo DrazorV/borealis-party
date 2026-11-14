@@ -35,7 +35,7 @@
 .cb-tb-detail { font-size: var(--fs-xs); opacity: 0.8; font-variant-numeric: tabular-nums; }
 .cb-tb-why { font-size: 11px; color: var(--danger); padding: 2px 4px 0; }
 .cb-react-strip { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px var(--sp-2);
-  border: var(--border-w) solid var(--info); border-radius: var(--radius); background: var(--info-soft); }
+  border: var(--border-w) solid var(--info); border-radius: var(--radius); background: linear-gradient(var(--info-soft), var(--info-soft)), var(--surface); }
 .cb-react-strip .cb-overline { color: var(--info); opacity: 1; }
 
 /* coverage badges */
