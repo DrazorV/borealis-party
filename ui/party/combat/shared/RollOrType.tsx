@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button } from "../../../src/components/Button";
+import { useDigitalDiceHidden } from "../../play/dicePrefs";
 import type { D20Input } from "./types";
 
 /** The highest d20 total anyone types (a high bonus plus a 20); the server checks again. */
@@ -10,8 +11,9 @@ export const MIN_TOTAL = -20;
  * Every roll, table first (user, 2026-11-13: "we want to promote actual rolls on table"; D21, D43): the box for the
  * total of the dice rolled at the table is the main action, with Send; "Roll for me" (the server's roller,
  * `{kind: "app"}`) is second, for players without dice. A typed result is the player's own dice and always wins.
+ * "Hide Roll for me" in Settings (../../play/dicePrefs.ts) leaves only the box.
  */
-export function RollOrType({ label, modifier = 0, onRoll, busy, rollLabel = "Roll for me", autoFocus = false }: {
+export function RollOrType({ label, modifier = 0, onRoll, busy, rollLabel = "Roll for me", autoFocus = false, appHint }: {
   /** What is being rolled, e.g. "Initiative" or "Death save". */
   label: string;
   modifier?: number;
@@ -19,7 +21,10 @@ export function RollOrType({ label, modifier = 0, onRoll, busy, rollLabel = "Rol
   busy?: boolean;
   rollLabel?: string;
   autoFocus?: boolean;
+  /** What "Roll for me" rolls, shown in place of the modifier ("1d8+3"). */
+  appHint?: string;
 }) {
+  const hideApp = useDigitalDiceHidden();
   const [text, setText] = useState("");
   const total = Number(text);
   const valid = /^-?\d+$/.test(text.trim()) && total >= MIN_TOTAL && total <= MAX_TOTAL;
@@ -34,7 +39,7 @@ export function RollOrType({ label, modifier = 0, onRoll, busy, rollLabel = "Rol
       <input className="input" inputMode="numeric" enterKeyHint="send" placeholder="Your roll" autoFocus={autoFocus}
         aria-label={`${label}: my table roll`} value={text} onChange={(e) => setText(e.target.value)} disabled={busy} />
       <Button type="submit" variant="primary" disabled={busy || !valid}>Send</Button>
-      <Button variant="ghost" icon="dice" disabled={busy} onClick={() => void onRoll({ kind: "app", modifier, mode: "normal" })}>{rollLabel} ({mod})</Button>
+      {!hideApp && <Button variant="ghost" icon="dice" disabled={busy} onClick={() => void onRoll({ kind: "app", modifier, mode: "normal" })}>{rollLabel} ({appHint ?? mod})</Button>}
     </form>
   );
 }
