@@ -5,6 +5,7 @@ import { CombatPane } from "../combat/player/CombatPane";
 import { myCombatant } from "../combat/player/api";
 import { useCombatFor } from "../combat/player/store";
 import { leaveCombatTab, useCombatTabSelected } from "../combat/player/tabState";
+import { DeathSavesCard } from "./DeathSaves";
 
 /**
  * What the Play page's Play sub-tab starts with, in place of upstream's rest bar (the rests moved onto the stat
@@ -12,6 +13,8 @@ import { leaveCombatTab, useCombatTabSelected } from "../combat/player/tabState"
  * section (user, 2026-11-14: the Play tab is the player's screen; the separate Combat sub-tab is retired into it).
  * It appears when the DM starts a combat with the open character in it, and goes when it ends. The Live chip and the
  * "Your turn" banner lead here and scroll it into view.
+ * Without that section, a character at 0 hit points gets the death saves card here instead (./DeathSaves.tsx, 0.3.5):
+ * the section has its own, kept by the server.
  */
 // PlayPage passes the hit points upstream's rest bar used; the rests now read them themselves.
 export function RestBar(props: { hp: PlayHitPoints }) {
@@ -26,8 +29,8 @@ export function RestBar(props: { hp: PlayHitPoints }) {
     ref.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
     leaveCombatTab();
   }, [live, asked]);
-  if (!combat || !snapshot) return null;
+  if (!snapshot) return null;
   // Only for a character in the fight's initiative (user, 2026-11-14): the server says when one isn't.
-  if (myCombatant(combat, { id: snapshot.id, name: snapshot.name })?.inInitiative === false) return null;
+  if (!combat || myCombatant(combat, { id: snapshot.id, name: snapshot.name })?.inInitiative === false) return <DeathSavesCard s={snapshot} />;
   return <div ref={ref} className="bp-play-combat"><CombatPane combat={combat} s={snapshot} /></div>;
 }

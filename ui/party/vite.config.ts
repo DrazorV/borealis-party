@@ -30,7 +30,22 @@ const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   // The Play tab is the player's screen (0.3.3): its Play sub-tab starts with the live combat section while the open
   // character's party has a live combat (play/PlayTop.tsx, in place of the rest bar), and Short Rest and Long Rest sit
   // on the stat tiles' row (play/StatRowWithRests.tsx, through combat/player/playTabs.tsx).
-  "src/pages/play/PlayPage.tsx": { "../../components": local("./combat/player/playTabs.tsx"), "./RestBar": local("./play/PlayTop.tsx") },
+  // 0.3.5 player quick wins: every d20 roll asks for the table's total first, "Roll for me" second (play/rolls/), and
+  // the history can share a roll with the DM; damage asks for a concentration save under the concentration banner
+  // (play/HitPointsCard.tsx, play/SpellSlotsCard.tsx); the trackers offer quick counters (play/TrackersCard.tsx); the
+  // death saves card outside combat comes with the top section (play/PlayTop.tsx, play/DeathSaves.tsx).
+  "src/pages/play/PlayPage.tsx": {
+    "../../components": local("./combat/player/playTabs.tsx"),
+    "./RestBar": local("./play/PlayTop.tsx"),
+    "./rolls/RollContext": local("./play/rolls/RollContext.tsx"),
+    "./rolls/RollResult": local("./play/rolls/RollResult.tsx"),
+    "./HitPointsCard": local("./play/HitPointsCard.tsx"),
+    "./SpellSlotsCard": local("./play/SpellSlotsCard.tsx"),
+    "./TrackersCard": local("./play/TrackersCard.tsx"),
+  },
+  "src/pages/play/AttacksPanel.tsx": { "./rolls/RollContext": local("./play/rolls/RollContext.tsx") },
+  "src/pages/play/DiceCards.tsx": { "./rolls/RollContext": local("./play/rolls/RollContext.tsx") },
+  "src/pages/play/rolls/RollButton.tsx": { "./RollContext": local("./play/rolls/RollContext.tsx") },
   // Additional Content is the one import page: the Import section above upstream's packs (content/WithImport.tsx).
   // Index files with "Packs without their index" above them, each with Add its index (content/WithUnfollowed.tsx).
   "src/pages/content/ContentPage.tsx": {
