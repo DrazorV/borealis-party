@@ -31,6 +31,13 @@ export const DM_BAND_LABEL: Record<DmBand, string> = { healthy: "Healthy", blood
 const SERVER_BAND: Record<string, DmBand> = { unhurt: "healthy", healthy: "healthy", bloodied: "bloodied", down: "down", stable: "stable", dead: "dead", dying: "down" };
 
 function bandOf(c: Combatant): DmBand | undefined {
+  // A copy of a combatant this module already stripped keeps the band it read then.
+  const kept = (c as { dmBand?: DmBand }).dmBand;
+  if (kept) return kept;
+  // The server's `life_state` (alive | dying | stable | dead) says Stable and Dead, which its `band` can't.
+  const state = (c as { life_state?: unknown }).life_state;
+  if (state === "dead" || state === "stable") return state;
+  if (state === "dying") return "down";
   const sent = (c as { band?: unknown }).band;
   if (typeof sent === "string" && SERVER_BAND[sent]) return SERVER_BAND[sent];
   const life = c.life?.state;
@@ -54,8 +61,8 @@ const PRIVATE = ["life", "zero_hp", "spell_slots", "resources", "economy", "pend
  */
 export function redactCombatant(c: Combatant, state?: CombatState): Combatant {
   if (!playerSide(c)) return c;
-  // Already stripped (the band is read once, from what the server sent).
-  if ((c as { dmBand?: unknown }).dmBand !== undefined || (c.hp && c.hp.max === 0 && c.hp.current === 0 && !c.life)) return c;
+  // Already stripped here (the band is read once, from what the server sent).
+  if (STRIPPED.has(c)) return c;
   const band = bandOf(c);
   const kept = { ...c, hp: { ...NO_HP }, ...(band ? { dmBand: band } : {}) } as Combatant;
   delete (kept as { band?: unknown }).band;
@@ -65,8 +72,12 @@ export function redactCombatant(c: Combatant, state?: CombatState): Combatant {
     const held = state?.effects.find((e) => e.source === c.id && e.concentration);
     kept.concentration = { name: held?.name ?? "a spell" };
   } else if (conc === false || conc === null) delete kept.concentration;
+  STRIPPED.add(kept);
   return kept;
 }
+
+/** The combatants this module made, so stripping twice (the mock server and the screen) changes nothing. */
+const STRIPPED = new WeakSet<Combatant>();
 
 /** The whole state, with every player-side combatant stripped. */
 export function redactState(state: CombatState): CombatState {

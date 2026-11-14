@@ -842,6 +842,15 @@ describe("the player screen (0.3.3): the Play tab with the live combat on top", 
     expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/roll", body: { args: { id: "me1", roll: { dice: { kind: "typed", total: 6 } } } } });
   });
 
+  it("a PC the server says isn't in the initiative gets no live combat section (inInitiative: false)", async () => {
+    server.combats.set("p1", liveWith({}, { inInitiative: false }));
+    await start();
+    renderPlay();
+    await screen.findByRole("tab", { name: "Abilities" });
+    await act(async () => { await Promise.resolve(); });
+    expect(section()).toBeNull();
+  });
+
   it("Short Rest and Long Rest sit on the stat tiles' row of the Play sub-tab, not on Traits", async () => {
     const user = userEvent.setup();
     server.combats.set("p1", null);

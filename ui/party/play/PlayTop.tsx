@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { PlayHitPoints } from "../../src/api/contract";
 import { useCharacter } from "../../src/state/CharacterContext";
 import { CombatPane } from "../combat/player/CombatPane";
+import { myCombatant } from "../combat/player/api";
 import { useCombatFor } from "../combat/player/store";
 import { leaveCombatTab, useCombatTabSelected } from "../combat/player/tabState";
 
@@ -26,5 +27,7 @@ export function RestBar(props: { hp: PlayHitPoints }) {
     leaveCombatTab();
   }, [live, asked]);
   if (!combat || !snapshot) return null;
+  // Only for a character in the fight's initiative (user, 2026-11-14): the server says when one isn't.
+  if (myCombatant(combat, { id: snapshot.id, name: snapshot.name })?.inInitiative === false) return null;
   return <div ref={ref} className="bp-play-combat"><CombatPane combat={combat} s={snapshot} /></div>;
 }

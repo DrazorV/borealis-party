@@ -74,6 +74,8 @@ export interface WireMine {
   kind?: "character" | "creature";
   /** C1: not in this fight. */
   absent?: boolean;
+  /** 0.3.3 (role-views.md): this PC is in the combat's initiative; false = the fight goes on without it. */
+  inInitiative?: boolean;
   /** My PC's companions the server offers to summon (from the character), by `key`. */
   offers?: { key: string; name: string; hp?: number | null; ac?: number | null; initiative?: number | null }[];
   /** My latest roll results, newest first (D21). */
@@ -154,6 +156,8 @@ export interface PlayerCombatant {
   inOrder: boolean;
   /** My own: the latest roll, as words. */
   lastRoll?: string | null;
+  /** My PC: false when the server says it isn't in this fight's initiative (no live combat section for it). */
+  inInitiative?: boolean;
   /** My PC: the companions the server offers to summon (`summon {owner, companion: key}`). */
   offers?: { key: string; name: string; hp?: number | null; ac?: number | null }[] | null;
 }
@@ -241,6 +245,7 @@ export function fromWire(w: WireProjection, ctx: WireContext = {}): PlayerCombat
       ownerId: o.view?.owner_id ?? o.ownerId ?? null,
       // A monster is its name and band only (user, 2026-11-14); my own creatures keep their HP, which I play.
       ...(o.kind === "creature" && mine ? { hp: m?.hp ?? o.view?.hp ?? o.hp ?? null, ac: o.view?.ac ?? o.ac ?? null } : {}),
+      ...(m?.inInitiative === false ? { inInitiative: false } : {}),
       ...(m?.offers ? { offers: m.offers.map((k) => ({ key: k.key, name: k.name, hp: k.hp ?? null, ac: k.ac ?? null })) } : {}),
       ...(roll ? { lastRoll: `${roll.name} ${roll.total}${roll.breakdown ? ` (${roll.breakdown})` : ""}` } : {}),
     };

@@ -6,7 +6,7 @@ import { saveSession } from "../api/session";
 import { resetCastFocus } from "../combat/dm/castFocus";
 import { execute } from "../combat/dm/mockEngine";
 import { mockCombatServer, type MockServer } from "../combat/dm/mockServer";
-import { redactCombatant } from "../combat/dm/privacy";
+import { dmBand, redactCombatant } from "../combat/dm/privacy";
 import type { Combatant, DmCombat } from "../combat/dm/types";
 import { memoryStorage } from "../test/memoryStorage";
 
@@ -116,6 +116,15 @@ describe("DM screen privacy", () => {
       expect(within(card()).queryByRole("button", { name: /^(Damage|Heal|Set exact|Temp HP|−10|−5|\+5|Stabilize)$/ })).toBeNull();
       expect(within(card()).getByRole("button", { name: "Send damage" })).toBeTruthy();
     }
+  });
+
+  it("the band from the server's band and life_state (role-views.md): Stable and Dead win over the band", () => {
+    const pc = (extra: Record<string, unknown>) => ({ ...combat().view.state.combatants.find((c) => c.id === "pc-aria")!, hp: { current: 0, max: 0, temp: 0 }, life: undefined, ...extra }) as Combatant;
+    expect(dmBand(redactCombatant(pc({ band: "bloodied", life_state: "alive" })))).toBe("bloodied");
+    expect(dmBand(redactCombatant(pc({ band: "unhurt" })))).toBe("healthy");
+    expect(dmBand(redactCombatant(pc({ band: "down", life_state: "stable" })))).toBe("stable");
+    expect(dmBand(redactCombatant(pc({ band: "down", life_state: "dead" })))).toBe("dead");
+    expect(dmBand(redactCombatant(pc({ band: "down", life_state: "dying" })))).toBe("down");
   });
 
   it("strips a player's combatant to what the DM may see", () => {
