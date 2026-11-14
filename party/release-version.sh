@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Prints the Borealis Connect release version and its kind, from party/VERSION, after checking it against
-# party/Cargo.toml. Used by party/release.sh, .github/workflows/party-apps.yml and party-image.yml.
+# party/Cargo.toml. Used by party/release.sh, .github/workflows/connect-apps.yml and connect-image.yml.
 #   X.Y.Z    a full release: the apps (Windows, Linux, Android, iOS), the desktop update feed and the server image.
 #            It must be party/Cargo.toml's version.
 #   X.Y.Z.W  a server and web release: the server image and release notes only. X.Y.Z is party/Cargo.toml's version

@@ -629,7 +629,7 @@ jobs:
           gh release upload "$TAG" assets/* --clobber
           gh release edit "$TAG" --draft=false --latest
 
-  # A server and web release (party/VERSION X.Y.Z.W): the server image comes from party-image.yml on main; this job
+  # A server and web release (party/VERSION X.Y.Z.W): the server image comes from connect-image.yml on main; this job
   # only publishes the GitHub release with its notes and no files. It is never marked "latest": the desktop apps read
   # their update feed from releases/latest/download/borealis-party-latest.json, so "latest" stays the newest full
   # release, and the apps are offered nothing. Make the release with its notes as a draft first

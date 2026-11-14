@@ -2,7 +2,7 @@
 # Tags a Borealis Connect release on main: party-v<party/VERSION>, with the Borealis release it is built on in the tag
 # message. Checks first; pushes nothing. party/VERSION (party/release-version.sh) says which kind:
 #   X.Y.Z    a full release, the apps too; it must be party/Cargo.toml's version.
-#   X.Y.Z.W  a server and web release: the server image and release notes, no apps (party-apps.yml skips them).
+#   X.Y.Z.W  a server and web release: the server image and release notes, no apps (connect-apps.yml skips them).
 # Usage: bash party/release.sh [--unreleased]
 #   --unreleased  allow Borealis commits that are newer than its last release (say why in the release notes)
 set -euo pipefail
