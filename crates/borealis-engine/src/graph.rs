@@ -1229,9 +1229,14 @@ impl<'u> Graph<'u> {
     /// May `cand` be offered for a NEW pick? Strict mode hides foreign-edition content; stored
     /// choices are replayed and only need the profile to accept the element.
     pub(crate) fn offers_edition(&self, cand: &UElem) -> bool {
+        !cand.hidden && self.edition_allows(cand)
+    }
+
+    /// [`Self::offers_edition`] without the hidden check: the edition, superseded and foreign
+    /// checks alone (a prepared hidden copy of a stand-in group replays through it).
+    pub(crate) fn edition_allows(&self, cand: &UElem) -> bool {
         cand.edition.is_accepted()
             && !cand.superseded
-            && !cand.hidden
             && (self.allow_cross_edition || !cand.edition.is_foreign())
     }
 
