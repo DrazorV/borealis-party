@@ -6,7 +6,7 @@ import { expect, measureOverflow, open, settled, test } from "./fixtures";
  * The encounter builder's "Add a spell" follows the account's content rules (0.3.5), as its characters do: a book the
  * Sources page restricts (here the Restrict playtest toggle) is never offered, and "also in" names each other book once.
  * The account's own made-up homebrew: "Zephyr Spark" in the book "Zephyr Pages" (marked playtest in the browser's
- * book list, as the bundled books are all official), and two copies of Fireball in one made-up book. The settings and
+ * book list, as the bundled books are all official), and three copies of "Ember Mote", two of them in one made-up book. The settings and
  * the server's filtering are the real server's. Run at 1440x900 and on the 384x832 phone, one account per project.
  */
 
@@ -59,13 +59,16 @@ async function prepare(request: APIRequestContext, testInfo: TestInfo) {
   await call(request, dm.token, "POST", "/api/rpc/save_settings", { patch: { restrictPlaytest: false, restrictThirdParty: false } });
   const packs = await call<{ id: string; name: string }[] | { packs: { id: string; name: string }[] }>(request, dm.token, "GET", "/api/homebrew/packs");
   const list = Array.isArray(packs) ? packs : packs.packs;
-  let pack = list.find((p) => p.name === "Rig Spells")?.id;
+  let pack = list.find((p) => p.name === "Rig Spell Books")?.id;
   if (!pack) {
-    pack = (await call<{ id: string }>(request, dm.token, "POST", "/api/homebrew/packs", { name: "Rig Spells", description: "Made up for the rig.", author: "Rig" })).id;
+    pack = (await call<{ id: string }>(request, dm.token, "POST", "/api/homebrew/packs", { name: "Rig Spell Books", description: "Made up for the rig.", author: "Rig" })).id;
     await call(request, dm.token, "POST", `/api/homebrew/packs/${pack}/elements`, spell("ID_RIG_SPELL_ZEPHYR_SPARK", "Zephyr Spark", "Zephyr Pages", "1"));
-    await call(request, dm.token, "POST", `/api/homebrew/packs/${pack}/elements`, spell("ID_RIG_SPELL_FIREBALL_A", "Fireball", "Made Up Grimoire", "3"));
-    await call(request, dm.token, "POST", `/api/homebrew/packs/${pack}/elements`, spell("ID_RIG_SPELL_FIREBALL_B", "Fireball", "Made Up Grimoire", "3"));
+    await call(request, dm.token, "POST", `/api/homebrew/packs/${pack}/elements`, spell("ID_RIG_SPELL_EMBER_MOTE_A", "Ember Mote", "Made Up Grimoire", "2"));
+    await call(request, dm.token, "POST", `/api/homebrew/packs/${pack}/elements`, spell("ID_RIG_SPELL_EMBER_MOTE_B", "Ember Mote", "Made Up Grimoire", "2"));
+    await call(request, dm.token, "POST", `/api/homebrew/packs/${pack}/elements`, spell("ID_RIG_SPELL_EMBER_MOTE_C", "Ember Mote", "Second Grimoire", "2"));
   }
+  // The DM's pick: the copy in the second book is the spell, the made-up book's two copies are "also in".
+  await call(request, dm.token, "POST", "/api/spells/ID_RIG_SPELL_EMBER_MOTE_C/choose");
   const party = await call<{ id: string }>(request, dm.token, "POST", "/api/parties", { name: `Sources ${Math.random().toString(36).slice(2, 7)}` });
   const enc = await call<{ id: string }>(request, dm.token, "POST", `/api/parties/${party.id}/encounters`, { name: "Spell check", publicName: "A fight" });
   await call(request, dm.token, "POST", `/api/encounters/${enc.id}/creatures`, { elementId: GOBLIN, count: 1 });
@@ -81,7 +84,7 @@ async function press(page: Page, testInfo: TestInfo, locator: ReturnType<Page["l
 async function openPicker(page: Page, testInfo: TestInfo, route: string) {
   if (wide(testInfo)) await page.goto(`/#${route}`);
   else await open(page, route);
-  const goblin = page.getByRole("listitem", { name: "Goblin Warrior 1" }).first();
+  const goblin = page.getByRole("listitem", { name: /^Goblin Warrior/ }).first();
   await expect(goblin).toBeVisible({ timeout: 30_000 });
   await press(page, testInfo, goblin.getByRole("button", { name: "Edit" }));
   await press(page, testInfo, page.getByRole("button", { name: "Add spell…" }));
@@ -112,13 +115,13 @@ test("Add a spell offers only the account's enabled books and names each other b
     });
     const route = `/encounters/${party.id}/${enc.id}`;
 
-    // Every book on: the made-up spell is offered, and Fireball's made-up book is named once.
+    // Every book on: the made-up spell is offered, and Ember Mote's other book is named once.
     let picker = await openPicker(page, testInfo, route);
     const search = picker.getByLabel("Search spells");
     await search.fill("zephyr");
     await expect(picker.getByRole("button", { name: /^Zephyr Spark/ })).toBeVisible({ timeout: 15_000 });
-    await search.fill("fireball");
-    const old = picker.getByRole("button", { name: /^Fireball.* 2014/ });
+    await search.fill("ember");
+    const old = picker.getByRole("button", { name: /^Ember Mote/ });
     await expect(old).toBeVisible({ timeout: 15_000 });
     await expect(old).toContainText("also in Made Up Grimoire");
     await expect(old).not.toContainText("Made Up Grimoire, Made Up Grimoire");
@@ -142,8 +145,8 @@ test("Add a spell offers only the account's enabled books and names each other b
     await page.evaluate((ids) => localStorage.setItem("borealis.defaultSources", JSON.stringify(ids)), books.map((b) => b.id).filter((id) => id !== "Made Up Grimoire"));
     await page.reload();
     picker = await openPicker(page, testInfo, route);
-    await picker.getByLabel("Search spells").fill("fireball");
-    const kept = picker.getByRole("button", { name: /^Fireball.* 2014/ });
+    await picker.getByLabel("Search spells").fill("ember");
+    const kept = picker.getByRole("button", { name: /^Ember Mote/ });
     await expect(kept).toBeVisible({ timeout: 15_000 });
     await expect(kept).not.toContainText("also in");
     await page.screenshot({ path: testInfo.outputPath("restricted.png") });
