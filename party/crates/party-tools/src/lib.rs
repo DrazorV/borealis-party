@@ -12,6 +12,7 @@ pub mod args;
 pub mod error;
 pub mod guard;
 pub mod mcp;
+pub mod prompts;
 pub mod scope;
 pub mod spec;
 

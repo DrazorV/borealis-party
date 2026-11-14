@@ -38,8 +38,6 @@ mod bestiary_tests;
 mod combat_tests;
 #[path = "content_tools_tests.rs"]
 mod content_tools_tests;
-#[path = "drop_ai_tests.rs"]
-mod drop_ai_tests;
 #[path = "encounters_tests.rs"]
 mod encounters_tests;
 #[path = "health_tests.rs"]
@@ -58,6 +56,8 @@ mod mcp_tests;
 mod no_vendor_calls_tests;
 #[path = "parties_tests.rs"]
 mod parties_tests;
+#[path = "retired_steps_tests.rs"]
+mod retired_steps_tests;
 #[path = "shares_tests.rs"]
 mod shares_tests;
 #[path = "simulate_tests.rs"]
@@ -507,8 +507,6 @@ async fn drop_all(url: &str) {
         "spell_meta",
         "encounter_casts",
         "spell_mechanics",
-        "ai_usage",
-        "ai_providers",
         "oauth_tokens",
         "oauth_grants",
         "oauth_codes",

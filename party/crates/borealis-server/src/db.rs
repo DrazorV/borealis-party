@@ -416,35 +416,12 @@ const MIGRATIONS: &[&[&str]] = &[
         "CREATE INDEX IF NOT EXISTS oauth_tokens_grant ON oauth_tokens (grant_id)",
         "CREATE INDEX IF NOT EXISTS oauth_tokens_expires ON oauth_tokens (expires_at)",
     ],
-    // 8 (M-ai-providers, 0.3.1), after M-ai-auth. Bring your own AI (ai_providers.rs): one provider per account, its key encrypted with the
-    // server's `[ai] secret_key` (never stored in the clear, never in the account's folder, so never in a bundle or a
-    // share), and each account's tokens per day for the budget. Both go with the account.
-    // 0.3.3 removed the in-app assistant, and step 10 drops both tables again. This step keeps its place so the
-    // numbering stays, and has no marker (MARKERS): a missing ai_providers must not make it run again.
-    &[
-        "CREATE TABLE IF NOT EXISTS ai_providers (
-            user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-            provider TEXT NOT NULL,
-            mode TEXT NOT NULL,
-            base_url TEXT,
-            model TEXT NOT NULL,
-            key_sealed TEXT,
-            key_last4 TEXT,
-            key_ring TEXT,
-            auto_apply BIGINT NOT NULL DEFAULT 0,
-            profile TEXT NOT NULL DEFAULT 'small',
-            consented_at BIGINT NOT NULL,
-            updated_at BIGINT NOT NULL
-        )",
-        "CREATE TABLE IF NOT EXISTS ai_usage (
-            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            day BIGINT NOT NULL,
-            requests BIGINT NOT NULL DEFAULT 0,
-            tokens BIGINT NOT NULL DEFAULT 0,
-            PRIMARY KEY (user_id, day)
-        )",
-    ],
-    // 9 (M-spells, 0.3.2), after M-ai-providers. Spells as mechanics in combat (spells.rs).
+    // 8: unused since 0.3.3, empty since 0.3.5. It created the in-app assistant's tables (0.3.1), which 0.3.3
+    // removed with that assistant (step 10 dropped them, and every database in the world has run it). The step keeps
+    // its place, so schema_version (1..) and `/api/health`'s expected version stay the same; it creates nothing and
+    // has no marker (MARKERS).
+    &[],
+    // 9 (M-spells, 0.3.2), after step 8. Spells as mechanics in combat (spells.rs).
     // `spell_mechanics`: what a DM decided about spells, per account (D: per account, with a JSON file export and
     // import; not in homebrew packs yet). One table, by `kind`:
     // - `def`: an effect the DM built (`def_json` is the engine's SpellMech, `schema_v` its version, `rev` bumped on
@@ -501,14 +478,9 @@ const MIGRATIONS: &[&[&str]] = &[
         )",
         "CREATE INDEX IF NOT EXISTS spell_meta_pack ON spell_meta (owner_id, pack_id)",
     ],
-    // 10 (M-drop-ai, 0.3.3), after M-spells. The in-app assistant is gone (Borealis Connect never calls an AI service;
-    // AI apps connect over MCP), so step 8's tables go: each account's saved provider and its sealed key, and the
-    // usage counts. The user approved dropping them (2026-11-14). `IF EXISTS`, so it can run twice; the backup before
-    // an upgrade (backup.rs) still has them. Nothing else of step 8 exists (no columns elsewhere).
-    &[
-        "DROP TABLE IF EXISTS ai_usage",
-        "DROP TABLE IF EXISTS ai_providers",
-    ],
+    // 10: unused since 0.3.3, empty since 0.3.5. It dropped step 8's tables (0.3.3); every database has run it, so
+    // its statements are gone. It keeps its place (see step 8) and has no marker.
+    &[],
 ];
 
 /// How many steps [`MIGRATIONS`] has: the schema version a database is at after [`Db::open`] (also `/api/health`).
@@ -526,13 +498,13 @@ const MARKERS: &[(usize, &str)] = &[
     (5, "encounters"),
     (6, "combats"),
     (7, "api_tokens"),
-    // No 8: step 10 drops its tables, and a marker would bring them back.
+    // No 8: it is empty (unused since 0.3.3).
     // Its table that refers to step 5's: a database that lost (or never had) those gets step 9 again too.
     (9, "encounter_casts"),
-    // No 10: it only drops tables, so there is nothing to look for; the recorded version is trusted.
+    // No 10: it is empty (unused since 0.3.3).
 ];
 
-/// The steps from 2 on with no marker: their tables are dropped by a later step, or they create none.
+/// The steps from 2 on with no marker: the empty ones (8 and 10, unused since 0.3.3).
 #[cfg(test)]
 const UNMARKED: [usize; 2] = [8, 10];
 
@@ -1417,22 +1389,14 @@ mod marker_tests {
             .filter(|s| !UNMARKED.contains(s))
             .collect();
         assert_eq!(steps, want, "one marker per step from 2 on, in order");
-        // A step with no marker can still run twice: it creates with IF NOT EXISTS and drops with IF EXISTS.
+        // The steps with no marker are empty (8 and 10: unused since 0.3.3), and no step names an ai_ table.
         for step in UNMARKED {
-            for statement in MIGRATIONS[step - 1] {
-                assert!(
-                    statement.starts_with("CREATE TABLE IF NOT EXISTS ")
-                        || statement.starts_with("CREATE INDEX IF NOT EXISTS ")
-                        || statement.starts_with("DROP TABLE IF EXISTS "),
-                    "step {step} has a statement that can't run twice: {statement}"
-                );
-            }
+            assert!(MIGRATIONS[step - 1].is_empty(), "step {step} is not empty");
         }
-        // Step 10 drops step 8's tables, and step 8 has no marker that would make it create them again.
-        assert!(MIGRATIONS[9].contains(&"DROP TABLE IF EXISTS ai_providers"));
-        assert!(!MARKERS
+        assert!(!MIGRATIONS
             .iter()
-            .any(|(_, t)| *t == "ai_providers" || *t == "ai_usage"));
+            .flat_map(|s| s.iter())
+            .any(|s| s.contains(" ai_")));
         for (step, table) in MARKERS {
             let sql = MIGRATIONS[step - 1];
             let creates = format!("CREATE TABLE IF NOT EXISTS {table} (");

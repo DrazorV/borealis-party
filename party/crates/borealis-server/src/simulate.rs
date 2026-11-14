@@ -6,9 +6,12 @@
 //!   migration, no activity row and no event. No tool takes or returns a combat id.
 //! * **DM only.** Every call re-reads `parties.dm_id` of the encounter's party; anyone else gets the generic "not
 //!   found", the same as an unknown id.
-//! * **In memory.** A session lives in [`STORE`] for 30 idle minutes, at most 2 per account and 600 steps each; a
-//!   server update loses it (the report's transcript replays it). Sim ids are random 122-bit values bound to the
-//!   account.
+//! * **Kept across a restart (0.3.5).** A session lives in [`STORE`] for 30 idle minutes, at most 2 per account and
+//!   600 steps each. After every call it is also saved whole (setup, engine state with its dice, transcript) as one
+//!   JSON file in `<data>/sims/`, and [`install`] loads the unexpired ones at start-up, so a server update doesn't end
+//!   a running simulation and it continues exactly as it would have. Files, not database rows: the database stays
+//!   untouched by simulations (D25), and nothing needs a migration. A file the new version can't read is dropped.
+//!   Sim ids are random 122-bit values bound to the account.
 //! * **Off the async threads.** The fight itself runs in `spawn_blocking` under the combat module's per-account job
 //!   semaphore.
 //! * **No model calls (0.3.3).** The server never calls an AI service: an MCP client plays with its own model
@@ -21,6 +24,7 @@
 //! `simulate_tools.rs` plugs them into `party-tools`.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
@@ -389,6 +393,7 @@ fn parse<T: serde::de::DeserializeOwned>(args: Map<String, Value>) -> SimResult<
 
 // ----- Sessions -----
 
+#[derive(Serialize, Deserialize)]
 struct Session {
     account: String,
     party: String,
@@ -414,10 +419,141 @@ fn lock(s: &Shared) -> std::sync::MutexGuard<'_, Session> {
     s.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Drop idle sessions.
+/// Drop idle sessions (and their files).
 fn sweep() {
     let cut = now() - IDLE_SECONDS;
-    store().retain(|_, s| lock(s).last_used > cut);
+    let mut gone = Vec::new();
+    store().retain(|id, s| {
+        let keep = lock(s).last_used > cut;
+        if !keep {
+            gone.push(id.clone());
+        }
+        keep
+    });
+    for id in gone {
+        forget(&id);
+    }
+}
+
+// ----- Saved sessions (0.3.5) -----
+
+/// The version of the saved file. A file of another version (or that no longer parses) is dropped at start-up.
+const SAVED_FORMAT: u32 = 1;
+
+/// Where sessions are saved: `<data>/sims`, set by [`install`]. `None` (tests that don't ask): memory only.
+static DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+fn dir() -> Option<PathBuf> {
+    DIR.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
+#[derive(Serialize)]
+struct SavedRef<'a> {
+    format: u32,
+    session: &'a Session,
+}
+
+#[derive(Deserialize)]
+struct Saved {
+    format: u32,
+    session: Session,
+}
+
+/// A sim id as [`start`] makes them (32 hex digits): the only file names read or written.
+fn file_id_ok(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Save a session after a call, replacing its file whole (written aside, then renamed). A failure is logged and the
+/// session goes on in memory: only a restart would lose it.
+fn save(id: &str, s: &Session) {
+    let Some(dir) = dir() else { return };
+    if !file_id_ok(id) {
+        return;
+    }
+    let body = match serde_json::to_vec(&SavedRef {
+        format: SAVED_FORMAT,
+        session: s,
+    }) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!("simulate: a session could not be saved: {e}");
+            return;
+        }
+    };
+    let tmp = dir.join(format!("{id}.json.tmp"));
+    let file = dir.join(format!("{id}.json"));
+    if let Err(e) = std::fs::write(&tmp, body).and_then(|()| std::fs::rename(&tmp, &file)) {
+        tracing::warn!("simulate: a session could not be saved: {e}");
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+/// Remove a session's file (ended, expired, or unreadable).
+fn forget(id: &str) {
+    let Some(dir) = dir() else { return };
+    if file_id_ok(id) {
+        let _ = std::fs::remove_file(dir.join(format!("{id}.json")));
+    }
+}
+
+/// Read the saved sessions in `dir` into the store: the unexpired ones the current version can read. The others'
+/// files are removed. Returns how many came back.
+fn restore(dir: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let cut = now() - IDLE_SECONDS;
+    let mut back = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.ends_with(".json.tmp") {
+            let _ = std::fs::remove_file(&path);
+            continue;
+        }
+        let Some(id) = name.strip_suffix(".json").filter(|id| file_id_ok(id)) else {
+            continue;
+        };
+        let saved = std::fs::read(&path)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Saved>(&b).ok())
+            .filter(|s| s.format == SAVED_FORMAT);
+        match saved {
+            Some(s) if s.session.last_used > cut => {
+                store().insert(id.to_string(), Arc::new(Mutex::new(s.session)));
+                back += 1;
+            }
+            Some(_) => {
+                let _ = std::fs::remove_file(&path);
+            }
+            None => {
+                tracing::warn!("simulate: a saved session this version can't read was dropped");
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+    back
+}
+
+/// Keep sessions in `dir` (`<data>/sims`) from now on, and load the ones a previous run left there. Called once at
+/// start-up, before the server listens.
+pub fn install(dir: PathBuf) {
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        tracing::warn!(
+            "simulate: {} can't be created, so simulations end with a restart: {e}",
+            dir.display()
+        );
+        return;
+    }
+    let back = restore(&dir);
+    if back > 0 {
+        tracing::info!("simulate: {back} open simulation(s) restored");
+    }
+    *DIR.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(dir);
 }
 
 fn session_of(user: &User, sim_id: &str) -> SimResult<Shared> {
@@ -859,7 +995,9 @@ pub async fn call(
             blocking(move || {
                 let mut g = lock(&s);
                 g.last_used = now();
-                json!({ "card": next_card(&mut g.sim) })
+                let card = next_card(&mut g.sim);
+                save(&a.sim_id, &g);
+                json!({ "card": card })
             })
             .await
         }
@@ -869,15 +1007,20 @@ pub async fn call(
             let a: SimIdArgs = parse(args)?;
             let s = session_of(user, &a.sim_id)?;
             still_dm(state, user, &s).await?;
-            let mut g = lock(&s);
-            g.last_used = now();
-            Ok(board(&g))
+            blocking(move || {
+                let mut g = lock(&s);
+                g.last_used = now();
+                save(&a.sim_id, &g);
+                board(&g)
+            })
+            .await
         }
         "sim_report" => {
             let a: SimIdArgs = parse(args)?;
             let s = session_of(user, &a.sim_id)?;
             still_dm(state, user, &s).await?;
             store().remove(&a.sim_id);
+            forget(&a.sim_id);
             let g = lock(&s);
             let mut v = serde_json::to_value(party_sim::report(&g.sim)).map_err(internal)?;
             v["replay"] = json!({ "encounterId": g.encounter, "seed": g.setup.seed });
@@ -920,17 +1063,16 @@ async fn start(state: &AppState, user: &User, a: StartArgs) -> SimResult<Value> 
             "card": card,
         });
         let id = uuid::Uuid::new_v4().simple().to_string();
-        store().insert(
-            id.clone(),
-            Arc::new(Mutex::new(Session {
-                account,
-                party,
-                encounter,
-                setup,
-                sim,
-                last_used: now(),
-            })),
-        );
+        let session = Session {
+            account,
+            party,
+            encounter,
+            setup,
+            sim,
+            last_used: now(),
+        };
+        save(&id, &session);
+        store().insert(id.clone(), Arc::new(Mutex::new(session)));
         Ok((id, out))
     })
     .await??;
@@ -951,34 +1093,47 @@ async fn act(state: &AppState, user: &User, a: ActArgs) -> SimResult<Value> {
             "d is one decision or a list of 1 to 3".into(),
         ));
     }
+    let id = a.sim_id.clone();
+    let step = a.step;
     blocking(move || {
         let mut g = lock(&s);
-        g.last_used = now();
-        let card = next_card(&mut g.sim);
-        if card.is_null() {
-            return Ok(json!({ "step": g.sim.step, "lines": [], "card": null, "ended": g.sim.outcome }));
-        }
-        if a.step != g.sim.step {
-            return Ok(json!({ "stale": true, "step": g.sim.step, "lines": [], "card": card }));
-        }
-        let actor = g.sim.decider();
-        let mut lines = Vec::new();
-        for (i, d) in ds.into_iter().enumerate() {
-            if i > 0 && (g.sim.decider() != actor || matches!(g.sim.advance(), Pending::Ended(_))) {
-                break; // a bundle is one combatant's turn
-            }
-            match g.sim.answer(d, By::Agent) {
-                Ok(more) => lines.extend(more),
-                Err(refusal) => {
-                    let card = next_card(&mut g.sim);
-                    return Ok(json!({ "step": g.sim.step, "error": refusal.0, "lines": lines, "card": card }));
-                }
-            }
-        }
-        let card = next_card(&mut g.sim);
-        Ok(json!({ "step": g.sim.step, "lines": lines, "card": card, "ended": g.sim.outcome }))
+        let out = act_on(&mut g, step, ds);
+        save(&id, &g);
+        out
     })
     .await?
+}
+
+/// [`act`] on the locked session.
+fn act_on(g: &mut Session, step: u32, ds: Vec<Decision>) -> SimResult<Value> {
+    g.last_used = now();
+    let card = next_card(&mut g.sim);
+    if card.is_null() {
+        return Ok(
+            json!({ "step": g.sim.step, "lines": [], "card": null, "ended": g.sim.outcome }),
+        );
+    }
+    if step != g.sim.step {
+        return Ok(json!({ "stale": true, "step": g.sim.step, "lines": [], "card": card }));
+    }
+    let actor = g.sim.decider();
+    let mut lines = Vec::new();
+    for (i, d) in ds.into_iter().enumerate() {
+        if i > 0 && (g.sim.decider() != actor || matches!(g.sim.advance(), Pending::Ended(_))) {
+            break; // a bundle is one combatant's turn
+        }
+        match g.sim.answer(d, By::Agent) {
+            Ok(more) => lines.extend(more),
+            Err(refusal) => {
+                let card = next_card(&mut g.sim);
+                return Ok(
+                    json!({ "step": g.sim.step, "error": refusal.0, "lines": lines, "card": card }),
+                );
+            }
+        }
+    }
+    let card = next_card(&mut g.sim);
+    Ok(json!({ "step": g.sim.step, "lines": lines, "card": card, "ended": g.sim.outcome }))
 }
 
 async fn auto(state: &AppState, user: &User, a: AutoArgs) -> SimResult<Value> {
@@ -998,6 +1153,7 @@ async fn auto(state: &AppState, user: &User, a: AutoArgs) -> SimResult<Value> {
         let _ = next_card(&mut g.sim);
         if a.step != g.sim.step {
             let card = next_card(&mut g.sim);
+            save(&a.sim_id, &g);
             return Ok(json!({ "stale": true, "step": g.sim.step, "card": card }));
         }
         let before = g.sim.log.len();
@@ -1018,6 +1174,7 @@ async fn auto(state: &AppState, user: &User, a: AutoArgs) -> SimResult<Value> {
             .map(|l| if fog { l.fog.clone() } else { l.dm.clone() })
             .collect();
         let card = next_card(&mut g.sim);
+        save(&a.sim_id, &g);
         Ok(json!({ "step": g.sim.step, "lines": lines, "card": card, "ended": g.sim.outcome }))
     })
     .await?
@@ -1072,7 +1229,22 @@ async fn replay(state: &AppState, user: &User, a: ReplayArgs) -> SimResult<Value
     .await?
 }
 
+/// Forget every open session in memory (their files stay, as after a crash).
 #[cfg(test)]
 pub(crate) fn clear_sessions() {
     store().clear();
+}
+
+/// A server restart: memory is gone, and start-up loads `dir` again (as [`install`]).
+#[cfg(test)]
+pub(crate) fn restart(dir: &Path) {
+    store().clear();
+    install(dir.to_path_buf());
+}
+
+/// Back to memory only (the other tests' default).
+#[cfg(test)]
+pub(crate) fn stop_saving() {
+    *DIR.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
 }

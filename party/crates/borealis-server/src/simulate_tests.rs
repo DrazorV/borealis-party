@@ -598,6 +598,164 @@ async fn spell_casters(w: &World) {
     simulate::clear_sessions();
 }
 
+/// The agent plays `n` cards the same way every time (the first automated option with a target, else end its turn).
+async fn play(w: &World, sim: &str, mut card: Value, n: usize) -> Value {
+    for _ in 0..n {
+        if card.is_null() {
+            break;
+        }
+        let step = card["step"].as_u64().unwrap();
+        let o = card["options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["kind"] != "adjudicate" && !o["targets"].as_array().unwrap().is_empty())
+            .cloned();
+        let d = match o {
+            Some(o) => json!({ "o": o["o"], "t": [o["targets"][0]] }),
+            None => json!({ "o": "end", "mv": "near" }),
+        };
+        let out = call(
+            w,
+            &w.dm,
+            "sim_act",
+            json!({ "simId": sim, "step": step, "d": d }),
+        )
+        .await
+        .unwrap();
+        assert!(out.get("error").is_none(), "{out}");
+        card = out["card"].clone();
+    }
+    card
+}
+
+/// Basic plays the rest, then the report (which ends the session).
+async fn finish(w: &World, sim: &str, card: &Value) -> Value {
+    if !card.is_null() {
+        call(
+            w,
+            &w.dm,
+            "sim_auto",
+            json!({ "simId": sim, "step": card["step"], "until": "end" }),
+        )
+        .await
+        .unwrap();
+    }
+    call(w, &w.dm, "sim_report", json!({ "simId": sim }))
+        .await
+        .unwrap()
+}
+
+fn saved(dir: &Path, sim: &str) -> std::path::PathBuf {
+    dir.join(format!("{sim}.json"))
+}
+
+/// 0.3.5: a running simulation is saved after every call, comes back after a server restart, and goes on exactly as
+/// a run that never stopped. The 30 idle minutes and the per-account cap hold for restored sessions too, and the
+/// database is still never written.
+async fn survives_a_restart(w: &World) {
+    simulate::clear_sessions();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("sims");
+    simulate::restart(&dir);
+    let before = census(&w.state.db, &w.combat).await;
+    let begin = json!({ "encounterId": w.encounter, "seed": 23, "opts": { "maxRounds": 6 } });
+
+    // A run interrupted by a restart after three cards.
+    let start = call(w, &w.dm, "sim_start", begin.clone()).await.unwrap();
+    let sim = start["simId"].as_str().unwrap().to_string();
+    assert!(saved(&dir, &sim).is_file(), "saved from the start");
+    let card = play(w, &sim, start["card"].clone(), 3).await;
+    let board = call(w, &w.dm, "sim_state", json!({ "simId": sim }))
+        .await
+        .unwrap();
+    simulate::restart(&dir);
+    let again = call(w, &w.dm, "sim_card", json!({ "simId": sim }))
+        .await
+        .unwrap();
+    assert_eq!(again["card"], card, "the same card after the restart");
+    assert_eq!(
+        call(w, &w.dm, "sim_state", json!({ "simId": sim }))
+            .await
+            .unwrap(),
+        board,
+        "the same board after the restart"
+    );
+    // Still the DM's only: the player gets the generic not found.
+    assert_eq!(
+        call(w, &w.player, "sim_card", json!({ "simId": sim }))
+            .await
+            .unwrap_err(),
+        SimError::NotFound
+    );
+    let card = play(w, &sim, again["card"].clone(), 2).await;
+    let interrupted = finish(w, &sim, &card).await;
+    assert!(!saved(&dir, &sim).exists(), "the report removes the file");
+
+    // The same run without a restart: the same report, decision for decision and roll for roll.
+    let start = call(w, &w.dm, "sim_start", begin.clone()).await.unwrap();
+    let twin = start["simId"].as_str().unwrap().to_string();
+    let card = play(w, &twin, start["card"].clone(), 5).await;
+    let straight = finish(w, &twin, &card).await;
+    assert_eq!(
+        interrupted, straight,
+        "a restart changes nothing in the run"
+    );
+    assert!(
+        interrupted["transcript"]
+            .as_array()
+            .is_some_and(|t| !t.is_empty()),
+        "{interrupted}"
+    );
+
+    // The cap counts restored sessions.
+    let one = call(w, &w.dm, "sim_start", begin.clone()).await.unwrap()["simId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let two = call(w, &w.dm, "sim_start", begin.clone()).await.unwrap()["simId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    simulate::restart(&dir);
+    assert!(matches!(
+        call(w, &w.dm, "sim_start", begin.clone())
+            .await
+            .unwrap_err(),
+        SimError::Busy(_)
+    ));
+
+    // An idle session doesn't come back (and its file goes), nor does a file this version can't read.
+    let file = saved(&dir, &one);
+    let mut v: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    v["session"]["last_used"] = json!(0);
+    std::fs::write(&file, v.to_string()).unwrap();
+    let junk = dir.join(format!("{}.json", "ab".repeat(16)));
+    std::fs::write(&junk, b"{\"format\":0}").unwrap();
+    simulate::restart(&dir);
+    assert_eq!(
+        call(w, &w.dm, "sim_card", json!({ "simId": one }))
+            .await
+            .unwrap_err(),
+        SimError::NotFound,
+        "idle for over 30 minutes"
+    );
+    assert!(!file.exists() && !junk.exists());
+    call(w, &w.dm, "sim_card", json!({ "simId": two }))
+        .await
+        .unwrap();
+    call(w, &w.dm, "sim_report", json!({ "simId": two }))
+        .await
+        .unwrap();
+    assert_eq!(
+        census(&w.state.db, &w.combat).await,
+        before,
+        "saved as files: no row changes"
+    );
+    simulate::stop_saving();
+    simulate::clear_sessions();
+}
+
 /// D16 over the tool table: no difficulty words in names, titles, descriptions or schemas.
 #[test]
 fn the_tool_table_has_no_difficulty_words() {
@@ -652,6 +810,7 @@ async fn simulations_read_copies_only_and_only_for_the_dm() {
     whole_run(&w).await;
     only_the_dm(&w).await;
     spell_casters(&w).await;
+    survives_a_restart(&w).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -669,5 +828,6 @@ async fn simulations_on_postgres() {
     whole_run(&w).await;
     only_the_dm(&w).await;
     spell_casters(&w).await;
+    survives_a_restart(&w).await;
     drop_all(&url).await;
 }

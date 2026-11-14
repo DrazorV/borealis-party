@@ -34,6 +34,7 @@ mod homebrew;
 mod hub;
 mod import_source;
 mod index_subs;
+mod item_tools;
 mod jobs;
 mod mail;
 mod mcp;
@@ -448,6 +449,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data = Settings::resolve(dir, &settings.paths.data);
     std::fs::create_dir_all(&data)?;
     let cards = data.join("party-cards");
+    // Open simulations saved by the previous run (simulate.rs): an update doesn't end them.
+    simulate::install(data.join("sims"));
     let workspaces = Arc::new(Workspaces::new(data, content));
     tokio::spawn(Arc::clone(&workspaces).evict_loop());
     tokio::spawn(shares::sweep_loop(db.clone(), Arc::clone(&workspaces)));

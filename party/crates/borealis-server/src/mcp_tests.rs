@@ -333,7 +333,7 @@ async fn conformance(t: &Table) {
         .iter()
         .map(|x| x["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["bestiary_search", "monster_get"]);
+    assert_eq!(names, ["bestiary_search", "monster_get", "item_search"]);
     let gone = testing::token(&t.state.db, &t.dm.id, ALL_SCOPES).await;
     testing::revoke(&t.state.db, &gone).await;
     let (s, _, _) = post(
@@ -457,8 +457,8 @@ async fn conformance(t: &Table) {
         (s, b["error"]["code"].clone()),
         (StatusCode::BAD_REQUEST, json!(-32600))
     );
-    // Resources exist since 0.3.3 (the instructions); prompts don't.
-    let (s, _, b) = rpc(r, &tok, &modern(1, "prompts/list", json!({}))).await;
+    // Resources exist since 0.3.3 (the instructions) and prompts since 0.3.5; completions don't.
+    let (s, _, b) = rpc(r, &tok, &modern(1, "completion/complete", json!({}))).await;
     assert_eq!(
         (s, b["error"]["code"].clone()),
         (StatusCode::NOT_FOUND, json!(-32601))
@@ -673,6 +673,95 @@ async fn scope_matrix(t: &Table) {
     )
     .await;
     assert_eq!(s, StatusCode::FORBIDDEN);
+}
+
+/// The `loot_ideas` prompt and `item_search` (0.3.5): the prompt is fixed text for the caller's own model (no scope,
+/// no account data) that names the read tools; `item_search` is `bestiary:read`, lists the caller's installed items
+/// and carries no XP.
+async fn prompts_and_items(t: &Table) {
+    let r = &t.router;
+    let tok = testing::token(&t.state.db, &t.dm.id, "characters:read").await;
+    let (_, _, init) = post(
+        r,
+        Some(&tok),
+        &json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": { "protocolVersion": "2025-11-25" } })
+            .to_string(),
+        &[],
+    )
+    .await;
+    assert!(
+        init["result"]["capabilities"]["prompts"].is_object(),
+        "{init}"
+    );
+    let (s, _, list) = rpc(r, &tok, &modern(1, "prompts/list", json!({}))).await;
+    assert_eq!(s, StatusCode::OK, "{list}");
+    assert_eq!(list["result"]["prompts"][0]["name"], "loot_ideas", "{list}");
+    let (s, _, got) = rpc(
+        r,
+        &tok,
+        &modern(
+            2,
+            "prompts/get",
+            json!({ "name": "loot_ideas", "arguments": { "encounter_id": t.encounter, "party_level": "4", "theme": "an owlbear den" } }),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{got}");
+    let text = got["result"]["messages"][0]["content"]["text"]
+        .as_str()
+        .unwrap();
+    assert!(
+        text.contains(&t.encounter) && text.contains("item_search") && text.contains("level 4")
+    );
+    assert!(!text.to_lowercase().contains("deadly"));
+    for bad in [
+        json!({ "name": "hoard", "arguments": { "encounter_id": t.encounter } }),
+        json!({ "name": "loot_ideas", "arguments": {} }),
+        json!({ "name": "loot_ideas", "arguments": { "encounter_id": t.encounter, "party_level": "30" } }),
+    ] {
+        let (s, _, b) = rpc(r, &tok, &modern(3, "prompts/get", bad)).await;
+        assert_eq!(
+            (s, b["error"]["code"].clone()),
+            (StatusCode::BAD_REQUEST, json!(-32602)),
+            "{b}"
+        );
+    }
+    // item_search: bestiary:read only.
+    let (s, _) = call(r, &tok, "item_search", json!({})).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let tok = testing::token(&t.state.db, &t.dm.id, "bestiary:read").await;
+    let (_, _, tools) = rpc(r, &tok, &modern(1, "tools/list", json!({}))).await;
+    assert!(tools.to_string().contains("item_search"));
+    let found = data(
+        r,
+        &tok,
+        "item_search",
+        json!({ "type": "Magic Item", "limit": 100 }),
+    )
+    .await;
+    let items = found["items"].as_array().unwrap();
+    assert!(!items.is_empty(), "the bundled SRD magic items: {found}");
+    assert!(items.iter().all(|i| i["type"] == "Magic Item"), "{found}");
+    assert!(items.iter().any(|i| i["rarity"].is_string()), "{found}");
+    assert!(!found.to_string().contains("\"xp\""), "{found}");
+    let name = items[0]["name"].as_str().unwrap().to_lowercase();
+    let one = data(
+        r,
+        &tok,
+        "item_search",
+        json!({ "text": name, "type": "Magic Item" }),
+    )
+    .await;
+    assert!(
+        one["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["id"] == items[0]["id"]),
+        "{one}"
+    );
+    let (_, b) = call(r, &tok, "item_search", json!({ "type": "Spell" })).await;
+    assert_eq!(b["result"]["isError"], true, "{b}");
 }
 
 /// The spell read tools (0.3.3): `encounters:read` (or write) and nothing else; the DM's mechanics, one copy per
@@ -1087,6 +1176,7 @@ async fn every_tool_needs_its_scope() {
     let t = memory_table(dir.path()).await;
     scope_matrix(&t).await;
     spell_tools(&t).await;
+    prompts_and_items(&t).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1128,6 +1218,7 @@ async fn mcp_on_postgres() {
             "scopes" => {
                 scope_matrix(&t).await;
                 spell_tools(&t).await;
+                prompts_and_items(&t).await;
             }
             "leaks" => leak_suite(&t).await,
             "combats" => no_combat_tools(&t).await,
