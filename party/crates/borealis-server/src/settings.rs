@@ -155,6 +155,19 @@ mod tests {
     }
 
     #[test]
+    fn the_source_restrict_toggles_go_on_to_the_accounts_settings() {
+        // Sources page "Restrict playtest / third-party content": upstream settings, so each account's own file keeps them.
+        let dir = tempfile::tempdir().unwrap();
+        let mut patch = json!({ "restrictPlaytest": true, "restrictThirdParty": false });
+        strip(&mut patch, dir.path()).unwrap();
+        assert_eq!(
+            patch,
+            json!({ "restrictPlaytest": true, "restrictThirdParty": false })
+        );
+        assert!(!dir.path().join(PARTY_FILE).exists());
+    }
+
+    #[test]
     fn an_unreadable_party_file_reads_as_the_defaults() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(PARTY_FILE), "not json").unwrap();
