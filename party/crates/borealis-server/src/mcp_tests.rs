@@ -28,6 +28,8 @@ const OWLBEAR: &str = "ID_SRD521_MONSTER_OWLBEAR";
 const GOBLIN: &str = "ID_SRD521_MONSTER_GOBLIN_WARRIOR";
 const ALL_SCOPES: &str =
     "bestiary:read encounters:write encounters:simulate characters:read homebrew:write";
+/// A spell the hidden dragon precasts; its key never reaches a player.
+const SPELL_KEY: &str = "ID_2024_SPELL_FIREBALL";
 const SECRETS: [&str; 5] = [
     "SECRET-LABEL-DRAGON",
     "SECRET-PUBLIC-DRAGON",
@@ -135,6 +137,21 @@ async fn table(state: AppState) -> Table {
     };
     let v = ok(&dm, "POST", &path, json!({ "elementId": DRAGON, "dmLabel": "SECRET-LABEL-DRAGON", "publicName": "SECRET-PUBLIC-DRAGON", "hidden": true })).await;
     let dragon_src = last(&v);
+    // A precast spell of the hidden dragon and a spell rule of the DM (0.3.2): DM-only, like the labels.
+    ok(
+        &dm,
+        "POST",
+        &format!("/api/encounters/{encounter}/casts"),
+        json!({ "casterId": dragon_src, "spellKey": SPELL_KEY, "slotLevel": 3 }),
+    )
+    .await;
+    ok(
+        &dm,
+        "PUT",
+        "/api/spell-mechanics",
+        json!({ "kind": "alias", "spellKey": SPELL_KEY, "ruleset": "dnd2024", "aliasName": "SECRET Spell Alias" }),
+    )
+    .await;
     let v = ok(
         &dm,
         "POST",
@@ -714,6 +731,12 @@ async fn leak_suite(t: &Table) {
             assert!(
                 !text.contains(secret),
                 "{tool} {args}: {secret} leaked: {text}"
+            );
+        }
+        for spell in [SPELL_KEY, "\"casts\"", "spell alias"] {
+            assert!(
+                !text.to_lowercase().contains(&spell.to_lowercase()),
+                "{tool} {args}: the DM's spell data ({spell}) leaked: {text}"
             );
         }
         for id in &t.hidden_ids {

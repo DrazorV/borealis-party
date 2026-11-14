@@ -255,6 +255,8 @@ struct Built {
     revealed: String,
     effect: String,
     rule: String,
+    /// A precast spell of the hidden creature (0.3.2).
+    cast: String,
 }
 
 const SECRETS: [&str; 6] = [
@@ -346,6 +348,14 @@ async fn build(t: &Table) -> Built {
     let rule = v["rules"][0]["id"].as_str().unwrap().to_string();
     let v = ok(
         &t.dm,
+        "POST",
+        &format!("/api/encounters/{shown}/casts"),
+        json!({ "casterId": hidden, "spellKey": "ID_2024_SPELL_FIREBALL", "slotLevel": 3, "targets": [revealed] }),
+    )
+    .await;
+    let cast = v["casts"][0]["id"].as_str().unwrap().to_string();
+    let v = ok(
+        &t.dm,
         "PATCH",
         &format!("/api/encounters/{shown}"),
         json!({ "status": "ready", "playerVisible": true }),
@@ -361,6 +371,7 @@ async fn build(t: &Table) -> Built {
         revealed,
         effect,
         rule,
+        cast,
     }
 }
 
@@ -555,8 +566,10 @@ async fn leak_suite(t: &Table) {
                 ("POST", format!("/api/encounters/{id}/creatures")),
                 ("POST", format!("/api/encounters/{id}/effects")),
                 ("POST", format!("/api/encounters/{id}/rules")),
+                ("POST", format!("/api/encounters/{id}/casts")),
             ];
             for sub in [
+                &b.cast,
                 &b.hidden,
                 &b.hidden_pet,
                 &b.revealed,
@@ -571,6 +584,8 @@ async fn leak_suite(t: &Table) {
                     ("DELETE", "effects"),
                     ("PATCH", "rules"),
                     ("DELETE", "rules"),
+                    ("PATCH", "casts"),
+                    ("DELETE", "casts"),
                 ] {
                     paths.push((m, format!("/api/encounters/{id}/{tail}/{sub}")));
                 }
@@ -644,6 +659,11 @@ async fn leak_suite(t: &Table) {
         b.effect.as_str(),
         b.rule.as_str(),
         b.draft.as_str(),
+        b.cast.as_str(),
+        "ID_2024_SPELL",
+        "spellKey",
+        "\"casts\"",
+        "Fireball",
         "ID_SRD521",
         "elementId",
         "statblock_json",
@@ -1519,6 +1539,7 @@ async fn effects_and_rules(t: &Table) {
         "encounter_creatures",
         "encounter_effects",
         "encounter_rules",
+        "encounter_casts",
     ] {
         let n: i64 = sqlx::query(&format!("SELECT COUNT(*) FROM {table}"))
             .fetch_one(t.state.db.pool())
@@ -1617,8 +1638,10 @@ async fn check_upgraded(location: &Location, data: &Path) {
     assert_eq!(status, StatusCode::OK, "{seen}");
     assert_eq!(seen["creatures"].as_array().unwrap().len(), 4);
     drop(Db::open(location).await.unwrap());
-    // A database that says the step ran but has no encounters table (another numbering) gets it again.
+    // A database that says the step ran but has no encounters table (another numbering) gets it again. The
+    // precast spells (step 9) refer to its creatures, so they go first.
     for table in [
+        "encounter_casts",
         "encounter_rules",
         "encounter_effects",
         "encounter_creatures",
