@@ -228,3 +228,47 @@ export async function scrollIntoReach(page: Page, locator: ReturnType<Page["loca
   await page.waitForTimeout(50);
   return inReach();
 }
+
+export interface UnevenRow { container: string; boxes: string[]; heights: number[] }
+
+/**
+ * The user's rule (2026-11-14): "when boxes side by side always same height". Every row of boxes (a card or panel: a
+ * child with a border or a background of its own, at least 48 px tall) laid out side by side by a grid or a row flex
+ * container, on the page or inside `within`, whose heights differ by more than 2 px. Phones stack at natural height,
+ * so this is for wide screens. A container can opt out with `data-natural-height` (a masonry list on purpose).
+ */
+export function unevenRows(page: Page, within?: string): Promise<UnevenRow[]> {
+  return page.evaluate((within) => {
+    const scope: ParentNode = (within && document.querySelector(within)) || document;
+    const name = (el: Element) => `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}${[...el.classList].slice(0, 3).map((c) => `.${c}`).join("")}${el.getAttribute("aria-label") ? `[${el.getAttribute("aria-label")}]` : ""}`;
+    const boxy = (el: HTMLElement) => {
+      const s = getComputedStyle(el);
+      if (s.display === "none" || s.visibility === "hidden" || s.position === "absolute" || s.position === "fixed") return false;
+      const border = ["Top", "Right", "Bottom", "Left"].some((k) => parseFloat(s[`border${k}Width` as "borderTopWidth"]) > 0 && s[`border${k}Style` as "borderTopStyle"] !== "none");
+      const bg = s.backgroundColor !== "rgba(0, 0, 0, 0)" && s.backgroundColor !== "transparent";
+      return border || bg;
+    };
+    const out: { container: string; boxes: string[]; heights: number[] }[] = [];
+    const all = [scope instanceof Element ? scope : document.body, ...Array.from(scope.querySelectorAll<HTMLElement>("*"))];
+    for (const c of all) {
+      if (!(c instanceof HTMLElement) || c.closest("[data-natural-height]")) continue;
+      const s = getComputedStyle(c);
+      const grid = s.display.includes("grid");
+      const flexRow = s.display.includes("flex") && s.flexDirection.startsWith("row");
+      if (!grid && !flexRow) continue;
+      const kids = Array.from(c.children).filter((k): k is HTMLElement => k instanceof HTMLElement && boxy(k));
+      const rects = kids.map((k) => ({ k, r: k.getBoundingClientRect() })).filter(({ r }) => r.height >= 48 && r.width >= 120);
+      const rows = new Map<number, typeof rects>();
+      for (const x of rects) {
+        const key = [...rows.keys()].find((t) => Math.abs(t - x.r.top) <= 3) ?? x.r.top;
+        rows.set(key, [...(rows.get(key) ?? []), x]);
+      }
+      for (const row of rows.values()) {
+        if (row.length < 2) continue;
+        const hs = row.map(({ r }) => Math.round(r.height));
+        if (Math.max(...hs) - Math.min(...hs) > 2) out.push({ container: name(c), boxes: row.map(({ k }) => name(k)), heights: hs });
+      }
+    }
+    return out;
+  }, within ?? "");
+}

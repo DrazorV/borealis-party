@@ -32,6 +32,8 @@ import { hideUnofferedRows } from "./hideTransfer";
 import { startPhoneBrowser } from "./phoneBrowser";
 import { unifyImports } from "./unifyImports";
 import "../pages/party.css";
+// "When boxes side by side always same height" (user, 2026-11-14): one rule for every row of panels.
+import "../layout/panels.css";
 
 // A browser tab has no window buttons to offer (party.css).
 document.documentElement.classList.toggle("party-browser", !isTauri());
