@@ -148,7 +148,7 @@ describe("through the page's API", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     // The second launch's file is in the queue; the running app is told.
     queued.push(file("Borealis characters.borealis"));
-    callbacks.get(listening[0])?.({ event: "borealis://open-file", id: 1, payload: null });
+    callbacks.get(listening[0]!)?.({ event: "borealis://open-file", id: 1, payload: null });
     const dialog = await screen.findByRole("dialog");
     expect(dialog.textContent).toContain("Import Borealis characters.borealis into alice?");
     expect(takeInbox().files).toEqual([]);
