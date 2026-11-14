@@ -193,4 +193,16 @@ describe("spells and mechanics in the tracker (0.3.2)", () => {
     await waitFor(() => expect(server.spells.rows.find((r) => r.spellKey === "ID_SRD_SPELL_CONE_OF_COLD")).toMatchObject({ origin: "suggested", sourceHash: "mockhash" }));
     expect(within(b).getByRole("button", { name: "60 ft" })).toBeTruthy();
   });
+
+  it("effect chips: End, Dismiss spell, and the It attacked: end reminder", async () => {
+    turnOf("mage");
+    execute(combat(), { command: "add_effect", effect: { name: "Invisibility", source: "mage", target: "mage", ends_on_attack: true, spell: { key: "ID_SRD_SPELL_INVISIBILITY", level: 2 } } });
+    page();
+    const card = await screen.findByRole("region", { name: "Mage details" });
+    const fx = card.querySelector<HTMLElement>("[data-effect]")!;
+    expect(within(fx).getByRole("button", { name: "End Invisibility" })).toBeTruthy();
+    expect(within(fx).getByRole("button", { name: "Dismiss spell" })).toBeTruthy();
+    fireEvent.click(within(fx).getByRole("button", { name: "It attacked: end" }));
+    await waitFor(() => expect(state().effects.find((e) => e.name === "Invisibility")).toBeUndefined());
+  });
 });

@@ -189,6 +189,12 @@ fn sealer() -> Result<Sealer, &'static str> {
     Sealer::from_config(settings().secret_key.as_deref())
 }
 
+/// The refusal when the server can't save keys: the person's note, not the admin's instructions (those are on the
+/// Account page, for admins only).
+fn keys_off() -> ApiError {
+    ApiError::Refused("ai_keys_unavailable", ai_providers::KEYS_OFF_NOTE.into())
+}
+
 /// Counts calls per account in a sliding minute.
 struct Window {
     calls: Mutex<HashMap<String, Vec<Instant>>>,
@@ -364,10 +370,13 @@ async fn status(State(state): State<AppState>, user: User) -> ApiResult<Json<Val
             })
             .collect();
     Ok(Json(json!({
+        // Everyone is told keys can't be saved here; only an admin is told how to switch it on.
         "keys": match &sealer {
             Ok(_) => json!({ "canStore": true }),
-            Err(why) => json!({ "canStore": false, "why": why }),
+            Err(how) if user.admin => json!({ "canStore": false, "why": ai_providers::KEYS_OFF_NOTE, "adminHelp": how }),
+            Err(_) => json!({ "canStore": false, "why": ai_providers::KEYS_OFF_NOTE }),
         },
+        "signIn": crate::ai_oauth::offered(&state),
         "provider": saved.as_ref().map(|s| provider_view(s, sealer.as_ref().ok())),
         "scopes": SCOPES,
         "limits": {
@@ -540,8 +549,7 @@ async fn save(
             )),
             (Mode::Device, _) => (None, None, None),
             (Mode::Server, Some(k)) if !k.trim().is_empty() => {
-                let sealer =
-                    sealer().map_err(|why| ApiError::Refused("ai_keys_unavailable", why.into()))?;
+                let sealer = sealer().map_err(|_| keys_off())?;
                 let key = key_arg(k)?;
                 let sealed = sealer
                     .seal(&user.id, provider, &key)
@@ -588,6 +596,50 @@ async fn save(
     status(State(state), user).await
 }
 
+/// Save the key a browser sign-in gave (`ai_oauth.rs`) as the account's provider: an OpenAI-compatible provider at
+/// `base_url` through the server, sealed like a pasted key. The person agreed to the provider before the sign-in
+/// started (`consented_at`).
+///
+/// # Errors
+/// No server key, or the database.
+pub(crate) async fn store_signed_in(
+    state: &AppState,
+    user: &str,
+    base_url: &str,
+    model: &str,
+    key: &Secret,
+    auto_apply: bool,
+    consented_at: i64,
+) -> ApiResult<()> {
+    let sealer = sealer().map_err(|_| keys_off())?;
+    let sealed = sealer
+        .seal(user, Provider::OpenAi, key)
+        .map_err(ApiError::Internal)?;
+    let saved = Saved {
+        provider: Provider::OpenAi,
+        mode: Mode::Server,
+        base_url: Some(base_url.to_string()),
+        model: model.to_string(),
+        key_sealed: Some(sealed),
+        key_last4: Some(key.last4()),
+        key_ring: Some(sealer.ring().to_string()),
+        auto_apply,
+        profile: Profile::guess(Mode::Server, Provider::OpenAi, model),
+        consented_at,
+    };
+    store(state, user, &saved).await
+}
+
+/// Whether the server can save keys (a browser sign-in is offered only then).
+pub(crate) fn can_store_keys() -> bool {
+    sealer().is_ok()
+}
+
+/// A model name as `PUT /api/ai` takes it.
+pub(crate) fn check_model(model: &str) -> ApiResult<String> {
+    model_arg(model)
+}
+
 async fn remove(State(state): State<AppState>, user: User) -> ApiResult<Json<Value>> {
     sqlx::query("DELETE FROM ai_providers WHERE user_id = $1")
         .bind(&user.id)
@@ -624,7 +676,7 @@ fn endpoint(user: &User, saved: &Saved) -> ApiResult<Endpoint> {
             "Your AI runs on your own device: the app talks to it, not the server.".into(),
         ));
     }
-    let sealer = sealer().map_err(|why| ApiError::Refused("ai_keys_unavailable", why.into()))?;
+    let sealer = sealer().map_err(|_| keys_off())?;
     let reenter = || {
         ApiError::Refused(
             "ai_key_unreadable",
@@ -944,7 +996,7 @@ pub(crate) fn routes_if(on: bool) -> axum::Router<AppState> {
     if !on {
         return axum::Router::new();
     }
-    axum::Router::new()
+    crate::ai_oauth::routes()
         .route("/api/ai", get(status).put(save).delete(remove))
         .route("/api/ai/key", axum::routing::delete(remove_key))
         .route("/api/ai/test", post(test))

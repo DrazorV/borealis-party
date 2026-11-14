@@ -469,6 +469,8 @@ export function watchEncounters(partyId: string, listener: (encounterId: string 
   return watchParties((e) => {
     if (e.type === "resync" || e.type === "mine") listener(null);
     else if (e.party === partyId && e.kind === "encounters") listener(e.id);
+    // The party's edition (or name) changed: every encounter of it follows the party's edition (D23 b).
+    else if (e.party === partyId && e.kind === "party") listener(null);
   });
 }
 

@@ -217,7 +217,7 @@ describe("encounters list (DM)", () => {
     expect(server.calls.some((c) => c.method === "POST" && c.path === "/api/parties/p1/encounters")).toBe(true);
     expect(screen.getByRole("radio", { name: "Draft" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("switch", { name: "Shown to players" }).getAttribute("aria-checked")).toBe("false");
-    expect(screen.getByText("Rules: the party's edition (2024).")).toBeTruthy();
+    expect(screen.getByText(/The party's edition:/).textContent).toBe("The party's edition: 2024 rules");
   });
 
   it("lists encounters with their creatures and status, and no XP or difficulty", async () => {

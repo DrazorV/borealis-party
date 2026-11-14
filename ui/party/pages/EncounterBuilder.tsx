@@ -15,6 +15,7 @@ import {
   type EncounterFields, type Rule,
 } from "../api/overrides/encounters";
 import type { Ruleset } from "../api/overrides/parties";
+import { EditionSwitch, PartyEditionRow } from "./PartyEdition";
 import { LiveCombatLink, StartCombatButton } from "../combat/dm/StartCombatButton";
 import { CreatureDialog, DetailsDialog, EffectDialog, RefreshDialog, RuleDialog, WarningsDialog } from "./EncounterDialogs";
 import { BeforeFightCard, PrecastDialog } from "./EncounterSpells";
@@ -251,7 +252,7 @@ export function EncounterBuilder() {
 
   const setup = (
     <Card title="Setup" className="enc-card">
-      <p className="muted party-note enc-setting-row">Rules: the party's edition ({EDITION_WORD[enc.ruleset]}).</p>
+      <PartyEditionRow partyId={partyId} ruleset={enc.ruleset} onChanged={() => void load()} />
       <div className="enc-setting-row">
         <span className="enc-setting-label">Monster HP</span>
         <div className="segmented enc-segmented" role="radiogroup" aria-label="Monster hit points">
@@ -419,7 +420,11 @@ export function EncounterBuilder() {
         <RuleDialog creatures={creatures} rule={dialog.rule} onClose={() => setDialog(null)}
           onSave={async (f) => setEnc(await (dialog.rule ? updateRule(enc.id, dialog.rule.id, f) : addRule(enc.id, f)))} />
       )}
-      {dialog?.kind === "warnings" && <WarningsDialog warnings={enc.warnings} onClose={() => setDialog(null)} />}
+      {dialog?.kind === "warnings" && (
+        <WarningsDialog warnings={enc.warnings} onClose={() => setDialog(null)}>
+          <EditionSwitch partyId={partyId} onChanged={() => { setDialog(null); void load(); }} />
+        </WarningsDialog>
+      )}
       {dialog?.kind === "block" && (
         <Modal title={dialog.creature.dmLabel} onClose={() => setDialog(null)} footer={<Button onClick={() => setDialog(null)}>Close</Button>}>
           <EncounterStatBlock title={dialog.creature.name} block={dialog.creature.statBlock} />

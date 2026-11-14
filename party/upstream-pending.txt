@@ -34,6 +34,16 @@ ui/src/pages/builder/MissingContentAction.tsx branch:feat/leave-missing-unselect
 ui/src/pages/characters/MissingContentList.tsx branch:feat/leave-missing-unselected
 ui/src/test/i37-missing-content-list.test.tsx branch:feat/leave-missing-unselected
 
+# Hidden elements: ids never offered for new picks, stored choices still replay (not sent upstream yet).
+# The party server lists every duplicate spell copy but one per edition (party-spells canonical resolver).
+crates/borealis-engine/src/engine.rs branch:feat/hidden-elements
+crates/borealis-engine/src/eval.rs branch:feat/hidden-elements
+crates/borealis-engine/src/graph.rs branch:feat/hidden-elements
+crates/borealis-engine/src/settings.rs branch:feat/hidden-elements
+crates/borealis-engine/src/universe.rs branch:feat/hidden-elements
+crates/borealis-engine/tests/hidden_elements.rs branch:feat/hidden-elements
+src-tauri/src/settings.rs branch:feat/hidden-elements
+
 # Planned, not opened (plan item I7/I10): an optional host guard in src-tauri/src/content_index.rs (`https_client`),
 # so the HTTPS client checks the address it actually connects to (after its own lookup and after every redirect)
 # and the refusal reaches the Indexes tab in words. The party server checks before fetching (net_guard.rs) and relies

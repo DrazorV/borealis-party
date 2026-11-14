@@ -17,11 +17,8 @@ export type {
 /** How well the app knows a spell's mechanics (the Spells tab's badge). */
 export type Coverage = "auto" | "partial" | "ruling" | "unlinked" | "suggested";
 
-/**
- * Optional fields the UI reads when the engine sends them (asked of the engine, not in its contract yet): an effect
- * that ends when its target attacks (the "It attacked: end" reminder).
- */
-export type SpellEffect = Effect & { ends_on_attack?: boolean };
+/** An effect as the spell chips read it (`spell` tag, `dismiss_on_end`, `ends_on_attack`: all in the engine's mirror). */
+export type SpellEffect = Effect;
 
 /** The tracker's `send` takes the engine's Command; kept as a no-op so call sites read the same. */
 export const asCommand = (c: Command): Command => c;

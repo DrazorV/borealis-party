@@ -1,0 +1,6275 @@
+{
+ "format": "party-spells/1",
+ "srd": "5.2.1",
+ "edition": "2024",
+ "attribution": "This work includes material from the System Reference Document 5.2.1 (“SRD 5.2.1”) by Wizards of the Coast LLC, available at https://www.dndbeyond.com/srd. The SRD 5.2.1 is licensed under the Creative Commons Attribution 4.0 International License, available at https://creativecommons.org/licenses/by/4.0/legalcode.",
+ "note": "Numbers and enums only; notes are our own words. Every other SRD spell is listed in uncurated.",
+ "rows": [
+  {
+   "srdTextSha": "5a55ba623368e17f",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_ACID_SPLASH",
+    "edition": "2024",
+    "name": "Acid Splash",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "sphere",
+     "size_ft": 5
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "dex",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "(cantrip_tier)d6",
+      "damage_type": "acid"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "0cbe870cd8818702",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CHILL_TOUCH",
+    "edition": "2024",
+    "name": "Chill Touch",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "attack",
+     "attack": "melee",
+     "rays": "1"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "(cantrip_tier)d10",
+      "damage_type": "necrotic"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "The target can’t regain hit points until the start of the caster’s next turn."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "116132b0c4f2d685",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_DANCING_LIGHTS",
+    "edition": "2024",
+    "name": "Dancing Lights",
+    "rev": 1,
+    "level": 0,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "2e7612ec326d839b",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_DRUIDCRAFT",
+    "edition": "2024",
+    "name": "Druidcraft",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cube",
+     "size_ft": 5
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "f65865815fb129a2",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_ELDRITCH_BLAST",
+    "edition": "2024",
+    "name": "Eldritch Blast",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "attack",
+     "attack": "ranged",
+     "rays": "cantrip_tier"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "1d10",
+      "damage_type": "force"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "85fc1439eea24e5b",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_ELEMENTALISM",
+    "edition": "2024",
+    "name": "Elementalism",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cube",
+     "size_ft": 5
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "d99267cf3e5ffad5",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_FIRE_BOLT",
+    "edition": "2024",
+    "name": "Fire Bolt",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "attack",
+     "attack": "ranged",
+     "rays": "1"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "(cantrip_tier)d10",
+      "damage_type": "fire"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "12ab0c33ba7f525f",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_LIGHT",
+    "edition": "2024",
+    "name": "Light",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "sphere",
+     "size_ft": 20
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "3e2df5ec0ad548f8",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_MAGE_HAND",
+    "edition": "2024",
+    "name": "Mage Hand",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "1ee7824dba36fa4e",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_MINOR_ILLUSION",
+    "edition": "2024",
+    "name": "Minor Illusion",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cube",
+     "size_ft": 5
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "7ebcdb7e28f8bc92",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_POISON_SPRAY",
+    "edition": "2024",
+    "name": "Poison Spray",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "attack",
+     "attack": "ranged",
+     "rays": "1"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "(cantrip_tier)d12",
+      "damage_type": "poison"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "b9ea34274d526dad",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_PRESTIDIGITATION",
+    "edition": "2024",
+    "name": "Prestidigitation",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "10a5031463de03c5",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_RAY_OF_FROST",
+    "edition": "2024",
+    "name": "Ray of Frost",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "attack",
+     "attack": "ranged",
+     "rays": "1"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "(cantrip_tier)d8",
+      "damage_type": "cold"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "071af6e933824b82",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SACRED_FLAME",
+    "edition": "2024",
+    "name": "Sacred Flame",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "dex",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "(cantrip_tier)d8",
+      "damage_type": "radiant"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "b3afeda12d53f39a",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SHOCKING_GRASP",
+    "edition": "2024",
+    "name": "Shocking Grasp",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "attack",
+     "attack": "melee",
+     "rays": "1"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "(cantrip_tier)d8",
+      "damage_type": "lightning"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "0fa1cf0dcee96cc4",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SORCEROUS_BURST",
+    "edition": "2024",
+    "name": "Sorcerous Burst",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "attack",
+     "attack": "ranged",
+     "rays": "1"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "(cantrip_tier)d8",
+      "choice": [
+       "acid",
+       "cold",
+       "fire",
+       "lightning",
+       "poison",
+       "psychic",
+       "thunder"
+      ]
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "Each d8 that rolls an 8 adds another d8, up to the spellcasting modifier."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "b7c6cc6f2380bbab",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_STARRY_WISP",
+    "edition": "2024",
+    "name": "Starry Wisp",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "attack",
+     "attack": "ranged",
+     "rays": "1"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "(cantrip_tier)d8",
+      "damage_type": "radiant"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "The target sheds light and can’t benefit from being invisible until the end of the caster’s next turn."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "cf7890cce1f28613",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_THAUMATURGY",
+    "edition": "2024",
+    "name": "Thaumaturgy",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "ec3076fa6983a11d",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_VICIOUS_MOCKERY",
+    "edition": "2024",
+    "name": "Vicious Mockery",
+    "rev": 1,
+    "level": 0,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "(cantrip_tier)d6",
+      "damage_type": "psychic"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "Disadvantage on its next attack roll before the end of its next turn."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "3162c58bf1e8b67a",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_ANIMAL_FRIENDSHIP",
+    "edition": "2024",
+    "name": "Animal Friendship",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1+slot_above",
+     "filter": {
+      "kind": "type",
+      "types": [
+       "beast"
+      ]
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "condition",
+      "condition": "charmed"
+     }
+    ],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "ec3b2063db02bb12",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_BANE",
+    "edition": "2024",
+    "name": "Bane",
+    "rev": 1,
+    "level": 1,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "3+slot_above",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "cha",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "roll_dice",
+      "on": "attacks",
+      "term": {
+       "count": 1,
+       "sides": 4,
+       "sign": "minus"
+      }
+     },
+     {
+      "kind": "roll_dice",
+      "on": "saves",
+      "term": {
+       "count": 1,
+       "sides": 4,
+       "sign": "minus"
+      }
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "ea46dbb639ec8b62",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_BLESS",
+    "edition": "2024",
+    "name": "Bless",
+    "rev": 1,
+    "level": 1,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "3+slot_above",
+     "filter": {
+      "kind": "willing"
+     },
+     "include_self": true
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "always": [
+     {
+      "kind": "roll_dice",
+      "on": "attacks",
+      "term": {
+       "count": 1,
+       "sides": 4
+      }
+     },
+     {
+      "kind": "roll_dice",
+      "on": "saves",
+      "term": {
+       "count": 1,
+       "sides": 4
+      }
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "auto"
+   }
+  },
+  {
+   "srdTextSha": "6ddbd51e7fe86e26",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_BURNING_HANDS",
+    "edition": "2024",
+    "name": "Burning Hands",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cone",
+     "size_ft": 15
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "dex",
+     "success": "half"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "3d6+(slot_above)d6",
+      "damage_type": "fire"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "4813e29fb9794dba",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CHARM_PERSON",
+    "edition": "2024",
+    "name": "Charm Person",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1+slot_above",
+     "filter": {
+      "kind": "type",
+      "types": [
+       "humanoid"
+      ]
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "condition",
+      "condition": "charmed"
+     }
+    ],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "partial",
+    "notes": [
+     "Advantage on the save if the caster or its allies are fighting it."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "c23a46fa54ff78f7",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CHROMATIC_ORB",
+    "edition": "2024",
+    "name": "Chromatic Orb",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "attack",
+     "attack": "ranged",
+     "rays": "1"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "3d8+(slot_above)d8",
+      "choice": [
+       "acid",
+       "cold",
+       "fire",
+       "lightning",
+       "poison",
+       "thunder"
+      ]
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "Matching dice let it leap to another target."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "fb63af6acdafb2e1",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_COMMAND",
+    "edition": "2024",
+    "name": "Command",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1+slot_above",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "ruling",
+    "notes": [
+     "The target follows a one-word command on its next turn."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "601ed54514842744",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CURE_WOUNDS",
+    "edition": "2024",
+    "name": "Cure Wounds",
+    "rev": 1,
+    "level": 1,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "include_self": true
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [
+     {
+      "kind": "heal",
+      "dice": "2d8+(2*slot_above)d8",
+      "add_mod": true
+     }
+    ],
+    "tier": "auto"
+   }
+  },
+  {
+   "srdTextSha": "c9a286c50ac565eb",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_DETECT_EVIL_AND_GOOD",
+    "edition": "2024",
+    "name": "Detect Evil and Good",
+    "rev": 1,
+    "level": 1,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "51eb56f078f829f4",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_DETECT_MAGIC",
+    "edition": "2024",
+    "name": "Detect Magic",
+    "rev": 1,
+    "level": 1,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "4c0dec07fc44f435",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_DISGUISE_SELF",
+    "edition": "2024",
+    "name": "Disguise Self",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "99a0808fe1fe3c01",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_DIVINE_FAVOR",
+    "edition": "2024",
+    "name": "Divine Favor",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "bonus",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": [
+     "Its weapon hits deal an extra 1d4 radiant damage."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "42f73b79b50af33c",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_DIVINE_SMITE",
+    "edition": "2024",
+    "name": "Divine Smite",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "bonus",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "2d8+(slot_above)d8",
+      "damage_type": "radiant"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "Extra damage on a melee weapon hit; +1d8 against fiends and undead."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "8dade709dfbdf346",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_ENTANGLE",
+    "edition": "2024",
+    "name": "Entangle",
+    "rev": 1,
+    "level": 1,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "str",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "condition",
+      "condition": "restrained"
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": [
+     "A STR check against the DC frees it. Difficult terrain."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "cd525400cbfc31aa",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_FAERIE_FIRE",
+    "edition": "2024",
+    "name": "Faerie Fire",
+    "rev": 1,
+    "level": 1,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cube",
+     "size_ft": 20
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "dex",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "roll_mode",
+      "on": "attacks_against",
+      "mode": "advantage"
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": [
+     "Outlined targets cannot benefit from being invisible."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "ea2e6b7c4588ad23",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_FIND_FAMILIAR",
+    "edition": "2024",
+    "name": "Find Familiar",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "minute",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "Opens Add creature, controlled by the caster."
+    ],
+    "always": [
+     {
+      "kind": "summon",
+      "info": {
+       "initiative": "after_owner"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "c938d097b06fd35e",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_FOG_CLOUD",
+    "edition": "2024",
+    "name": "Fog Cloud",
+    "rev": 1,
+    "level": 1,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "sphere",
+     "size_ft": 20
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "f511b9743e67171e",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_GUIDING_BOLT",
+    "edition": "2024",
+    "name": "Guiding Bolt",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "attack",
+     "attack": "ranged",
+     "rays": "1"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "4d6+(slot_above)d6",
+      "damage_type": "radiant"
+     }
+    ],
+    "duration": {
+     "kind": "source_turns",
+     "n": 1,
+     "at": "start"
+    },
+    "tier": "partial",
+    "notes": [
+     "The next attack against the target before the end of the caster’s next turn has advantage."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "ee1183548f8378c3",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_HEALING_WORD",
+    "edition": "2024",
+    "name": "Healing Word",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "bonus",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     },
+     "include_self": true
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [
+     {
+      "kind": "heal",
+      "dice": "2d4+(2*slot_above)d4",
+      "add_mod": true
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": [
+     "No effect on undead or constructs."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "7757b84f91ff6735",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_HELLISH_REBUKE",
+    "edition": "2024",
+    "name": "Hellish Rebuke",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "reaction",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "dex",
+     "success": "half"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "2d10+(slot_above)d10",
+      "damage_type": "fire"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": [
+     "Cast in reaction to being damaged by a creature it can see."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "b0aef050122deab8",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_HEROISM",
+    "edition": "2024",
+    "name": "Heroism",
+    "rev": 1,
+    "level": 1,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1+slot_above",
+     "filter": {
+      "kind": "any"
+     },
+     "include_self": true
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": [
+     "Immune to frightened; the temporary hit points come back at the start of each of its turns."
+    ],
+    "always": [
+     {
+      "kind": "temp_hp",
+      "dice": "mod"
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "4b5b0d120ebe03eb",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_ICE_KNIFE",
+    "edition": "2024",
+    "name": "Ice Knife",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "attack",
+     "attack": "ranged",
+     "rays": "1"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "1d10",
+      "damage_type": "piercing"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "Hit or miss, each creature within 5 feet of the target makes a DEX save or takes 2d6 cold (+1d6 per slot level above 1)."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "5c3b722519934f33",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_IDENTIFY",
+    "edition": "2024",
+    "name": "Identify",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "minute",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "06f0d67ca593e263",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_INFLICT_WOUNDS",
+    "edition": "2024",
+    "name": "Inflict Wounds",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "con",
+     "success": "half"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "2d10+(slot_above)d10",
+      "damage_type": "necrotic"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "125a164552e6b014",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_LONGSTRIDER",
+    "edition": "2024",
+    "name": "Longstrider",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1+slot_above",
+     "filter": {
+      "kind": "any"
+     },
+     "include_self": true
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "auto",
+    "notes": [],
+    "always": [
+     {
+      "kind": "speed",
+      "change": {
+       "op": "add",
+       "ft": 10
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "b8b9840a01bed536",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_MAGE_ARMOR",
+    "edition": "2024",
+    "name": "Mage Armor",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "willing"
+     },
+     "include_self": true
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "always": [
+     {
+      "kind": "ac_base",
+      "base": 13,
+      "add_dex": true
+     }
+    ],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "auto",
+    "notes": [
+     "Only on a creature wearing no armor; ends if it dons armor."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "ddf9aa5d5f34f5f5",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_MAGIC_MISSILE",
+    "edition": "2024",
+    "name": "Magic Missile",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "3+slot_above",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "1d4+1",
+      "damage_type": "force"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "One dart per target here; darts can be split among targets as the caster likes (three, plus one per slot level above 1)."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "dbc84cc825c3e04a",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_PROTECTION_FROM_EVIL_AND_GOOD",
+    "edition": "2024",
+    "name": "Protection from Evil and Good",
+    "rev": 1,
+    "level": 1,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "willing"
+     },
+     "include_self": true
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "partial",
+    "notes": [
+     "Aberrations, celestials, elementals, fey, fiends and undead have disadvantage to attack it; it cannot be charmed, frightened or possessed by them."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "6ed83b4db24be963",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_RAY_OF_SICKNESS",
+    "edition": "2024",
+    "name": "Ray of Sickness",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "attack",
+     "attack": "ranged",
+     "rays": "1"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "2d8+(slot_above)d8",
+      "damage_type": "poison"
+     },
+     {
+      "kind": "condition",
+      "condition": "poisoned"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "Poisoned until the end of the caster’s next turn."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "3156b07369392d0f",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SEARING_SMITE",
+    "edition": "2024",
+    "name": "Searing Smite",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "bonus",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "1d6+(slot_above)d6",
+      "damage_type": "fire"
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": [
+     "Extra damage on a weapon hit; the target burns for 1d6 fire each turn until a CON save ends it."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "89fb86663b9b5e32",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SHIELD",
+    "edition": "2024",
+    "name": "Shield",
+    "rev": 1,
+    "level": 1,
+    "cast": "reaction",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "always": [
+     {
+      "kind": "ac_bonus",
+      "n": 5
+     }
+    ],
+    "duration": {
+     "kind": "source_turns",
+     "n": 1,
+     "at": "start"
+    },
+    "tier": "auto",
+    "notes": [
+     "Counts against the triggering attack.",
+     "No damage from Magic Missile while it lasts."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "221f78d264e233a9",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SHIELD_OF_FAITH",
+    "edition": "2024",
+    "name": "Shield of Faith",
+    "rev": 1,
+    "level": 1,
+    "concentration": true,
+    "cast": "bonus",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     },
+     "include_self": true
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "auto",
+    "notes": [],
+    "always": [
+     {
+      "kind": "ac_bonus",
+      "n": 2
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "54f8b11e4a261890",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SLEEP",
+    "edition": "2024",
+    "name": "Sleep",
+    "rev": 1,
+    "level": 1,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "sphere",
+     "size_ft": 5
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "condition",
+      "condition": "incapacitated"
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": [
+     "Incapacitated until the end of its next turn, then unconscious if it fails a second save; ends on damage."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "35c7941bec646ba4",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SPEAK_WITH_ANIMALS",
+    "edition": "2024",
+    "name": "Speak with Animals",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "a5338b983fc41c0e",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_THUNDERWAVE",
+    "edition": "2024",
+    "name": "Thunderwave",
+    "rev": 1,
+    "level": 1,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cube",
+     "size_ft": 15
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "con",
+     "success": "half"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "2d8+(slot_above)d8",
+      "damage_type": "thunder"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "On a failed save the target is pushed 10 feet away."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "414d70ffc5a7dc3a",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_ACID_ARROW",
+    "edition": "2024",
+    "name": "Acid Arrow",
+    "rev": 1,
+    "level": 2,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "e989944d60388f36",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_ANIMAL_MESSENGER",
+    "edition": "2024",
+    "name": "Animal Messenger",
+    "rev": 1,
+    "level": 2,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "cha",
+     "success": "none"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "0c4db653a1de6eee",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_BARKSKIN",
+    "edition": "2024",
+    "name": "Barkskin",
+    "rev": 1,
+    "level": 2,
+    "concentration": false,
+    "cast": "bonus",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "willing"
+     },
+     "include_self": true
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "auto",
+    "notes": [],
+    "always": [
+     {
+      "kind": "ac_min",
+      "n": 17
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "ae9b85fe4074cf13",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_BLINDNESS_DEAFNESS",
+    "edition": "2024",
+    "name": "Blindness/Deafness",
+    "rev": 1,
+    "level": 2,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1+slot_above",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "con",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "condition",
+      "condition": "blinded",
+      "repeat_save": {
+       "ability": "con",
+       "at": "end"
+      }
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": [
+     "Or deafened instead, chosen when cast."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "4f7d9aa205b159fe",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CALM_EMOTIONS",
+    "edition": "2024",
+    "name": "Calm Emotions",
+    "rev": 1,
+    "level": 2,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "sphere",
+     "size_ft": 20
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "cha",
+     "success": "none"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "50eb6bf4aa58091c",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_DARKNESS",
+    "edition": "2024",
+    "name": "Darkness",
+    "rev": 1,
+    "level": 2,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "sphere",
+     "size_ft": 15
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "c983af4f9f37a131",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_DETECT_THOUGHTS",
+    "edition": "2024",
+    "name": "Detect Thoughts",
+    "rev": 1,
+    "level": 2,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "550cc2dc3b1870d2",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_FIND_STEED",
+    "edition": "2024",
+    "name": "Find Steed",
+    "rev": 1,
+    "level": 2,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "Opens Add creature, controlled by the caster."
+    ],
+    "always": [
+     {
+      "kind": "summon",
+      "info": {
+       "initiative": "after_owner"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "1731a1640e1ae426",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_HOLD_PERSON",
+    "edition": "2024",
+    "name": "Hold Person",
+    "rev": 1,
+    "level": 2,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1+slot_above",
+     "filter": {
+      "kind": "type",
+      "types": [
+       "humanoid"
+      ]
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "condition",
+      "condition": "paralyzed",
+      "repeat_save": {
+       "ability": "wis",
+       "at": "end"
+      }
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "auto"
+   }
+  },
+  {
+   "srdTextSha": "db556065c44c5a23",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_INVISIBILITY",
+    "edition": "2024",
+    "name": "Invisibility",
+    "rev": 1,
+    "level": 2,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1+slot_above",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "partial",
+    "notes": [
+     "Ends on the target after it attacks, deals damage or casts a spell."
+    ],
+    "always": [
+     {
+      "kind": "condition",
+      "condition": "invisible"
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "2b9ad6952b92f45a",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_LOCATE_OBJECT",
+    "edition": "2024",
+    "name": "Locate Object",
+    "rev": 1,
+    "level": 2,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "53d8612ed98a65c8",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_MIND_SPIKE",
+    "edition": "2024",
+    "name": "Mind Spike",
+    "rev": 1,
+    "level": 2,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "half"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "3d8+(slot_above)d8",
+      "damage_type": "psychic"
+     }
+    ],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "partial",
+    "notes": [
+     "The caster knows where the target is while the spell lasts."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "a229c1b3b6c17f3c",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_MISTY_STEP",
+    "edition": "2024",
+    "name": "Misty Step",
+    "rev": 1,
+    "level": 2,
+    "concentration": false,
+    "cast": "bonus",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "c9fdc9e77daca788",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_MOONBEAM",
+    "edition": "2024",
+    "name": "Moonbeam",
+    "rev": 1,
+    "level": 2,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cylinder",
+     "size_ft": 5
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "auto",
+    "notes": [],
+    "always": [
+     {
+      "kind": "zone",
+      "zone": {
+       "save": {
+        "ability": "con",
+        "success": "half"
+       },
+       "damage_type": "radiant",
+       "damage": "2d10+(slot_above)d10"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "0ac42004a7465073",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_PASS_WITHOUT_TRACE",
+    "edition": "2024",
+    "name": "Pass without Trace",
+    "rev": 1,
+    "level": 2,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "emanation",
+     "size_ft": 30
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "083b635e0f76ad7e",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SCORCHING_RAY",
+    "edition": "2024",
+    "name": "Scorching Ray",
+    "rev": 1,
+    "level": 2,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "attack",
+     "attack": "ranged",
+     "rays": "3+slot_above"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "2d6",
+      "damage_type": "fire"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "3c9bb2114945983a",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SHATTER",
+    "edition": "2024",
+    "name": "Shatter",
+    "rev": 1,
+    "level": 2,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "sphere",
+     "size_ft": 10
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "con",
+     "success": "half"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "3d8+(slot_above)d8",
+      "damage_type": "thunder"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "482146fa293fe5a2",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SHINING_SMITE",
+    "edition": "2024",
+    "name": "Shining Smite",
+    "rev": 1,
+    "level": 2,
+    "concentration": true,
+    "cast": "bonus",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "2d6+(slot_above)d6",
+      "damage_type": "radiant"
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": [
+     "Extra damage on a weapon hit; the target sheds light and can’t benefit from being invisible."
+    ],
+    "always": [
+     {
+      "kind": "roll_mode",
+      "on": "attacks_against",
+      "mode": "advantage"
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "8be56a92ac9f0652",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SPIRITUAL_WEAPON",
+    "edition": "2024",
+    "name": "Spiritual Weapon",
+    "rev": 1,
+    "level": 2,
+    "concentration": true,
+    "cast": "bonus",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": [
+     "Bonus action: melee spell attack for 1d8 + modifier force damage (more with a higher slot)."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "d32f69f53c3e3967",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_WEB",
+    "edition": "2024",
+    "name": "Web",
+    "rev": 1,
+    "level": 2,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cube",
+     "size_ft": 20
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "dex",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "condition",
+      "condition": "restrained"
+     }
+    ],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "partial",
+    "notes": [
+     "A STR check (2014) or DEX check (2024) against the DC frees it. Difficult terrain."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "0d3dd7383a3ba021",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_ZONE_OF_TRUTH",
+    "edition": "2024",
+    "name": "Zone of Truth",
+    "rev": 1,
+    "level": 2,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "sphere",
+     "size_ft": 15
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "cha",
+     "success": "none"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "a8a46fa9041ddd97",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_ANIMATE_DEAD",
+    "edition": "2024",
+    "name": "Animate Dead",
+    "rev": 1,
+    "level": 3,
+    "concentration": false,
+    "cast": "minute",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "Opens Add creature, controlled by the caster."
+    ],
+    "always": [
+     {
+      "kind": "summon",
+      "info": {
+       "creature_types": [
+        "undead"
+       ],
+       "initiative": "own_group"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "cc417e7f2bebdfca",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CLAIRVOYANCE",
+    "edition": "2024",
+    "name": "Clairvoyance",
+    "rev": 1,
+    "level": 3,
+    "concentration": true,
+    "cast": "minute",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "b186d2d1bf7ce537",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CONJURE_ANIMALS",
+    "edition": "2024",
+    "name": "Conjure Animals",
+    "rev": 1,
+    "level": 3,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cube",
+     "size_ft": 10
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "partial",
+    "notes": [
+     "A pack of spectral animals, not creatures: nothing to add to the initiative."
+    ],
+    "always": [
+     {
+      "kind": "zone",
+      "zone": {
+       "save": {
+        "ability": "str",
+        "success": "none"
+       },
+       "damage_type": "slashing",
+       "damage": "3d10+(2*slot_above)d10"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "e8079009c75db0f0",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_COUNTERSPELL",
+    "edition": "2024",
+    "name": "Counterspell",
+    "rev": 1,
+    "level": 3,
+    "cast": "reaction",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "enemy"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [
+     {
+      "kind": "ruling",
+      "question": "The caster makes a CON save against your DC. Countered on a failure; its slot isn't spent.",
+      "buttons": [
+       {
+        "label": "Ask for the CON save",
+        "action": {
+         "kind": "ask_save",
+         "ability": "con"
+        }
+       },
+       {
+        "label": "Countered",
+        "action": {
+         "kind": "cancel_target_cast",
+         "refund": true
+        }
+       },
+       {
+        "label": "Not countered",
+        "action": {
+         "kind": "log"
+        }
+       }
+      ]
+     }
+    ],
+    "tier": "ruling"
+   }
+  },
+  {
+   "srdTextSha": "e1c9ebe2dd798fcc",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CREATE_FOOD_AND_WATER",
+    "edition": "2024",
+    "name": "Create Food and Water",
+    "rev": 1,
+    "level": 3,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": [],
+    "always": []
+   }
+  },
+  {
+   "srdTextSha": "6fc0703639aaca13",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_DISPEL_MAGIC",
+    "edition": "2024",
+    "name": "Dispel Magic",
+    "rev": 1,
+    "level": 3,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     },
+     "include_self": true
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [
+     {
+      "kind": "end_effects",
+      "max_level": "slot"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "Higher-level effects need a spellcasting ability check against 10 + their level."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "7f4d301943620e08",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_FEAR",
+    "edition": "2024",
+    "name": "Fear",
+    "rev": 1,
+    "level": 3,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cone",
+     "size_ft": 30
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "condition",
+      "condition": "frightened"
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": [
+     "Drops what it holds and must Dash away; it repeats the save only when it ends its turn out of the caster’s sight."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "ca1a103980b8fc20",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_FIREBALL",
+    "edition": "2024",
+    "name": "Fireball",
+    "rev": 1,
+    "level": 3,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "sphere",
+     "size_ft": 20
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "dex",
+     "success": "half"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "8d6+(slot_above)d6",
+      "damage_type": "fire"
+     }
+    ],
+    "tier": "auto",
+    "notes": [
+     "Ignites unattended flammable objects."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "906d7759d71321b6",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_FLY",
+    "edition": "2024",
+    "name": "Fly",
+    "rev": 1,
+    "level": 3,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1+slot_above",
+     "filter": {
+      "kind": "willing"
+     },
+     "include_self": true
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "auto",
+    "notes": [],
+    "always": [
+     {
+      "kind": "speed",
+      "change": {
+       "op": "set_mode",
+       "mode": "fly",
+       "ft": 60
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "d9faf62608a65785",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_GASEOUS_FORM",
+    "edition": "2024",
+    "name": "Gaseous Form",
+    "rev": 1,
+    "level": 3,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1+slot_above",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "4f0fb2535dd5b7a9",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_HASTE",
+    "edition": "2024",
+    "name": "Haste",
+    "rev": 1,
+    "level": 3,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "willing"
+     },
+     "include_self": true
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": [
+     "One extra limited action each turn."
+    ],
+    "always": [
+     {
+      "kind": "ac_bonus",
+      "n": 2
+     },
+     {
+      "kind": "speed",
+      "change": {
+       "op": "mult",
+       "n": 2
+      }
+     },
+     {
+      "kind": "roll_mode",
+      "on": "saves",
+      "ability": "dex",
+      "mode": "advantage"
+     },
+     {
+      "kind": "follow_up",
+      "effect": {
+       "name": "Lethargic",
+       "duration": {
+        "kind": "target_turns",
+        "n": 1,
+        "at": "end"
+       },
+       "apply": [
+        {
+         "kind": "speed",
+         "change": {
+          "op": "zero"
+         }
+        },
+        {
+         "kind": "note",
+         "text": "No actions this turn."
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "e1c54d633fc21f92",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_HYPNOTIC_PATTERN",
+    "edition": "2024",
+    "name": "Hypnotic Pattern",
+    "rev": 1,
+    "level": 3,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cube",
+     "size_ft": 30
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "condition",
+      "condition": "charmed",
+      "ends_on_damage": true
+     },
+     {
+      "kind": "condition",
+      "condition": "incapacitated",
+      "ends_on_damage": true
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "auto",
+    "notes": [
+     "Its speed is 0; another creature can use an action to shake it free."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "e19e61bc8e831dca",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_LIGHTNING_BOLT",
+    "edition": "2024",
+    "name": "Lightning Bolt",
+    "rev": 1,
+    "level": 3,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "line",
+     "size_ft": 100
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "dex",
+     "success": "half"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "8d6+(slot_above)d6",
+      "damage_type": "lightning"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "f65bd588088f48b1",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_MAJOR_IMAGE",
+    "edition": "2024",
+    "name": "Major Image",
+    "rev": 1,
+    "level": 3,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cube",
+     "size_ft": 20
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "603ad41eb234109b",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_MASS_HEALING_WORD",
+    "edition": "2024",
+    "name": "Mass Healing Word",
+    "rev": 1,
+    "level": 3,
+    "concentration": false,
+    "cast": "bonus",
+    "targeting": {
+     "kind": "creatures",
+     "max": "6",
+     "filter": {
+      "kind": "any"
+     },
+     "include_self": true
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [
+     {
+      "kind": "heal",
+      "dice": "2d4+(slot_above)d4",
+      "add_mod": true
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": [
+     "No effect on undead or constructs."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "3b447e2bfeb78c92",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_REMOVE_CURSE",
+    "edition": "2024",
+    "name": "Remove Curse",
+    "rev": 1,
+    "level": 3,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "36bf88cde7f8079f",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SENDING",
+    "edition": "2024",
+    "name": "Sending",
+    "rev": 1,
+    "level": 3,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "833b1dc77862b2f5",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SLOW",
+    "edition": "2024",
+    "name": "Slow",
+    "rev": 1,
+    "level": 3,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "6",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "ac_bonus",
+      "n": -2
+     },
+     {
+      "kind": "roll_mode",
+      "on": "saves",
+      "ability": "dex",
+      "mode": "disadvantage"
+     },
+     {
+      "kind": "speed",
+      "change": {
+       "op": "halve"
+      }
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": [
+     "Action or bonus action, not both; no reactions; one attack. Repeat WIS save at the end of each of its turns."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "7307b33cbf87b8dd",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SPEAK_WITH_DEAD",
+    "edition": "2024",
+    "name": "Speak with Dead",
+    "rev": 1,
+    "level": 3,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "b13ee9f710482d15",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SPIRIT_GUARDIANS",
+    "edition": "2024",
+    "name": "Spirit Guardians",
+    "rev": 1,
+    "level": 3,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "emanation",
+     "size_ft": 15
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "partial",
+    "notes": [
+     "Radiant or necrotic, chosen when cast. Speed halved for enemies in the area."
+    ],
+    "always": [
+     {
+      "kind": "zone",
+      "zone": {
+       "choice": [
+        "radiant",
+        "necrotic"
+       ],
+       "save": {
+        "ability": "wis",
+        "success": "half"
+       },
+       "damage": "3d8+(slot_above)d8"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "e31bdf404d157ac9",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_TONGUES",
+    "edition": "2024",
+    "name": "Tongues",
+    "rev": 1,
+    "level": 3,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "234b3e9cc9a1aa91",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_WATER_BREATHING",
+    "edition": "2024",
+    "name": "Water Breathing",
+    "rev": 1,
+    "level": 3,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "10",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "6dc0d23d86459146",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_BANISHMENT",
+    "edition": "2024",
+    "name": "Banishment",
+    "rev": 1,
+    "level": 4,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1+slot_above",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "cha",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "condition",
+      "condition": "incapacitated"
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": [
+     "The target is banished while the spell lasts."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "f1edb6c52ed989a5",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CHARM_MONSTER",
+    "edition": "2024",
+    "name": "Charm Monster",
+    "rev": 1,
+    "level": 4,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1+slot_above",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "condition",
+      "condition": "charmed"
+     }
+    ],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "partial",
+    "notes": [
+     "Advantage on the save if the caster or its allies are fighting it."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "ce4afd3703a5e2aa",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CONFUSION",
+    "edition": "2024",
+    "name": "Confusion",
+    "rev": 1,
+    "level": 4,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "sphere",
+     "size_ft": 10
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "c14e20dbd591ed34",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CONJURE_MINOR_ELEMENTALS",
+    "edition": "2024",
+    "name": "Conjure Minor Elementals",
+    "rev": 1,
+    "level": 4,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "emanation",
+     "size_ft": 15
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "partial",
+    "notes": [
+     "The caster’s attacks deal an extra 2d8 (+1d8 per slot level above 4) acid, cold, fire or lightning to creatures in the emanation. Difficult terrain for enemies."
+    ],
+    "always": []
+   }
+  },
+  {
+   "srdTextSha": "3a3a80998519516d",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CONJURE_WOODLAND_BEINGS",
+    "edition": "2024",
+    "name": "Conjure Woodland Beings",
+    "rev": 1,
+    "level": 4,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "emanation",
+     "size_ft": 10
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "partial",
+    "notes": [
+     "Once per turn per creature. The caster can Disengage as a bonus action."
+    ],
+    "always": [
+     {
+      "kind": "zone",
+      "zone": {
+       "save": {
+        "ability": "wis",
+        "success": "half"
+       },
+       "damage_type": "force",
+       "damage": "5d8+(slot_above)d8"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "905b2483df04f092",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CONTROL_WATER",
+    "edition": "2024",
+    "name": "Control Water",
+    "rev": 1,
+    "level": 4,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "str",
+     "success": "half"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "utility",
+    "notes": [],
+    "always": []
+   }
+  },
+  {
+   "srdTextSha": "7798f202e3cb986a",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_DIMENSION_DOOR",
+    "edition": "2024",
+    "name": "Dimension Door",
+    "rev": 1,
+    "level": 4,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": [],
+    "always": []
+   }
+  },
+  {
+   "srdTextSha": "142502e25e0d69c3",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_GIANT_INSECT",
+    "edition": "2024",
+    "name": "Giant Insect",
+    "rev": 1,
+    "level": 4,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "partial",
+    "notes": [
+     "Opens Add creature, controlled by the caster."
+    ],
+    "always": [
+     {
+      "kind": "summon",
+      "info": {
+       "creature_types": [
+        "beast"
+       ],
+       "initiative": "own_group"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "cb4d8383f777515e",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_GREATER_INVISIBILITY",
+    "edition": "2024",
+    "name": "Greater Invisibility",
+    "rev": 1,
+    "level": 4,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "auto",
+    "notes": [],
+    "always": [
+     {
+      "kind": "condition",
+      "condition": "invisible"
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "d4d4995b19243a34",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_ICE_STORM",
+    "edition": "2024",
+    "name": "Ice Storm",
+    "rev": 1,
+    "level": 4,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cylinder",
+     "size_ft": 20
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "dex",
+     "success": "half"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "2d10+(slot_above)d10",
+      "damage_type": "bludgeoning"
+     },
+     {
+      "kind": "damage",
+      "dice": "4d6",
+      "damage_type": "cold"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": [
+     "The area is difficult terrain until the end of the caster’s next turn."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "fe4cb30ef10f9f72",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_PHANTASMAL_KILLER",
+    "edition": "2024",
+    "name": "Phantasmal Killer",
+    "rev": 1,
+    "level": 4,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "half"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "4d10+(slot_above)d10",
+      "damage_type": "psychic"
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": [
+     "Disadvantage on ability checks and attacks; repeat WIS save at the end of each of its turns, taking the damage again on a failure."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "5d44630a6239f9e6",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_VITRIOLIC_SPHERE",
+    "edition": "2024",
+    "name": "Vitriolic Sphere",
+    "rev": 1,
+    "level": 4,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "sphere",
+     "size_ft": 20
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "dex",
+     "success": "half"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "10d4+(2*slot_above)d4",
+      "damage_type": "acid"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "On a failed save, another 5d4 acid at the end of its next turn."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "34641ab251735f4f",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_WALL_OF_FIRE",
+    "edition": "2024",
+    "name": "Wall of Fire",
+    "rev": 1,
+    "level": 4,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": [
+     "The wall’s damaging side, chosen when cast, also burns creatures that end their turn near it."
+    ],
+    "always": [
+     {
+      "kind": "zone",
+      "zone": {
+       "save": {
+        "ability": "dex",
+        "success": "half"
+       },
+       "damage_type": "fire",
+       "damage": "5d8+(slot_above)d8"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "eb2295dc6eb9a126",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_ANIMATE_OBJECTS",
+    "edition": "2024",
+    "name": "Animate Objects",
+    "rev": 1,
+    "level": 5,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     },
+     "include_self": true
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "ruling",
+    "notes": [
+     "The animated objects use the caster’s initiative."
+    ],
+    "always": [
+     {
+      "kind": "summon",
+      "info": {
+       "creature_types": [
+        "construct"
+       ],
+       "initiative": "own_group"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "7a3da4728f462408",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_COMMUNE",
+    "edition": "2024",
+    "name": "Commune",
+    "rev": 1,
+    "level": 5,
+    "concentration": false,
+    "cast": "minute",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "1db13f5692c7ad5c",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CONE_OF_COLD",
+    "edition": "2024",
+    "name": "Cone of Cold",
+    "rev": 1,
+    "level": 5,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cone",
+     "size_ft": 60
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "con",
+     "success": "half"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "8d8+(slot_above)d8",
+      "damage_type": "cold"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "e61baa4420c03184",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CONJURE_ELEMENTAL",
+    "edition": "2024",
+    "name": "Conjure Elemental",
+    "rev": 1,
+    "level": 5,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cube",
+     "size_ft": 10
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "partial",
+    "notes": [
+     "A restrained target repeats the save at the start of each of its turns, taking 4d8 on a failure."
+    ],
+    "always": [
+     {
+      "kind": "zone",
+      "zone": {
+       "choice": [
+        "lightning",
+        "thunder",
+        "fire",
+        "cold"
+       ],
+       "save": {
+        "ability": "dex",
+        "success": "none"
+       },
+       "conditions": [
+        "restrained"
+       ],
+       "damage": "8d8+(slot_above)d8"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "cb267587f8ebbf54",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CREATION",
+    "edition": "2024",
+    "name": "Creation",
+    "rev": 1,
+    "level": 5,
+    "concentration": false,
+    "cast": "minute",
+    "targeting": {
+     "kind": "area",
+     "shape": "cube",
+     "size_ft": 5
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "ee059a8aad930738",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_DISPEL_EVIL_AND_GOOD",
+    "edition": "2024",
+    "name": "Dispel Evil and Good",
+    "rev": 1,
+    "level": 5,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "cha",
+     "success": "none"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "6a2057d05ac6b2a8",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_DREAM",
+    "edition": "2024",
+    "name": "Dream",
+    "rev": 1,
+    "level": 5,
+    "concentration": false,
+    "cast": "minute",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": [],
+    "always": []
+   }
+  },
+  {
+   "srdTextSha": "87d7f38939541457",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_FLAME_STRIKE",
+    "edition": "2024",
+    "name": "Flame Strike",
+    "rev": 1,
+    "level": 5,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cylinder",
+     "size_ft": 10
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "dex",
+     "success": "half"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "5d6+(slot_above)d6",
+      "damage_type": "fire"
+     },
+     {
+      "kind": "damage",
+      "dice": "5d6+(slot_above)d6",
+      "damage_type": "radiant"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "85c3cfc10d312dcd",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_GEAS",
+    "edition": "2024",
+    "name": "Geas",
+    "rev": 1,
+    "level": 5,
+    "concentration": false,
+    "cast": "minute",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "condition",
+      "condition": "charmed"
+     }
+    ],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "partial",
+    "notes": [
+     "Takes psychic damage when it acts against the command."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "9053b40c051e44b6",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_GREATER_RESTORATION",
+    "edition": "2024",
+    "name": "Greater Restoration",
+    "rev": 1,
+    "level": 5,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "98a8e0a8c96f487d",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_HOLD_MONSTER",
+    "edition": "2024",
+    "name": "Hold Monster",
+    "rev": 1,
+    "level": 5,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1+slot_above",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "condition",
+      "condition": "paralyzed",
+      "repeat_save": {
+       "ability": "wis",
+       "at": "end"
+      }
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "auto",
+    "notes": [
+     "No effect on undead."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "3bb066bb2a95ab84",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_INSECT_PLAGUE",
+    "edition": "2024",
+    "name": "Insect Plague",
+    "rev": 1,
+    "level": 5,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "sphere",
+     "size_ft": 20
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "auto",
+    "notes": [],
+    "always": [
+     {
+      "kind": "zone",
+      "zone": {
+       "save": {
+        "ability": "con",
+        "success": "half"
+       },
+       "damage_type": "piercing",
+       "damage": "4d10+(slot_above)d10"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "d9dd3d80dfacb87f",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_LEGEND_LORE",
+    "edition": "2024",
+    "name": "Legend Lore",
+    "rev": 1,
+    "level": 5,
+    "concentration": false,
+    "cast": "minute",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "273baaaea9ef4624",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_MODIFY_MEMORY",
+    "edition": "2024",
+    "name": "Modify Memory",
+    "rev": 1,
+    "level": 5,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "condition",
+      "condition": "charmed"
+     },
+     {
+      "kind": "condition",
+      "condition": "incapacitated"
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "ac87481cca948ae4",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_RAISE_DEAD",
+    "edition": "2024",
+    "name": "Raise Dead",
+    "rev": 1,
+    "level": 5,
+    "concentration": false,
+    "cast": "minute",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "8f604876b58d1f93",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SCRYING",
+    "edition": "2024",
+    "name": "Scrying",
+    "rev": 1,
+    "level": 5,
+    "concentration": true,
+    "cast": "minute",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "wis",
+     "success": "none"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "b75d30ecb993dd5a",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SUMMON_DRAGON",
+    "edition": "2024",
+    "name": "Summon Dragon",
+    "rev": 1,
+    "level": 5,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "partial",
+    "notes": [
+     "Opens Add creature, controlled by the caster."
+    ],
+    "always": [
+     {
+      "kind": "summon",
+      "info": {
+       "creature_types": [
+        "dragon"
+       ],
+       "initiative": "after_owner"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "689a8b27d8e16af5",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_TELEKINESIS",
+    "edition": "2024",
+    "name": "Telekinesis",
+    "rev": 1,
+    "level": 5,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "str",
+     "success": "none"
+    },
+    "on_land": [
+     {
+      "kind": "condition",
+      "condition": "restrained"
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "partial",
+    "notes": [
+     "The caster can move the restrained creature."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "e9fae92fa87a5821",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CHAIN_LIGHTNING",
+    "edition": "2024",
+    "name": "Chain Lightning",
+    "rev": 1,
+    "level": 6,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "4+slot_above",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "dex",
+     "success": "half"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "10d8",
+      "damage_type": "lightning"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "One target plus three bolts that leap to other targets (one more per slot level above 6)."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "d19cb6422c01f204",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CONJURE_FEY",
+    "edition": "2024",
+    "name": "Conjure Fey",
+    "rev": 1,
+    "level": 6,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "attack",
+     "attack": "melee",
+     "rays": "1"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "3d12+(slot_above)d12+mod",
+      "damage_type": "psychic"
+     },
+     {
+      "kind": "condition",
+      "condition": "frightened"
+     }
+    ],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "partial",
+    "notes": [
+     "Frightened until the start of the caster’s next turn. Bonus action on later turns: teleport the spirit and attack again."
+    ],
+    "always": []
+   }
+  },
+  {
+   "srdTextSha": "d5fcc850c05f05c1",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CREATE_UNDEAD",
+    "edition": "2024",
+    "name": "Create Undead",
+    "rev": 1,
+    "level": 6,
+    "concentration": false,
+    "cast": "minute",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "Opens Add creature, controlled by the caster."
+    ],
+    "always": [
+     {
+      "kind": "summon",
+      "info": {
+       "creature_types": [
+        "undead"
+       ],
+       "initiative": "own_group"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "dde08c3b4672bf7c",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_HARM",
+    "edition": "2024",
+    "name": "Harm",
+    "rev": 1,
+    "level": 6,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "con",
+     "success": "half"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "14d6",
+      "damage_type": "necrotic"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "Can’t reduce the target below 1 hit point."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "ae68a1b513b310dd",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_HEROES_FEAST",
+    "edition": "2024",
+    "name": "Heroes’ Feast",
+    "rev": 1,
+    "level": 6,
+    "concentration": false,
+    "cast": "minute",
+    "targeting": {
+     "kind": "area",
+     "shape": "cube",
+     "size_ft": 10
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": [],
+    "always": []
+   }
+  },
+  {
+   "srdTextSha": "b4dcccf076648e3e",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_PLANAR_ALLY",
+    "edition": "2024",
+    "name": "Planar Ally",
+    "rev": 1,
+    "level": 6,
+    "concentration": false,
+    "cast": "minute",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "Opens Add creature, controlled by the caster."
+    ],
+    "always": [
+     {
+      "kind": "summon",
+      "info": {
+       "creature_types": [
+        "celestial",
+        "fiend",
+        "fey",
+        "elemental"
+       ],
+       "initiative": "own_group"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "96f83ec1882e4557",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_TRUE_SEEING",
+    "edition": "2024",
+    "name": "True Seeing",
+    "rev": 1,
+    "level": 6,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "d99d8a621268cad2",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_WIND_WALK",
+    "edition": "2024",
+    "name": "Wind Walk",
+    "rev": 1,
+    "level": 6,
+    "concentration": false,
+    "cast": "minute",
+    "targeting": {
+     "kind": "creatures",
+     "max": "10",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": [],
+    "always": []
+   }
+  },
+  {
+   "srdTextSha": "b30823485f1f157b",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_WORD_OF_RECALL",
+    "edition": "2024",
+    "name": "Word of Recall",
+    "rev": 1,
+    "level": 6,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "5",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "f20fe9532c416aef",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CONJURE_CELESTIAL",
+    "edition": "2024",
+    "name": "Conjure Celestial",
+    "rev": 1,
+    "level": 7,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "area",
+     "shape": "cylinder",
+     "size_ft": 10
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 10
+    },
+    "tier": "partial",
+    "notes": [
+     "Each creature gets healing light (4d12 + modifier) or searing light (the zone)."
+    ],
+    "always": [
+     {
+      "kind": "zone",
+      "zone": {
+       "save": {
+        "ability": "dex",
+        "success": "half"
+       },
+       "damage_type": "radiant",
+       "damage": "6d12+(slot_above)d12"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "eb87e001a3e99f3f",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_ETHEREALNESS",
+    "edition": "2024",
+    "name": "Etherealness",
+    "rev": 1,
+    "level": 7,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "015eda401492e61e",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_FINGER_OF_DEATH",
+    "edition": "2024",
+    "name": "Finger of Death",
+    "rev": 1,
+    "level": 7,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "save",
+     "ability": "con",
+     "success": "half"
+    },
+    "on_land": [
+     {
+      "kind": "damage",
+      "dice": "7d8+30",
+      "damage_type": "necrotic"
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "auto",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "34a53a8bfcfa2486",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_PLANE_SHIFT",
+    "edition": "2024",
+    "name": "Plane Shift",
+    "rev": 1,
+    "level": 7,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "e8c42656edd73c74",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_PROJECT_IMAGE",
+    "edition": "2024",
+    "name": "Project Image",
+    "rev": 1,
+    "level": 7,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "17728750908abea4",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_RESURRECTION",
+    "edition": "2024",
+    "name": "Resurrection",
+    "rev": 1,
+    "level": 7,
+    "concentration": false,
+    "cast": "minute",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "0628436984e3fced",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_TELEPORT",
+    "edition": "2024",
+    "name": "Teleport",
+    "rev": 1,
+    "level": 7,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "utility",
+    "notes": [],
+    "always": []
+   }
+  },
+  {
+   "srdTextSha": "f0119c7c1c44a864",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_CONTROL_WEATHER",
+    "edition": "2024",
+    "name": "Control Weather",
+    "rev": 1,
+    "level": 8,
+    "concentration": true,
+    "cast": "minute",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  },
+  {
+   "srdTextSha": "de79a001fcc22f19",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_MIND_BLANK",
+    "edition": "2024",
+    "name": "Mind Blank",
+    "rev": 1,
+    "level": 8,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "willing"
+     },
+     "include_self": true
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "partial",
+    "notes": [
+     "Also immune to charmed and to mind reading."
+    ],
+    "always": [
+     {
+      "kind": "defense",
+      "defense": "immune",
+      "types": [
+       "psychic"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "148390e7a7561aaf",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_POWER_WORD_STUN",
+    "edition": "2024",
+    "name": "Power Word Stun",
+    "rev": 1,
+    "level": 8,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     }
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [
+     {
+      "kind": "condition",
+      "condition": "stunned",
+      "repeat_save": {
+       "ability": "con",
+       "at": "end"
+      }
+     }
+    ],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "partial",
+    "notes": [
+     "Only if it has 150 hit points or fewer; otherwise its speed is 0 until the start of the next turn."
+    ]
+   }
+  },
+  {
+   "srdTextSha": "7d50c0a8450ca16b",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_GATE",
+    "edition": "2024",
+    "name": "Gate",
+    "rev": 1,
+    "level": 9,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "minutes",
+     "n": 1
+    },
+    "tier": "partial",
+    "notes": [
+     "Opens Add creature, controlled by the caster."
+    ],
+    "always": [
+     {
+      "kind": "summon",
+      "info": {
+       "initiative": "own_group"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "8a0c1cf7924f14ce",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_POWER_WORD_KILL",
+    "edition": "2024",
+    "name": "Power Word Kill",
+    "rev": 1,
+    "level": 9,
+    "concentration": false,
+    "cast": "action",
+    "targeting": {
+     "kind": "creatures",
+     "max": "1",
+     "filter": {
+      "kind": "any"
+     },
+     "include_self": true
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "instant"
+    },
+    "tier": "ruling",
+    "notes": [],
+    "always": [
+     {
+      "kind": "ruling",
+      "question": "Does the target have 100 hit points or fewer?",
+      "buttons": [
+       {
+        "label": "Dies"
+       },
+       {
+        "label": "No effect"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "srdTextSha": "7562f7118faf3b1f",
+   "mech": {
+    "v": 1,
+    "key": "ID_2024_SPELL_SHAPECHANGE",
+    "edition": "2024",
+    "name": "Shapechange",
+    "rev": 1,
+    "level": 9,
+    "concentration": true,
+    "cast": "action",
+    "targeting": {
+     "kind": "self"
+    },
+    "delivery": {
+     "kind": "auto"
+    },
+    "on_land": [],
+    "duration": {
+     "kind": "long"
+    },
+    "tier": "utility",
+    "notes": []
+   }
+  }
+ ],
+ "uncurated": [
+  {
+   "id": "ID_2024_SPELL_GUIDANCE",
+   "name": "Guidance",
+   "level": 0
+  },
+  {
+   "id": "ID_2024_SPELL_MENDING",
+   "name": "Mending",
+   "level": 0
+  },
+  {
+   "id": "ID_2024_SPELL_MESSAGE",
+   "name": "Message",
+   "level": 0
+  },
+  {
+   "id": "ID_2024_SPELL_PRODUCE_FLAME",
+   "name": "Produce Flame",
+   "level": 0
+  },
+  {
+   "id": "ID_2024_SPELL_RESISTANCE",
+   "name": "Resistance",
+   "level": 0
+  },
+  {
+   "id": "ID_2024_SPELL_SHILLELAGH",
+   "name": "Shillelagh",
+   "level": 0
+  },
+  {
+   "id": "ID_2024_SPELL_SPARE_THE_DYING",
+   "name": "Spare the Dying",
+   "level": 0
+  },
+  {
+   "id": "ID_2024_SPELL_TRUE_STRIKE",
+   "name": "True Strike",
+   "level": 0
+  },
+  {
+   "id": "ID_2024_SPELL_ALARM",
+   "name": "Alarm",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_COLOR_SPRAY",
+   "name": "Color Spray",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_COMPREHEND_LANGUAGES",
+   "name": "Comprehend Languages",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_CREATE_OR_DESTROY_WATER",
+   "name": "Create or Destroy Water",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_DETECT_POISON_AND_DISEASE",
+   "name": "Detect Poison and Disease",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_DISSONANT_WHISPERS",
+   "name": "Dissonant Whispers",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_ENSNARING_STRIKE",
+   "name": "Ensnaring Strike",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_EXPEDITIOUS_RETREAT",
+   "name": "Expeditious Retreat",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_FALSE_LIFE",
+   "name": "False Life",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_FEATHER_FALL",
+   "name": "Feather Fall",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_FLOATING_DISK",
+   "name": "Floating Disk",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_GOODBERRY",
+   "name": "Goodberry",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_GREASE",
+   "name": "Grease",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_HEX",
+   "name": "Hex",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_HIDEOUS_LAUGHTER",
+   "name": "Hideous Laughter",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_HUNTERS_MARK",
+   "name": "Hunter’s Mark",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_ILLUSORY_SCRIPT",
+   "name": "Illusory Script",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_JUMP",
+   "name": "Jump",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_PURIFY_FOOD_AND_DRINK",
+   "name": "Purify Food and Drink",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_SANCTUARY",
+   "name": "Sanctuary",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_SILENT_IMAGE",
+   "name": "Silent Image",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_UNSEEN_SERVANT",
+   "name": "Unseen Servant",
+   "level": 1
+  },
+  {
+   "id": "ID_2024_SPELL_AID",
+   "name": "Aid",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_ALTER_SELF",
+   "name": "Alter Self",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_ARCANE_LOCK",
+   "name": "Arcane Lock",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_ARCANISTS_MAGIC_AURA",
+   "name": "Arcanist’s Magic Aura",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_AUGURY",
+   "name": "Augury",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_BLUR",
+   "name": "Blur",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_CONTINUAL_FLAME",
+   "name": "Continual Flame",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_DARKVISION",
+   "name": "Darkvision",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_DRAGONS_BREATH",
+   "name": "Dragon’s Breath",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_ENHANCE_ABILITY",
+   "name": "Enhance Ability",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_ENLARGE_REDUCE",
+   "name": "Enlarge/Reduce",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_ENTHRALL",
+   "name": "Enthrall",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_FIND_TRAPS",
+   "name": "Find Traps",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_FLAME_BLADE",
+   "name": "Flame Blade",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_FLAMING_SPHERE",
+   "name": "Flaming Sphere",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_GENTLE_REPOSE",
+   "name": "Gentle Repose",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_GUST_OF_WIND",
+   "name": "Gust of Wind",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_HEAT_METAL",
+   "name": "Heat Metal",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_KNOCK",
+   "name": "Knock",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_LESSER_RESTORATION",
+   "name": "Lesser Restoration",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_LEVITATE",
+   "name": "Levitate",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_LOCATE_ANIMALS_OR_PLANTS",
+   "name": "Locate Animals or Plants",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_MAGIC_MOUTH",
+   "name": "Magic Mouth",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_MAGIC_WEAPON",
+   "name": "Magic Weapon",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_MIRROR_IMAGE",
+   "name": "Mirror Image",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_PHANTASMAL_FORCE",
+   "name": "Phantasmal Force",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_PRAYER_OF_HEALING",
+   "name": "Prayer of Healing",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_PROTECTION_FROM_POISON",
+   "name": "Protection from Poison",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_RAY_OF_ENFEEBLEMENT",
+   "name": "Ray of Enfeeblement",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_ROPE_TRICK",
+   "name": "Rope Trick",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_SEE_INVISIBILITY",
+   "name": "See Invisibility",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_SILENCE",
+   "name": "Silence",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_SPIDER_CLIMB",
+   "name": "Spider Climb",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_SPIKE_GROWTH",
+   "name": "Spike Growth",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_SUGGESTION",
+   "name": "Suggestion",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_WARDING_BOND",
+   "name": "Warding Bond",
+   "level": 2
+  },
+  {
+   "id": "ID_2024_SPELL_BEACON_OF_HOPE",
+   "name": "Beacon of Hope",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_BESTOW_CURSE",
+   "name": "Bestow Curse",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_BLINK",
+   "name": "Blink",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_CALL_LIGHTNING",
+   "name": "Call Lightning",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_DAYLIGHT",
+   "name": "Daylight",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_GLYPH_OF_WARDING",
+   "name": "Glyph of Warding",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_MAGIC_CIRCLE",
+   "name": "Magic Circle",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_MELD_INTO_STONE",
+   "name": "Meld into Stone",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_NONDETECTION",
+   "name": "Nondetection",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_PHANTOM_STEED",
+   "name": "Phantom Steed",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_PLANT_GROWTH",
+   "name": "Plant Growth",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_PROTECTION_FROM_ENERGY",
+   "name": "Protection from Energy",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_REVIVIFY",
+   "name": "Revivify",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_SLEET_STORM",
+   "name": "Sleet Storm",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_SPEAK_WITH_PLANTS",
+   "name": "Speak with Plants",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_STINKING_CLOUD",
+   "name": "Stinking Cloud",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_TINY_HUT",
+   "name": "Tiny Hut",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_VAMPIRIC_TOUCH",
+   "name": "Vampiric Touch",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_WATER_WALK",
+   "name": "Water Walk",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_WIND_WALL",
+   "name": "Wind Wall",
+   "level": 3
+  },
+  {
+   "id": "ID_2024_SPELL_ARCANE_EYE",
+   "name": "Arcane Eye",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_AURA_OF_LIFE",
+   "name": "Aura of Life",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_BLACK_TENTACLES",
+   "name": "Black Tentacles",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_BLIGHT",
+   "name": "Blight",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_COMPULSION",
+   "name": "Compulsion",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_DEATH_WARD",
+   "name": "Death Ward",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_DIVINATION",
+   "name": "Divination",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_DOMINATE_BEAST",
+   "name": "Dominate Beast",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_FABRICATE",
+   "name": "Fabricate",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_FAITHFUL_HOUND",
+   "name": "Faithful Hound",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_FIRE_SHIELD",
+   "name": "Fire Shield",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_FREEDOM_OF_MOVEMENT",
+   "name": "Freedom of Movement",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_GUARDIAN_OF_FAITH",
+   "name": "Guardian of Faith",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_HALLUCINATORY_TERRAIN",
+   "name": "Hallucinatory Terrain",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_LOCATE_CREATURE",
+   "name": "Locate Creature",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_POLYMORPH",
+   "name": "Polymorph",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_PRIVATE_SANCTUM",
+   "name": "Private Sanctum",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_RESILIENT_SPHERE",
+   "name": "Resilient Sphere",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_SECRET_CHEST",
+   "name": "Secret Chest",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_STONE_SHAPE",
+   "name": "Stone Shape",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_STONESKIN",
+   "name": "Stoneskin",
+   "level": 4
+  },
+  {
+   "id": "ID_2024_SPELL_ANTILIFE_SHELL",
+   "name": "Antilife Shell",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_ARCANE_HAND",
+   "name": "Arcane Hand",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_AWAKEN",
+   "name": "Awaken",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_CLOUDKILL",
+   "name": "Cloudkill",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_COMMUNE_WITH_NATURE",
+   "name": "Commune with Nature",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_CONTACT_OTHER_PLANE",
+   "name": "Contact Other Plane",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_CONTAGION",
+   "name": "Contagion",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_DOMINATE_PERSON",
+   "name": "Dominate Person",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_HALLOW",
+   "name": "Hallow",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_MASS_CURE_WOUNDS",
+   "name": "Mass Cure Wounds",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_MISLEAD",
+   "name": "Mislead",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_PASSWALL",
+   "name": "Passwall",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_PLANAR_BINDING",
+   "name": "Planar Binding",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_REINCARNATE",
+   "name": "Reincarnate",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_SEEMING",
+   "name": "Seeming",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_TELEPATHIC_BOND",
+   "name": "Telepathic Bond",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_TELEPORTATION_CIRCLE",
+   "name": "Teleportation Circle",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_TREE_STRIDE",
+   "name": "Tree Stride",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_WALL_OF_FORCE",
+   "name": "Wall of Force",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_WALL_OF_STONE",
+   "name": "Wall of Stone",
+   "level": 5
+  },
+  {
+   "id": "ID_2024_SPELL_BLADE_BARRIER",
+   "name": "Blade Barrier",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_CIRCLE_OF_DEATH",
+   "name": "Circle of Death",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_CONTINGENCY",
+   "name": "Contingency",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_DISINTEGRATE",
+   "name": "Disintegrate",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_EYEBITE",
+   "name": "Eyebite",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_FIND_THE_PATH",
+   "name": "Find the Path",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_FLESH_TO_STONE",
+   "name": "Flesh to Stone",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_FORBIDDANCE",
+   "name": "Forbiddance",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_FREEZING_SPHERE",
+   "name": "Freezing Sphere",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_GLOBE_OF_INVULNERABILITY",
+   "name": "Globe of Invulnerability",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_GUARDS_AND_WARDS",
+   "name": "Guards and Wards",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_HEAL",
+   "name": "Heal",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_INSTANT_SUMMONS",
+   "name": "Instant Summons",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_IRRESISTIBLE_DANCE",
+   "name": "Irresistible Dance",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_MAGIC_JAR",
+   "name": "Magic Jar",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_MASS_SUGGESTION",
+   "name": "Mass Suggestion",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_MOVE_EARTH",
+   "name": "Move Earth",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_PROGRAMMED_ILLUSION",
+   "name": "Programmed Illusion",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_SUNBEAM",
+   "name": "Sunbeam",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_TRANSPORT_VIA_PLANTS",
+   "name": "Transport via Plants",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_WALL_OF_ICE",
+   "name": "Wall of Ice",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_WALL_OF_THORNS",
+   "name": "Wall of Thorns",
+   "level": 6
+  },
+  {
+   "id": "ID_2024_SPELL_ARCANE_SWORD",
+   "name": "Arcane Sword",
+   "level": 7
+  },
+  {
+   "id": "ID_2024_SPELL_DELAYED_BLAST_FIREBALL",
+   "name": "Delayed Blast Fireball",
+   "level": 7
+  },
+  {
+   "id": "ID_2024_SPELL_DIVINE_WORD",
+   "name": "Divine Word",
+   "level": 7
+  },
+  {
+   "id": "ID_2024_SPELL_FIRE_STORM",
+   "name": "Fire Storm",
+   "level": 7
+  },
+  {
+   "id": "ID_2024_SPELL_FORCECAGE",
+   "name": "Forcecage",
+   "level": 7
+  },
+  {
+   "id": "ID_2024_SPELL_MAGNIFICENT_MANSION",
+   "name": "Magnificent Mansion",
+   "level": 7
+  },
+  {
+   "id": "ID_2024_SPELL_MIRAGE_ARCANE",
+   "name": "Mirage Arcane",
+   "level": 7
+  },
+  {
+   "id": "ID_2024_SPELL_PRISMATIC_SPRAY",
+   "name": "Prismatic Spray",
+   "level": 7
+  },
+  {
+   "id": "ID_2024_SPELL_REGENERATE",
+   "name": "Regenerate",
+   "level": 7
+  },
+  {
+   "id": "ID_2024_SPELL_REVERSE_GRAVITY",
+   "name": "Reverse Gravity",
+   "level": 7
+  },
+  {
+   "id": "ID_2024_SPELL_SEQUESTER",
+   "name": "Sequester",
+   "level": 7
+  },
+  {
+   "id": "ID_2024_SPELL_SIMULACRUM",
+   "name": "Simulacrum",
+   "level": 7
+  },
+  {
+   "id": "ID_2024_SPELL_SYMBOL",
+   "name": "Symbol",
+   "level": 7
+  },
+  {
+   "id": "ID_2024_SPELL_ANIMAL_SHAPES",
+   "name": "Animal Shapes",
+   "level": 8
+  },
+  {
+   "id": "ID_2024_SPELL_ANTIMAGIC_FIELD",
+   "name": "Antimagic Field",
+   "level": 8
+  },
+  {
+   "id": "ID_2024_SPELL_ANTIPATHY_SYMPATHY",
+   "name": "Antipathy/Sympathy",
+   "level": 8
+  },
+  {
+   "id": "ID_2024_SPELL_BEFUDDLEMENT",
+   "name": "Befuddlement",
+   "level": 8
+  },
+  {
+   "id": "ID_2024_SPELL_CLONE",
+   "name": "Clone",
+   "level": 8
+  },
+  {
+   "id": "ID_2024_SPELL_DEMIPLANE",
+   "name": "Demiplane",
+   "level": 8
+  },
+  {
+   "id": "ID_2024_SPELL_DOMINATE_MONSTER",
+   "name": "Dominate Monster",
+   "level": 8
+  },
+  {
+   "id": "ID_2024_SPELL_EARTHQUAKE",
+   "name": "Earthquake",
+   "level": 8
+  },
+  {
+   "id": "ID_2024_SPELL_GLIBNESS",
+   "name": "Glibness",
+   "level": 8
+  },
+  {
+   "id": "ID_2024_SPELL_HOLY_AURA",
+   "name": "Holy Aura",
+   "level": 8
+  },
+  {
+   "id": "ID_2024_SPELL_INCENDIARY_CLOUD",
+   "name": "Incendiary Cloud",
+   "level": 8
+  },
+  {
+   "id": "ID_2024_SPELL_MAZE",
+   "name": "Maze",
+   "level": 8
+  },
+  {
+   "id": "ID_2024_SPELL_SUNBURST",
+   "name": "Sunburst",
+   "level": 8
+  },
+  {
+   "id": "ID_2024_SPELL_TSUNAMI",
+   "name": "Tsunami",
+   "level": 8
+  },
+  {
+   "id": "ID_2024_SPELL_ASTRAL_PROJECTION",
+   "name": "Astral Projection",
+   "level": 9
+  },
+  {
+   "id": "ID_2024_SPELL_FORESIGHT",
+   "name": "Foresight",
+   "level": 9
+  },
+  {
+   "id": "ID_2024_SPELL_IMPRISONMENT",
+   "name": "Imprisonment",
+   "level": 9
+  },
+  {
+   "id": "ID_2024_SPELL_MASS_HEAL",
+   "name": "Mass Heal",
+   "level": 9
+  },
+  {
+   "id": "ID_2024_SPELL_METEOR_SWARM",
+   "name": "Meteor Swarm",
+   "level": 9
+  },
+  {
+   "id": "ID_2024_SPELL_POWER_WORD_HEAL",
+   "name": "Power Word Heal",
+   "level": 9
+  },
+  {
+   "id": "ID_2024_SPELL_PRISMATIC_WALL",
+   "name": "Prismatic Wall",
+   "level": 9
+  },
+  {
+   "id": "ID_2024_SPELL_STORM_OF_VENGEANCE",
+   "name": "Storm of Vengeance",
+   "level": 9
+  },
+  {
+   "id": "ID_2024_SPELL_TIME_STOP",
+   "name": "Time Stop",
+   "level": 9
+  },
+  {
+   "id": "ID_2024_SPELL_TRUE_POLYMORPH",
+   "name": "True Polymorph",
+   "level": 9
+  },
+  {
+   "id": "ID_2024_SPELL_TRUE_RESURRECTION",
+   "name": "True Resurrection",
+   "level": 9
+  },
+  {
+   "id": "ID_2024_SPELL_WEIRD",
+   "name": "Weird",
+   "level": 9
+  },
+  {
+   "id": "ID_2024_SPELL_WISH",
+   "name": "Wish",
+   "level": 9
+  }
+ ]
+}

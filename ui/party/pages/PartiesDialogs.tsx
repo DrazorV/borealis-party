@@ -6,8 +6,9 @@ import { Modal } from "../../src/components/Modal";
 import { NumericUpDown } from "../../src/components/controls/Controls";
 import { errorMessage } from "../../src/state/useAsync";
 import {
-  CODE_DAYS, formatCode, inviteUsername, joinLink, makeJoinCode, MAX_CODE_USES, MAX_NAME, type JoinCode, type Party,
+  CODE_DAYS, formatCode, inviteUsername, joinLink, makeJoinCode, MAX_CODE_USES, MAX_NAME, type JoinCode, type Party, type Ruleset,
 } from "../api/overrides/parties";
+import { EDITION_EFFECT, EditionChoice } from "./PartyEdition";
 
 /** A party's name: typed for a new party, or a new one for a party. */
 export function NameDialog({ title, action, initial = "", onSave, onClose }: {
@@ -41,6 +42,52 @@ export function NameDialog({ title, action, initial = "", onSave, onClose }: {
           Party name
           <input className="input" aria-label="Party name" maxLength={MAX_NAME} value={name} onChange={(e) => setName(e.target.value)} required />
         </label>
+        {error && <Alert tone="danger">{error}</Alert>}
+      </form>
+    </Modal>
+  );
+}
+
+/**
+ * A new party (0.3.2): its name and its edition. The edition is required, with no silent default: `initial` (the
+ * edition of the DM's most recent character) is pre-selected when there is one, else nothing is.
+ */
+export function NewPartyDialog({ initial, onSave, onClose }: {
+  initial: Ruleset | null; onSave: (name: string, ruleset: Ruleset) => Promise<void>; onClose: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [ruleset, setRuleset] = useState<Ruleset | null>(initial);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const ready = Boolean(name.trim()) && ruleset !== null;
+  const submit = async (e?: FormEvent) => {
+    e?.preventDefault();
+    if (!ready || !ruleset) return;
+    setBusy(true);
+    setError("");
+    try {
+      await onSave(name.trim(), ruleset);
+      onClose();
+    } catch (err) {
+      setError(errorMessage(err));
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title="New party" onClose={onClose}
+      footer={<>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="primary" disabled={busy || !ready} onClick={() => void submit()}>Create</Button>
+      </>}>
+      <form className="party-form" onSubmit={(e) => void submit(e)}>
+        <label className="party-field">
+          Party name
+          <input className="input" aria-label="Party name" maxLength={MAX_NAME} value={name} onChange={(e) => setName(e.target.value)} required />
+        </label>
+        <EditionChoice value={ruleset} onChange={setRuleset} />
+        <p className="muted party-note">
+          {ruleset === null ? "Pick the rules your players' characters use. " : ""}{EDITION_EFFECT} You can change it later.
+        </p>
         {error && <Alert tone="danger">{error}</Alert>}
       </form>
     </Modal>

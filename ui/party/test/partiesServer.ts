@@ -1,5 +1,5 @@
 import type { ServerEvent } from "../api/http";
-import type { CardStats, ClassLine, MyInvite, Party, PartyInvite, PartyMember, PartySummary } from "../api/overrides/parties";
+import type { CardStats, ClassLine, MyInvite, Party, PartyInvite, PartyMember, PartySummary, Ruleset } from "../api/overrides/parties";
 
 /**
  * An in-memory parties server for tests. It answers the routes in party/docs/parties-api.md the way the server does:
@@ -13,10 +13,10 @@ import type { CardStats, ClassLine, MyInvite, Party, PartyInvite, PartyMember, P
  * - `emit` sends an event on the account's stream (`listen` is what `partiesDeps.events` calls).
  */
 
-interface Row { id: string; name: string; dmId: string; createdAt: number }
+interface Row { id: string; name: string; dmId: string; createdAt: number; ruleset?: Ruleset }
 interface Invite { id: string; partyId: string; username?: string; code?: string; usesLeft: number; expiresAt: number }
 interface Member { ownerId: string; characterId: string; partyId: string; joinedAt: number }
-interface Character { id: string; name: string; level: number; classes?: ClassLine[]; stats?: CardStats | null }
+interface Character { id: string; name: string; level: number; classes?: ClassLine[]; stats?: CardStats | null; ruleset?: Ruleset; updatedAt?: string }
 interface Account { id: string; username: string; dm: boolean; online?: boolean; characters: Character[] }
 
 export interface FakeServer {
@@ -95,7 +95,7 @@ export function fakePartiesServer(accounts: Account[], me: string): FakeServer {
     return {
       characterId: m.characterId, ownerName: owner.username, ...(full ? { ownerId: m.ownerId } : {}),
       ...(dm ? { online: Boolean(owner.online) } : {}),
-      mine, dmCharacter: m.ownerId === party.dmId, name: c?.name ?? null, level: c?.level ?? null, ruleset: c ? "dnd2024" : null,
+      mine, dmCharacter: m.ownerId === party.dmId, name: c?.name ?? null, level: c?.level ?? null, ruleset: c ? (c.ruleset ?? "dnd2024") : null,
       classes: c?.classes ?? [],
       ...(full ? { stats: c?.stats ?? null, readAt: c?.stats ? now() : null } : s.inCombat ? { band: band(c?.stats) } : {}),
       build: null, state: c ? "ok" : "missing", joinedAt: m.joinedAt,
@@ -104,7 +104,7 @@ export function fakePartiesServer(accounts: Account[], me: string): FakeServer {
   const summary = (p: Row): PartySummary => {
     const members = s.members.filter((m) => m.partyId === p.id);
     return {
-      id: p.id, name: p.name, ruleset: "dnd2024", role: p.dmId === s.me ? "dm" : "player", dmName: account(p.dmId).username,
+      id: p.id, name: p.name, ruleset: p.ruleset ?? "dnd2024", role: p.dmId === s.me ? "dm" : "player", dmName: account(p.dmId).username,
       memberCount: members.length, myCharacters: members.filter((m) => m.ownerId === s.me).map((m) => m.characterId),
       createdAt: p.createdAt, updatedAt: p.createdAt,
     };
@@ -122,7 +122,7 @@ export function fakePartiesServer(accounts: Account[], me: string): FakeServer {
   const visible = (p: Row) => p.dmId === s.me || s.members.some((m) => m.partyId === p.id && m.ownerId === s.me);
   const myInvite = (i: Invite): MyInvite => {
     const p = s.parties.find((x) => x.id === i.partyId)!;
-    return { id: i.id, kind: i.username !== undefined ? "username" : "code", party: { name: p.name, dmName: account(p.dmId).username, ruleset: "dnd2024" }, expiresAt: i.expiresAt };
+    return { id: i.id, kind: i.username !== undefined ? "username" : "code", party: { name: p.name, dmName: account(p.dmId).username, ruleset: p.ruleset ?? "dnd2024" }, expiresAt: i.expiresAt };
   };
   const mineToTake = (i: Invite) => open(i) && !s.declined.has(`${s.me}:${i.id}`)
     && (i.username === account(s.me).username.toLowerCase() || Boolean(s.redeemed.get(i.id)?.has(s.me)));
@@ -153,7 +153,9 @@ export function fakePartiesServer(accounts: Account[], me: string): FakeServer {
       case "GET /parties": return { dm: account(s.me).dm, parties: s.parties.filter(visible).map(summary).reverse() };
       case "POST /parties": {
         if (!account(s.me).dm) throw err("dm_required", "Turn on Dungeon Master tools first.");
-        const row = { id: id("p"), name: String(b.name).trim(), dmId: s.me, createdAt: now() };
+        if (b.ruleset !== undefined && b.ruleset !== "dnd2024" && b.ruleset !== "dnd2014") throw err("invalid_argument", "The ruleset is dnd2024 or dnd2014.");
+        // Like the server: no ruleset is 2024 (API clients before 0.3.2).
+        const row: Row = { id: id("p"), name: String(b.name).trim(), dmId: s.me, createdAt: now(), ruleset: (b.ruleset as Ruleset | undefined) ?? "dnd2024" };
         s.parties.push(row);
         return detail(row);
       }
@@ -167,7 +169,7 @@ export function fakePartiesServer(accounts: Account[], me: string): FakeServer {
         const inv = s.invites.find((i) => i.code === b.code && open(i));
         if (!inv) throw notFound();
         const p = s.parties.find((x) => x.id === inv.partyId)!;
-        return { party: { name: p.name, dmName: account(p.dmId).username, ruleset: "dnd2024" }, expiresAt: inv.expiresAt };
+        return { party: { name: p.name, dmName: account(p.dmId).username, ruleset: p.ruleset ?? "dnd2024" }, expiresAt: inv.expiresAt };
       }
       case "GET /invites": return { invites: s.invites.filter(mineToTake).map(myInvite) };
     }
@@ -188,7 +190,12 @@ export function fakePartiesServer(accounts: Account[], me: string): FakeServer {
     const isDm = party.dmId === s.me;
     switch (route) {
       case "GET /parties/:": return detail(party);
-      case "PATCH /parties/:": if (!isDm) throw notFound(); party.name = String(b.name).trim(); return detail(party);
+      case "PATCH /parties/:":
+        if (!isDm) throw notFound();
+        if (b.ruleset !== undefined && b.ruleset !== "dnd2024" && b.ruleset !== "dnd2014") throw err("invalid_argument", "The ruleset is dnd2024 or dnd2014.");
+        if (b.name !== undefined) party.name = String(b.name).trim();
+        if (b.ruleset !== undefined) party.ruleset = b.ruleset as Ruleset;
+        return detail(party);
       case "DELETE /parties/:":
         if (!isDm) throw notFound();
         s.parties = s.parties.filter((p) => p !== party);

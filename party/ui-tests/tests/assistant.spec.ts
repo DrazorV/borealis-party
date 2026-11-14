@@ -81,7 +81,7 @@ test.describe("Bring your own AI (0.3.1)", () => {
       await open(page, "/account");
       const card = page.locator("section", { has: page.getByRole("heading", { name: "Your AI" }) });
       await expect(card).toBeVisible({ timeout: 30_000 });
-      await expect(card).toContainText("BOREALIS__AI__SECRET_KEY");
+      await expect(card).toContainText("isn't switched on for this server yet");
       await card.getByRole("button", { name: "Start from" }).tap();
       const sheet = page.getByRole("dialog", { name: "Start from" });
       await settled(sheet);

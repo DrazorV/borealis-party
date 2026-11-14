@@ -170,6 +170,10 @@ pub struct Overrides {
     /// The DM's note on this creature (where the change came from, a correction...). Never shown to players.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// Spells the DM adds for this encounter, picked from installed spell elements, with slots and casting numbers
+    /// (0.3.2, plan 4.5b item 3). A 0.3.1 server refuses overrides that have them (`deny_unknown_fields`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spells: Option<crate::spellbook::SpellsOverride>,
 }
 
 /// What the DM asks to change, as the builder sends it. Each field: absent = leave as is, `null` = drop the override,
@@ -192,6 +196,9 @@ pub struct OverridesForm {
     /// The note (`null` or "" drops it).
     #[serde(default, deserialize_with = "some")]
     pub notes: Option<Option<String>>,
+    /// The added spells (replaces them; `null` drops them).
+    #[serde(default, deserialize_with = "some")]
+    pub spells: Option<Option<crate::spellbook::SpellsOverride>>,
 }
 
 /// `null` as `Some(None)`, so a field can be dropped as well as left out.
@@ -209,6 +216,9 @@ pub enum OverrideError {
     /// A number outside what a stat block can say.
     #[error("{0}")]
     OutOfRange(&'static str),
+    /// Added spells that don't check out.
+    #[error("{0}")]
+    BadSpells(&'static str),
     /// Text too long, empty or with control characters.
     #[error("{0}")]
     BadText(&'static str),
@@ -299,7 +309,11 @@ impl Overrides {
     /// True when the block the encounter uses differs from the copy (a note alone doesn't change it).
     #[must_use]
     pub fn changes_block(&self) -> bool {
-        self.hp.is_some() || self.ac.is_some() || !self.saves.is_empty() || !self.traits.is_empty()
+        self.hp.is_some()
+            || self.ac.is_some()
+            || !self.saves.is_empty()
+            || !self.traits.is_empty()
+            || self.spells.is_some()
     }
 
     /// Apply what the DM asked to `self`, taking the source values from `printed` (the copy's).
@@ -383,6 +397,15 @@ impl Overrides {
                     "Notes are up to 4000 characters.",
                 )?)
                 .filter(|n| !n.is_empty()),
+            };
+        }
+        if let Some(spells) = form.spells {
+            out.spells = match spells {
+                None => None,
+                Some(s) => {
+                    s.check().map_err(OverrideError::BadSpells)?;
+                    (!s.is_empty()).then_some(s)
+                }
             };
         }
         Ok(out)

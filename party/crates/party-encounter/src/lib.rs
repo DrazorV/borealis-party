@@ -13,3 +13,4 @@
 pub mod combatant;
 pub mod creature;
 pub mod overrides;
+pub mod spellbook;

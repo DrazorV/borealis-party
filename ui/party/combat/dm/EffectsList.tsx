@@ -6,7 +6,7 @@ import { RollInput } from "./RollInput";
 import { byId, durationText, effectsOn, isDefeated } from "./derive";
 import { EffectDialog, draftSpecs, emptyDraft } from "./dialogs";
 import { expectCast } from "./castFocus";
-import { evalFormula, termText } from "./formula";
+import { evalFormula } from "./formula";
 import { asCommand, asSpellEffect, type SpellEffect } from "./spellTypes";
 import type { Combatant, Command, CombatState, Effect, Modifier } from "./types";
 
@@ -15,18 +15,22 @@ const signedN = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
 const modText = (m: Modifier): string => {
   switch (m.kind) {
     case "ac": return `AC ${signedN(m.value)}`;
-    case "ac_base": return `AC ${m.value.base}${m.value.add_dex ? " + DEX" : ""}`;
-    case "ac_min": return `AC at least ${m.value}`;
     case "speed_add": return `speed ${signedN(m.value)} ft`;
     case "speed_multiply": return `speed ×${m.value}`;
     case "speed_halve": return "speed halved";
     case "speed_zero": return "speed 0";
-    case "speed_set_mode": return `${m.value.mode} ${m.value.ft} ft`;
     case "cover": return m.value === "half" ? "half cover" : "three-quarters cover";
-    case "roll_dice": return `${termText(m.value.term)} on ${m.value.on}`;
-    case "roll_mode": return `${m.value.mode} on ${m.value.on.replace("_", " ")}`;
-    case "defense": return `${m.value.defense === "resist" ? "resists" : m.value.defense === "immune" ? "immune to" : "vulnerable to"} ${m.value.damage_type}`;
-    case "max_hp": return `max HP ${signedN(m.value)}`;
+    // 0.3.2 (the spell engine).
+    case "ac_base": return `AC ${m.value.base}${m.value.add_dex ? " + Dex" : ""}`;
+    case "ac_min": return `AC at least ${m.value}`;
+    case "roll_dice": {
+      const t = m.value.term;
+      return `${t.sign === "minus" ? "−" : "+"}${t.count}d${t.sides} to ${m.value.ability ? `${m.value.ability} ` : ""}${m.value.on}`;
+    }
+    case "roll_mode": return `${m.value.mode} on ${m.value.ability ? `${m.value.ability} ` : ""}${m.value.on.replace("_", " ")}`;
+    case "defense": return `${{ resist: "resistance", immune: "immunity", vuln: "vulnerability" }[m.value.defense]} to ${m.value.damage_type}`;
+    case "max_hp": return `max HP ${m.value >= 0 ? "+" : ""}${m.value}`;
+    case "speed_set_mode": return `${m.value.mode} speed ${m.value.ft} ft`;
   }
 };
 

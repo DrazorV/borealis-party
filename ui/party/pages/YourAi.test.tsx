@@ -1,8 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { assistantDeps, resetAssistant, type SaveForm } from "../api/overrides/assistant";
+import { linkDeps, resetLinks } from "../api/overrides/links";
 import { saveSession } from "../api/session";
-import { fakeAi, SAVED, status, type FakeAi } from "../assistant/fakeAi";
+import { ADMIN_HELP, fakeAi, KEYS_OFF, SAVED, status, type FakeAi } from "../assistant/fakeAi";
 import { memoryStorage } from "../test/memoryStorage";
 
 const state = vi.hoisted(() => ({ confirm: "confirm" as string, toasts: [] as { text: string; tone?: string }[] }));
@@ -27,6 +28,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   resetAssistant();
+  resetLinks();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -55,7 +58,8 @@ describe("Your AI", () => {
   it("explains why keys can't be saved here, and offers a model on this device", async () => {
     ai.status = status(null, false);
     render(<YourAiCard />);
-    expect(await screen.findByText(/BOREALIS__AI__SECRET_KEY/)).toBeTruthy();
+    expect(await screen.findByText(/isn't switched on for this server yet; ask its admin/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("BOREALIS__AI__SECRET_KEY");
     expect((screen.getByLabelText("API key") as HTMLInputElement).disabled).toBe(true);
     fireEvent.change(screen.getByRole("combobox", { name: "Start from" }), { target: { value: "Ollama on this device" } });
     expect(screen.queryByLabelText("API key")).toBeNull();
@@ -112,6 +116,61 @@ describe("Your AI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(puts()).toHaveLength(1));
     expect(puts()[0]!.profile).toBe("frontier");
+  });
+
+  it("tells only an admin how to switch keys on; the browser sign-in is disabled for everyone without it", async () => {
+    ai.status = status(null, false);
+    render(<YourAiCard />);
+    expect(await screen.findByText(KEYS_OFF)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("BOREALIS__AI__SECRET_KEY");
+    const connect = screen.getByRole("button", { name: "Connect OpenRouter" }) as HTMLButtonElement;
+    expect(connect.disabled).toBe(true);
+    cleanup();
+    ai.status = status(null, false, true);
+    render(<YourAiCard />);
+    expect(await screen.findByText(new RegExp(ADMIN_HELP.slice(0, 40)))).toBeTruthy();
+    expect(document.body.textContent).toContain("BOREALIS__AI__SECRET_KEY");
+    expect(document.body.textContent).toContain(KEYS_OFF);
+    expect((screen.getByRole("button", { name: "Connect OpenRouter" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(ai.calls.some((c) => c.path.includes("/oauth/"))).toBe(false);
+  });
+
+  it("connects OpenRouter in the browser after the person agrees, then sees the key the server saved", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const opened: string[] = [];
+    linkDeps.openTab = (url) => { opened.push(url); };
+    render(<YourAiCard />);
+    state.confirm = "cancel";
+    fireEvent.click(await screen.findByRole("button", { name: "Connect OpenRouter" }));
+    await waitFor(() => expect(opened).toHaveLength(0));
+    expect(ai.calls.some((c) => c.path.includes("/oauth/"))).toBe(false);
+    state.confirm = "confirm";
+    fireEvent.click(screen.getByRole("button", { name: "Connect OpenRouter" }));
+    await waitFor(() => expect(opened).toHaveLength(1));
+    expect(opened[0]).toMatch(/^https:\/\/openrouter\.ai\/auth\?/);
+    const start = ai.calls.find((c) => c.path === "/api/ai/oauth/openrouter/start");
+    expect(start?.method).toBe("POST");
+    expect(start?.body).toMatchObject({ consent: true, autoApply: false });
+    expect(await screen.findByText(/Finish signing in to OpenRouter in your browser/)).toBeTruthy();
+    // The server saved the key (the browser came back to it): the card notices on its next check.
+    ai.status = status({ ...SAVED, baseUrl: "https://openrouter.ai/api/v1", model: "openrouter/auto", keyLast4: "abcd", consentedAt: 99 });
+    await vi.advanceTimersByTimeAsync(3100);
+    await waitFor(() => expect(state.toasts.at(-1)?.text).toBe("OpenRouter is connected."));
+    expect(await screen.findByPlaceholderText(/•••• abcd saved/)).toBeTruthy();
+    expect(screen.queryByText(/Finish signing in/)).toBeNull();
+  });
+
+  it("points Claude users to AI apps instead", async () => {
+    render(<YourAiCard />);
+    const link = await screen.findByRole("link", { name: /Account → AI apps/ });
+    expect(link.textContent).toContain("Using Claude? Connect claude.ai or Claude Desktop to Borealis Party instead");
+    const target = document.createElement("section");
+    target.className = "ai-apps";
+    target.scrollIntoView = vi.fn();
+    document.body.appendChild(target);
+    fireEvent.click(link);
+    expect(target.scrollIntoView).toHaveBeenCalled();
+    target.remove();
   });
 
   it("isn't there when the server doesn't offer the assistant", async () => {
