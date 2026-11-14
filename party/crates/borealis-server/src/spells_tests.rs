@@ -826,6 +826,28 @@ async fn hidden_now(client: &Client) -> Vec<String> {
     ids
 }
 
+/// The account's stand-ins: each hidden copy with the chosen copy that answers for it.
+async fn stand_ins_now(client: &Client) -> Value {
+    let (status, out) = client.rpc("get_settings", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    out.get("hiddenStandIns")
+        .cloned()
+        .unwrap_or_else(|| json!({}))
+}
+
+#[test]
+fn a_settings_file_from_before_stand_ins_still_loads() {
+    let old: borealis_lib::settings::AppSettings =
+        serde_json::from_value(json!({ "hiddenElements": ["ID_T_COPY"] })).unwrap();
+    assert!(old.hidden_stand_ins.is_empty());
+    assert!(old.engine_settings().hidden_stand_ins.is_empty());
+    let saved = serde_json::to_value(&old).unwrap();
+    assert!(
+        saved.get("hiddenStandIns").is_none(),
+        "an empty map is left out of the file"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn the_other_copies_of_a_spell_are_hidden_from_new_picks() {
     let dir = tempfile::tempdir().unwrap();
@@ -840,6 +862,11 @@ async fn the_other_copies_of_a_spell_are_hidden_from_new_picks() {
     // A second copy of Fireball (2014): the SRD one is the spell, the copy is hidden (on the next command).
     let copy = homebrew_fireball(&dm).await;
     assert_eq!(hidden_now(&dm).await, vec![copy.clone()]);
+    // Content that names the hidden copy by id (a list extension) gets the chosen one.
+    assert_eq!(
+        stand_ins_now(&dm).await,
+        json!({ copy.clone(): FIREBALL_2014 })
+    );
     assert_eq!(
         hidden_now(&other).await,
         Vec::<String>::new(),
@@ -849,11 +876,17 @@ async fn the_other_copies_of_a_spell_are_hidden_from_new_picks() {
     let (status, out) = dm
         .rpc(
             "save_settings",
-            json!({ "patch": { "hiddenElements": [] } }),
+            json!({ "patch": { "hiddenElements": [],
+                "hiddenStandIns": { copy.clone(): null, "ID_T_ANY": FIREBALL_2014 } } }),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{out}");
     assert_eq!(hidden_now(&dm).await, vec![copy.clone()]);
+    assert_eq!(
+        stand_ins_now(&dm).await,
+        json!({ copy.clone(): FIREBALL_2014 }),
+        "nor the stand-ins"
+    );
     // The DM's pick swaps them; back to the rule swaps them back.
     ok(
         &dm,
@@ -863,6 +896,10 @@ async fn the_other_copies_of_a_spell_are_hidden_from_new_picks() {
     )
     .await;
     assert_eq!(hidden_now(&dm).await, vec![FIREBALL_2014.to_string()]);
+    assert_eq!(
+        stand_ins_now(&dm).await,
+        json!({ FIREBALL_2014: copy.clone() })
+    );
     ok(
         &dm,
         "DELETE",
@@ -883,4 +920,138 @@ async fn the_other_copies_of_a_spell_are_hidden_from_new_picks() {
     let id = out["id"].as_str().unwrap().to_string();
     let (status, out) = dm.rpc("get_snapshot", json!({ "characterId": id })).await;
     assert_eq!(status, StatusCode::OK, "{out}");
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Opt-in: the user's own installed content (the opt-in content folders of the other corpus tests). Counts only.
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Every class-list extension that names a spell by id (an optional feature's or subclass's `<extend>`, an imported
+/// expanded list) still reaches the class's lists when that copy is hidden: its chosen copy stands in for it.
+#[tokio::test(flavor = "multi_thread")]
+async fn list_extensions_reach_a_visible_copy_in_installed_content() {
+    use tauri::Manager;
+    let aurora = std::env::var("BOREALIS_TEST_AURORA_DIR").ok();
+    let fivetools = std::env::var("BOREALIS_TEST_5ETOOLS_DIR").ok();
+    if aurora.is_none() && fivetools.is_none() {
+        eprintln!("skipped: set BOREALIS_TEST_AURORA_DIR (cached Aurora Legacy indexes) and/or BOREALIS_TEST_5ETOOLS_DIR");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(&Location::Memory).await.unwrap();
+    let state = super::state_with(dir.path().to_path_buf(), db, super::Setup::default());
+    let router = super::router_of(state.clone(), super::Setup::default().max_upload);
+    let dm = sign_up(&router, "corpus-dm").await;
+    let workspace = state.workspaces.get(&dm.id).await.unwrap();
+    if let Some(cache) = aurora {
+        let cache = std::path::PathBuf::from(cache);
+        workspace
+            .blocking(move |h| {
+                let backend = h.state::<borealis_lib::state::AppState>();
+                for url in super::bestiary_tests::AURORA_INDEXES {
+                    backend
+                        .add_index(url)
+                        .map_err(|e| crate::error::ApiError::Internal(e.message))?;
+                }
+                backend
+                    .update_indexes(
+                        &super::bestiary_tests::Cached(cache),
+                        &borealis_lib::content_packs::NullSink,
+                    )
+                    .map_err(|e| crate::error::ApiError::Internal(e.message))?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    if let Some(root) = fivetools {
+        let root = std::path::PathBuf::from(root);
+        let data = if root.join("data").is_dir() {
+            root.join("data")
+        } else {
+            root
+        };
+        let index: Value =
+            serde_json::from_str(&std::fs::read_to_string(data.join("spells/index.json")).unwrap())
+                .unwrap();
+        let sources: Vec<String> = index.as_object().unwrap().keys().cloned().collect();
+        let token = workspace
+            .blocking(move |h| {
+                let picked = h
+                    .state::<borealis_lib::state::AppState>()
+                    .picked
+                    .grant(
+                        data,
+                        borealis_lib::picked_paths::PickPurpose::FivetoolsFolder,
+                    )
+                    .map_err(|e| crate::error::ApiError::Internal(e.message))?;
+                Ok(picked.token)
+            })
+            .await
+            .unwrap();
+        let (status, out) = dm
+            .rpc(
+                "import_5etools",
+                json!({ "request": { "folder": token, "sources": sources, "includeFluff": false } }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{}", out["message"]);
+    }
+    crate::spells::sync_hidden(&state, &dm.id).await.unwrap();
+    let counts = workspace
+        .blocking(|h| {
+            let hub = h
+                .state::<borealis_lib::state::AppState>()
+                .hub()
+                .map_err(|e| crate::error::ApiError::Internal(e.message))?;
+            let mut out = Vec::new();
+            for ruleset in [
+                borealis_content::Ruleset::Dnd2014,
+                borealis_content::Ruleset::Dnd2024,
+            ] {
+                let uni = hub.engine.universe(ruleset);
+                let answered: std::collections::HashSet<&str> = uni
+                    .iter()
+                    .filter(|u| !u.hidden)
+                    .flat_map(|u| u.copy_ids.iter().map(String::as_str))
+                    .collect();
+                let (mut refs, mut missing, mut hidden, mut unanswered) =
+                    (0usize, 0usize, 0usize, 0usize);
+                for u in uni.iter() {
+                    let Some(sc) =
+                        u.el.spellcasting
+                            .as_ref()
+                            .filter(|s| s.extend == Some(true))
+                    else {
+                        continue;
+                    };
+                    for l in sc.extends.iter().filter(|l| l.is_spell_id()) {
+                        refs += 1;
+                        let id = l.supports.trim();
+                        match uni.get(id) {
+                            None => missing += 1,
+                            Some(t) if t.hidden => {
+                                hidden += 1;
+                                unanswered += usize::from(!answered.contains(id));
+                            }
+                            Some(_) => {}
+                        }
+                    }
+                }
+                out.push((ruleset, refs, missing, hidden, unanswered));
+            }
+            Ok(out)
+        })
+        .await
+        .unwrap();
+    for (ruleset, refs, missing, hidden, unanswered) in &counts {
+        println!(
+            "{ruleset:?}: {refs} list extensions by spell id; {missing} name no installed spell; \
+             {hidden} name a hidden copy (unreachable before stand-ins); {unanswered} of them with no stand-in"
+        );
+    }
+    assert!(
+        counts.iter().all(|c| c.4 == 0),
+        "a hidden copy named by a list extension has no stand-in"
+    );
 }

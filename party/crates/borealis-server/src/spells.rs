@@ -401,31 +401,45 @@ pub fn mark_stale(account: &str) {
 }
 
 /// Push the copies the canonical resolver hides (every copy of a spell but the chosen one, per name, edition and
-/// level) into the account's engine settings (`hiddenElements`), so builder and spell pickers offer one copy. Only
-/// when the set changed: every change rebuilds the account's engine. A character that chose a hidden copy keeps it
-/// (upstream replays stored choices). Answers whether it changed.
+/// level) into the account's engine settings (`hiddenElements`), so builder and spell pickers offer one copy, with the
+/// chosen copy as each hidden one's stand-in (`hiddenStandIns`): content that names a hidden copy by id (an optional
+/// feature's `<extend>` of a class list, a subclass's expanded list) gets the chosen copy instead. Only when they
+/// changed: every change rebuilds the account's engine. A character that chose a hidden copy keeps it (upstream
+/// replays stored choices). Answers whether it changed.
 ///
 /// # Errors
 /// The workspace's and the database's.
 pub async fn sync_hidden(state: &AppState, account: &str) -> ApiResult<bool> {
-    let hidden: BTreeSet<String> = book(state, account)
-        .await?
-        .catalog
+    let catalog = book(state, account).await?.catalog;
+    let hidden: BTreeSet<String> = catalog
         .hidden()
         .into_iter()
         .filter(|id| id.len() <= MAX_KEY)
         .take(MAX_HIDDEN)
+        .collect();
+    let stand_ins: BTreeMap<String, String> = catalog
+        .stand_ins()
+        .into_iter()
+        .filter(|(h, v)| hidden.contains(h) && v.len() <= MAX_KEY)
         .collect();
     let workspace = state.workspaces.get(account).await?;
     let changed = workspace
         .blocking(move |handle| {
             let backend = handle.state::<Backend>();
             let current = backend.settings().map_err(|e| upstream(&e))?;
-            if current.hidden_elements == hidden {
+            if current.hidden_elements == hidden && current.hidden_stand_ins == stand_ins {
                 return Ok(false);
             }
+            // Settings patches merge objects key by key: a stand-in that is gone is sent as null.
+            let mut patch: serde_json::Map<String, Value> = current
+                .hidden_stand_ins
+                .keys()
+                .filter(|k| !stand_ins.contains_key(*k))
+                .map(|k| (k.clone(), Value::Null))
+                .collect();
+            patch.extend(stand_ins.iter().map(|(k, v)| (k.clone(), json!(v))));
             backend
-                .save_settings(&json!({ "hiddenElements": hidden }))
+                .save_settings(&json!({ "hiddenElements": hidden, "hiddenStandIns": patch }))
                 .map_err(|e| upstream(&e))?;
             Ok(true)
         })

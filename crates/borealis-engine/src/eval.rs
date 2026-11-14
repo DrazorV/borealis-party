@@ -432,10 +432,12 @@ pub fn supports_match(
     let own = eval_bool(expr.root(), &|leaf| match leaf {
         SupportsLeaf::Tag(t) => {
             let is_id = t.starts_with("ID_");
+            // a visible element answers for the hidden copies it stands in for
+            let named = is_id && (element.el.id == *t || element.copy_ids.iter().any(|h| h == t));
             if range && is_id {
-                element.el.id == *t
+                named
             } else {
-                (is_id && element.el.id == *t) || element.supports.iter().any(|s| same_tag(s, t))
+                named || element.supports.iter().any(|s| same_tag(s, t))
             }
         }
         SupportsLeaf::Dynamic(d) => dynamics.matches(d, element),
@@ -854,6 +856,7 @@ mod tests {
             repeatable: false,
             superseded: false,
             hidden: false,
+            copy_ids: Vec::new(),
             replaced_supports: Vec::new(),
             replaced_ids: Vec::new(),
             toggle_effects: Vec::new(),

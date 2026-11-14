@@ -1430,6 +1430,11 @@ impl<'u> Graph<'u> {
                 .equivalent_ids(id)
                 .iter()
                 .any(|x| self.ids.count(x) > 0)
+            // another copy of the same element (hidden_stand_ins)
+            || self
+                .uni
+                .get(id)
+                .is_some_and(|u| u.copy_ids.iter().any(|x| self.ids.count(x) > 0))
     }
 
     /// A Weapon Mastery slot holds `id` or a `maps_to` equivalent of it (A8: two slots never
@@ -1773,7 +1778,12 @@ impl<'g, 'u> SpellDynamics<'g, 'u> {
             return false;
         };
         let lists = self.lists(class);
-        if lists.ids.contains(element.el.id.as_str()) {
+        if lists.ids.contains(element.el.id.as_str())
+            || element
+                .copy_ids
+                .iter()
+                .any(|h| lists.ids.contains(h.as_str()))
+        {
             let spell_level = element.spell_level().unwrap_or(0);
             if spell_level != 0 && spell_level <= self.slot_level(class).max(1) {
                 return true;

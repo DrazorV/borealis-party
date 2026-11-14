@@ -170,10 +170,22 @@ fn add_prepared_extensions(
         if l.prepared != Some(true) || !l.is_spell_id() {
             continue;
         }
-        let id = l.supports.trim();
-        let Some(e) = uni.get(id) else { continue };
+        let Some(e) = uni.get(l.supports.trim()) else {
+            continue;
+        };
+        // a hidden copy is listed as the visible copy that stands in for it (hidden_stand_ins)
+        let e = if e.hidden {
+            e.copy_ids
+                .iter()
+                .filter_map(|c| uni.get(c))
+                .find(|c| !c.hidden)
+                .unwrap_or(e)
+        } else {
+            e
+        };
+        let id = e.el.id.as_str();
         let level = spell_level(e);
-        if level == 0 || level > top || spells.iter().any(|s| s.id == id) {
+        if level == 0 || level > top || spells.iter().any(|s| same_spell(s, e)) {
             continue;
         }
         spells.push(SpellEntry {
@@ -401,14 +413,16 @@ pub fn spellcasting_snapshots(
         let candidate_entries =
             |known_ids: &[SpellEntry], lists: &[&borealis_content::SpellcastingList]| {
                 let mut out = Vec::new();
+                let prepared = state.prepared_for(&info.name);
                 for cand in uni.by_type("Spell").filter(|c| {
-                    graph.offers_edition(c)
+                    // a hidden copy the character already prepared still replays
+                    (graph.offers_edition(c) || c.hidden && prepared.contains(&c.el.id))
                         && !graph
                             .restricted
                             .is_restricted_element(&c.el.source, &c.el.ty)
                 }) {
                     let lvl = spell_level(cand);
-                    if lvl == 0 || lvl > top || known_ids.iter().any(|s| s.id == cand.el.id) {
+                    if lvl == 0 || lvl > top || known_ids.iter().any(|s| same_spell(s, cand)) {
                         continue;
                     }
                     if on_lists(lists, cand) {
@@ -425,7 +439,21 @@ pub fn spellcasting_snapshots(
                         });
                     }
                 }
-                out
+                // one copy per spell: an unprepared copy gives way to a prepared one
+                let is_prepared_copy = |e: &SpellEntry| {
+                    uni.get(&e.id).is_some_and(|u| {
+                        out.iter()
+                            .any(|f: &SpellEntry| f.prepared && u.copy_ids.contains(&f.id))
+                    })
+                };
+                let drop: Vec<bool> = out
+                    .iter()
+                    .map(|e| !e.prepared && is_prepared_copy(e))
+                    .collect();
+                out.into_iter()
+                    .zip(drop)
+                    .filter_map(|(e, d)| (!d).then_some(e))
+                    .collect::<Vec<_>>()
             };
         let book_candidates = if rules.spellbook.is_some() {
             let lists: Vec<&borealis_content::SpellcastingList> = info
@@ -537,11 +565,17 @@ pub fn spellcasting_snapshots(
     out
 }
 
+/// `entry` is `e` or another copy of it ([`UElem::copy_ids`]).
+fn same_spell(entry: &SpellEntry, e: &UElem) -> bool {
+    entry.id == e.el.id || e.copy_ids.contains(&entry.id)
+}
+
 /// Is `cand` on one of `lists` (a single spell id, or a supports expression over spells)?
 pub(crate) fn on_lists(lists: &[&borealis_content::SpellcastingList], cand: &UElem) -> bool {
     lists.iter().any(|l| {
         if l.is_spell_id() {
-            return l.supports.trim() == cand.el.id;
+            let id = l.supports.trim();
+            return id == cand.el.id || cand.copy_ids.iter().any(|h| h == id);
         }
         matches!(l.expr(), Ok(Some(e)) if supports_match(&e, cand, &NoDynamics))
     })

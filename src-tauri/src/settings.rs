@@ -181,6 +181,14 @@ pub struct AppSettings {
     /// Borealis, empty by default. Stored choices of them still load.
     #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub hidden_elements: std::collections::BTreeSet<String>,
+    /// For a hidden element, the visible one that answers for it where content names the hidden id
+    /// ([`EngineSettings::hidden_stand_ins`]); empty by default. Settings patches merge objects key by key, so a
+    /// patch removes an entry with a `null` value.
+    #[serde(
+        skip_serializing_if = "std::collections::BTreeMap::is_empty",
+        deserialize_with = "stand_ins_without_removed"
+    )]
+    pub hidden_stand_ins: std::collections::BTreeMap<String, String>,
 }
 
 /// Device tier override for semantic search (S3; keyword search ignores it).
@@ -304,6 +312,7 @@ impl Default for AppSettings {
             restrict_third_party: false,
             search: SearchSettings::default(),
             hidden_elements: std::collections::BTreeSet::new(),
+            hidden_stand_ins: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -350,6 +359,11 @@ impl AppSettings {
                 .hidden_elements
                 .iter()
                 .any(|id| id.is_empty() || id.len() > 200)
+            || self.hidden_stand_ins.len() > MAX_HIDDEN_ELEMENTS
+            || self
+                .hidden_stand_ins
+                .iter()
+                .any(|(h, v)| h.is_empty() || h.len() > 200 || v.is_empty() || v.len() > 200)
         {
             return Err(ApiError::invalid(
                 "Too many hidden elements, or an invalid element id.",
@@ -395,6 +409,7 @@ impl AppSettings {
             min_base_score: self.ability_min_base,
             max_base_score: self.ability_max_base,
             hidden_elements: self.hidden_elements.clone(),
+            hidden_stand_ins: self.hidden_stand_ins.clone(),
             ..EngineSettings::default()
         }
     }
@@ -497,6 +512,14 @@ impl AppSettings {
     }
 }
 
+/// [`AppSettings::hidden_stand_ins`] without the entries a patch removed (`null`).
+fn stand_ins_without_removed<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<std::collections::BTreeMap<String, String>, D::Error> {
+    let map: std::collections::BTreeMap<String, Option<String>> = Deserialize::deserialize(d)?;
+    Ok(map.into_iter().filter_map(|(k, v)| Some((k, v?))).collect())
+}
+
 fn merge(target: &mut Value, patch: &Value) {
     match (target, patch) {
         (Value::Object(t), Value::Object(p)) => {
@@ -516,6 +539,45 @@ fn merge(target: &mut Value, patch: &Value) {
 #[cfg(test)]
 mod default_tests {
     use super::*;
+
+    #[test]
+    fn hidden_stand_ins_load_from_files_without_them_and_reach_the_engine() {
+        let dir = std::env::temp_dir().join(format!("borealis-stand-ins-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("settings.json");
+        std::fs::write(&file, r#"{"hiddenElements":["ID_T_COPY_B"]}"#).unwrap();
+        let old = AppSettings::load(&file);
+        assert!(old.hidden_elements.contains("ID_T_COPY_B"));
+        assert!(old.hidden_stand_ins.is_empty());
+        assert!(old.engine_settings().hidden_stand_ins.is_empty());
+        let saved = serde_json::to_value(&old).unwrap();
+        assert!(
+            saved.get("hiddenStandIns").is_none(),
+            "an empty map stays out of the file"
+        );
+        let new = old
+            .patched(&serde_json::json!({"hiddenStandIns": {"ID_T_COPY_B": "ID_T_COPY_A"}}))
+            .unwrap();
+        assert_eq!(
+            new.engine_settings()
+                .hidden_stand_ins
+                .get("ID_T_COPY_B")
+                .map(String::as_str),
+            Some("ID_T_COPY_A")
+        );
+        assert!(old
+            .patched(&serde_json::json!({"hiddenStandIns": {"ID_T_COPY_B": ""}}))
+            .is_err());
+        // a patch merges key by key: a null removes an entry, the others stay
+        let swapped = new
+            .patched(&serde_json::json!({"hiddenStandIns": {"ID_T_COPY_B": null, "ID_T_COPY_A": "ID_T_COPY_B"}}))
+            .unwrap();
+        assert_eq!(
+            swapped.hidden_stand_ins.into_iter().collect::<Vec<_>>(),
+            [("ID_T_COPY_A".to_string(), "ID_T_COPY_B".to_string())]
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn defaults_match_the_settings_spec() {
