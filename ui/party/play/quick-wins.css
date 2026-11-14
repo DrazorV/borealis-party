@@ -1,0 +1,10 @@
+/* 0.3.5 player quick wins on the Play sub-tab: the death saves card, the concentration save under its banner, tracker presets. */
+.bp-death-card { margin: 0 0 10px; border-left: 3px solid var(--danger, #b22222); }
+.bp-death-hurt { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.bp-conc-save { margin: 0 0 10px; }
+.bp-conc-save > .btn { align-self: flex-start; }
+.bp-shared { white-space: nowrap; }
+.bp-presets { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.bp-presets-label { font-size: var(--fs-sm); opacity: 0.8; }
+html.phone .bp-death-card, html.phone .bp-conc-save { margin: 0 0 8px; }
+html.phone .bp-death-hurt > .btn, html.phone .bp-presets > .btn, html.phone .bp-conc-save > .btn { min-height: var(--ph-hit, 44px); }
