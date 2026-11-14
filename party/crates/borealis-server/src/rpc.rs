@@ -131,13 +131,16 @@ pub async fn events(
         .unwrap_or_default();
     let subscription = state.hub.subscribe(&user.id, &session, query.after);
     let (out, stream) = mpsc::channel::<Event>(64);
-    tokio::spawn(forward(
-        state.clone(),
-        session,
-        workspace.events.subscribe(),
-        subscription,
-        out,
-    ));
+    // Counted for /api/health while the stream is open (the task ends when the client goes).
+    let open = crate::health::Subscriber::new();
+    tokio::spawn({
+        let state = state.clone();
+        let workspace = workspace.events.subscribe();
+        async move {
+            let _open = open;
+            forward(state, session, workspace, subscription, out).await;
+        }
+    });
     let sse = Sse::new(ReceiverStream::new(stream).map(Ok::<_, Infallible>))
         .keep_alive(KeepAlive::default());
     Ok((

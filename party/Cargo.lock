@@ -881,6 +881,7 @@ dependencies = [
  "clap",
  "http-body-util",
  "lettre",
+ "libc",
  "party-combat",
  "party-encounter",
  "party-sim",

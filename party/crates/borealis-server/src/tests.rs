@@ -40,6 +40,8 @@ mod combat_tests;
 mod content_tools_tests;
 #[path = "encounters_tests.rs"]
 mod encounters_tests;
+#[path = "health_tests.rs"]
+mod health_tests;
 #[path = "homebrew_tests.rs"]
 mod homebrew_tests;
 #[path = "index_subs_tests.rs"]
