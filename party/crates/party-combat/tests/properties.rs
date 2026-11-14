@@ -100,7 +100,7 @@ impl Gen {
 
 fn random_command(g: &mut Gen, state: &CombatState) -> Command {
     let effect_id = state.effects.first().map_or(EffectId(1), |e| e.id);
-    match g.n(30) {
+    match g.n(34) {
         1..=4 => Command::NextTurn,
         5 => Command::PreviousTurn,
         6 | 7 => Command::Damage {
@@ -242,6 +242,102 @@ fn random_command(g: &mut Gen, state: &CombatState) -> Command {
             label: "check".into(),
             roll: RollInput::Dice(DiceInput::app("1d8")),
         },
+        // 0.3.2: casts, rows, applying, cancelling, standard actions.
+        29..=31 => {
+            let name = g.pick(&[
+                "fireball",
+                "hold-person",
+                "bless",
+                "mage-armor",
+                "cure-wounds",
+            ]);
+            let mut targets = vec![g.who()];
+            let second = g.who();
+            if !targets.contains(&second) && name != "mage-armor" && name != "cure-wounds" {
+                targets.push(second);
+            }
+            let rows = if g.n(2) == 1 {
+                targets
+                    .iter()
+                    .map(|t| RowInput {
+                        target: t.clone(),
+                        ray: 0,
+                        roll: if g.n(2) == 1 {
+                            RowRoll::App
+                        } else {
+                            RowRoll::Typed {
+                                total: g.n(25) as i32,
+                                natural: None,
+                            }
+                        },
+                        use_lr: false,
+                    })
+                    .collect()
+            } else {
+                vec![]
+            };
+            let amounts = if g.n(2) == 1 {
+                vec![AmountRoll::App]
+            } else {
+                vec![]
+            };
+            Command::CastSpell {
+                caster: id(g.pick(&["m", "hidden-goblin", "w"])),
+                ability: None,
+                spec: Some(Box::new(spec_of(name, state.edition, 13, Some(5)))),
+                slot: Some(g.pick(&[1, 2, 3, 4])),
+                targets,
+                rows,
+                amounts,
+                crit_amounts: vec![],
+                choices: spell::CastChoices::default(),
+                precast: g.n(4) == 1,
+                force: g.n(2) == 1,
+                id: None,
+            }
+        }
+        32 => match state.casts.first() {
+            Some(cast) => {
+                let row = &cast.rows[g.n(cast.rows.len().max(1) as u32) as usize - 1];
+                Command::ResolveCastRow {
+                    cast: cast.id.clone(),
+                    target: row.target.clone(),
+                    ray: row.ray,
+                    roll: if g.n(2) == 1 {
+                        RowRoll::App
+                    } else {
+                        RowRoll::Typed {
+                            total: g.n(25) as i32,
+                            natural: Some(g.n(20)),
+                        }
+                    },
+                    use_lr: g.n(5) == 1,
+                }
+            }
+            None => Command::NextTurn,
+        },
+        33 => match state.casts.first() {
+            Some(cast) if g.n(3) == 1 => Command::CancelCast {
+                cast: cast.id.clone(),
+                refund: g.n(2) == 1,
+            },
+            Some(cast) => Command::ApplyCast {
+                cast: cast.id.clone(),
+                amounts: vec![],
+                crit_amounts: vec![],
+                force: g.n(2) == 1,
+            },
+            None => Command::StandardAction {
+                id: g.who(),
+                action: g.pick(&[
+                    StandardActionKind::Dodge,
+                    StandardActionKind::Dash,
+                    StandardActionKind::Disengage,
+                ]),
+                target: None,
+                bonus: g.n(2) == 1,
+            },
+        },
         _ => Command::UseCharge { effect: effect_id },
     }
 }
@@ -362,6 +458,8 @@ fn random_sequences_keep_the_invariants_undo_and_determinism() {
                             DmEventKind::Summoned { .. } => "summoned",
                             DmEventKind::OwnerDefeated { .. } => "owner-defeated",
                             DmEventKind::Attack { .. } => "attack",
+                            DmEventKind::CastApplied { .. } => "cast-applied",
+                            DmEventKind::CastRow { .. } => "cast-row",
                             DmEventKind::EffectAdded { .. }
                                 if cmd.label() != "add effect"
                                     && cmd.label() != "add condition" =>
@@ -414,6 +512,8 @@ fn random_sequences_keep_the_invariants_undo_and_determinism() {
         "legendary-reset",
         "unlinked",
         "follow-up",
+        "cast-applied",
+        "cast-row",
         "summoned",
         "owner-defeated",
         "attack",

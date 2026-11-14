@@ -56,6 +56,18 @@ pub enum Unavailable {
     /// Legendary actions are taken on other creatures' turns.
     #[error("Not on its own turn")]
     OwnTurn,
+    /// A slot below the spell's level, or a slot for a cantrip (the detail is the spell's level).
+    #[error("Needs a level {0} slot or higher")]
+    SlotTooLow(u8),
+    /// A levelled spell cast without a slot.
+    #[error("Choose a slot (level {0} or higher)")]
+    NeedsSlot(u8),
+    /// 2014: a bonus action spell this turn allows only an action cantrip besides it.
+    #[error("Bonus action spell this turn: only an action cantrip")]
+    BonusSpellRule,
+    /// 2024: one spell slot per turn.
+    #[error("A spell slot was already used this turn")]
+    OneSlotPerTurn,
 }
 
 /// Why a command was refused.

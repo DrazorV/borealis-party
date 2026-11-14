@@ -41,5 +41,5 @@ pub use export::{export_json, import_json, SCHEMA_VERSION};
 pub use model::*;
 pub use party_dice;
 pub use visibility::{
-    is_visible, player_view_of, turn_pointer, visible_order, TurnPointer, ViewerKind,
+    is_visible, player_casts, player_view_of, turn_pointer, visible_order, TurnPointer, ViewerKind,
 };
