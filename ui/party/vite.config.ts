@@ -31,6 +31,8 @@ const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     // The 5etools addresses follow the account's content changes at once (content/ContentScope.tsx).
     "./FiveToolsTab": local("./content/WithFiveTools.tsx"),
   },
+  // The Build page's content notices line up with the rows, can be dismissed, and say what is missing (builder/NoticesBanner.tsx).
+  "src/pages/builder/BuilderPage.tsx": { "./NoticesBanner": local("./builder/NoticesBanner.tsx") },
   // Installed packs by origin, with Remove all on each group (content/PackGroups.tsx).
   // Grouped on desktops too, each group folded to its count (content/packsPlatform.ts).
   "src/pages/content/PacksTab.tsx": {

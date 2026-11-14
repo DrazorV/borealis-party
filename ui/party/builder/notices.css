@@ -1,0 +1,18 @@
+/* The Build page's content notices (NoticesBanner.tsx). The selection rows below start past their focus bar (a 4 px border
+   and 10 px padding, 6 px under 900 px, none on phones), so the notice starts there too, ends with them, and keeps a gap. */
+.alert.bp-notices.party-notices { display: flex; align-items: flex-start; gap: var(--sp-3); margin: 0 0 var(--sp-3) 14px; }
+@media (max-width: 899px) { .alert.bp-notices.party-notices { margin-left: 10px; } }
+html.phone .alert.bp-notices.party-notices { margin-left: 0; }
+.party-notices-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.party-notices-close { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin: -4px -8px -4px 0; padding: 0; border: 0;
+  background: transparent; color: inherit; opacity: .7; cursor: pointer; }
+.party-notices-close .icon { width: 16px; height: 16px; }
+.party-notices-close:focus-visible { outline: 1px solid currentColor; outline-offset: 1px; opacity: 1; }
+@media (hover: hover) and (pointer: fine) { .party-notices-close:hover { opacity: 1; } }
+html.phone .party-notices-close { width: 44px; height: 44px; margin: -12px -12px -12px 0; }
+/* next to the 44 px count toggle, the 44 px close button lines up with it */
+html.phone .party-notices:has(> .party-notices-body > .bp-notices-toggle) .party-notices-close { margin-top: 0; }
+.party-notices-details { margin-top: 4px; font-size: var(--fs-sm); }
+.party-notices-details > summary { cursor: pointer; width: max-content; opacity: .8; }
+.party-notices-details > code { display: block; margin-top: 2px; user-select: all; }
+html.phone .party-notices-details > summary { min-height: 44px; display: flex; align-items: center; }
