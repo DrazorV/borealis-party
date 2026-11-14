@@ -1,6 +1,6 @@
 #!/bin/sh
 # Fails if the fork has changed any upstream file. Our code belongs in party/ and ui/party/
-# (and our own workflows, .github/workflows/party-*.yml, and the fork's front page, .github/README.markdown,
+# (and our own workflows, .github/workflows/connect-*.yml, and the fork's front page, .github/README.markdown,
 # which GitHub shows instead of upstream's README.md; .github/README.md would clash with upstream's .github/readme/
 # folder on case-insensitive file systems).
 # Files of an open upstream pull request listed in party/upstream-pending.txt are accepted too.
@@ -9,7 +9,7 @@ set -eu
 
 pending="$(dirname "$0")/upstream-pending.txt"
 base=$(git merge-base upstream/main HEAD)
-changed=$(git diff --name-only "$base" -- . ':(exclude)party' ':(exclude)ui/party' ':(glob,exclude).github/workflows/party-*.yml' \
+changed=$(git diff --name-only "$base" -- . ':(exclude)party' ':(exclude)ui/party' ':(glob,exclude).github/workflows/connect-*.yml' \
     ':(exclude).github/README.markdown')
 
 # "<path> <PR url>" lines, comments and blank lines skipped

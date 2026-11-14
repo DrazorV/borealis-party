@@ -1,8 +1,8 @@
-name: Party image
+name: Connect image
 
 # Builds the Borealis Connect server image from main and pushes it to ghcr.io/fortress-soft/borealis-connect.
 # Tags: latest, sha-<short commit>, and the version in party/Cargo.toml.
-# This file belongs to the fork (party/check-upstream.sh accepts .github/workflows/party-*.yml).
+# This file belongs to the fork (party/check-upstream.sh accepts .github/workflows/connect-*.yml).
 on:
   push:
     branches: [main]
@@ -14,11 +14,11 @@ on:
       - "content/**"
       - "Cargo.toml"
       - "Cargo.lock"
-      - ".github/workflows/party-image.yml"
+      - ".github/workflows/connect-image.yml"
   workflow_dispatch:
 
 concurrency:
-  group: party-image
+  group: connect-image
   cancel-in-progress: true
 
 permissions:

@@ -28,10 +28,10 @@ All of it is in the fork's own files; upstream's code is used as it is.
   (`app.security.capabilities`, after upstream's own `default` and `splash`). With a real key, upstream registers the
   plugin for a copy that can replace itself (an NSIS install, an AppImage) and leaves it out otherwise.
 - The desktop app's version is the party version from `party/Cargo.toml`, set at build time (`build-desktop.ps1` and
-  `party-apps.yml`). Up to 0.1.1 the desktop apps called themselves 1.4.0 (upstream's version).
+  `connect-apps.yml`). Up to 0.1.1 the desktop apps called themselves 1.4.0 (upstream's version).
 - `ui/party/api/desktopUpdate.ts` and `ui/party/pages/DesktopUpdate.tsx`: the check and the bar. Upstream's own
   update notice is not used: it asks upstream's GitHub about upstream's version.
-- `party-apps.yml`: with the key, the desktop jobs sign the installer and the AppImages (`.sig` beside each), and the
+- `connect-apps.yml`: with the key, the desktop jobs sign the installer and the AppImages (`.sig` beside each), and the
   release job writes the feed with `party/desktop/update-feed.py`. Its links name the files of that tag. Without the
   key the apps are released as before, with no feed, and installed apps simply find no update.
 

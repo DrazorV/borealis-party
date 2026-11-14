@@ -1,5 +1,5 @@
 # Checks that the Windows installers register the .borealis file type for Borealis Connect, and that uninstalling
-# takes it away again. Run by .github/workflows/party-apps.yml after the Windows build; it also works by hand on a
+# takes it away again. Run by .github/workflows/connect-apps.yml after the Windows build; it also works by hand on a
 # Windows PC (it installs and then uninstalls the app for the current user, so don't run it where you use the app):
 #   party/desktop/check-file-type.ps1 -Setup <...-setup.exe> [-Msi <...msi>]
 #

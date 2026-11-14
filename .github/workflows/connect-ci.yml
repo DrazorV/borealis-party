@@ -1,11 +1,11 @@
-name: Party CI
+name: Connect CI
 
 # Checks the fork's own code on every push and pull request: no upstream file changed, every upstream command has a
 # decision, the party web app (types, tests, build), the server (fmt, clippy, tests on SQLite and PostgreSQL) and the
 # phone UI suite (party/ui-tests).
 # Upstream's own CI (ci.yml) is turned off on the fork: upstream runs it on the same upstream code, and
 # party/check-upstream.sh keeps that code unchanged here.
-# This file belongs to the fork (party/check-upstream.sh accepts .github/workflows/party-*.yml).
+# This file belongs to the fork (party/check-upstream.sh accepts .github/workflows/connect-*.yml).
 on:
   push:
     branches: [main]
@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: party-ci-${{ github.ref }}
+  group: connect-ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -67,7 +67,7 @@ jobs:
       postgres:
         image: postgres:18
         env:
-          POSTGRES_PASSWORD: party-ci
+          POSTGRES_PASSWORD: connect-ci
         ports:
           - 5432:5432
         options: >-
@@ -126,7 +126,7 @@ jobs:
       - name: Tests (server, PostgreSQL)
         working-directory: party
         env:
-          BOREALIS_TEST_POSTGRES_URL: postgres://postgres:party-ci@localhost:5432/postgres
+          BOREALIS_TEST_POSTGRES_URL: postgres://postgres:connect-ci@localhost:5432/postgres
           BOREALIS_TEST_PG_BIN: /usr/lib/postgresql/18/bin
         run: |
           tests=$(cargo test -p borealis-server --locked -- --list 2>/dev/null | grep -E 'postgres.*: test$' | sed 's/: test$//')
