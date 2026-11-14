@@ -170,15 +170,16 @@ test.describe("Import section: 5etools sources", () => {
     expect(seen).toEqual([`stage ${DEFAULT_URL}`, "import"]);
     const report = r.locator(".party-import-report");
     await expect(r.locator(".party-import-msg")).toHaveText("Imported 16746 elements into 2 content packs.");
+    // 0.3.6: the report is folded under the row's Details, and opens with its notes line and groups (each folded).
+    await expect(report).toHaveCount(0);
+    await r.getByRole("button", { name: "Details" }).tap();
     await expect(report.getByText("828 details couldn't be carried over. They don't stop anything from working. 5 entries couldn't be read and were left out.", { exact: false })).toBeVisible();
     await expect(report.getByText(/Local import — not redistributable/)).toBeVisible();
-    await expect(report.locator(".aur-expander-toggle")).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath("5etools-result.png") });
     await testInfo.attach("5etools-result", { path: testInfo.outputPath("5etools-result.png"), contentType: "image/png" });
     await expectPhoneLayout(page, testInfo);
 
-    // Show details: groups in sentence case with their counts, each folded; one opens to say what it means.
-    await report.getByRole("button", { name: "Show details" }).tap();
+    // The groups: sentence case with their counts, each folded; one opens to say what it means.
     const groups = report.locator(".aur-expander-toggle");
     await expect(groups.first()).toHaveText("411 Variant sidebars");
     expect(await groups.count()).toBeGreaterThan(4);

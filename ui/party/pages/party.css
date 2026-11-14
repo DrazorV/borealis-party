@@ -130,6 +130,18 @@ html.phone .party-import .input { font-size: 16px; }
 html.phone .party-import-actions > .btn, html.phone .party-import-link > .btn { flex: 1 1 auto; justify-content: center; }
 html.phone .party-import-books input[type="checkbox"] { min-width: 24px; min-height: 24px; }
 .party-import-report { margin-top: var(--sp-2); max-height: 50vh; overflow: auto; min-width: 0; }
+/* 0.3.6: the results' summary first (counts, missing content once, what next); each row folds its details. */
+.party-import-summary { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: var(--border-w) solid var(--border); border-left-width: 4px; border-radius: var(--radius); min-width: 0; }
+.party-import-summary.success { border-left-color: var(--success, #3a7d44); }
+.party-import-summary.warning { border-left-color: var(--warning, #b8860b); }
+.party-import-summary.error { border-left-color: var(--danger, #b22222); }
+.party-import-summary.working, .party-import-summary.info { border-left-color: var(--accent, var(--border)); }
+.party-import .party-import-summary p { margin: 0; overflow-wrap: anywhere; }
+.party-import-summary-line { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
+.party-import-chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.party-import-missing-source { margin-top: var(--sp-2); }
+.party-import-toggle { display: flex; margin-top: var(--sp-1); }
+.party-import-more { display: flex; flex-direction: column; min-width: 0; }
 
 /* Share codes (SharePage, ShareReceivePage; plan E4). */
 .party-share { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); max-width: 760px; min-width: 0; }

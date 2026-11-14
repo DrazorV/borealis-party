@@ -30,10 +30,10 @@ function Groups({ label, groups }: { label: string; groups: NoteGroup[] }) {
  * notes grouped by what they mean. Upstream's FiveToolsReport words every note as a problem; this one keeps a warning
  * for an import that brought nothing in.
  */
-export function FiveToolsResult({ report, headline = true }: { report: FiveToolsImportReport; headline?: boolean }) {
+export function FiveToolsResult({ report, headline = true, startOpen = false }: { report: FiveToolsImportReport; headline?: boolean; startOpen?: boolean }) {
   const view = viewReport(report);
   const line = notesLine(view);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(startOpen);
   const id = useId();
   return (
     <div className={`party-report ${view.tone}`} data-tone={view.tone}>
@@ -42,11 +42,14 @@ export function FiveToolsResult({ report, headline = true }: { report: FiveTools
       {line && (
         <>
           <p className="party-report-line">{line}</p>
-          <div className="party-report-toggle">
-            <Button small aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>
-              {open ? "Hide details" : "Show details"}
-            </Button>
-          </div>
+          {/* Opened by its row's Details (ImportSection.tsx): no second toggle. */}
+          {!startOpen && (
+            <div className="party-report-toggle">
+              <Button small aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>
+                {open ? "Hide details" : "Show details"}
+              </Button>
+            </div>
+          )}
         </>
       )}
       {open && (
