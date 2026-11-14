@@ -31,8 +31,8 @@ pub mod visibility;
 
 pub use combat::{Combat, LOG_RETENTION_DAYS, UNDO_LIMIT};
 pub use command::{
-    Actor, AmountRoll, Command, DamagePart, DamageTaken, RollInput, RowInput, RowRoll,
-    StandardActionKind,
+    Actor, AmountRoll, Command, DamagePart, DamageTaken, MultiSave, MultiTarget, RollInput,
+    RowInput, RowRoll, StandardActionKind,
 };
 pub use engine::{account_of, apply, player_may, Outcome};
 pub use error::{CombatError, Unavailable};

@@ -13,13 +13,16 @@ import type { Combatant, Command, CombatState } from "./types";
  * −5/+5, its HP, its economy, and reveal/hide (D20 b). A player's row (a PC, or a creature its player controls) shows
  * only its name, initiative, AC, conditions, effects and concentration: the DM never sees players' HP (./privacy.ts).
  */
-export function Roster({ state, selected, onSelect, send, disabled, onAdd }: {
+export function Roster({ state, selected, onSelect, send, disabled, onAdd, joinable = 0, onAddMember }: {
   state: CombatState;
   selected: string | null;
   onSelect: (id: string) => void;
   send: (c: Command) => void;
   disabled: boolean;
   onAdd: () => void;
+  /** 0.3.5 (A2): how many party characters aren't fighting; "Party member" adds one. */
+  joinable?: number;
+  onAddMember?: () => void;
 }) {
   const list = rosterOrder(state);
   const alive = state.combatants.filter((c) => !c.removed && c.kind === "creature" && !isDefeated(c)).length;
@@ -30,6 +33,7 @@ export function Roster({ state, selected, onSelect, send, disabled, onAdd }: {
         <strong>Combatants</strong>
         <span className="muted cb-small">{alive}/{total} creatures up</span>
         <Button small icon="plus" onClick={onAdd} disabled={disabled}>Creature</Button>
+        {joinable > 0 && onAddMember && <Button small icon="plus" onClick={onAddMember} disabled={disabled} title="A party member who isn't in this fight">Party member</Button>}
       </div>
       <ol className="cb-rows">
         {list.map((c) => <Row key={c.id} c={c} state={state} selected={selected === c.id} onSelect={onSelect} send={send} disabled={disabled} />)}

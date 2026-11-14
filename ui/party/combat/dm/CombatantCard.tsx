@@ -26,11 +26,13 @@ const signed = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
  * A player's combatant (a PC, or a creature its player controls) shows only AC, initiative, concentration, conditions
  * and effects, with "Send damage to …" in place of HP: the DM never sees players' HP or resources (./privacy.ts).
  */
-export function CombatantCard({ state, c, block, blockName, blockOf, send, disabled, onDefine, onAddCreature, prompts }: {
+export function CombatantCard({ state, c, block, blockName, blockOf, send, disabled, onDefine, onAddCreature, onMultiDamage, prompts }: {
   state: CombatState; c: Combatant; block: StatBlock | undefined; blockName?: string; send: (cmd: Command) => void; disabled: boolean;
   /** The damage and healing prompts sent to players (the DM view's `prompts`). */
   prompts?: DmCombat["prompts"];
   blockOf: (id: string) => StatBlock | undefined; onDefine: (a: Ability) => void; onAddCreature?: (p: AddPreset) => void;
+  /** 0.3.5 (D13): the multi-target damage sheet, from this card. */
+  onMultiDamage?: (first: string) => void;
 }) {
   const confirm = useConfirm();
   const phone = usePhone();
@@ -140,7 +142,7 @@ export function CombatantCard({ state, c, block, blockName, blockOf, send, disab
         {mine
           ? <SendDamage view={{ prompts }} state={state} c={c} send={send} disabled={disabled} />
           : <><HpBar current={c.hp.current} max={c.hp.max} temp={c.hp.temp} label={`${c.label} hit points`} />
-            <HpControls c={c} send={send} disabled={disabled} /></>}
+            <HpControls c={c} send={send} disabled={disabled} onMulti={onMultiDamage ? () => onMultiDamage(c.id) : undefined} /></>}
         {!mine && life.state === "dying" && (
           <div className="cb-death">
             <span>Death saves: {life.successes} ✓ · {life.failures} ✗</span>

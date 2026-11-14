@@ -4,7 +4,7 @@
  * journal of 50 and the export format. It is not the judge in production; the server's engine is.
  */
 import { parseNotation, rollExpr, seededDie, rollD20, type DieRoller } from "../../../src/lib/dice";
-import { INCAPACITATING, type D20Input, type D20Result, type DiceInput, type DiceResult } from "./common";
+import { ABILITY_NAMES, INCAPACITATING, type D20Input, type D20Result, type DiceInput, type DiceResult } from "./common";
 import { abilityStatus, byId, concentrationDc, conditionsOf, effectiveInitiative, isAlive, poolOf, poolResetOwner, takesTurn, turnOrder } from "./derive";
 import { runSpell, SPELL_COMMANDS, type SpellHost } from "./mockSpells";
 import type { Combatant, CombatState, Command, DamageClause, DamageResult, DmEvent, Effect, EffectSpec, StatBlockSnapshot } from "./types";
@@ -184,6 +184,32 @@ class Run {
         return;
       }
       case "damage": this.damage(cmd); return;
+      case "multi_damage": {
+        // The engine's MultiDamage (D13): one roll, each target's save, half (or none) on a success.
+        if (!cmd.targets.length) refuse("Pick at least one target.");
+        const roll = dice(cmd.amount, this.m.die);
+        if (roll.total < 0) refuse("Damage can't be negative.");
+        for (const t of cmd.targets) {
+          const c = this.c(t.id);
+          if (cmd.save && !t.save) refuse("Each target needs its save: typed, rolled, saved or failed.");
+          if (cmd.save && t.save?.kind === "app" && c.hp_authority === "player") refuse("A player's save is theirs to roll: type it, or set saved or failed.");
+        }
+        this.ev(undefined, "edited", `Damage to ${cmd.targets.length} targets: ${roll.breakdown}`);
+        for (const t of cmd.targets) {
+          const c = this.c(t.id);
+          let saved = false;
+          if (cmd.save && t.save) {
+            if (t.save.kind === "outcome") saved = t.save.outcome === "saved";
+            else if (t.save.kind === "typed") saved = t.save.total >= cmd.save.dc;
+            else saved = d20({ kind: "app", modifier: c.stats?.saves?.[ABILITY_NAMES.indexOf(cmd.save.ability)] ?? 0, mode: "normal" }, this.m.die).total >= cmd.save.dc;
+          }
+          const dealt = cmd.save && saved ? (cmd.save.half ? Math.floor(roll.total / 2) : 0) : roll.total;
+          if (dealt === 0) { this.ev(c.id, "edited", `${c.label} takes no damage`); continue; }
+          this.damage({ command: "damage", target: c.id, parts: [{ amount: { kind: "typed", total: dealt }, ...(cmd.damage_type ? { damage_type: cmd.damage_type } : {}) }],
+            ...(cmd.magical ? { magical: true } : {}), ...(cmd.apply_qualified ? { apply_qualified: true } : {}) });
+        }
+        return;
+      }
       case "heal": {
         const c = this.c(cmd.target);
         if (c.life?.state === "dead") refuse("Dead: set HP to revive.", "dead");

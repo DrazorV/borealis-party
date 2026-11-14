@@ -176,6 +176,10 @@ test.describe("The player's live combat section (0.3.0)", () => {
       const saved = await api<{ play: { hitPoints: { current: number } } }>(request, player.token, "POST", "/api/rpc/get_snapshot", { characterId: hero.id });
       expect(saved.play.hitPoints.current, "the player's own character took it").toBe(Math.max(0, before - 3));
 
+      // 0.3.5: the Goblin Boss acts and the hero is up next: "You're next" (the phone buzzes softly where it can).
+      await expect(pane.getByTestId("combat-on-deck")).toContainText("You're next");
+      await shot(page, testInfo, "on-deck");
+
       // The turn order: visible combatants only, the one acting marked, allies' bands and conditions.
       const order = pane.getByRole("list", { name: "Turn order" });
       await expect(order.locator(".combat-row")).toHaveCount(3);

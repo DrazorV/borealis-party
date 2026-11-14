@@ -447,6 +447,9 @@ export type RowRoll =
   | { kind: "typed"; total: number; natural?: number }
   | { kind: "app" }
   | { kind: "outcome"; outcome: RowOutcome };
+/** A target of `multi_damage`, with its save when the volley has one. */
+export interface MultiTarget { id: string; save?: RowRoll }
+export interface MultiSave { ability: AbilityName; dc: number; half: boolean }
 export interface RowInput { target: string; ray?: number; roll: RowRoll; use_lr?: boolean }
 /** An amount (damage, healing, temp HP), in the order of the definition's amount primitives. */
 export type AmountRoll = { kind: "typed"; total: number } | { kind: "app" };
@@ -480,6 +483,10 @@ export type Command =
   | { command: "set_economy"; id: string; action?: boolean; bonus_action?: boolean; reaction?: boolean }
   | { command: "damage"; target: string; parts: DamagePart[]; magical?: boolean; apply_qualified?: boolean; critical_hit?: boolean }
   | { command: "heal"; target: string; amount: DiceInput }
+  /** 0.3.5 (D13): one roll on several targets, each with its own save; half (or none) on a success. */
+  | { command: "multi_damage"; targets: MultiTarget[]; amount: DiceInput; damage_type?: DamageType; save?: MultiSave; magical?: boolean; apply_qualified?: boolean }
+  /** 0.3.5 (A2), a server action: a party member's character not in the fight joins it with this initiative. */
+  | { command: "add_member"; characterId: string; initiative: D20Input }
   | { command: "set_hp"; id: string; current: number; max?: number; temp?: number }
   | { command: "grant_temp_hp"; id: string; amount: number }
   | { command: "death_save"; id: string; roll: D20Input }
@@ -662,6 +669,8 @@ export interface DmCombat {
   prompts?: PlayerPrompt[];
   /** Each PC's sheet companions not yet in the fight, for Summon. */
   offers?: CompanionOffer[];
+  /** 0.3.5 (A2): the party's characters not fighting (joined late, or absent): names only, for "Add party member". */
+  joinable?: { characterId: string; name: string }[];
   /** What undo would revert, newest first (the engine's labels). */
   undo: string[];
   startedAt?: number;

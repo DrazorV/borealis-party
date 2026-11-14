@@ -1491,6 +1491,7 @@ fn snapshot_of(state: CombatState, roster: BTreeMap<String, Member>) -> Snapshot
         prompts: vec![],
         rolls: vec![],
         offers: vec![],
+        joinable: vec![],
         encounter: Some(EncounterInfo {
             id: "enc-1".into(),
             name: "DM name".into(),
@@ -3482,4 +3483,252 @@ async fn cards_after_a_job(t: &Table) {
 async fn an_import_job_refreshes_the_party_cards_when_it_ends() {
     let dir = tempfile::tempdir().unwrap();
     cards_after_a_job(&memory_table(dir.path()).await).await;
+}
+
+// 0.3.5 combat quick wins: multi-target damage from the DM's keypad (D13), a late-joining party member (A2), and
+// creature copies and sheet companions that come with what they fight with (A24).
+
+fn hp_now(view: &Value, id: &str) -> i64 {
+    combatant_in(view, id)["hp"]["current"].as_i64().unwrap()
+}
+
+#[allow(clippy::too_many_lines)]
+async fn quick_wins(t: &Table) {
+    let f = fight(t).await;
+    roll_in(t, &f).await;
+    let (_, before) = t.dm.get(&format!("/api/combats/{}", f.combat)).await;
+    let bear = hp_now(&before, &f.owlbear);
+    let goblin = hp_now(&before, &f.goblin);
+
+    // D13: one typed roll, three targets, each with its own save; the PC's is a prompt (D7), never a DM write.
+    let v = act_ok(
+        &t.dm,
+        &f.combat,
+        "multi_damage",
+        json!({
+            "targets": [
+                { "id": f.owlbear, "save": { "kind": "typed", "total": 5 } },
+                { "id": f.goblin, "save": { "kind": "outcome", "outcome": "saved" } },
+                { "id": f.pc_player, "save": { "kind": "outcome", "outcome": "saved" } },
+            ],
+            "amount": typed(20),
+            "damage_type": "fire",
+            "save": { "ability": "dex", "dc": 15, "half": true },
+        }),
+    )
+    .await;
+    assert_eq!(
+        hp_now(&v, &f.owlbear),
+        (bear - 20).max(0),
+        "failed: the full 20"
+    );
+    assert_eq!(hp_now(&v, &f.goblin), (goblin - 10).max(0), "saved: half");
+    assert!(
+        combatant_in(&v, &f.pc_player).get("hp").is_none(),
+        "no PC HP in the DM view: {}",
+        combatant_in(&v, &f.pc_player)
+    );
+    let (_, mine) = t.player.get(&format!("/api/combats/{}", f.combat)).await;
+    let prompts = mine["me"][0]["prompts"].as_array().unwrap().clone();
+    assert_eq!(prompts.len(), 1, "{mine}");
+    assert_eq!(prompts[0]["amount"], 10, "{mine}");
+    // A player can't send it; one undo step holds the whole volley.
+    let (status, _) = act(
+        &t.player,
+        &f.combat,
+        "multi_damage",
+        json!({ "targets": [{ "id": f.owlbear }], "amount": typed(5) }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (_, labels) = t.dm.get(&format!("/api/combats/{}", f.combat)).await;
+    assert_eq!(
+        labels["undo"][0], "multi-target damage",
+        "{}",
+        labels["undo"]
+    );
+
+    // A2: a member who joins the party mid-fight is not in it, and the DM adds them with their initiative.
+    let late = sign_up(&t.router, "cbt-late").await;
+    join(
+        &t.dm,
+        &t.party,
+        "Friday Party",
+        &late,
+        "cbt-late",
+        "Hero Late",
+    )
+    .await;
+    let (_, v) = t.dm.get(&format!("/api/combats/{}", f.combat)).await;
+    let joinable = v["joinable"].as_array().unwrap().clone();
+    assert_eq!(joinable.len(), 1, "{}", v["joinable"]);
+    let character = joinable[0]["characterId"].as_str().unwrap().to_string();
+    assert!(joinable[0].get("hp").is_none() && joinable[0].get("stats").is_none());
+    let (status, _) = act(
+        &t.player,
+        &f.combat,
+        "add_member",
+        json!({ "characterId": character, "initiative": typed(17) }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "the DM's only");
+    let v = act_ok(
+        &t.dm,
+        &f.combat,
+        "add_member",
+        json!({ "characterId": character, "initiative": typed(17) }),
+    )
+    .await;
+    let pc = pc_of(&v, &late.id);
+    assert_eq!(combatant_in(&v, &pc)["initiative"], 17, "{v}");
+    assert_eq!(v["joinable"], json!([]));
+    let (status, out) = act(
+        &t.dm,
+        &f.combat,
+        "add_member",
+        json!({ "characterId": character, "initiative": typed(3) }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "already in: {out}");
+    // The late player's Play tab: their PC is in this fight, in the order.
+    let (_, found) = late.get(&format!("/api/parties/{}/combat", t.party)).await;
+    assert_eq!(found["combat"], f.combat.as_str(), "{found}");
+    assert_eq!(found["characters"], json!([character]), "{found}");
+    let (_, theirs) = late.get(&format!("/api/combats/{}", f.combat)).await;
+    assert_eq!(theirs["me"][0]["inInitiative"], true, "{theirs}");
+    assert!(
+        theirs["order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o["id"] == pc.as_str()),
+        "{theirs}"
+    );
+    // A PC set absent comes back the same way, with an app roll.
+    act_ok(
+        &t.dm,
+        &f.combat,
+        "set_absent",
+        json!({ "id": f.pc_member2, "absent": true }),
+    )
+    .await;
+    let (_, v) = t.dm.get(&format!("/api/combats/{}", f.combat)).await;
+    let back = v["joinable"][0]["characterId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let v = act_ok(
+        &t.dm,
+        &f.combat,
+        "add_member",
+        json!({ "characterId": back, "initiative": { "kind": "app", "modifier": 2 } }),
+    )
+    .await;
+    assert_eq!(combatant_in(&v, &f.pc_member2)["absent"], false);
+    assert!(combatant_in(&v, &f.pc_member2)["initiative"].is_number());
+
+    // A24: a companion added on the sheet mid-fight reaches its owner's offers, though the card's HP is the same.
+    let mine_char = before["characters"][&f.pc_player]["characterId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mut card = t
+        .state
+        .hub
+        .cards
+        .get(&t.player.id, &mine_char)
+        .unwrap_or_default();
+    card.companions = vec![crate::hub::CompanionCard {
+        key: "granted".into(),
+        name: "Hawk".into(),
+        element_id: None,
+        hp: 3,
+        ac: 13,
+        initiative: 3,
+        speed: 10,
+    }];
+    let changed = t.state.hub.cards.put(&t.player.id, &mine_char, card, true);
+    assert!(changed.stored);
+    crate::combat::card_changed(&t.state, &t.party, &t.player.id, &mine_char).await;
+    let (_, mine) = t.player.get(&format!("/api/combats/{}", f.combat)).await;
+    assert_eq!(mine["me"][0]["offers"][0]["name"], "Hawk", "{mine}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn multi_target_damage_late_joiners_and_companion_offers() {
+    let dir = tempfile::tempdir().unwrap();
+    quick_wins(&memory_table(dir.path()).await).await;
+}
+
+async fn copies_carry_spells(t: &Table) {
+    let (status, party) =
+        t.dm.post(
+            "/api/parties",
+            json!({ "name": "Copy Party", "ruleset": "dnd2014" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{party}");
+    let party = party["id"].as_str().unwrap().to_string();
+    let e = ok(
+        &t.dm,
+        "POST",
+        &format!("/api/parties/{party}/encounters"),
+        json!({ "name": "Tower", "publicName": "Tower" }),
+    )
+    .await;
+    let enc = e["id"].as_str().unwrap().to_string();
+    ok(
+        &t.dm,
+        "POST",
+        &format!("/api/encounters/{enc}/creatures"),
+        json!({ "elementId": MAGE_2014, "dmLabel": "Mage", "hidden": false }),
+    )
+    .await;
+    let v = ok(
+        &t.dm,
+        "POST",
+        &format!("/api/encounters/{enc}/start"),
+        json!({ "requestId": request_id() }),
+    )
+    .await;
+    let combat = v["id"].as_str().unwrap().to_string();
+    let mage = find_by_label(&v, "Mage");
+    let source = combatant_in(&v, &mage).clone();
+    assert!(
+        source["casting"].as_array().is_some_and(|c| !c.is_empty()),
+        "{source}"
+    );
+    let full = slots_left(&v, &mage, 1);
+    act_ok(
+        &t.dm,
+        &combat,
+        "adjust_slot",
+        json!({ "id": mage, "level": 1, "delta": -1 }),
+    )
+    .await;
+    for (action, args) in [
+        ("add_creature", json!({ "copyOf": mage })),
+        ("summon", json!({ "owner": mage, "copyOf": mage })),
+    ] {
+        let v = act_ok(&t.dm, &combat, action, args).await;
+        let copy = combatants_of(&v)
+            .into_iter()
+            .rfind(|c| c["removed"] != true && c["id"] != mage.as_str())
+            .unwrap();
+        let id = copy["id"].as_str().unwrap();
+        assert_eq!(copy["casting"], source["casting"], "{action}: {copy}");
+        assert_eq!(
+            copy["abilities"].as_array().map(Vec::len),
+            source["abilities"].as_array().map(Vec::len),
+            "{action}: the same spells and actions"
+        );
+        assert_eq!(slots_left(&v, id, 1), full, "{action}: full slots");
+        assert_eq!(copy["stats"], source["stats"], "{action}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn creature_copies_keep_their_spells_and_get_full_pools() {
+    let dir = tempfile::tempdir().unwrap();
+    copies_carry_spells(&memory_table(dir.path()).await).await;
 }

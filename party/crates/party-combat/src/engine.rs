@@ -461,6 +461,21 @@ impl Cx<'_> {
                 critical_hit,
             } => self.damage(target, parts, *magical, *apply_qualified, *critical_hit),
             Command::Heal { target, amount } => self.heal(target, amount),
+            Command::MultiDamage {
+                targets,
+                amount,
+                damage_type,
+                save,
+                magical,
+                apply_qualified,
+            } => self.multi_damage(
+                targets,
+                amount,
+                *damage_type,
+                save.as_ref(),
+                *magical,
+                *apply_qualified,
+            ),
             Command::SetHp {
                 id,
                 current,
@@ -1566,6 +1581,156 @@ impl Cx<'_> {
             text,
         );
         self.lose_hp(i, total, critical_hit);
+        Ok(())
+    }
+
+    /// [`Command::MultiDamage`]: one roll, each target's save, then each target's damage (full, half or none) through
+    /// [`Self::damage`], so defenses, prompts for PCs, concentration and the 0 HP rules are the same as for one hit.
+    fn multi_damage(
+        &mut self,
+        targets: &[crate::command::MultiTarget],
+        amount: &DiceInput,
+        damage_type: Option<crate::model::DamageType>,
+        save: Option<&crate::command::MultiSave>,
+        magical: bool,
+        apply_qualified: bool,
+    ) -> Result<(), CombatError> {
+        use crate::command::RowRoll;
+        use crate::model::RowOutcome;
+        if targets.is_empty() {
+            return Err(invalid("Pick at least one target."));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for t in targets {
+            let i = self.idx(&t.id)?;
+            if self.s.combatants[i].removed {
+                return Err(invalid("A target isn't in the fight."));
+            }
+            if !seen.insert(t.id.clone()) {
+                return Err(invalid("A target is listed twice."));
+            }
+            if save.is_some() {
+                match &t.save {
+                    None => {
+                        return Err(invalid(
+                            "Each target needs its save: typed, rolled, saved or failed.",
+                        ))
+                    }
+                    Some(RowRoll::App)
+                        if crate::visibility::player_owned(&self.s.combatants[i]) =>
+                    {
+                        return Err(invalid(
+                            "A player's save is theirs to roll: type it, or set saved or failed.",
+                        ))
+                    }
+                    Some(RowRoll::Outcome { outcome })
+                        if !matches!(outcome, RowOutcome::Saved | RowOutcome::Failed) =>
+                    {
+                        return Err(invalid("A save is saved or failed."))
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let roll = resolve_dice(amount, self.die)?;
+        if roll.total < 0 {
+            return Err(invalid("Damage can't be negative."));
+        }
+        let ty = damage_type.map_or_else(String::new, |t| format!(" {t}"));
+        let head = match save {
+            Some(s) => format!(
+                "Damage{ty} to {} targets: {}, DC {} {} save{}",
+                targets.len(),
+                roll.breakdown,
+                s.dc,
+                s.ability.to_string().to_uppercase(),
+                if s.half {
+                    ", half on a success"
+                } else {
+                    ", none on a success"
+                }
+            ),
+            None => format!(
+                "Damage{ty} to {} targets: {}",
+                targets.len(),
+                roll.breakdown
+            ),
+        };
+        self.ev(None, K::Edited, head);
+        for t in targets {
+            let saved = match (save, &t.save) {
+                (None, _) | (Some(_), None) => false,
+                (Some(_), Some(RowRoll::Outcome { outcome })) => *outcome == RowOutcome::Saved,
+                (Some(s), Some(RowRoll::Typed { total, natural })) => {
+                    let r = resolve_d20(
+                        &D20Input::Typed {
+                            total: *total,
+                            natural: *natural,
+                        },
+                        self.die,
+                    )?;
+                    let n = self.name(&t.id);
+                    let ok = r.total >= s.dc as i32;
+                    self.ev(
+                        Some(&t.id),
+                        K::Edited,
+                        format!(
+                            "{n}: {} save {} ({})",
+                            s.ability.to_string().to_uppercase(),
+                            r.total,
+                            if ok { "saved" } else { "failed" }
+                        ),
+                    );
+                    ok
+                }
+                (Some(s), Some(RowRoll::App)) => {
+                    let sm = crate::derive::save_mod(&self.s, &t.id, s.ability, false);
+                    let n = self.name(&t.id);
+                    if sm.auto_fail {
+                        self.ev(
+                            Some(&t.id),
+                            K::Edited,
+                            format!(
+                                "{n}: {} save fails automatically",
+                                s.ability.to_string().to_uppercase()
+                            ),
+                        );
+                        false
+                    } else {
+                        let r = self.roll_test(sm.bonus, sm.mode, &sm.dice)?;
+                        let ok = r.total >= s.dc as i32;
+                        self.ev(
+                            Some(&t.id),
+                            K::Edited,
+                            format!(
+                                "{n}: {} save {} ({})",
+                                s.ability.to_string().to_uppercase(),
+                                r.breakdown,
+                                if ok { "saved" } else { "failed" }
+                            ),
+                        );
+                        ok
+                    }
+                }
+            };
+            let dealt = match save {
+                Some(s) if saved && s.half => roll.total / 2,
+                Some(_) if saved => 0,
+                _ => roll.total,
+            };
+            if dealt == 0 {
+                let n = self.name(&t.id);
+                self.ev(Some(&t.id), K::Edited, format!("{n} takes no damage"));
+                continue;
+            }
+            self.damage(
+                &t.id,
+                &[DamagePart::typed(dealt, damage_type)],
+                magical,
+                apply_qualified,
+                false,
+            )?;
+        }
         Ok(())
     }
 
