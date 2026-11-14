@@ -92,7 +92,7 @@ function HistoryRow({ r, share }: { r: RollEntry; share: ((e: RollEntry) => Prom
       <span className="grow">{r.label}<span className="v5-note" style={{ display: "block" }}>{r.breakdown}</span></span>
       <span className="meta">{time(r.at)}</span>
       <ShareButton e={r} share={share} />
-      <span className="v5-count">{r.total}</span>
+      <span className="v5-count">{Number.isNaN(r.total) ? "" : r.total}</span>
     </li>
   );
 }
