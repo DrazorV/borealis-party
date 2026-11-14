@@ -457,7 +457,8 @@ async fn conformance(t: &Table) {
         (s, b["error"]["code"].clone()),
         (StatusCode::BAD_REQUEST, json!(-32600))
     );
-    let (s, _, b) = rpc(r, &tok, &modern(1, "resources/list", json!({}))).await;
+    // Resources exist since 0.3.3 (the instructions); prompts don't.
+    let (s, _, b) = rpc(r, &tok, &modern(1, "prompts/list", json!({}))).await;
     assert_eq!(
         (s, b["error"]["code"].clone()),
         (StatusCode::NOT_FOUND, json!(-32601))

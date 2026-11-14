@@ -94,6 +94,32 @@ pub fn server_info() -> Value {
 /// system prompt includes it (`ai_assistant::system_prompt`).
 pub const INSTRUCTIONS: &str = include_str!("instructions.md");
 
+/// The same text as an MCP resource, for clients that don't show `instructions` to the model (or drop it after a
+/// while): an agent can list and read it like a file.
+pub const INSTRUCTIONS_URI: &str = "borealis://agent/instructions";
+
+/// `resources/read`'s "not found" (MCP 2025-11-25 server/resources, Error Handling).
+pub const RESOURCE_NOT_FOUND: i64 = -32002;
+
+/// What the server offers. Resources are fixed (no subscriptions, no list changes); tools depend on the scopes.
+fn capabilities() -> Value {
+    json!({
+        "tools": { "listChanged": false },
+        "resources": { "subscribe": false, "listChanged": false },
+    })
+}
+
+fn instructions_resource() -> Value {
+    json!({
+        "uri": INSTRUCTIONS_URI,
+        "name": "instructions",
+        "title": "How to use Borealis Party",
+        "description": "The workflow for a DM's assistant: what the tools do, in which order, and the rules (read this first).",
+        "mimeType": "text/markdown",
+        "size": INSTRUCTIONS.len(),
+    })
+}
+
 enum Era {
     Modern,
     Legacy,
@@ -175,7 +201,7 @@ pub async fn handle(
             .unwrap_or(LEGACY_VERSIONS[0]);
         return Reply::ok(json!({ "jsonrpc": "2.0", "id": id, "result": {
             "protocolVersion": version,
-            "capabilities": { "tools": { "listChanged": false } },
+            "capabilities": capabilities(),
             "serverInfo": server_info(),
             "instructions": INSTRUCTIONS,
         }}));
@@ -188,12 +214,37 @@ pub async fn handle(
     let result = match method {
         "server/discover" if !legacy => json!({
             "supportedVersions": [MODERN_VERSION],
-            "capabilities": { "tools": {} },
+            // No stream in this revision, so nothing to subscribe to or be told about.
+            "capabilities": { "tools": {}, "resources": {} },
             "instructions": INSTRUCTIONS,
             "ttlMs": TTL_MS,
             "cacheScope": "private",
         }),
         "ping" if legacy => json!({}),
+        // The instructions resource: the same for every caller, so no scope is needed.
+        "resources/list" => json!({ "resources": [instructions_resource()] }),
+        "resources/templates/list" => json!({ "resourceTemplates": [] }),
+        "resources/read" => {
+            let Some(uri) = params.get("uri").and_then(Value::as_str) else {
+                return fail(
+                    400,
+                    &id,
+                    INVALID_PARAMS,
+                    "resources/read needs a string uri",
+                    None,
+                );
+            };
+            if uri != INSTRUCTIONS_URI {
+                return fail(
+                    if legacy { 200 } else { 404 },
+                    &id,
+                    RESOURCE_NOT_FOUND,
+                    "Resource not found",
+                    Some(json!({ "uri": uri })),
+                );
+            }
+            json!({ "contents": [{ "uri": INSTRUCTIONS_URI, "mimeType": "text/markdown", "text": INSTRUCTIONS }] })
+        }
         "tools/list" => {
             let tools: Vec<Value> = registry.list(caller).iter().map(|s| s.mcp()).collect();
             let mut r = json!({ "tools": tools });

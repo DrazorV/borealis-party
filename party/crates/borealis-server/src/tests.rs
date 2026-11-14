@@ -42,6 +42,8 @@ mod homebrew_tests;
 mod index_subs_tests;
 #[path = "live_tests.rs"]
 mod live_tests;
+#[path = "mcp_connector_tests.rs"]
+mod mcp_connector_tests;
 #[path = "mcp_tests.rs"]
 mod mcp_tests;
 #[path = "no_vendor_calls_tests.rs"]
