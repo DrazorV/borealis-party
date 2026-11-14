@@ -101,11 +101,13 @@ pub const INSTRUCTIONS_URI: &str = "borealis://agent/instructions";
 /// `resources/read`'s "not found" (MCP 2025-11-25 server/resources, Error Handling).
 pub const RESOURCE_NOT_FOUND: i64 = -32002;
 
-/// What the server offers. Resources are fixed (no subscriptions, no list changes); tools depend on the scopes.
+/// What the server offers. Resources and prompts are fixed (no subscriptions, no list changes); tools depend on the
+/// scopes.
 fn capabilities() -> Value {
     json!({
         "tools": { "listChanged": false },
         "resources": { "subscribe": false, "listChanged": false },
+        "prompts": { "listChanged": false },
     })
 }
 
@@ -215,7 +217,7 @@ pub async fn handle(
         "server/discover" if !legacy => json!({
             "supportedVersions": [MODERN_VERSION],
             // No stream in this revision, so nothing to subscribe to or be told about.
-            "capabilities": { "tools": {}, "resources": {} },
+            "capabilities": { "tools": {}, "resources": {}, "prompts": {} },
             "instructions": INSTRUCTIONS,
             "ttlMs": TTL_MS,
             "cacheScope": "private",
@@ -224,6 +226,42 @@ pub async fn handle(
         // The instructions resource: the same for every caller, so no scope is needed.
         "resources/list" => json!({ "resources": [instructions_resource()] }),
         "resources/templates/list" => json!({ "resourceTemplates": [] }),
+        // Fixed prompts (prompts.rs, 0.3.5): text for the caller's own model, so no scope is needed.
+        "prompts/list" => json!({ "prompts": crate::prompts::list() }),
+        "prompts/get" => {
+            let Some(name) = params.get("name").and_then(Value::as_str) else {
+                return fail(
+                    400,
+                    &id,
+                    INVALID_PARAMS,
+                    "prompts/get needs a string name",
+                    None,
+                );
+            };
+            let none = serde_json::Map::new();
+            let args = params
+                .get("arguments")
+                .and_then(Value::as_object)
+                .unwrap_or(&none);
+            match crate::prompts::get(name, args) {
+                Ok(r) => r,
+                Err(e) => {
+                    let message = match e {
+                        crate::prompts::PromptError::UnknownPrompt => {
+                            format!("Unknown prompt: {name}")
+                        }
+                        crate::prompts::PromptError::Invalid(m) => m,
+                    };
+                    return fail(
+                        if legacy { 200 } else { 400 },
+                        &id,
+                        INVALID_PARAMS,
+                        &message,
+                        None,
+                    );
+                }
+            }
+        }
         "resources/read" => {
             let Some(uri) = params.get("uri").and_then(Value::as_str) else {
                 return fail(

@@ -58,8 +58,8 @@ let out: Result<ToolOutput, ToolError> = registry.call(&backend, &caller, "encou
 
 | Scope | Tools |
 |---|---|
-| `bestiary:read` | `bestiary_search`, `monster_get` |
-| `encounters:read` | `encounter_list`, `encounter_get` |
+| `bestiary:read` | `bestiary_search`, `monster_get`, `item_search` |
+| `encounters:read` | `encounter_list`, `encounter_get`, `spell_search`, `spell_get`, `creature_spellbook` |
 | `encounters:write` (implies `encounters:read`) | `encounter_create`, `encounter_update`, `encounter_add_creature`, `encounter_remove_creature` |
 | `encounters:simulate` | `sim_start`, `sim_card`, `sim_act`, `sim_auto`, `sim_state`, `sim_report`, `sim_batch`, `sim_replay` |
 | `characters:read` | `character_list`, `character_get` |

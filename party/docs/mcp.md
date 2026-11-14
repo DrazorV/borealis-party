@@ -29,6 +29,9 @@ calls the server's own API code with the token owner's account, so the access ru
   `server/discover` results as `instructions`, and is also the resource `borealis://agent/instructions`
   (`text/markdown`) through `resources/list` and `resources/read`, for clients that don't show `instructions` to the
   model. It needs no scope. An unknown resource is `-32002`.
+- **Prompts (0.3.5):** `prompts/list` and `prompts/get` serve fixed prompts the user can pick in their AI app. They
+  need no scope (the text holds no account data); the tools a prompt names are scope-checked as usual. An unknown
+  prompt or a bad argument is `-32602`. See [Loot ideas](#loot-ideas-loot_ideas-prompt).
 - **Errors:**
   - unknown method: `404` / `-32601`;
   - unsupported revision: `400` / `-32022`;
@@ -72,8 +75,8 @@ Spec pages used (read 2026-11-13; the 2025-11-25 ones checked again 2026-11-14 f
 
   | Scope | Tools |
   |---|---|
-  | `bestiary:read` | `bestiary_search`, `monster_get` |
-  | `encounters:read` | `encounter_list`, `encounter_get` |
+  | `bestiary:read` | `bestiary_search`, `monster_get`, `item_search` |
+  | `encounters:read` | `encounter_list`, `encounter_get`, `spell_search`, `spell_get`, `creature_spellbook` |
   | `encounters:write` | `encounter_create`, `encounter_update`, `encounter_add_creature`, `encounter_remove_creature` |
   | `encounters:simulate` | `sim_start`, `sim_card`, `sim_act`, `sim_auto`, `sim_state`, `sim_report`, `sim_batch`, `sim_replay` |
   | `characters:read` | `character_list`, `character_get` |
@@ -99,13 +102,32 @@ Spec pages used (read 2026-11-13; the 2025-11-25 ones checked again 2026-11-14 f
 ## Simulations (`sim_*`, D26)
 
 - **DM only.** They run on a copy of one of the DM's encounters, and never on a live combat (D25).
-- **They write nothing:** no row, event or `seq` change.
+- **They write nothing to the database:** no row, event or `seq` change.
+- **They survive a server update (0.3.5):** each open session is saved as a file under `<data>/sims/` after every
+  call and loaded back at start-up (30 idle minutes and 2 per account still apply). See
+  [simulation.md](simulation.md).
 - **Engine and agent:** the combat engine produces every number. The agent decides tactics turn by turn from
   decision cards, and adjudicates what the engine can't automate.
 - **Batches:** `sim_batch` runs seeded batches with the basic policy, and reports plain counts out of N. There is no
   difficulty rating (D16).
 - The design is `plans/borealis-party-sim-design-2026-11-13.md`. These tools answer "not available yet" until the
   simulator is merged.
+
+## Loot ideas (`loot_ideas` prompt)
+
+Borealis Connect has no loot generator: the user's own AI app writes the hoard, from the DM's own data.
+
+- **`loot_ideas`** (`prompts/get`), arguments (strings): `encounter_id` (required), `party_level` (1-20, optional;
+  otherwise worked out from the party) and `theme` (optional, up to 100 characters, quoted as the DM's words).
+- It returns one user message telling the model to read `encounter_get`, then `monster_get` per creature
+  (`creature_spellbook` when spellcasting matters), `character_list` for the party, and `item_search` /
+  `spell_search` for what is installed, and to answer with a list: name, installed item id or "new idea", rarity,
+  where it is found, and why it fits, then coins, gems or art objects as plain amounts.
+- No XP, XP or CR budget, treasure table or difficulty rating (D16). Nothing is saved; homebrew only if the DM asks.
+- **`item_search`** (`bestiary:read`): the caller's installed Item, Magic Item, Weapon and Armor elements. Filters
+  `text` (in the name), `type`, `rarity`, `limit` (1-100, default 25), `offset`. Each item has id, name, type,
+  source, ruleset, rarity, category, cost, weight, attunement, and the first 300 characters of its text as
+  `untrusted_item_text`.
 
 ## Custom indexes: your own agent, your own repository (D47)
 

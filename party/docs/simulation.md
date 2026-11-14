@@ -29,8 +29,12 @@ Code: `party/crates/party-sim` (pure: setup, sheet, rules, space, menu, runner, 
 `control {agent: "foes"|"party"|"all"|"none"|[ids]}`, `fog` (default true), `profile` (`small` skips text-only
 options instead of adjudicating them; for clients on small models).
 
-Sessions are in memory: 30 idle minutes, 2 per account, 600 steps. A server update loses them; the transcript
-replays.
+Sessions: 30 idle minutes, 2 per account, 600 steps. Since 0.3.5 a session survives a server update or restart:
+after every call it is saved whole (setup, engine state with its dice, transcript) as `<data>/sims/<simId>.json`,
+and start-up loads the unexpired ones back, so the run goes on exactly as it would have. The idle limit and the
+per-account cap count restored sessions; `sim_report` and the idle sweep delete the file, and a file a newer version
+can't read is dropped (the report's transcript still replays). Files, not database rows: a simulation still writes
+nothing to the database (D25), and there is no migration.
 
 ## Cards
 

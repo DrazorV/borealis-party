@@ -284,7 +284,8 @@ impl ServerTools {
 ///
 /// * part D (`homebrew.rs`): `homebrew_*` and `index_build` (D47: the index comes back as data; nothing is hosted);
 /// * the simulator (`simulate.rs`, D26): `sim_*`, on copies of encounters only (D25: no combat is read or written);
-/// * spell mechanics (`spell_tools.rs`, 0.3.3): `spell_search`, `spell_get`, `creature_spellbook` (read only).
+/// * spell mechanics (`spell_tools.rs`, 0.3.3): `spell_search`, `spell_get`, `creature_spellbook` (read only);
+/// * installed items (`item_tools.rs`, 0.3.5): `item_search` (read only, for the `loot_ideas` prompt).
 ///
 /// The registry has already checked the scope and the request id (which is removed here: it is the registry's).
 /// The module re-derives the account's rights itself, as its HTTP routes do.
@@ -300,6 +301,9 @@ async fn external(
     }
     if crate::spell_tools::NAMES.contains(&tool) {
         return crate::spell_tools::call_tool(state, user, tool, args).await;
+    }
+    if crate::item_tools::NAMES.contains(&tool) {
+        return crate::item_tools::call_tool(state, user, tool, args).await;
     }
     crate::homebrew::call_tool(state, user, tool, Value::Object(args))
         .await
@@ -321,6 +325,7 @@ pub fn external_specs() -> Vec<ToolSpec> {
         .collect();
     specs.extend(crate::simulate_tools::tools());
     specs.extend(crate::spell_tools::tools());
+    specs.extend(crate::item_tools::tools());
     specs
 }
 

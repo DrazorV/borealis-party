@@ -131,6 +131,10 @@ The number is the last migration step the data went through. It must not be high
 version's image instead. A lower one is upgraded on start, after an automatic backup. When `pending` lists a step below
 the recorded one, a table that step creates is missing (a partial restore): the server creates it again on start.
 
+Steps 8 and 10 are empty since 0.3.5. They were unused since 0.3.3: step 8 created the old in-app assistant's
+tables (`ai_providers`, `ai_usage`) and step 10 dropped them again. Both numbers stay, so the version history and
+`migrations.expected` don't change; a database at step 10 starts with nothing pending.
+
 ## Health monitoring
 
 `GET /api/health` tells an uptime checker whether the server is well. It needs no sign-in and carries no secrets (no
