@@ -25,7 +25,7 @@ beforeEach(() => {
     sent.push({ method: String(init.method), path, body });
     const reply = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
     if (path === "/api/shares/redeem") return reply({ share: share(`s-${body.code}`), bundle: { token: `tok-${body.code}`, name: "Hero.borealis" } });
-    if (path === "/api/rpc/bundle_open") return reply({ bundleId: `b-${body.token}`, sourceDevice: "another Borealis Party account", preview: { items: [] } });
+    if (path === "/api/rpc/bundle_open") return reply({ bundleId: `b-${body.token}`, sourceDevice: "another Borealis Connect account", preview: { items: [] } });
     if (path === "/api/rpc/bundle_accept") return reply({ added: 1, replaced: 0, keptLocal: 0, identical: 0 });
     if (path === "/api/rpc/bundle_discard") return reply(null);
     if (path.endsWith("/accepted")) return reply({ ok: true });

@@ -41,10 +41,10 @@ function Guide({ id, url, oauth }: { id: GuideId; url: string; oauth: boolean })
       <>
         <ol className="ai-guide-steps">
           <li>In ChatGPT on the web, open <strong>Plugins</strong> and choose <strong>+</strong>, then <strong>Add custom MCP server</strong>.</li>
-          <li>Name: <Code>Borealis Party</Code>. Server URL: the address above.</li>
+          <li>Name: <Code>Borealis Connect</Code>. Server URL: the address above.</li>
           <li>Authentication: <strong>OAuth</strong>. Choose <strong>I understand and want to continue</strong>, then <strong>Create as a plugin</strong> and install it.</li>
-          <li>Borealis Party opens: sign in if asked, and approve what the app may do.</li>
-          <li>In a chat, type <Code>@</Code> and pick <strong>Borealis Party</strong>.</li>
+          <li>Borealis Connect opens: sign in if asked, and approve what the app may do.</li>
+          <li>In a chat, type <Code>@</Code> and pick <strong>Borealis Connect</strong>.</li>
         </ol>
         <p className="muted ai-guide-note">Custom MCP servers need a ChatGPT plan that allows them; on a workspace plan, an admin may have to add it. Paste the instructions below into a Project's instructions too, for a project that always uses it.</p>
         {!oauth && <p className="muted ai-guide-note">This server has no public address, so ChatGPT can't sign in to it.</p>}
@@ -58,9 +58,9 @@ function Guide({ id, url, oauth }: { id: GuideId; url: string; oauth: boolean })
         <ol className="ai-guide-steps">
           <li>In claude.ai or Claude Desktop, open <strong>Customize</strong>, then <strong>Connectors</strong>.</li>
           <li>Choose <strong>+ Add</strong>, then <strong>Add custom connector</strong>.</li>
-          <li>Name: <Code>Borealis Party</Code>. Remote MCP server URL: the address above. Choose <strong>Continue</strong>, sign in now, and <strong>Add</strong>.</li>
-          <li>Borealis Party opens: sign in if asked, and approve what the app may do.</li>
-          <li>In a chat, choose <strong>+</strong>, then <strong>Connectors</strong>, and turn on <strong>Borealis Party</strong>.</li>
+          <li>Name: <Code>Borealis Connect</Code>. Remote MCP server URL: the address above. Choose <strong>Continue</strong>, sign in now, and <strong>Add</strong>.</li>
+          <li>Borealis Connect opens: sign in if asked, and approve what the app may do.</li>
+          <li>In a chat, choose <strong>+</strong>, then <strong>Connectors</strong>, and turn on <strong>Borealis Connect</strong>.</li>
         </ol>
         <p className="muted ai-guide-note">On a Team or Enterprise plan, an owner adds it under Organization settings, Connectors, and members choose Connect. The free plan allows one custom connector.</p>
         {!oauth && <p className="muted ai-guide-note">This server has no public address, so Claude can't sign in to it.</p>}
@@ -71,8 +71,8 @@ function Guide({ id, url, oauth }: { id: GuideId; url: string; oauth: boolean })
   return (
     <>
       <ol className="ai-guide-steps">
-        <li>Claude Code: <Code>claude mcp add --transport http borealis-party {url}</Code>, then <Code>/mcp</Code> in Claude Code to sign in.</li>
-        <li>Codex: <Code>codex mcp add borealis-party --url {url}</Code>, then <Code>codex mcp login borealis-party</Code>.</li>
+        <li>Claude Code: <Code>claude mcp add --transport http borealis-connect {url}</Code>, then <Code>/mcp</Code> in Claude Code to sign in.</li>
+        <li>Codex: <Code>codex mcp add borealis-connect --url {url}</Code>, then <Code>codex mcp login borealis-connect</Code>.</li>
         <li>Cursor, Gemini CLI and other MCP clients: make a key under <strong>Keys for developer tools</strong> below; it shows the setup to paste.</li>
       </ol>
       {!oauth && <p className="muted ai-guide-note">Without a public address, signing in doesn't work here: use a key.</p>}

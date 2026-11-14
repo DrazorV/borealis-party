@@ -501,7 +501,7 @@ const MIGRATIONS: &[&[&str]] = &[
         )",
         "CREATE INDEX IF NOT EXISTS spell_meta_pack ON spell_meta (owner_id, pack_id)",
     ],
-    // 10 (M-drop-ai, 0.3.3), after M-spells. The in-app assistant is gone (Borealis Party never calls an AI service;
+    // 10 (M-drop-ai, 0.3.3), after M-spells. The in-app assistant is gone (Borealis Connect never calls an AI service;
     // AI apps connect over MCP), so step 8's tables go: each account's saved provider and its sealed key, and the
     // usage counts. The user approved dropping them (2026-11-14). `IF EXISTS`, so it can run twice; the backup before
     // an upgrade (backup.rs) still has them. Nothing else of step 8 exists (no columns elsewhere).

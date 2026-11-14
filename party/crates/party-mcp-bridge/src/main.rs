@@ -1,9 +1,12 @@
-//! `borealis-party-mcp`: relays MCP over stdio (one JSON-RPC message per line) to a Borealis Party server's
+//! `borealis-party-mcp`: relays MCP over stdio (one JSON-RPC message per line) to a Borealis Connect server's
 //! Streamable HTTP endpoint, for clients that only start local MCP servers (Claude Desktop, older clients).
 //!
 //! Configuration, from the environment only (never a command-line argument, which other users can list):
-//! * `BOREALIS_PARTY_URL`: the server, e.g. `https://party.example.com` (`/api/mcp` is added);
-//! * `BOREALIS_PARTY_TOKEN`: a personal `bpt_` token from the server's Account page.
+//! * `BOREALIS_CONNECT_URL`: the server, e.g. `https://party.example.com` (`/api/mcp` is added);
+//! * `BOREALIS_CONNECT_TOKEN`: a personal `bpt_` token from the server's Account page.
+//!
+//! The names from before the rename, `BOREALIS_PARTY_URL` and `BOREALIS_PARTY_TOKEN`, still work: each is read when
+//! its `BOREALIS_CONNECT_*` name is not set, so existing client configs keep working. The binary keeps its name.
 //!
 //! It keeps no state but the protocol version an `initialize` agreed on, which it sends as `MCP-Protocol-Version`.
 //! Everything else is the server's: the bridge adds nothing to and removes nothing from the messages.
@@ -19,9 +22,18 @@ fn error_line(id: &Value, code: i64, message: &str) -> String {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } }).to_string()
 }
 
+/// The value of `name`, or else of `old` (its name before the rename), from `get`.
+fn either_var(get: impl Fn(&str) -> Option<String>, name: &str, old: &str) -> Option<String> {
+    get(name).or_else(|| get(old))
+}
+
+fn env_var(name: &str, old: &str) -> Option<String> {
+    either_var(|k| std::env::var(k).ok(), name, old)
+}
+
 fn main() {
-    let url = match std::env::var("BOREALIS_PARTY_URL") {
-        Ok(u)
+    let url = match env_var("BOREALIS_CONNECT_URL", "BOREALIS_PARTY_URL") {
+        Some(u)
             if u.starts_with("https://")
                 || u.starts_with("http://localhost")
                 || u.starts_with("http://127.0.0.1") =>
@@ -33,13 +45,15 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "borealis-party-mcp: set BOREALIS_PARTY_URL to the server's https:// address"
+                "borealis-party-mcp: set BOREALIS_CONNECT_URL to the server's https:// address"
             );
             std::process::exit(2);
         }
     };
-    let Ok(token) = std::env::var("BOREALIS_PARTY_TOKEN") else {
-        eprintln!("borealis-party-mcp: set BOREALIS_PARTY_TOKEN to a token from the server's Account page");
+    let Some(token) = env_var("BOREALIS_CONNECT_TOKEN", "BOREALIS_PARTY_TOKEN") else {
+        eprintln!(
+            "borealis-party-mcp: set BOREALIS_CONNECT_TOKEN to a token from the server's Account page"
+        );
         std::process::exit(2);
     };
     let client = match reqwest::blocking::Client::builder()
@@ -106,7 +120,7 @@ fn main() {
                     let _ = writeln!(
                         out,
                         "{}",
-                        error_line(&id, -32603, "the Borealis Party server can't be reached")
+                        error_line(&id, -32603, "the Borealis Connect server can't be reached")
                     );
                     let _ = out.flush();
                 }
@@ -135,5 +149,40 @@ fn main() {
         };
         let _ = writeln!(out, "{line_out}");
         let _ = out.flush();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::either_var;
+    use std::collections::HashMap;
+
+    fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let m: HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        move |k| m.get(k).cloned()
+    }
+
+    #[test]
+    fn the_new_name_wins_and_the_old_one_still_works() {
+        let both = env(&[
+            ("BOREALIS_CONNECT_URL", "https://new"),
+            ("BOREALIS_PARTY_URL", "https://old"),
+        ]);
+        assert_eq!(
+            either_var(&both, "BOREALIS_CONNECT_URL", "BOREALIS_PARTY_URL").as_deref(),
+            Some("https://new")
+        );
+        let old = env(&[("BOREALIS_PARTY_URL", "https://old")]);
+        assert_eq!(
+            either_var(&old, "BOREALIS_CONNECT_URL", "BOREALIS_PARTY_URL").as_deref(),
+            Some("https://old")
+        );
+        assert_eq!(
+            either_var(env(&[]), "BOREALIS_CONNECT_URL", "BOREALIS_PARTY_URL"),
+            None
+        );
     }
 }

@@ -54,7 +54,7 @@ export function DefaultFiveToolsSource() {
       <form className="party-form" noValidate onSubmit={(e) => { e.preventDefault(); submit(); }}>
         <p className="muted">
           An address of 5etools-format data the Import section offers every account in one tap, for example a GitHub
-          repository your group is entitled to use. Borealis Party comes with none. Accounts can always import from an
+          repository your group is entitled to use. Borealis Connect comes with none. Accounts can always import from an
           address of their own.
         </p>
         <p className="muted small">{where(s)}</p>

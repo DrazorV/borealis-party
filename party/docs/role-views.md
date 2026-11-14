@@ -1,4 +1,4 @@
-# Role views: the DM's screen and the player's screen (Borealis Party 0.3.3)
+# Role views: the DM's screen and the player's screen (Borealis Connect 0.3.3)
 
 The server side of the user's rules of 2026-11-14:
 

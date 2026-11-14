@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="/ui/party/public/favicon.svg" alt="Borealis Party" width="96">
+<img src="/ui/party/public/favicon.svg" alt="Borealis Connect" width="96">
 
-# Borealis Party
+# Borealis Connect
 
 **Borealis for the whole table: a self-hosted, multi-user server for playing fifth edition together.**
 
@@ -20,23 +20,23 @@
 
 ## Built on Borealis ❤️
 
-Borealis Party is an add-on to **[Borealis](https://github.com/TeamBorealis/borealis)**, the free and open-source
+Borealis Connect is an add-on to **[Borealis](https://github.com/TeamBorealis/borealis)**, the free and open-source
 character builder by **[TeamBorealis](https://github.com/TeamBorealis)**. The character builder, the rules and content
 engine, the character sheets and the importers are all their work. This fork adds only the multi-user part on top: the
 server, accounts and the party features.
 
-If you like Borealis Party, you like Borealis. Please give the
+If you like Borealis Connect, you like Borealis. Please give the
 **[original repository a star](https://github.com/TeamBorealis/borealis)**, try the
 **[desktop and phone apps](https://borealisbuilder.com)**, and come and say hi on the
 **[Borealis Discord](https://discord.gg/r4K4D3AJpZ)**.
 
-The two projects work together. Borealis Party stays a separate port, by agreement with the Borealis team, and the two
-coordinate releases: every Borealis Party release is built on a Borealis release, and fixes that belong in Borealis go
+The two projects work together. Borealis Connect stays a separate port, by agreement with the Borealis team, and the two
+coordinate releases: every Borealis Connect release is built on a Borealis release, and fixes that belong in Borealis go
 to them as pull requests.
 
 ## What it adds
 
-Borealis keeps everything on one device. Borealis Party puts the same app on a server you run, so a whole group can use
+Borealis keeps everything on one device. Borealis Connect puts the same app on a server you run, so a whole group can use
 it from any device:
 
 - **A self-hosted server.** One Docker image (`ghcr.io/fortress-soft/borealis-connect`), with SQLite or PostgreSQL. It runs
@@ -49,13 +49,33 @@ it from any device:
 - **Offline play.** The apps keep a copy of your characters, so you can play and edit them without the server. They
   sync when you are back online.
 - **One import page.** Aurora `.dnd5e` characters, Aurora XML content and `.index` files, `.borealis` bundles, and
-  5etools-format data you supply, all in one place.
+  5etools-format data you supply, all in one place. In the apps, **Open with** (or Share to) Borealis Connect takes a file
+  such as a `.borealis` bundle straight to the import, after asking.
 - **Share codes.** Send characters and content packs to another player with a one-time code, Android included.
+- **Homebrew.** Write your own spells, feats, items, races, backgrounds, class features, archetypes and monsters in the
+  app, checked by the same engine as your characters. Build a pack into a standard `.index` plus its element files for
+  your own repository, so others can subscribe to it from Borealis Connect, Borealis or Aurora.
 - **Parties.** Switch on "Dungeon Master tools" on your Account page to run parties: invite players by username or with
-  a join code and add characters. The **live party roster** updates as characters are played: the Dungeon Master sees
-  hit points, AC, concentration and who is online, and can open any member's sheet read-only.
+  a join code, add characters, and set the party's edition (2014 or 2024 rules). The **live party roster** updates as
+  characters are played: health, AC, concentration and who is online.
+- **Bestiary and encounters.** Every creature in your installed content, searchable. The Dungeon Master builds
+  encounters from it, with per-encounter changes, pets and summons, and decides which creatures players see.
+- **Combat tracker.** Initiative, turns, hit points, conditions, concentration and legendary actions, run by the server
+  so everyone stays in step. The DM works in the **Combat** tab and the players in their own **Play** tab, and each
+  side sees only what it should: players see a monster's name and whether it is bloodied, and in a fight the DM sees
+  the characters' health bands, not their exact hit points.
+- **Spells as mechanics.** SRD spells carry their saves, attacks, damage and effects, so casting one in combat applies
+  it. Spells from your own 5etools data get a draft of their mechanics that you can check and correct.
+- **Simulations.** Play an encounter out on a copy, never the real fight, as often as you like, and read what happened.
+- **Your own AI, over MCP.** Connect your own ChatGPT, Claude or another MCP client to your account: it can search
+  the bestiary, build and simulate encounters, read characters and write homebrew, with the permissions you approve,
+  and it sees only what you may see. Borealis Connect never calls an AI service itself, and your own plan pays for
+  the AI.
+- **Safe upgrades.** Before each update's database changes the server makes an automatic backup, and `GET /api/health`
+  tells an uptime checker whether the server and its database are well.
 
-**In progress** (not released yet): a bestiary, an encounter builder and a combat tracker.
+**In progress:** 0.3.4 brings quick wins for players, and the 0.4 releases continue with larger features. The
+[releases](https://github.com/fortress-soft/borealis-connect/releases) list what each version brings.
 
 ## Run your own server
 
@@ -63,7 +83,7 @@ With Docker (or a Portainer stack), using SQLite:
 
 ```yaml
 services:
-  borealis-party:
+  borealis-connect:
     image: "ghcr.io/fortress-soft/borealis-connect:latest"
     ports:
       - "8787:8787/tcp"
@@ -71,6 +91,9 @@ services:
     volumes:
       - "/docker/borealis-party/config:/config"
 ```
+
+Servers set up before the rename to Borealis Connect keep their `borealis-party` service name; the host folder and the
+`BOREALIS__*` variables keep their names on every install.
 
 1. Start it and open `http://<server>:8787`. The first account you create becomes the admin.
 2. Everything the server keeps is in `/config`. Back up that folder to back up the server.
@@ -99,17 +122,17 @@ at all: every browser works too.
 
 ## Content and licensing
 
-Borealis Party ships only the System Reference Document content (SRD 5.1 and SRD 5.2.1) that Borealis includes. Any
+Borealis Connect ships only the System Reference Document content (SRD 5.1 and SRD 5.2.1) that Borealis includes. Any
 other content is what each player imports into their own account, for their own use.
 
 ### Licence
 
-Like Borealis, Borealis Party is dual-licensed under **[MIT](/LICENSE-MIT)** OR **[Apache-2.0](/LICENSE-APACHE)**, at
+Like Borealis, Borealis Connect is dual-licensed under **[MIT](/LICENSE-MIT)** OR **[Apache-2.0](/LICENSE-APACHE)**, at
 your option. Borealis's copyright and notices are kept unchanged ([NOTICE](/NOTICE)).
 
 ## Support
 
-Borealis Party is a hobby project. If it brings your table together, you can buy me a coffee:
+Borealis Connect is a hobby project. If it brings your table together, you can buy me a coffee:
 
 <a href="https://buymeacoffee.com/drazorv"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="45"></a>
 

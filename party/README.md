@@ -1,6 +1,6 @@
-# Borealis Party server
+# Borealis Connect server
 
-Borealis Party is Borealis with a multi-user server: every account has its own characters and its own content, and
+Borealis Connect is Borealis with a multi-user server: every account has its own characters and its own content, and
 an admin page manages the accounts. The server runs the Borealis rules engine and stores everything. Browsers, the
 Android and iOS apps and the desktop app are clients.
 
@@ -14,8 +14,8 @@ on an empty one.
 
 ```yaml
 services:
-  borealis-party:
-    container_name: "borealis-party"
+  borealis-connect:
+    container_name: "borealis-connect"
     image: "ghcr.io/fortress-soft/borealis-connect:latest"
     environment:
       - "TZ=Europe/Athens"
@@ -28,6 +28,10 @@ services:
     volumes:
       - "/docker/borealis-party/config:/config"
 ```
+
+Servers set up before the rename to Borealis Connect keep their service and container name, `borealis-party`: use that name
+in place of `borealis-connect` in the `docker exec` commands below. The host folders (`/docker/borealis-party/...`), the
+database `borealis_party` and the `BOREALIS__*` variables keep their names on every install.
 
 Everything the server keeps is in `/config`: `config.toml`, the SQLite database and the `data` folder with characters
 and content. Back up that folder to back up the instance. `PUID` and `PGID` choose who owns those files on the host,
@@ -136,7 +140,7 @@ accounts the file is never copied again. Delete it when you are happy. To run th
 from another file:
 
 ```sh
-docker exec borealis-party /app/borealis-server migrate-sqlite --from /config/party.db
+docker exec borealis-connect /app/borealis-server migrate-sqlite --from /config/party.db
 ```
 
 It refuses if PostgreSQL already has accounts, and saves nothing if anything fails.
@@ -215,7 +219,7 @@ New accounts wait for an admin's approval by default. To close sign-up entirely,
 `INITIAL_ADMIN` variables, and other accounts with:
 
 ```sh
-docker exec -i borealis-party /app/borealis-server add-user <name> [--email <address>] [--admin]
+docker exec -i borealis-connect /app/borealis-server add-user <name> [--email <address>] [--admin]
 ```
 
 The password is read from standard input. For a direct install, run
@@ -256,7 +260,7 @@ Done on the Docker host (for a direct install, the same rules with `-m owner --u
 
    ```yaml
    services:
-     borealis-party:
+     borealis-connect:
        networks: [borealis]
        # remove network_mode: "bridge"
    networks:
@@ -424,7 +428,7 @@ A player shares characters and content packs with another player from any device
 
 ## Open with, and web links, in the apps
 
-- **Open with / Share to Borealis Party** (Android, iOS and the desktop apps): the app asks first, in its own dialog, "Import
+- **Open with / Share to Borealis Connect** (Android, iOS and the desktop apps): the app asks first, in its own dialog, "Import
   Hero.dnd5e into alice?", and Import opens the Import section with the file, as if it had been chosen there (see
   "One import page" below). Cancel drops it. The upload size limits above apply, with the same messages.
 - A `.borealis` opened on Android or on the desktop goes to the Import section too, which uploads it and opens the
@@ -436,7 +440,7 @@ A player shares characters and content packs with another player from any device
   file goes to that window (upstream's single-instance plugin, carried as `branch:fix/single-instance`), which comes
   to the front and asks. Uninstalling removes the type. `.dnd5e` stays desktop Borealis's: the party apps don't claim
   it. If Windows still opens `.borealis` with something else, the user picked that once in "Open with" (right-click >
-  Open with > Choose another app > Borealis Party > Always). `party/desktop/check-file-type.ps1` checks the installers'
+  Open with > Choose another app > Borealis Connect > Always). `party/desktop/check-file-type.ps1` checks the installers'
   registry entries (run by party-apps.yml; it installs and uninstalls the app, so not on a PC that uses it).
 - Offline, an opened file stays on the device and the app says it will import it when it is connected; the online
   app takes it when it starts. (On Android a file opened while the app was closed is taken on the next online start.)
@@ -678,7 +682,7 @@ Apple's limits for a free Apple ID apply:
   AltStore and Sideloadly renew it on the same Wi-Fi as their computer, SideStore on the phone itself.
 - At most 3 sideloaded apps per device.
 
-Borealis Party needs no capability a free Apple ID lacks: sign-in, offline use and sync work as on Android.
+Borealis Connect needs no capability a free Apple ID lacks: sign-in, offline use and sync work as on Android.
 
 ## Build the Android app
 
@@ -717,7 +721,7 @@ Only on a Mac, with Xcode, the `ui` dependencies (`npm --prefix ui ci`) and the 
 (`aarch64-apple-ios-sim` for the Simulator), from the repository root:
 
 ```sh
-party/ios/build-ios.sh                # signed IPA, target/party-ios/Borealis Party.ipa
+party/ios/build-ios.sh                # signed IPA, target/party-ios/Borealis Party.ipa (named after productName)
 party/ios/build-ios.sh --sim          # debug app for the iOS Simulator, target/party-ios/Borealis Party.app
 party/ios/build-ios.sh --export-method app-store-connect --build-number 1004000
 ```
@@ -742,8 +746,10 @@ party/desktop/build-desktop.ps1              # target\party-desktop\release\bore
 party/desktop/build-desktop.ps1 -Installer   # also an NSIS installer
 ```
 
-`party/tauri.party.desktop.json` names the app "Borealis Party" with its own identifier, `app.borealis.party`, so it
-keeps its data in `%APPDATA%\app.borealis.party`, and the app window never touches desktop Borealis's
+`party/tauri.party.desktop.json` titles the window "Borealis Connect". Its `productName` stays "Borealis
+Party" (the name from before the rename to Borealis Connect), because the Windows installer derives the install folder and the
+uninstall entry from it: a new one would install a second copy beside the old one instead of updating it. The app has
+its own identifier, `app.borealis.party`, so it keeps its data in `%APPDATA%\app.borealis.party`, and the app window never touches desktop Borealis's
 `%APPDATA%\app.borealis` on the same computer. The exe still has upstream's `--mcp` and command-line modes; those read
 (never write) desktop Borealis's library and search index in `%APPDATA%\app.borealis`, so don't use them. It also leaves out upstream's update feed and file associations, which belong to desktop Borealis, except
 `.borealis`, which it registers under its own type name (`BorealisParty.Bundle`): whichever app was installed last

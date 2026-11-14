@@ -52,9 +52,9 @@ it("refuses a server that rejects the sign-in, without signing this device out",
   expect(reload).not.toHaveBeenCalled();
 });
 
-it("refuses an address that isn't a Borealis Party server", async () => {
+it("refuses an address that isn't a Borealis Connect server", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ app: "something" }), { status: 200 })));
-  await expect(moveToAddress(NEW)).rejects.toThrow(/isn't a Borealis Party server/);
+  await expect(moveToAddress(NEW)).rejects.toThrow(/isn't a Borealis Connect server/);
   expect(loadSession()?.baseUrl).toBe(OLD);
 });
 

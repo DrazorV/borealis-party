@@ -1,6 +1,6 @@
 # Authentication for AI apps (0.3.1, part A)
 
-How AI apps and MCP clients sign in to a Borealis Party server, and the Rust API the MCP server (part B) and later
+How AI apps and MCP clients sign in to a Borealis Connect server, and the Rust API the MCP server (part B) and later
 HTTP APIs use to check them. Code: `party/crates/borealis-server/src/tokens.rs` and `oauth.rs`. Schema: migration
 step 7 (`M-ai-auth`, marker table `api_tokens`).
 

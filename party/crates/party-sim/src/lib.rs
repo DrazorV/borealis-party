@@ -1,4 +1,4 @@
-//! Encounter simulation for Borealis Party (0.3.1, D26): one pure runner that owns a whole fight on a **copy** of
+//! Encounter simulation for Borealis Connect (0.3.1, D26): one pure runner that owns a whole fight on a **copy** of
 //! an encounter and pauses at every decision point for an oracle.
 //!
 //! * Oracles: an MCP agent (through the `sim_*` tools: the client's own model), [`basic`] (the deterministic

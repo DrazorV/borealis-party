@@ -2,7 +2,7 @@
 //
 // On a running emulator (or the AVD it starts): a throwaway party server in WSL (server.sh, SQLite in /tmp, never the
 // production server), the debug APK installed fresh, a sign-in through the app's own sign-in page, and then each test
-// file opened with Borealis Party the way the Files app does it (an ACTION_VIEW of a content:// URI). For each one it
+// file opened with Borealis Connect the way the Files app does it (an ACTION_VIEW of a content:// URI). For each one it
 // checks the app dialog "Import <file> into smoke?" and what the import did on the server. The page is driven over
 // the WebView's DevTools socket (debug APKs only). Screenshots go to the output folder.
 // It also opens the imported character's sheet preview at Android font sizes 1.0 and 1.15 (sheetPreview below).

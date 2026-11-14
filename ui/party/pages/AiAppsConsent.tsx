@@ -100,7 +100,7 @@ export function AiAppsConsent({ go = (url: string) => window.location.assign(url
         {request && !leaving && (
           <div className="party-form">
             <p className="ai-consent-app">
-              <strong>{request.client.name}</strong> wants to use your Borealis Party account
+              <strong>{request.client.name}</strong> wants to use your Borealis Connect account
               {" "}<strong>{request.account.username}</strong>.
             </p>
             <p className="party-note muted">

@@ -1,6 +1,6 @@
 name: Party apps
 
-# Builds the Borealis Party phone and desktop apps and, for a party-v<version> tag, attaches them to that GitHub
+# Builds the Borealis Connect phone and desktop apps and, for a party-v<version> tag, attaches them to that GitHub
 # release, so https://github.com/fortress-soft/borealis-connect/releases/latest/download/<asset> always points at the newest
 # build. The tag's version must be the one in party/Cargo.toml. Asset names carry no version (party/README.md lists
 # them):
@@ -280,6 +280,8 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$PARTY_VERSION"
+          # productName stays "Borealis Party" after the rename to Borealis Connect: the Xcode project and the app bundle are
+          # named after it. The home screen shows CFBundleDisplayName (party/ios/Info.plist), "Borealis Connect".
           identity=$(jq -n --arg build "$RUN_NUMBER" --arg team "$TEAM_ID" --arg version "$PARTY_VERSION" '
             {productName: "Borealis Party", identifier: "app.borealis.party", version: $version,
              bundle: {iOS: ({bundleVersion: $build} + (if $team == "" then {} else {developmentTeam: $team} end))}}')
@@ -605,8 +607,8 @@ jobs:
           # update feed from releases/latest, which answers 404 for a latest release without files. Make the release
           # with its notes as a draft (gh release create --draft); a missing one is created as a draft here.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --verify-tag --draft --title "Borealis Party $VERSION" \
-              --notes "Borealis Party $VERSION: the Android app (arm64 for phones, x86_64 for emulators), the Windows and Linux apps (unsigned), and $ios. Verify downloads against borealis-party-SHA256SUMS.txt."
+            gh release create "$TAG" --verify-tag --draft --title "Borealis Connect $VERSION" \
+              --notes "Borealis Connect $VERSION (built on Borealis): the Android app (arm64 for phones, x86_64 for emulators), the Windows and Linux apps (unsigned), and $ios. Verify downloads against borealis-party-SHA256SUMS.txt."
           fi
           gh release upload "$TAG" assets/* --clobber
           gh release edit "$TAG" --draft=false --latest

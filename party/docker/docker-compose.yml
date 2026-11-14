@@ -1,9 +1,11 @@
-# Borealis Party with SQLite: everything lives in the mounted /config folder.
+# Borealis Connect with SQLite: everything lives in the mounted /config folder.
 # On first start the server writes /config/config.toml with every setting explained.
 # Any setting can be set here instead, as BOREALIS__<SECTION>__<KEY>.
+# Stacks set up before the rename to Borealis Connect keep their "borealis-party" service and container names; the host
+# folders, the database name and the BOREALIS__* variables stay as they are on every install.
 services:
-  borealis-party:
-    container_name: "borealis-party"
+  borealis-connect:
+    container_name: "borealis-connect"
     image: "ghcr.io/fortress-soft/borealis-connect:latest"
     # Or build it yourself from a checkout of the repository:
     # build:
@@ -21,7 +23,7 @@ services:
       # - "BOREALIS__SMTP__HOST=smtp.example.com"
       # - "BOREALIS__SMTP__USER=party@example.com"
       # - "BOREALIS__SMTP__PASSWORD=change-me"
-      # - "BOREALIS__SMTP__FROM=Borealis Party <party@example.com>"
+      # - "BOREALIS__SMTP__FROM=Borealis Connect <party@example.com>"
       # PostgreSQL instead of SQLite:
       # - "BOREALIS__DATABASE__TYPE=postgres"
       # - "BOREALIS__POSTGRES__HOST=172.20.20.247"

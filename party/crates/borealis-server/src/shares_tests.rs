@@ -136,7 +136,7 @@ async fn share_flow(router: Router, data: &Path, db: &Db, admin: Client) {
     let (status, preview) = bob.rpc("bundle_open", json!({ "token": token })).await;
     assert_eq!(status, StatusCode::OK, "{preview}");
     assert_eq!(
-        preview["sourceDevice"], "another Borealis Party account",
+        preview["sourceDevice"], "another Borealis Connect account",
         "{preview}"
     );
     assert_eq!(actions(&preview), one("character", "new"), "{preview}");

@@ -36,7 +36,7 @@ def feed(folder: Path, version: str, base: str) -> dict:
         raise SystemExit(f"the feed needs these signed: {', '.join(PLATFORMS[k] for k in missing)}")
     return {
         "version": version,
-        "notes": f"Borealis Party {version}",
+        "notes": f"Borealis Connect {version}",
         "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "platforms": platforms,
     }

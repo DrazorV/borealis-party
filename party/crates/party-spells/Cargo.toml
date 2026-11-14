@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 rust-version.workspace = true
-description = "Spell data for Borealis Party: curated SRD spell mechanics, the canonical-spell resolver, and drafts from a user's own 5etools spells"
+description = "Spell data for Borealis Connect: curated SRD spell mechanics, the canonical-spell resolver, and drafts from a user's own 5etools spells"
 
 [lints]
 workspace = true

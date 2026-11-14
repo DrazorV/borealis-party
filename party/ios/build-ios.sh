@@ -10,7 +10,8 @@
 # own certificates), or IOS_CERTIFICATE, IOS_CERTIFICATE_PASSWORD and IOS_MOBILE_PROVISION as upstream's release does
 # (Tauri imports them into a temporary keychain). The profile must be for the app id app.borealis.party.
 #
-# The result is copied to target/party-ios/: Borealis Party.ipa, or Borealis Party.app for --sim.
+# The result is copied to target/party-ios/: Borealis Party.ipa, or Borealis Party.app for --sim (named after the Tauri
+# productName, which stays "Borealis Party"; the home screen shows CFBundleDisplayName, "Borealis Connect").
 #
 # party/tauri.party.ios.json gives the app its own id, app.borealis.party, and merges party/ios/Info.plist (name, plain
 # HTTP, local network text) into upstream's Info.plist. Tauri writes those into upstream's Xcode project while it builds;
@@ -78,6 +79,6 @@ http=$(plutil -extract NSAppTransportSecurity.NSAllowsArbitraryLoads raw "$plist
 rm -rf "$out/check"
 echo "Built: $id \"$name\" (plain HTTP allowed: ${http:-no})"
 [ "$id" = app.borealis.party ] || { echo "Bundle id is $id, expected app.borealis.party" >&2; exit 1; }
-[ "$name" = "Borealis Party" ] || { echo "Display name is \"$name\", expected Borealis Party" >&2; exit 1; }
+[ "$name" = "Borealis Connect" ] || { echo "Display name is \"$name\", expected Borealis Connect" >&2; exit 1; }
 [ "$http" = true ] || { echo "NSAllowsArbitraryLoads is not set: home-network servers would be refused" >&2; exit 1; }
 ls -d "$out"/*

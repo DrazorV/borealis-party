@@ -100,7 +100,7 @@ pub struct Mythic {
 /// The challenge rating of a creature as part of a coven.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CovenCr {
-    /// As printed (`"12"`). No XP: there is none anywhere in Borealis Party (the user's D16).
+    /// As printed (`"12"`). No XP: there is none anywhere in Borealis Connect (the user's D16).
     pub cr: String,
 }
 

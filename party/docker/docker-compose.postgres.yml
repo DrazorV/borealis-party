@@ -1,8 +1,10 @@
-# Borealis Party with its own PostgreSQL, both in this file.
+# Borealis Connect with its own PostgreSQL, both in this file.
 # Put the passwords in a .env file next to this one (BOREALIS_DB_PASSWORD=...), not in the file itself.
+# Stacks set up before the rename to Borealis Connect keep their "borealis-party" service and container names; the host
+# folders, the database name and the BOREALIS__* variables stay as they are on every install.
 services:
-  borealis-party:
-    container_name: "borealis-party"
+  borealis-connect:
+    container_name: "borealis-connect"
     image: "ghcr.io/fortress-soft/borealis-connect:latest"
     depends_on:
       db:
@@ -25,7 +27,7 @@ services:
       - "/docker/borealis-party/config:/config"
 
   db:
-    container_name: "borealis-party-db"
+    container_name: "borealis-connect-db"
     image: "postgres:18"
     environment:
       - "POSTGRES_USER=borealis"

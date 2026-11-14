@@ -9,7 +9,7 @@
 <dict>
 	<!-- The name under the home screen icon (Android: res/values/strings.xml app_name). -->
 	<key>CFBundleDisplayName</key>
-	<string>Borealis Party</string>
+	<string>Borealis Connect</string>
 	<!--
 	  App Transport Security allows only HTTPS by default. An address such as 192.168.1.20:8787, a .local name or a
 	  typed http:// is plain HTTP (ui/party/api/session.ts normaliseAddress), as Android's usesCleartextTraffic allows.
@@ -23,7 +23,7 @@
 	</dict>
 	<!-- Asked before the first connection to an address on this network (iOS 14 and later). Replaces upstream's text. -->
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Borealis Party connects to your party server on this network.</string>
+	<string>Borealis Connect connects to your party server on this network.</string>
 	<!--
 	  Open with / Share (plan I4, decision D11). These two keys replace upstream's whole lists (the merge works key by
 	  key). The party app is built without device-link, and without it the backend drops an opened .borealis without a

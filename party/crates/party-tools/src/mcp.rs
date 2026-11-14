@@ -86,7 +86,7 @@ fn fail(status: u16, id: &Value, code: i64, message: &str, data: Option<Value>) 
 /// The server's name and version.
 #[must_use]
 pub fn server_info() -> Value {
-    json!({ "name": "borealis-party", "title": "Borealis Party", "version": env!("CARGO_PKG_VERSION") })
+    json!({ "name": "borealis-connect", "title": "Borealis Connect", "version": env!("CARGO_PKG_VERSION") })
 }
 
 /// What a connected app is told about using these tools (`initialize` and `server/discover`): a short workflow for a
@@ -113,7 +113,7 @@ fn instructions_resource() -> Value {
     json!({
         "uri": INSTRUCTIONS_URI,
         "name": "instructions",
-        "title": "How to use Borealis Party",
+        "title": "How to use Borealis Connect",
         "description": "The workflow for a DM's assistant: what the tools do, in which order, and the rules (read this first).",
         "mimeType": "text/markdown",
         "size": INSTRUCTIONS.len(),

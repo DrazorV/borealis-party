@@ -1,6 +1,6 @@
 # Combat engine (`party-dice`, `party-combat`)
 
-Two pure Rust crates for Borealis Party combat. They have no server, database or UI code and do no I/O. The combat
+Two pure Rust crates for Borealis Connect combat. They have no server, database or UI code and do no I/O. The combat
 server, the DM tracker and the player Combat sub-tab are built on them. The rustdoc on every type is the
 reference; this page gives the shape.
 

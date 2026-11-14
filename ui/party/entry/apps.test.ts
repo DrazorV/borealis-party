@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { normaliseAddress } from "../api/session";
+import { PRODUCT_NAME } from "../branding";
 
 // The app settings that live outside upstream's projects (party/android, party/ios, party/tauri.party.*.json) must
 // give the Android, iOS and desktop apps the same identity and the same network policy.
@@ -19,7 +20,11 @@ function plistValue(plist: string, key: string): string | null {
 
 describe("the party apps' identity", () => {
   const ios = JSON.parse(read("party/tauri.party.ios.json")) as { identifier: string; bundle: { iOS: { infoPlist: string } } };
-  const desktop = JSON.parse(read("party/tauri.party.desktop.json")) as { identifier: string; productName: string };
+  const desktop = JSON.parse(read("party/tauri.party.desktop.json")) as {
+    identifier: string;
+    productName: string;
+    app: { windows: { title: string }[] };
+  };
   const gradle = read("party/android/party.init.gradle");
   const strings = read("party/android/res/values/strings.xml");
   const plist = read("party/ios/Info.plist");
@@ -30,8 +35,10 @@ describe("the party apps' identity", () => {
   });
 
   it("one name on Android, iOS and the desktop", () => {
-    expect(strings).toContain(`<string name="app_name">"${desktop.productName}"</string>`);
-    expect(plistValue(plist, "CFBundleDisplayName")).toBe(desktop.productName);
+    // The desktop productName stays "Borealis Party" (the installer's folder and uninstall key); its window says the name.
+    expect(strings).toContain(`<string name="app_name">"${PRODUCT_NAME}"</string>`);
+    expect(plistValue(plist, "CFBundleDisplayName")).toBe(PRODUCT_NAME);
+    expect(desktop.app.windows[0]!.title).toBe(PRODUCT_NAME);
   });
 
   it("iOS merges party/ios/Info.plist, a path Tauri reads from src-tauri", () => {

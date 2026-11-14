@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 rust-version.workspace = true
-description = "The one AI tool registry of Borealis Party: tool specs, scopes, limits, idempotency and the MCP envelope"
+description = "The one AI tool registry of Borealis Connect: tool specs, scopes, limits, idempotency and the MCP envelope"
 
 [lints]
 workspace = true

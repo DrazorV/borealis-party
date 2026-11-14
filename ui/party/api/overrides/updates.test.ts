@@ -73,7 +73,7 @@ describe("Help → Check for updates…", () => {
   it("nothing newer: says this version is up to date", async () => {
     const { d, calls } = deps();
     await checkNow(d);
-    expect(calls).toEqual(["check", `ask ${CHECK_TITLE}: You're up to date (Borealis Party 0.1.4). [OK]`]);
+    expect(calls).toEqual(["check", `ask ${CHECK_TITLE}: You're up to date (Borealis Connect 0.1.4). [OK]`]);
     expect(getStatus()).toBe("");
   });
 
@@ -81,7 +81,7 @@ describe("Help → Check for updates…", () => {
     const { d, calls } = deps({ check: async () => offer });
     await checkNow(d);
     expect(calls).toEqual([
-      `ask ${CHECK_TITLE}: Borealis Party 0.1.5 is available (this is 0.1.4). Your characters stay as they are. [Install and restart|Later]`,
+      `ask ${CHECK_TITLE}: Borealis Connect 0.1.5 is available (this is 0.1.4). Your characters stay as they are. [Install and restart|Later]`,
       "offer 0.1.5 install=true",
     ]);
   });
@@ -101,7 +101,7 @@ describe("Help → Check for updates…", () => {
   it("the feed can't be read, or there is no updater: says why", async () => {
     const { d, calls } = deps({ check: async () => { throw new Error("feed unreachable"); } });
     await checkNow(d);
-    expect(calls).toEqual([`ask ${CHECK_TITLE}: Borealis Party couldn't check for updates: feed unreachable [OK]`]);
+    expect(calls).toEqual([`ask ${CHECK_TITLE}: Borealis Connect couldn't check for updates: feed unreachable [OK]`]);
     expect(getStatus()).toBe("");
   });
 

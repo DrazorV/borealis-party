@@ -40,7 +40,7 @@ export function AppProviders(props: ComponentProps<typeof UpstreamProviders>) {
       <div className="party-connect">
         <DesktopUpdate floating />
         <div className="card party-connect-card">
-          <h1>Borealis Party</h1>
+          <h1>Borealis Connect</h1>
           <p>Can't reach the server and this device has no offline copy yet.</p>
           <button className="btn primary" onClick={() => window.location.reload()}>Try again</button>
         </div>

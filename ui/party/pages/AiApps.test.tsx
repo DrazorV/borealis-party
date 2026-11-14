@@ -40,8 +40,8 @@ const signIn = () => saveSession({ baseUrl: BASE, token: "session-token", user }
 
 it("makes setup lines with the address and the token", () => {
   const [claude, json] = setupSnippets(`${BASE}/api/mcp`, "bpt_x");
-  expect(claude!.text).toBe(`claude mcp add --transport http borealis-party ${BASE}/api/mcp --header "Authorization: Bearer bpt_x"`);
-  expect(JSON.parse(json!.text)).toEqual({ mcpServers: { "borealis-party": { url: `${BASE}/api/mcp`, headers: { Authorization: "Bearer bpt_x" } } } });
+  expect(claude!.text).toBe(`claude mcp add --transport http borealis-connect ${BASE}/api/mcp --header "Authorization: Bearer bpt_x"`);
+  expect(JSON.parse(json!.text)).toEqual({ mcpServers: { "borealis-connect": { url: `${BASE}/api/mcp`, headers: { Authorization: "Bearer bpt_x" } } } });
 });
 
 it("never sends the browser to a scheme that would run in the page", () => {
@@ -163,7 +163,7 @@ it("guides each app in tabs, copies the address and the instructions, and keeps 
   signIn();
   const writes: string[] = [];
   vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: async (t: string) => { writes.push(t); } } });
-  const INSTRUCTIONS = "You are a Dungeon Master's assistant for Borealis Party.\nNever invent a stat block.";
+  const INSTRUCTIONS = "You are a Dungeon Master's assistant for Borealis Connect.\nNever invent a stat block.";
   answers["GET /api/me/ai"] = {
     status: 200,
     body: { mcpUrl: `${BASE}/api/mcp`, oauth: true, scopes: SCOPES, defaultDays: 90, maxDays: 365, maxTokens: 25, callsPerMinute: 60, instructions: INSTRUCTIONS },
@@ -188,8 +188,8 @@ it("guides each app in tabs, copies the address and the instructions, and keeps 
   expect(panel().textContent).toContain("Connectors");
 
   fireEvent.click(screen.getByRole("tab", { name: "Developer tools" }));
-  expect(panel().textContent).toContain(`claude mcp add --transport http borealis-party ${BASE}/api/mcp`);
-  expect(panel().textContent).toContain("codex mcp login borealis-party");
+  expect(panel().textContent).toContain(`claude mcp add --transport http borealis-connect ${BASE}/api/mcp`);
+  expect(panel().textContent).toContain("codex mcp login borealis-connect");
 
   // Keys live in a collapsible section.
   const keys = screen.getByText("Keys for developer tools", { selector: "summary" }).closest("details")!;
@@ -219,8 +219,8 @@ it("puts connecting ChatGPT or Claude first, then the instructions, then keys; i
   await settle();
 
   const text = container.textContent ?? "";
-  expect(text).toContain("Borealis Party uses your own ChatGPT or Claude");
-  expect(text).toContain("Borealis Party never calls an AI service itself.");
+  expect(text).toContain("Borealis Connect uses your own ChatGPT or Claude");
+  expect(text).toContain("Borealis Connect never calls an AI service itself.");
   const at = (el: Element | null) => {
     expect(el).toBeTruthy();
     return text.indexOf(el!.textContent!.slice(0, 20));

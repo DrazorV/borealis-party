@@ -1,4 +1,4 @@
-# Encounters API (Borealis Party 0.3.0)
+# Encounters API (Borealis Connect 0.3.0)
 
 The encounter builder's server routes: a party's DM builds encounters from their own installed creatures (typed
 Monster elements and Aurora Companions), gives villains pets and summons, and decides what players may see. Players

@@ -1,4 +1,4 @@
-//! The Borealis party server: the Borealis backend for many accounts, each with its own characters and content.
+//! The Borealis Connect server: the Borealis backend for many accounts, each with its own characters and content.
 //!
 //! See `party/README.md`.
 
@@ -63,7 +63,7 @@ use config::Settings;
 use db::Db;
 use workspaces::Workspaces;
 
-// The page calls only this server: Borealis Party never calls an AI service itself (AI apps connect to it over MCP).
+// The page calls only this server: Borealis Connect never calls an AI service itself (AI apps connect to it over MCP).
 const CSP: &str = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; \
                    connect-src 'self'; \
                    object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -323,7 +323,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 0.3.1 and 0.3.2 had an in-app assistant that called AI services; its `[ai]` settings are accepted and unread.
     if !settings.ai.names().is_empty() {
         tracing::info!(
-            "[ai] {} (BOREALIS__AI__*) is no longer used: Borealis Party never calls an AI service itself since 0.3.3; the setting can be removed",
+            "[ai] {} (BOREALIS__AI__*) is no longer used: Borealis Connect never calls an AI service itself since 0.3.3; the setting can be removed",
             settings.ai.names().join(", ")
         );
     }

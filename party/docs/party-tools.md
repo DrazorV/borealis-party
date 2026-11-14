@@ -1,6 +1,6 @@
 # Party tools (`party/crates/party-tools`)
 
-Borealis Party has ONE tool registry for every AI client of the server: the MCP server at `/api/mcp`
+Borealis Connect has ONE tool registry for every AI client of the server: the MCP server at `/api/mcp`
 (`borealis-server/src/mcp.rs`, [mcp.md](mcp.md)). ChatGPT, Claude and developer tools connect to it; the server
 never calls a model vendor itself (the in-app assistant was removed in 0.3.3).
 
