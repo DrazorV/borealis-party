@@ -131,6 +131,9 @@ describe("Choose files", () => {
     // The preview's trip to /content stays on this page: the results are still listed.
     expect(screen.getByRole("list", { name: "Import results" })).toBeTruthy();
     expect(within(row("content.borealis")).getByRole("status").textContent).toBe("Imported Ana.");
+    // Its notes are folded under Details (0.3.6).
+    expect(within(row("content.borealis")).queryByText("Also in the bundle: Bo.")).toBeNull();
+    fireEvent.click(within(row("content.borealis")).getByRole("button", { name: "Details" }));
     expect(within(row("content.borealis")).getByText("Also in the bundle: Bo.")).toBeTruthy();
     expect(calls.find((c) => c.name === "stage5etoolsFiles")?.args).toMatchObject({ files: [{ fileName: "brew.json" }] });
     expect(calls.find((c) => c.name === "scan5etoolsFolder")?.args).toEqual({ folder: "brew" });
@@ -415,9 +418,12 @@ describe("5etools results", () => {
     const r = row("Default 5etools data");
     expect(r.getAttribute("data-tone")).toBe("success");
     expect(within(r).getAllByRole("status")[0]!.textContent).toBe("Imported 16746 elements into 1 content pack.");
+    // Summary first: the row's report is folded under Details, and opens with its notes grouped (0.3.6).
+    expect(within(r).queryByText(/833 details couldn't be carried over/)).toBeNull();
+    fireEvent.click(within(r).getByRole("button", { name: "Details" }));
     expect(within(r).getByText(/833 details couldn't be carried over/)).toBeTruthy();
-    expect(within(r).getByRole("button", { name: "Show details" })).toBeTruthy();
-    expect(within(r).queryByText("Variant sidebars")).toBeNull();
+    expect(within(r).getByRole("button", { name: "Hide details" })).toBeTruthy();
+    expect(within(r).getByText("Variant sidebars")).toBeTruthy();
   });
 
   it("an import that brought nothing in warns", async () => {

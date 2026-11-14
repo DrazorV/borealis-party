@@ -39,7 +39,11 @@ const FIXED: [&str; 7] = [
 /// [`PARTY_FILE`] in its folder; a client reads and saves them with the rest.
 /// - `skipPersonalityChoices`: the selection flow leaves out a background's personality trait, ideal, bond and flaw
 ///   lists (ui/party/api/overrides/personality.ts).
-const PARTY: [(&str, bool); 1] = [("skipPersonalityChoices", true)];
+/// - `onboardingDismissed`: the account closed its first-run checklist (ui/party/onboarding/), so no device shows it.
+const PARTY: [(&str, bool); 2] = [
+    ("skipPersonalityChoices", true),
+    ("onboardingDismissed", false),
+];
 
 /// The account's party settings, beside upstream's `settings.json`.
 pub const PARTY_FILE: &str = "party-settings.json";
@@ -153,6 +157,25 @@ mod tests {
 
         strip(&mut json!({ "skipPersonalityChoices": true }), dir.path()).unwrap();
         assert_eq!(shown_now()["skipPersonalityChoices"], true, "and back on");
+    }
+
+    #[test]
+    fn the_onboarding_checklist_stays_closed_once_dismissed() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            shown(json!({}), dir.path())["onboardingDismissed"],
+            false,
+            "a new account sees it"
+        );
+        let mut patch = json!({ "onboardingDismissed": true, "accentColor": "green" });
+        strip(&mut patch, dir.path()).unwrap();
+        assert_eq!(patch, json!({ "accentColor": "green" }));
+        let shown_now = shown(json!({}), dir.path());
+        assert_eq!(shown_now["onboardingDismissed"], true);
+        assert_eq!(
+            shown_now["skipPersonalityChoices"], true,
+            "the other party setting keeps its default"
+        );
     }
 
     #[test]

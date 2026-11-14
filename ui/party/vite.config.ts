@@ -43,6 +43,8 @@ const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     "./SpellSlotsCard": local("./play/SpellSlotsCard.tsx"),
     "./TrackersCard": local("./play/TrackersCard.tsx"),
   },
+  // The Characters page (the start) gains the first-run checklist above it (onboarding/OnboardingCard.tsx, 0.3.6).
+  "src/App.tsx": { "./pages/characters/CharactersPage": local("./onboarding/CharactersWithOnboarding.tsx") },
   "src/pages/play/AttacksPanel.tsx": { "./rolls/RollContext": local("./play/rolls/RollContext.tsx") },
   "src/pages/play/DiceCards.tsx": { "./rolls/RollContext": local("./play/rolls/RollContext.tsx") },
   "src/pages/play/rolls/RollButton.tsx": { "./RollContext": local("./play/rolls/RollContext.tsx") },

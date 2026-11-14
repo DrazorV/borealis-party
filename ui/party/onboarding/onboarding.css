@@ -1,0 +1,23 @@
+/* The first-run checklist (OnboardingCard.tsx): an Aurora card above the Characters page, lined up with its columns. */
+.card.party-onboarding { margin: 10px 25px 0 50px; display: flex; flex-direction: column; gap: var(--sp-2, 8px); }
+.party-onboarding .card-head { display: flex; align-items: center; gap: var(--sp-2, 8px); }
+.party-onboarding .card-head h2 { margin: 0; }
+.party-onboarding > p { margin: 0; }
+.party-onboarding-bar { height: 4px; background: var(--light-3, #333); overflow: hidden; }
+.party-onboarding-bar > span { display: block; height: 100%; background: var(--accent-base); transition: width 0.3s; }
+.party-onboarding-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sp-2, 8px); }
+/* Equal-height step boxes in a row; the link sits at the bottom of each. */
+.party-onboarding-step { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: 1fr auto; column-gap: var(--sp-2, 8px); row-gap: 6px; align-items: start; padding: var(--sp-2, 8px); border: 1px solid var(--light-4, #3a3a3a); background: var(--light-1, #1b1b1b); }
+.party-onboarding-step.next { border-color: var(--accent-base); }
+.party-onboarding-step.done { opacity: 0.7; }
+.party-onboarding-step > .btn { grid-column: 2; justify-self: start; }
+.party-onboarding-mark { width: 20px; height: 20px; border: 2px solid var(--light-5, #555); border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+.party-onboarding-step.done .party-onboarding-mark { border-color: var(--success, #4caf50); color: var(--success, #4caf50); }
+.party-onboarding-mark svg { width: 14px; height: 14px; }
+.party-onboarding-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+@media (max-width: 899px) {
+  .card.party-onboarding { margin: 15px 16px 0; }
+  .party-onboarding-steps { grid-template-columns: minmax(0, 1fr); }
+  .party-onboarding-step { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto; align-items: center; }
+  .party-onboarding-step > .btn { grid-column: 3; }
+}

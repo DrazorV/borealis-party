@@ -1,6 +1,6 @@
-import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import type { Api, ContentProgress, FiveToolsImportReport, FiveToolsSource, FiveToolsUrl, ImportReport } from "../../src/api/contract";
+import type { Api, ContentProgress, FiveToolsImportReport, FiveToolsSource, FiveToolsUrl, ImportReport, MissingContentItem } from "../../src/api/contract";
 import { Button } from "../../src/components/Button";
 import { Card } from "../../src/components/Card";
 import { useConfirm } from "../../src/components/Confirm";
@@ -23,6 +23,8 @@ import { doorCount, inboxEmpty, onInbox, sendFiles, takeFocus, takeInbox } from 
 import { KIND_LABEL, needsNotice, planImport, sentence } from "../import/plan";
 import { viewReport } from "../import/reportNotes";
 import { checkFiveToolsSource, classifyLink, type LinkKind } from "../import/sniff";
+import { type Category, type NextId, type Tone } from "../import/results";
+import { ImportResults } from "./ImportResults";
 import { receiveRoute } from "./ShareReceivePage";
 import "./party.css";
 import { FiveToolsResult } from "./FiveToolsResult";
@@ -47,7 +49,6 @@ import { contentSync } from "../content/contentSync";
  * GlobalImport already shows on every upstream page, so this section renders none of its own.
  */
 
-type Tone = "working" | "success" | "warning" | "error" | "info";
 
 /** 5etools-format data downloaded or unpacked on the server, waiting for its books to be chosen. */
 interface Staged {
@@ -60,8 +61,14 @@ interface Row {
   title: string;
   kind: string;
   tone: Tone;
+  /** What it brought in, for the summary and what to do next (../import/results.ts). */
+  category: Category;
   message: string;
   details: string[];
+  /** A character's content that is not installed, grouped with the other characters' at the top. */
+  missing?: MissingContentItem[];
+  /** The imported character's name, for "used by" in the missing content. */
+  who?: string;
   staged?: Staged;
   /** A link that could be either: the two ways to take it. */
   choose?: string;
@@ -79,11 +86,16 @@ const checkedText = (iso: string) => `Last checked at ${new Date(iso).toLocaleTi
 const sameUrl = (a: string, b: string) => a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
 
 /** What the character import said, as a row. */
-function characterRow(r: ImportReport): Pick<Row, "tone" | "message" | "details"> {
+function characterRow(r: ImportReport): Pick<Row, "tone" | "message" | "details" | "missing" | "who"> {
   const details = [...r.warnings];
-  if (r.missingContent.length > 0) details.push(`${plural(r.missingContent.length, "item")} of content it uses ${r.missingContent.length === 1 ? "is" : "are"} not installed.`);
+  const missing = r.missingContent.length;
   if (r.unmappedSlots.length > 0) details.push(`${plural(r.unmappedSlots.length, "choice")} could not be placed; the builder lists ${r.unmappedSlots.length === 1 ? "it" : "them"}.`);
-  return { tone: details.length > 0 ? "warning" : "success", message: `Imported ${r.summary.name}.`, details };
+  const notes = [missing > 0 && `${plural(missing, "item")} of content missing`, details.length > 0 && plural(details.length, "note")].filter(Boolean);
+  return {
+    tone: details.length > 0 || missing > 0 ? "warning" : "success",
+    message: `Imported ${r.summary.name}.${notes.length > 0 ? ` ${notes.join(", ")}.` : ""}`,
+    details, missing: missing > 0 ? r.missingContent : undefined, who: r.summary.name,
+  };
 }
 
 /**
@@ -145,6 +157,45 @@ function saveCustom(url: string) {
   try { const k = customKey(); if (k) localStorage.setItem(k, url); } catch { /* storage off: nothing to remember */ }
 }
 
+
+/**
+ * One file or link in the results: its name, kind and one-line outcome, with what it said in full (notes, the 5etools
+ * report, missing content) folded under Details (0.3.6: the results showed everything at once). A row that waits for a
+ * choice shows that choice at once.
+ */
+function ResultRow({ row: r, progress, children }: { row: Row; progress?: string; children?: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const missing = r.missing?.length ?? 0;
+  const more = r.details.length + (r.report ? 1 : 0) + (missing > 0 ? 1 : 0);
+  return (
+    <li className={`party-import-row ${r.tone}`} data-tone={r.tone} data-open={open}>
+      <div className="party-import-head">
+        <Icon name={ICONS[r.tone]} />
+        <strong className="party-import-name">{r.title}</strong>
+        <span className="muted small party-import-kind">{r.kind}</span>
+      </div>
+      <p className="party-import-msg" role={r.tone === "error" ? "alert" : "status"}>
+        {r.message}
+        {progress ? <span className="muted small"> {progress}</span> : null}
+      </p>
+      {r.source && <p className="muted small party-import-detail">From {r.source}</p>}
+      {more > 0 && (
+        <div className="party-import-toggle">
+          <Button small aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>{open ? "Hide details" : "Details"}</Button>
+        </div>
+      )}
+      {open && (
+        <div id={id} className="party-import-more">
+          {r.details.map((d) => <p key={d} className="muted small party-import-detail">{d}</p>)}
+          {missing > 0 && <p className="muted small party-import-detail">{plural(missing, "item")} of content it uses {missing === 1 ? "is" : "are"} not installed; they are listed under Missing content above.</p>}
+          {r.report && <div className="party-import-report"><FiveToolsResult report={r.report} headline={false} startOpen /></div>}
+        </div>
+      )}
+      {children}
+    </li>
+  );
+}
 
 export function ImportSection() {
   const api = useApi();
@@ -227,7 +278,8 @@ export function ImportSection() {
     try {
       const plan = await planImport(files);
       const ids = new Map<File, number>();
-      for (const f of files) ids.set(f, add({ title: f.name, kind: KIND_LABEL[plan.kinds.get(f) ?? "other"], tone: "working", message: "Waiting…" }));
+      const category = (f: File): Category => (plan.characters.includes(f) || plan.bundles.includes(f) ? "character" : plan.others.includes(f) ? "other" : "content");
+      for (const f of files) ids.set(f, add({ title: f.name, kind: KIND_LABEL[plan.kinds.get(f) ?? "other"], category: category(f), tone: "working", message: "Waiting…" }));
       const id = (f: File) => ids.get(f)!;
       for (const f of plan.others) {
         patch(id(f), { tone: "error", message: "Nothing here reads this file. Use a .dnd5e, .borealis, .xml, .index, .zip or .json file." });
@@ -340,13 +392,13 @@ export function ImportSection() {
     e.preventDefault();
     if (busy) return;
     const parsed = classifyLink(link);
-    if (!parsed) { add({ title: link.trim() || "Link", kind: "Link", tone: "error", message: "That is not a web address. Paste a link that starts with https://." }); return; }
+    if (!parsed) { add({ title: link.trim() || "Link", kind: "Link", category: "other", tone: "error", message: "That is not a web address. Paste a link that starts with https://." }); return; }
     setLink("");
     if (parsed.kind === "unknown") {
-      add({ title: parsed.url, kind: "Link", tone: "info", message: "Is this an index file or a folder of 5etools-format data?", choose: parsed.url });
+      add({ title: parsed.url, kind: "Link", category: "content", tone: "info", message: "Is this an index file or a folder of 5etools-format data?", choose: parsed.url });
       return;
     }
-    const id = add({ title: parsed.url, kind: parsed.kind === "index" ? "Index" : "5etools-format data", tone: "working", message: "Waiting…" });
+    const id = add({ title: parsed.url, kind: parsed.kind === "index" ? "Index" : "5etools-format data", category: "content", tone: "working", message: "Waiting…" });
     await take(parsed.kind, id, parsed.url);
   };
 
@@ -354,7 +406,7 @@ export function ImportSection() {
   const fromSource = async (url: string) => {
     if (busy) return;
     const title = sourceTitle(url);
-    const id = add({ title, kind: "5etools-format data", tone: "working", message: "Waiting…", source: title === url ? undefined : url });
+    const id = add({ title, kind: "5etools-format data", category: "content", tone: "working", message: "Waiting…", source: title === url ? undefined : url });
     await take("fivetools", id, url);
   };
 
@@ -380,8 +432,8 @@ export function ImportSection() {
         await importFiles(inbox.files);
         for (const l of inbox.links) {
           const parsed = classifyLink(l.url);
-          if (!parsed) { add({ title: l.url, kind: "Link", tone: "error", message: "That is not a web address. Paste a link that starts with https://." }); continue; }
-          const id = add({ title: parsed.url, kind: l.kind === "index" ? "Index" : "5etools-format data", tone: "working", message: "Waiting…" });
+          if (!parsed) { add({ title: l.url, kind: "Link", category: "other", tone: "error", message: "That is not a web address. Paste a link that starts with https://." }); continue; }
+          const id = add({ title: parsed.url, kind: l.kind === "index" ? "Index" : "5etools-format data", category: "content", tone: "working", message: "Waiting…" });
           await take(l.kind, id, parsed.url);
         }
       }
@@ -404,6 +456,13 @@ export function ImportSection() {
   }, []);
   // A pick that waited for the one before it.
   useEffect(() => { if (!busy) void drain(); }, [busy]);
+
+  /** A "what next" button under the summary (../import/results.ts). */
+  const next = (id: NextId) => {
+    if (id === "characters" || id === "new-character") void nav("/characters");
+    else if (id === "parties") void nav("/parties");
+    else document.getElementById(FIVETOOLS_CARD)?.scrollIntoView?.({ block: "start" });
+  };
 
   return (
     // Drops anywhere on the page come in through the inbox (../entry/unifyImports.ts).
@@ -470,29 +529,18 @@ export function ImportSection() {
       </Card>
       {rows.length > 0 && (
         <Card title="Results" actions={<Button small disabled={busy} onClick={() => setRows([])}>Clear</Button>}>
+          <ImportResults rows={rows.map((r) => ({ ...r, waiting: Boolean(r.staged || r.choose) }))} onNext={next} />
           <ul className="party-import-results" aria-label="Import results" ref={listRef}>
             {rows.map((r) => (
-              <li key={r.id} className={`party-import-row ${r.tone}`} data-tone={r.tone}>
-                <div className="party-import-head">
-                  <Icon name={ICONS[r.tone]} />
-                  <strong className="party-import-name">{r.title}</strong>
-                  <span className="muted small party-import-kind">{r.kind}</span>
-                </div>
-                <p className="party-import-msg" role={r.tone === "error" ? "alert" : "status"}>
-                  {r.message}
-                  {r.tone === "working" && progress?.message ? <span className="muted small"> {progress.message}</span> : null}
-                </p>
-                {r.source && <p className="muted small party-import-detail">From {r.source}</p>}
-                {r.details.map((d) => <p key={d} className="muted small party-import-detail">{d}</p>)}
+              <ResultRow key={r.id} row={r} progress={r.tone === "working" ? progress?.message : undefined}>
                 {r.choose && (
                   <div className="party-import-actions">
                     <Button disabled={busy} onClick={() => void take("index", r.id, r.choose!)}>Add as an index</Button>
                     <Button disabled={busy} onClick={() => void take("fivetools", r.id, r.choose!)}>Import as 5etools data</Button>
                   </div>
                 )}
-                {r.report && <div className="party-import-report"><FiveToolsResult report={r.report} headline={false} /></div>}
                 {r.staged && <StagedBooks api={api} staged={r.staged} onDone={(report, error) => booksDone(r.id, report, error)} />}
-              </li>
+              </ResultRow>
             ))}
           </ul>
         </Card>
