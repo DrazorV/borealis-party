@@ -44,7 +44,7 @@ export default defineConfig({
     { name: "android-landscape", use: { ...android, viewport: { width: 832, height: 384 } } },
     { name: "iphone", use: { ...devices["iPhone 14"], viewport: { width: 390, height: 844 } } },
     // A desktop browser window, for the specs that cover phones and desktops alike.
-    { name: "desktop", testMatch: /(unify-imports|combat-tracker|content-refresh|content-compact)\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } } },
+    { name: "desktop", testMatch: /(unify-imports|combat-tracker|content-refresh|content-compact|branding)\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } } },
     // A DM's big screen for session prep (0.3.1): the Encounters and Combat tabs use the whole width.
     { name: "desktop-wide", testMatch: /(encounter-tab|ai-signin|spell-combat|combat-end|ai-guides)\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
   ],

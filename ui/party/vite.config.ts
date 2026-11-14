@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, mergeConfig, type Plugin } from "vite";
 import upstream from "../vite.config";
+import { applyBrand, BRAND_EDITS, brandedFile } from "./branding";
 import { cargoVersion } from "./version";
 
 const local = (path: string) => fileURLToPath(new URL(path, import.meta.url));
@@ -69,6 +70,29 @@ function partyEntry(): Plugin {
   };
 }
 
+/**
+ * "Borealis Party" where upstream's own files write "Borealis" (./branding.ts): the title bar, a phone's title bar,
+ * the splash and the log file's name. The build fails if one of them is no longer there to change.
+ */
+function partyBrand(): Plugin {
+  const done = new Set<string>();
+  return {
+    name: "party-brand",
+    enforce: "pre",
+    transform(code, id) {
+      const file = brandedFile(id);
+      if (!file) return null;
+      done.add(file);
+      return { code: applyBrand(file, code), map: null };
+    },
+    buildEnd(error) {
+      if (error) return;
+      const missing = Object.keys(BRAND_EDITS).filter((f) => !done.has(f));
+      if (missing.length > 0) this.error(`party-brand: upstream no longer builds ${missing.join(", ")}`);
+    },
+  };
+}
+
 const TITLE = /<title>Borealis<\/title>/;
 
 /**
@@ -99,7 +123,7 @@ function partyPage(): Plugin {
 export const PARTY_VERSION = cargoVersion(readFileSync(local("../../party/Cargo.toml"), "utf8"));
 
 export default mergeConfig(upstream, defineConfig({
-  plugins: [partyEntry(), partyPage()],
+  plugins: [partyEntry(), partyPage(), partyBrand()],
   define: { __APP_VERSION__: JSON.stringify(PARTY_VERSION) },
   publicDir: "party/public",
   build: { outDir: "party/dist", emptyOutDir: true },
