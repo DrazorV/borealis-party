@@ -19,7 +19,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: party-image
+  # Per ref: a dry run on a branch never cancels main's image build.
+  group: party-image-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
