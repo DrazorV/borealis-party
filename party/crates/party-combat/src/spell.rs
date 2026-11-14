@@ -1044,6 +1044,12 @@ pub enum MechOrigin {
     Statblock,
     /// No definition: a ruling.
     Ruling,
+    /// Drafted from the caster's own installed copy (its 5etools data) and never reviewed (0.3.3: a player's cast of
+    /// a spell nobody defined yet). The DM sees it and confirms the results.
+    Draft {
+        /// The element id it was drafted from.
+        key: String,
+    },
 }
 
 /// Choices made at cast time.

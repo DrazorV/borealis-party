@@ -273,7 +273,7 @@ fn death_save_machine() {
     // three successes: stable, still unconscious
     let mut combat = dying_pc();
     for n in [10, 15, 19] {
-        dm(&mut combat, save(n));
+        owner(&mut combat, save(n));
     }
     assert_eq!(life(&combat), Life::Stable);
     assert!(derive::has_condition(
@@ -281,12 +281,12 @@ fn death_save_machine() {
         &id("p"),
         Condition::Unconscious
     ));
-    assert_eq!(dm_err(&mut combat, save(12)), CombatError::NotDying);
+    assert_eq!(owner_err(&mut combat, save(12)), CombatError::NotDying);
 
     // three failures: dead
     let mut combat = dying_pc();
     for n in [9, 2] {
-        dm(&mut combat, save(n));
+        owner(&mut combat, save(n));
     }
     assert_eq!(
         life(&combat),
@@ -295,12 +295,12 @@ fn death_save_machine() {
             failures: 2
         }
     );
-    dm(&mut combat, save(5));
+    owner(&mut combat, save(5));
     assert_eq!(life(&combat), Life::Dead);
 
     // a natural 1 is two failures
     let mut combat = dying_pc();
-    dm(&mut combat, save(1));
+    owner(&mut combat, save(1));
     assert_eq!(
         life(&combat),
         Life::Dying {
@@ -311,7 +311,7 @@ fn death_save_machine() {
 
     // a natural 20: 1 HP and conscious
     let mut combat = dying_pc();
-    dm(&mut combat, save(20));
+    owner(&mut combat, save(20));
     assert_eq!(life(&combat), Life::Alive);
     assert_eq!(c(&combat, "p").hp.current, 1);
     assert!(!derive::has_condition(
@@ -324,7 +324,7 @@ fn death_save_machine() {
 #[test]
 fn a_typed_total_without_its_natural_counts_20_and_1() {
     let mut combat = dying_pc();
-    dm(
+    owner(
         &mut combat,
         Command::DeathSave {
             id: id("p"),
@@ -338,7 +338,7 @@ fn a_typed_total_without_its_natural_counts_20_and_1() {
             failures: 2
         }
     );
-    dm(
+    owner(
         &mut combat,
         Command::DeathSave {
             id: id("p"),
@@ -348,7 +348,7 @@ fn a_typed_total_without_its_natural_counts_20_and_1() {
     assert_eq!(life(&combat), Life::Alive);
     // A rolled save uses the server die.
     let mut combat = dying_pc();
-    scripted(
+    owner_scripted(
         &mut combat,
         Command::DeathSave {
             id: id("p"),
@@ -419,7 +419,7 @@ fn massive_damage_kills_outright() {
 #[test]
 fn healing_a_dying_creature_resets_its_saves() {
     let mut combat = dying_pc();
-    dm(
+    owner(
         &mut combat,
         Command::DeathSave {
             id: id("p"),
@@ -450,7 +450,7 @@ fn healing_a_dying_creature_resets_its_saves() {
 #[test]
 fn set_death_saves_corrects_the_counts() {
     let mut combat = dying_pc();
-    dm(
+    owner(
         &mut combat,
         Command::SetDeathSaves {
             id: id("p"),
@@ -466,7 +466,7 @@ fn set_death_saves_corrects_the_counts() {
         }
     );
     assert!(matches!(
-        dm_err(
+        owner_err(
             &mut combat,
             Command::SetDeathSaves {
                 id: id("p"),
@@ -645,4 +645,66 @@ fn sync_is_for_player_pcs_only() {
         combat.execute(&Actor::System, &sync),
         Err(CombatError::Invalid(_))
     ));
+}
+
+// 0.3.3: a PC's death saves are its player's (the DM never writes a player's numbers).
+fn alice() -> Actor {
+    Actor::Player {
+        account: ALICE.into(),
+    }
+}
+
+fn owner(combat: &mut Combat, cmd: Command) -> Events {
+    combat
+        .execute(&alice(), &cmd)
+        .unwrap_or_else(|e| panic!("{cmd:?}: {e}"))
+}
+
+fn owner_err(combat: &mut Combat, cmd: Command) -> CombatError {
+    combat
+        .execute(&alice(), &cmd)
+        .expect_err("should be refused")
+}
+
+fn owner_scripted(combat: &mut Combat, cmd: Command, rolls: &[u32]) -> Events {
+    let mut die = party_combat::party_dice::SequenceDie::new(rolls.to_vec());
+    combat
+        .execute_with(&alice(), &cmd, &mut die)
+        .unwrap_or_else(|e| panic!("{cmd:?}: {e}"))
+}
+
+#[test]
+fn the_dm_never_writes_a_players_numbers() {
+    let mut combat = dying_pc();
+    for cmd in [
+        Command::DeathSave {
+            id: id("p"),
+            roll: D20Input::typed(12),
+        },
+        Command::SetDeathSaves {
+            id: id("p"),
+            successes: 1,
+            failures: 0,
+        },
+        Command::SetHp {
+            id: id("p"),
+            current: 5,
+            max: None,
+            temp: None,
+        },
+        Command::GrantTempHp {
+            id: id("p"),
+            amount: 5,
+        },
+        Command::AdjustSlot {
+            id: id("p"),
+            level: 1,
+            delta: -1,
+        },
+    ] {
+        assert!(
+            matches!(dm_err(&mut combat, cmd.clone()), CombatError::Invalid(_)),
+            "{cmd:?}"
+        );
+    }
 }

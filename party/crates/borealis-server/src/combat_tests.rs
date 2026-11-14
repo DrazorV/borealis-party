@@ -806,12 +806,16 @@ async fn leak_suite(t: &Table) {
     assert_eq!(order.len(), 3, "two PCs and the owlbear: {view}");
     let owlbear = order.iter().find(|o| o["kind"] == "creature").unwrap();
     assert_eq!(owlbear["name"], "Owlbear");
-    assert!(
-        owlbear["statBlock"].is_object(),
-        "D20 b: the full stat block once revealed"
-    );
-    assert!(owlbear["statBlock"].get("xp").is_none());
-    assert!(owlbear.get("initiative").is_none());
+    // 0.3.3 (the user: "only the name and if bloodied"): a revealed monster is its name and band, nothing else.
+    let keys: BTreeSet<&str> = owlbear
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    let allowed: BTreeSet<&str> = crate::combat::CREATURE_FOR_PLAYERS.into_iter().collect();
+    assert_eq!(keys, allowed, "{owlbear}");
+    assert_eq!(owlbear["band"], "unhurt");
     for key in ["seq", "state", "creatures", "characters", "undo"] {
         assert!(view.get(key).is_none(), "{key} in {view}");
     }
@@ -834,7 +838,8 @@ async fn leak_suite(t: &Table) {
         .unwrap();
     assert!(theirs.get("hp").is_none(), "{theirs}");
     assert!(theirs.get("band").is_some(), "{theirs}");
-    // Reveal: the dragon appears, with its stat block (D20 b).
+    // Reveal: the dragon appears, as its public name and band only (0.3.3).
+
     act_ok(&t.dm, c, "reveal", json!({ "id": f.dragon })).await;
     let (_, view) = t.player.get(&format!("/api/combats/{c}")).await;
     let dragon = view["order"]
@@ -845,7 +850,16 @@ async fn leak_suite(t: &Table) {
         .cloned()
         .unwrap_or_else(|| panic!("revealed: {view}"));
     assert_eq!(dragon["name"], "SECRET-PUBLIC-DRAGON");
-    assert!(dragon["statBlock"].is_object());
+    assert!(
+        dragon.get("statBlock").is_none() && dragon.get("view").is_none(),
+        "{dragon}"
+    );
+    for fragment in &f.fragments {
+        assert!(
+            !view.to_string().contains(fragment.as_str()),
+            "{fragment} reached a player"
+        );
+    }
     assert!(!view.to_string().contains("SECRET-LABEL-DRAGON"));
     // Hidden again: gone again.
     act_ok(&t.dm, c, "hide", json!({ "id": f.dragon })).await;
@@ -952,9 +966,10 @@ async fn prompts_and_band(t: &Table) {
         .player
         .get(&format!("/api/parties/{}/roster", t.party))
         .await;
+    // 0.3.3: the other members' bands, in and out of combat (the user's decision of 2026-11-14), and still no HP.
     assert!(
-        !roster.to_string().contains("\"band\""),
-        "no band outside combat: {roster}"
+        roster.to_string().contains("\"band\""),
+        "the band outside combat too: {roster}"
     );
     let f = fight(t).await;
     assert!(
@@ -1481,6 +1496,8 @@ fn snapshot_of(state: CombatState, roster: BTreeMap<String, Member>) -> Snapshot
             name: "DM name".into(),
             public_name: "Public".into(),
         }),
+        answered: vec![],
+        feed: vec![],
     }
 }
 
@@ -2645,7 +2662,12 @@ fn combatant_in<'a>(view: &'a Value, id: &str) -> &'a Value {
 }
 
 fn state_of(view: &Value) -> CombatState {
-    serde_json::from_value(view["state"].clone()).unwrap()
+    // 0.3.3: the DM view has none of the player's side's numbers, so their combatants don't read back whole.
+    let mut v = view["state"].clone();
+    if let Some(list) = v["combatants"].as_array_mut() {
+        list.retain(|c| c.get("hp").is_some());
+    }
+    serde_json::from_value(v).unwrap()
 }
 
 fn slots_left(view: &Value, id: &str, level: u8) -> u64 {
@@ -2847,7 +2869,8 @@ async fn spells_in_combat(t: &Table) {
         st.effects
     );
 
-    // Casting is the DM's: a player gets the one 404, whatever they send.
+    // A malformed cast or a DM-only spell action: a player gets the one 404 (0.3.3: players cast for their own PC,
+    // further down; never zones, stat block actions or binding).
     for action in [
         "cast_spell",
         "apply_cast",
@@ -3033,4 +3056,430 @@ async fn spells_in_combat(t: &Table) {
 async fn spells_cast_in_combat_with_their_slots_and_nothing_reaches_players() {
     let dir = tempfile::tempdir().unwrap();
     spells_in_combat(&memory_table(dir.path()).await).await;
+}
+
+// 0.3.3: the DM's screen and the player's screen. The DM never gets a player character's (or a player creature's)
+// HP or resources: not in the combat view, a write's answer, the feed, the log, the export, the roster cards or the
+// sheet view, and the DM's stream hears nothing of a change only the player sees. Players cast from their own
+// character; a cast with an effect reaches the DM, a heal between players doesn't.
+
+/// `n` appears in `text` as a whole number (not inside an id or a timestamp).
+fn has_number(text: &str, n: i64) -> bool {
+    let needle = n.to_string();
+    let bytes = text.as_bytes();
+    text.match_indices(&needle).any(|(i, _)| {
+        let before = i.checked_sub(1).map(|j| bytes[j]);
+        let after = bytes.get(i + needle.len()).copied();
+        !before.is_some_and(|b| b.is_ascii_alphanumeric() || b == b'.')
+            && !after.is_some_and(|b| b.is_ascii_alphanumeric() || b == b'.')
+    })
+}
+
+/// The keys a player's combatant may never carry to the DM.
+const PLAYER_PRIVATE: [&str; 8] = [
+    "hp",
+    "life",
+    "spell_slots",
+    "resources",
+    "abilities",
+    "pending_concentration",
+    "stats",
+    "casting",
+];
+
+fn assert_no_player_numbers(view: &Value, players_side: &[&str], numbers: &[i64], what: &str) {
+    let text = view.to_string();
+    for n in numbers {
+        assert!(!has_number(&text, *n), "{what}: {n} reached the DM: {text}");
+    }
+    if let Some(list) = view["state"]["combatants"].as_array() {
+        for c in list.iter().filter(|c| {
+            c["id"]
+                .as_str()
+                .is_some_and(|id| players_side.contains(&id))
+        }) {
+            for k in PLAYER_PRIVATE {
+                assert!(
+                    c.get(k).is_none(),
+                    "{what}: {k} of {} reached the DM",
+                    c["id"]
+                );
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+async fn role_views(t: &Table) {
+    // A 2014 party (the bundled SRD 5.1 spells), the two players, a revealed owlbear.
+    let (status, party) =
+        t.dm.post(
+            "/api/parties",
+            json!({ "name": "Role Party", "ruleset": "dnd2014" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{party}");
+    let party = party["id"].as_str().unwrap().to_string();
+    join(&t.dm, &party, "Role Party", &t.player, "cbt-player", "Aria").await;
+    join(
+        &t.dm,
+        &party,
+        "Role Party",
+        &t.member2,
+        "cbt-member2",
+        "Bran",
+    )
+    .await;
+    let e = ok(
+        &t.dm,
+        "POST",
+        &format!("/api/parties/{party}/encounters"),
+        json!({ "name": "Bridge", "publicName": "Bridge" }),
+    )
+    .await;
+    let enc = e["id"].as_str().unwrap().to_string();
+    ok(
+        &t.dm,
+        "POST",
+        &format!("/api/encounters/{enc}/creatures"),
+        json!({ "elementId": OWLBEAR_2014, "dmLabel": "Bear", "publicName": "Owlbear", "hidden": false }),
+    )
+    .await;
+    let dm_view = ok(
+        &t.dm,
+        "POST",
+        &format!("/api/encounters/{enc}/start"),
+        json!({ "requestId": request_id() }),
+    )
+    .await;
+    let combat = dm_view["id"].as_str().unwrap().to_string();
+    let bear = find_by_label(&dm_view, "Bear");
+    let aria = pc_of(&dm_view, &t.player.id);
+    let bran = pc_of(&dm_view, &t.member2.id);
+    let aria_character = dm_view["characters"][&aria]["characterId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for (who, id, n) in [
+        (&t.dm, &bear, 12),
+        (&t.player, &aria, 16),
+        (&t.member2, &bran, 9),
+    ] {
+        act_ok(
+            who,
+            &combat,
+            "set_initiative",
+            json!({ "id": id, "roll": typed(n) }),
+        )
+        .await;
+    }
+    act_ok(&t.dm, &combat, "start", json!({})).await;
+
+    // The DM's damage is a prompt; the player answers with the sheet's HP (numbers the DM must never see).
+    let numbers = [4321_i64, 8765, 1234];
+    let mut dm_sub = t.state.hub.subscribe(&t.dm.id, "s-dm-roles", None);
+    let v = act_ok(
+        &t.dm,
+        &combat,
+        "damage",
+        json!({ "target": aria, "parts": [{ "amount": typed(13), "damage_type": "bludgeoning" }] }),
+    )
+    .await;
+    assert_eq!(v["prompts"][0]["status"], "open", "{v}");
+    assert_eq!(v["prompts"][0]["amount"], 13);
+    let (_, mine) = t.player.get(&format!("/api/combats/{combat}")).await;
+    let prompt = mine["me"][0]["prompts"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    act_ok(
+        &t.player,
+        &combat,
+        "resolve_prompt",
+        json!({ "promptId": prompt, "applied": true, "hp": { "current": 4321, "max": 8765, "temp": 1234 } }),
+    )
+    .await;
+    let (_, mine) = t.player.get(&format!("/api/combats/{combat}")).await;
+    assert_eq!(
+        mine["me"][0]["hp"]["current"], 4321,
+        "the player's own numbers"
+    );
+    let (_, dm) = t.dm.get(&format!("/api/combats/{combat}")).await;
+    assert_no_player_numbers(&dm, &[&aria, &bran], &numbers, "the DM view");
+    let answered = dm["prompts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == prompt.as_str())
+        .unwrap_or_else(|| panic!("{dm}"));
+    assert_eq!(answered["status"], "accepted");
+    let aria_entry = combatant_in(&dm, &aria);
+    assert_eq!(aria_entry["down"], false);
+    assert_eq!(aria_entry["life_state"], "alive");
+    assert!(
+        aria_entry.get("band").is_some(),
+        "the DM sees the band: {aria_entry}"
+    );
+    assert!(
+        aria_entry.get("ac").is_some(),
+        "the DM resolves attacks against it"
+    );
+    assert!(combatant_in(&dm, &bear)["hp"]["max"].as_i64().is_some());
+    // A DM write on a player's number is refused.
+    for (action, args) in [
+        ("set_hp", json!({ "id": aria, "current": 1 })),
+        ("death_save", json!({ "id": aria, "roll": typed(12) })),
+        (
+            "adjust_slot",
+            json!({ "id": aria, "level": 1, "delta": -1 }),
+        ),
+    ] {
+        let (status, out) = act(&t.dm, &combat, action, args).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{action}: {out}");
+    }
+    // A player's own roll moves nothing the DM sees: the DM's stream hears nothing.
+    drain(&mut dm_sub);
+    act_ok(
+        &t.player,
+        &combat,
+        "roll",
+        json!({ "id": aria, "label": "Perception", "roll": { "d20": typed(17) } }),
+    )
+    .await;
+    assert!(
+        combat_events(&drain(&mut dm_sub)).is_empty(),
+        "a private write tells the DM nothing"
+    );
+
+    // Players cast. Fireball on the owlbear: the DM sees the cast and rolls the owlbear's save.
+    let v = act_ok(
+        &t.player,
+        &combat,
+        "cast_spell",
+        json!({ "caster": aria, "spellKey": FIREBALL_2014, "slot": 3, "targets": [bear], "dc": 15 }),
+    )
+    .await;
+    assert!(v.get("state").is_none(), "a player gets the projection");
+    let (_, dm) = t.dm.get(&format!("/api/combats/{combat}")).await;
+    let cast = dm["state"]["casts"][0].clone();
+    assert_eq!(cast["spec"]["dc"], 15, "{dm}");
+    assert!(
+        dm["feed"].to_string().contains("Fireball"),
+        "the DM's feed shows the cast: {}",
+        dm["feed"]
+    );
+    let row =
+        json!({ "cast": cast["id"], "target": bear, "roll": { "kind": "typed", "total": 4 } });
+    let (status, _) = act(&t.player, &combat, "resolve_cast_row", row.clone()).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "the owlbear's save is the DM's"
+    );
+    act_ok(&t.dm, &combat, "resolve_cast_row", row).await;
+    // The player's own cast, on the Play tab: its rows and the amounts to roll.
+    let (_, mine) = t.player.get(&format!("/api/combats/{combat}")).await;
+    let own = &mine["myCasts"][0];
+    assert_eq!(own["spell"], "Fireball", "{mine}");
+    assert_eq!(own["delivery"], "save");
+    assert_eq!(own["needs_apply"], true, "{own}");
+    assert_eq!(own["amounts"][0]["kind"], "damage");
+    act_ok(
+        &t.player,
+        &combat,
+        "apply_cast",
+        json!({ "cast": cast["id"], "amounts": [{ "kind": "typed", "total": 20 }] }),
+    )
+    .await;
+    let (_, dm) = t.dm.get(&format!("/api/combats/{combat}")).await;
+    let bear_hp = combatant_in(&dm, &bear)["hp"].clone();
+    assert!(
+        bear_hp["current"].as_i64() < bear_hp["max"].as_i64(),
+        "{bear_hp}"
+    );
+    // Aria's next turn (Fireball spent her action).
+    for _ in 0..3 {
+        act_ok(&t.dm, &combat, "next_turn", json!({})).await;
+    }
+    let (_, dm) = t.dm.get(&format!("/api/combats/{combat}")).await;
+    // Cure Wounds on Bran: between players, nothing for the DM; Bran gets the heal prompt.
+    let feed_before = dm["feed"].clone();
+    act_ok(
+        &t.player,
+        &combat,
+        "cast_spell",
+        json!({ "caster": aria, "spellKey": "ID_PHB_SPELL_CURE_WOUNDS", "slot": 1, "targets": [bran],
+                "amounts": [{ "kind": "typed", "total": 7 }], "mod": 3 }),
+    )
+    .await;
+    let (_, bran_view) = t.member2.get(&format!("/api/combats/{combat}")).await;
+    assert!(
+        bran_view["me"][0]["prompts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["kind"] == "heal" && p["amount"] == 7),
+        "{bran_view}"
+    );
+    let (_, dm) = t.dm.get(&format!("/api/combats/{combat}")).await;
+    assert_eq!(
+        dm["feed"], feed_before,
+        "a private cast leaves the DM's feed alone"
+    );
+    assert!(!dm.to_string().contains("Cure Wounds"), "{dm}");
+    // Bless from the sheet (its element id): the curated SRD row applies, the DM sees the chips on both PCs and the
+    // concentration, never a ruling.
+    for _ in 0..3 {
+        act_ok(&t.dm, &combat, "next_turn", json!({})).await;
+    }
+    act_ok(
+        &t.player,
+        &combat,
+        "cast_spell",
+        json!({ "caster": aria, "spellKey": "ID_PHB_SPELL_BLESS", "slot": 1, "targets": [aria, bran] }),
+    )
+    .await;
+    let (_, dm) = t.dm.get(&format!("/api/combats/{combat}")).await;
+    let blessed: Vec<&str> = dm["state"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["name"] == "Bless")
+        .filter_map(|e| e["target"].as_str())
+        .collect();
+    assert!(
+        blessed.contains(&aria.as_str()) && blessed.contains(&bran.as_str()),
+        "Bless lands on both: {}",
+        dm["state"]["effects"]
+    );
+    assert_eq!(combatant_in(&dm, &aria)["concentration"], true);
+    assert!(
+        !dm["feed"].to_string().contains("ruling_needed"),
+        "a curated spell is no ruling: {}",
+        dm["feed"]
+    );
+    // A cast that isn't theirs, or a spell not in their content.
+    let (status, _) = act(
+        &t.player,
+        &combat,
+        "cast_spell",
+        json!({ "caster": bran, "spellKey": FIREBALL_2014, "slot": 3, "targets": [bear] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, out) = act(
+        &t.player,
+        &combat,
+        "cast_spell",
+        json!({ "caster": aria, "spellKey": "ID_NO_SUCH_SPELL", "slot": 1, "targets": [bear] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
+
+    // The log, the export, the roster and the sheet view: none of the player's numbers either.
+    let (status, log) = t.dm.get(&format!("/api/combats/{combat}/log")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_no_player_numbers(&log, &[], &numbers, "the log");
+    assert!(!log.to_string().contains("Cure Wounds"), "{log}");
+    let export = act_ok(&t.dm, &combat, "export", json!({})).await;
+    assert_no_player_numbers(&export, &[], &numbers, "the export");
+    let exported: CombatState = serde_json::from_value(export["state"].clone()).unwrap();
+    let a = exported.combatant(&CombatantId::new(aria.clone())).unwrap();
+    assert_eq!(
+        a.hp,
+        Hp::default(),
+        "the export still reads back, without the HP"
+    );
+    let (_, roster) = t.dm.get(&format!("/api/parties/{party}/roster")).await;
+    assert_no_player_numbers(&roster, &[], &numbers, "the roster");
+    assert!(
+        !roster.to_string().contains("\"hpMax\""),
+        "no HP on the DM's roster: {roster}"
+    );
+    let (status, sheet) =
+        t.dm.post(
+            &format!(
+                "/api/parties/{party}/members/{}/{aria_character}/view/snapshot",
+                t.player.id
+            ),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{sheet}");
+    for k in sheet["snapshot"]["play"].as_object().unwrap().keys() {
+        assert!(
+            crate::parties::DM_SHEET_PLAY.contains(&k.as_str()),
+            "{k} of the sheet reached the DM"
+        );
+    }
+    assert!(sheet["snapshot"]["stats"].get("hpMax").is_none());
+    assert!(sheet["snapshot"]["spellcasting"].get("slots").is_none());
+    assert!(
+        sheet["card"]["stats"].get("hp").is_none(),
+        "{}",
+        sheet["card"]
+    );
+    act_ok(&t.dm, &combat, "end", json!({})).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_dm_never_sees_the_players_numbers_and_players_cast() {
+    let dir = tempfile::tempdir().unwrap();
+    role_views(&memory_table(dir.path()).await).await;
+}
+
+// 0.3.3: no stale cards after an import that runs as a job. The RPC refreshes the account's cards when the job
+// starts; the job refreshes them again when it ends, so the DM's roster hears of it.
+async fn cards_after_a_job(t: &Table) {
+    let (_, roster) = t.dm.get(&format!("/api/parties/{}/roster", t.party)).await;
+    let character = roster["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["ownerId"] == t.player.id.as_str())
+        .unwrap_or_else(|| panic!("{roster}"))["characterId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // Forget the card first: `job_start` itself refreshes no card, so only the job's own refresh at its end brings it
+    // back.
+    let hub = std::sync::Arc::clone(&t.state.hub);
+    let (o, c) = (t.player.id.clone(), character.clone());
+    tokio::task::spawn_blocking(move || hub.cards.forget(&o, &c))
+        .await
+        .unwrap();
+    let (status, out) = t
+        .player
+        .rpc(
+            "job_start",
+            json!({ "command": "update_indexes", "args": {} }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let job = out["jobId"].as_str().unwrap().to_string();
+    let mut ended = false;
+    for _ in 0..2400 {
+        let (_, s) = t.player.rpc("job_status", json!({ "jobId": job })).await;
+        if s["state"] != "running" {
+            ended = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(ended, "the job ended");
+    let mut back = false;
+    for _ in 0..200 {
+        if t.state.hub.cards.get(&t.player.id, &character).is_some() {
+            back = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(back, "the card is read again when the job ends");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_import_job_refreshes_the_party_cards_when_it_ends() {
+    let dir = tempfile::tempdir().unwrap();
+    cards_after_a_job(&memory_table(dir.path()).await).await;
 }

@@ -159,6 +159,7 @@ impl Combat {
                 label: entry.label.clone(),
             },
             text: format!("Undid {}", entry.label),
+            private: false,
         }];
         self.push_log(Author::Dm, &dm);
         Ok(Events { dm, players })

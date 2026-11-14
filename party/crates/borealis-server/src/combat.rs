@@ -656,7 +656,16 @@ pub(crate) struct Snapshot {
     /// Companions on the PCs' sheets not yet in the fight: `{ pc, key, name, hp, ac, initiative, elementId }`.
     pub offers: Vec<Value>,
     pub encounter: Option<EncounterInfo>,
+    /// The latest answered damage and heal prompts (0.3.3: the DM sees that a prompt was accepted or declined),
+    /// newest first, with whether it was applied.
+    pub answered: Vec<(Prompt, bool)>,
+    /// The latest log entries the DM may see ([`party_combat::visibility::dm_may_see`]), newest first: what the
+    /// players did that the DM sees or resolves (a cast with an effect, its rows), and the DM's own.
+    pub feed: Vec<Value>,
 }
+
+/// How many answered prompts and log entries the DM view carries.
+const DM_RECENT: usize = 30;
 
 async fn snapshot(conn: &mut AnyConnection, combat: Loaded, cards: &CardCache) -> Res<Snapshot> {
     let roster = roster(conn, &combat.id).await?;
@@ -664,6 +673,10 @@ async fn snapshot(conn: &mut AnyConnection, combat: Loaded, cards: &CardCache) -
     let prompts = open_prompts(conn, &combat.id).await?;
     let rolls = recent_rolls(conn, &combat.id).await?;
     let encounter = encounter_info(conn, combat.encounter.as_deref()).await?;
+    let answered = answered_prompts(conn, &combat.id).await?;
+    let feed = dm_feed(conn, &combat.id, &combat.state, None, DM_RECENT)
+        .await?
+        .0;
     Ok(Snapshot {
         combat,
         roster,
@@ -671,7 +684,100 @@ async fn snapshot(conn: &mut AnyConnection, combat: Loaded, cards: &CardCache) -
         rolls,
         offers,
         encounter,
+        answered,
+        feed,
     })
+}
+
+async fn answered_prompts(conn: &mut AnyConnection, combat: &str) -> Res<Vec<(Prompt, bool)>> {
+    let rows = sqlx::query(
+        "SELECT id, combatant_id, owner_id, kind, payload_json, created_at, applied FROM combat_prompts
+         WHERE combat_id = $1 AND kind <> 'roll' AND resolved_at IS NOT NULL
+         ORDER BY resolved_at DESC, id DESC LIMIT $2",
+    )
+    .bind(combat)
+    .bind(i64::try_from(DM_RECENT).unwrap_or(30))
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            let payload: String = row.try_get(4)?;
+            let applied: Option<i64> = row.try_get(6)?;
+            Ok((
+                Prompt {
+                    id: row.try_get(0)?,
+                    combatant: row.try_get(1)?,
+                    owner: row.try_get(2)?,
+                    kind: row.try_get(3)?,
+                    payload: serde_json::from_str(&payload).map_err(internal)?,
+                    at: row.try_get(5)?,
+                },
+                applied.unwrap_or(0) != 0,
+            ))
+        })
+        .collect()
+}
+
+/// The DM's log, newest first, without what the DM may not see (0.3.3): up to `limit` entries older than `before`,
+/// and whether there are more. Private entries are skipped, not counted.
+async fn dm_feed(
+    conn: &mut AnyConnection,
+    combat: &str,
+    state: &CombatState,
+    before: Option<i64>,
+    limit: usize,
+) -> Res<(Vec<Value>, bool)> {
+    let mut out = Vec::new();
+    let mut cursor: Option<(i64, i64)> = before.map(|b| (b, -1));
+    loop {
+        let rows = match cursor {
+            None => {
+                sqlx::query(
+                    "SELECT seq, n, at, author, event_json FROM combat_log WHERE combat_id = $1
+                     ORDER BY seq DESC, n DESC LIMIT 200",
+                )
+                .bind(combat)
+                .fetch_all(&mut *conn)
+                .await?
+            }
+            Some((seq, n)) => {
+                sqlx::query(
+                    "SELECT seq, n, at, author, event_json FROM combat_log WHERE combat_id = $1
+                     AND (seq < $2 OR (seq = $2 AND n < $3)) ORDER BY seq DESC, n DESC LIMIT 200",
+                )
+                .bind(combat)
+                .bind(seq)
+                .bind(n)
+                .fetch_all(&mut *conn)
+                .await?
+            }
+        };
+        let fetched = rows.len();
+        for row in &rows {
+            let seq: i64 = row.try_get(0)?;
+            let n: i64 = row.try_get(1)?;
+            cursor = Some((seq, n));
+            let raw: String = row.try_get(4)?;
+            let Ok(event) = serde_json::from_str::<DmEvent>(&raw) else {
+                continue;
+            };
+            if !party_combat::visibility::dm_may_see(state, &event) {
+                continue;
+            }
+            if out.len() == limit {
+                return Ok((out, true));
+            }
+            out.push(json!({
+                "seq": seq,
+                "at": row.try_get::<i64, _>(2)?,
+                "author": row.try_get::<String, _>(3)?,
+                "event": event,
+            }));
+        }
+        if fetched < 200 {
+            return Ok((out, false));
+        }
+    }
 }
 
 // The projection.
@@ -734,9 +840,10 @@ fn prompt_json(p: &Prompt, dm: bool) -> Value {
     out
 }
 
-/// Fields of `player_view_of` a player never needs from someone else's combatant or a creature: the account behind
-/// a PC, and a creature's initiative (a follower's would give away its hidden leader's).
-const NOT_FOR_OTHERS: [&str; 3] = ["kind", "initiative", "initiative_bonus"];
+/// Every key of a DM creature's row in a player's `order` (0.3.3): its public name and health band only. No stat
+/// block, AC, HP, conditions, abilities or legendary counts (this narrows D20 b, "revealed = full stat block").
+#[cfg(test)]
+pub(crate) const CREATURE_FOR_PLAYERS: [&str; 5] = ["id", "kind", "name", "mine", "band"];
 
 fn player_view(snap: &Snapshot, account: &str, characters: &BTreeSet<String>) -> Value {
     let s = &snap.combat.state;
@@ -765,6 +872,17 @@ fn player_view(snap: &Snapshot, account: &str, characters: &BTreeSet<String>) ->
         .filter_map(|id| s.combatant(id))
         .map(|c| {
             let own = mine(c);
+            // 0.3.3, the user: "players do not need to know much about monsters in their tab only the name and if
+            // bloodied". A DM creature is its public name and its health band, nothing else ([`CREATURE_FOR_PLAYERS`]).
+            if !party_combat::visibility::player_owned(c) {
+                return json!({
+                    "id": c.id.0,
+                    "kind": "creature",
+                    "name": c.public_name,
+                    "mine": false,
+                    "band": c.hp.band(),
+                });
+            }
             let mut entry = json!({
                 "id": c.id.0,
                 "kind": if c.is_character() { "character" } else { "creature" },
@@ -786,20 +904,16 @@ fn player_view(snap: &Snapshot, account: &str, characters: &BTreeSet<String>) ->
             {
                 entry["ownerId"] = json!(owner.0);
             }
-            // D6: another player's PC is a band, never its numbers. Everything else seen is in full (D20 b).
-            if own || !c.is_character() {
-                if let Some(Value::Object(mut v)) = player_view_of(s, &c.id) {
-                    if !own {
-                        for key in NOT_FOR_OTHERS {
-                            v.remove(key);
-                        }
-                    }
-                    entry["view"] = Value::Object(v);
+            // D6: another player's PC (or creature) is a band, never its numbers. Mine are in full, with the stat
+            // block of my creatures.
+            if own {
+                if let Some(v) = player_view_of(s, &c.id) {
+                    entry["view"] = v;
                 }
-            }
-            if !c.is_character() {
-                entry["statBlock"] =
-                    public_block(snap.roster.get(&c.id.0).and_then(|m| m.block.as_ref()));
+                if !c.is_character() {
+                    entry["statBlock"] =
+                        public_block(snap.roster.get(&c.id.0).and_then(|m| m.block.as_ref()));
+                }
             }
             entry
         })
@@ -824,6 +938,9 @@ fn player_view(snap: &Snapshot, account: &str, characters: &BTreeSet<String>) ->
                 "hp": { "current": c.hp.current, "max": c.hp.max, "temp": c.hp.temp },
                 "life": c.life,
                 "absent": c.absent,
+                // 0.3.3: in the fight (the DM started it with this PC, and hasn't set it absent): the Play tab shows
+                // its combat section only for these.
+                "inInitiative": !c.absent,
                 "concentration": c.concentration.as_ref().map(|k| k.name.clone()),
                 "concentrationChecks": c.pending_concentration.iter().map(|k| json!({ "dc": k.dc })).collect::<Vec<_>>(),
                 "prompts": snap.prompts.iter()
@@ -846,6 +963,17 @@ fn player_view(snap: &Snapshot, account: &str, characters: &BTreeSet<String>) ->
         "showEnemyTurn": s.settings.show_enemy_turn,
         "order": order,
         "me": me,
+        // 0.3.3: this player's own open casts (their PC's and its creatures'): the attack rows they roll and the
+        // amounts they apply (`visibility::player_own_casts`).
+        "myCasts": party_combat::visibility::player_own_casts(s, account)
+            .into_iter()
+            .filter(|c| {
+                c.get("caster")
+                    .and_then(Value::as_str)
+                    .and_then(|id| s.combatant(&CombatantId::new(id)))
+                    .is_some_and(mine)
+            })
+            .collect::<Vec<_>>(),
         // Saves this player's PCs are asked for (0.3.2): only their own rows, the caster anonymized while hidden.
         "casts": party_combat::visibility::player_casts(s, account)
             .into_iter()
@@ -880,17 +1008,38 @@ fn dm_view(
                 }),
             );
         } else {
+            // 0.3.3: a creature a player controls is the player's; its stat block (its HP, its uses) isn't the DM's.
+            let players = snap
+                .combat
+                .state
+                .combatant(&CombatantId::new(id.clone()))
+                .is_some_and(party_combat::visibility::player_owned);
             creatures.insert(
                 id.clone(),
                 json!({
                     "encounterCreatureId": m.encounter_creature,
-                    "statBlock": m.block,
+                    "statBlock": if players { &Value::Null } else { m.block.as_ref().unwrap_or(&Value::Null) },
                     "name": m.name,
                     "origin": m.origin.as_deref().map(|o| o.split(':').next().unwrap_or(o)),
                 }),
             );
         }
     }
+    // Open prompts, then the answered ones: the DM sees what it sent and whether the player took it, never the HP.
+    let mut prompts: Vec<Value> = snap
+        .prompts
+        .iter()
+        .map(|p| {
+            let mut v = prompt_json(p, true);
+            v["status"] = json!("open");
+            v
+        })
+        .collect();
+    prompts.extend(snap.answered.iter().map(|(p, applied)| {
+        let mut v = prompt_json(p, true);
+        v["status"] = json!(if *applied { "accepted" } else { "declined" });
+        v
+    }));
     json!({
         "id": snap.combat.id,
         "partyId": snap.combat.party,
@@ -898,15 +1047,60 @@ fn dm_view(
         "seq": snap.combat.seq,
         "status": snap.combat.state.status,
         "live": snap.combat.status == "live",
-        "state": snap.combat.state,
+        // 0.3.3: the players' numbers left out (`dm_view_of`).
+        "state": party_combat::visibility::dm_view_of(&snap.combat.state),
         "creatures": creatures,
         "characters": characters,
-        "prompts": snap.prompts.iter().map(|p| prompt_json(p, true)).collect::<Vec<_>>(),
-        "offers": snap.offers,
+        "prompts": prompts,
+        // A sheet's companions, without the sheet's numbers.
+        "offers": snap.offers.iter().map(|o| json!({ "pc": o["pc"], "key": o["key"], "name": o["name"], "ac": o["ac"], "elementId": o["elementId"] })).collect::<Vec<_>>(),
+        "feed": snap.feed,
         "undo": undo,
         "startedAt": snap.combat.started_at,
         "endedAt": snap.combat.ended_at,
     })
+}
+
+/// What the DM's live event is compared by (0.3.3): the DM view without its `seq`, undo labels and member/online
+/// details. A write that changes only the player's side (a sync of a PC's HP from the sheet, a player's private cast)
+/// leaves it as it was, so the DM's stream hears nothing of it.
+fn dm_hash(snap: &Snapshot) -> String {
+    let members = BTreeSet::new();
+    let mut v = dm_view(snap, &[], &members, &|_| false);
+    if let Some(o) = v.as_object_mut() {
+        o.remove("seq");
+    }
+    view_hash(&v)
+}
+
+/// Compare the DM view with the hash kept for the DM (in `combat_views`, as the DM's own row): `true` when it
+/// changed (and the DM's stream should hear of it).
+async fn refresh_dm_view(conn: &mut AnyConnection, snap: &Snapshot, dm: &str) -> Res<bool> {
+    let hash = dm_hash(snap);
+    let kept =
+        sqlx::query("SELECT seq, hash FROM combat_views WHERE combat_id = $1 AND viewer_id = $2")
+            .bind(&snap.combat.id)
+            .bind(dm)
+            .fetch_optional(&mut *conn)
+            .await?;
+    let (seq, old): (i64, Option<String>) = match kept {
+        Some(r) => (r.try_get(0)?, Some(r.try_get(1)?)),
+        None => (0, None),
+    };
+    if old.as_deref() == Some(hash.as_str()) {
+        return Ok(false);
+    }
+    sqlx::query(
+        "INSERT INTO combat_views (combat_id, viewer_id, seq, hash) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (combat_id, viewer_id) DO UPDATE SET seq = excluded.seq, hash = excluded.hash",
+    )
+    .bind(&snap.combat.id)
+    .bind(dm)
+    .bind(seq + 1)
+    .bind(&hash)
+    .execute(&mut *conn)
+    .await?;
+    Ok(true)
 }
 
 /// The hash a player's projection is compared by.
@@ -932,12 +1126,23 @@ async fn members_of(
 }
 
 async fn undo_labels(conn: &mut AnyConnection, combat: &str) -> sqlx::Result<Vec<String>> {
-    let rows =
-        sqlx::query("SELECT label FROM combat_journal WHERE combat_id = $1 ORDER BY seq DESC")
-            .bind(combat)
-            .fetch_all(&mut *conn)
-            .await?;
-    rows.iter().map(|r| r.try_get(0)).collect()
+    let rows = sqlx::query(
+        "SELECT label, author FROM combat_journal WHERE combat_id = $1 ORDER BY seq DESC",
+    )
+    .bind(combat)
+    .fetch_all(&mut *conn)
+    .await?;
+    // 0.3.3: a player's step is "player action" for the DM (its label could tell a slot or HP was changed).
+    rows.iter()
+        .map(|r| {
+            let author: String = r.try_get(1)?;
+            if author == "player" {
+                Ok("player action".to_string())
+            } else {
+                r.try_get(0)
+            }
+        })
+        .collect()
 }
 
 async fn dm_id(conn: &mut AnyConnection, party: &str) -> sqlx::Result<Option<String>> {
@@ -951,7 +1156,27 @@ async fn dm_id(conn: &mut AnyConnection, party: &str) -> sqlx::Result<Option<Str
 
 /// Compare each player's projection with the hash kept for them, and move the `pseq` of those whose view changed.
 /// Answers the players to tell, with their new `pseq`.
-async fn refresh_views(conn: &mut AnyConnection, snap: &Snapshot) -> Res<Vec<(String, i64)>> {
+/// Each told player's account, new `pseq` and characters in the initiative ([`in_initiative`]).
+type Told = Vec<(String, i64, Vec<String>)>;
+
+/// The caller's member characters that are in this fight (0.3.3): a PC of theirs that isn't removed or absent. The
+/// Play tab shows its combat section only for these.
+pub(crate) fn in_initiative(
+    state: &CombatState,
+    roster: &BTreeMap<String, Member>,
+    account: &str,
+    characters: &BTreeSet<String>,
+) -> Vec<String> {
+    state
+        .combatants
+        .iter()
+        .filter(|c| !c.removed && !c.absent && c.owner() == Some(account))
+        .filter_map(|c| roster.get(&c.id.0).and_then(|m| m.character.clone()))
+        .filter(|ch| characters.contains(ch))
+        .collect()
+}
+
+async fn refresh_views(conn: &mut AnyConnection, snap: &Snapshot) -> Res<Told> {
     let Some(dm) = dm_id(conn, &snap.combat.party).await? else {
         return Ok(vec![]);
     };
@@ -988,7 +1213,8 @@ async fn refresh_views(conn: &mut AnyConnection, snap: &Snapshot) -> Res<Vec<(St
         .bind(&hash)
         .execute(&mut *conn)
         .await?;
-        tell.push((owner, seq + 1));
+        let fighting = in_initiative(&snap.combat.state, &snap.roster, &owner, &characters);
+        tell.push((owner, seq + 1, fighting));
     }
     Ok(tell)
 }
@@ -1127,7 +1353,7 @@ struct Done {
     replayed: bool,
     ended: bool,
     nothing: bool,
-    tell: Vec<(String, i64)>,
+    tell: Told,
     dm: Option<String>,
     /// What the DM's answer shows at once (0.3.2): a summon spell's options (the toast with [Add creature]) and a
     /// ruling's question.
@@ -1168,6 +1394,29 @@ fn refusal(writer: Writer, e: &CombatError) -> Fail {
         CombatError::Ended => Fail::Player(StatusCode::CONFLICT, "The combat has ended."),
         CombatError::Dice(_) | CombatError::Invalid(_) => {
             Fail::Player(StatusCode::BAD_REQUEST, "That roll isn't valid.")
+        }
+        // 0.3.3: a player casting for their own PC hears why it can't, in fixed words (never a DM rule's name).
+        CombatError::Unavailable(u) => {
+            use party_combat::Unavailable as U;
+            Fail::Player(
+                StatusCode::CONFLICT,
+                match u {
+                    U::Defeated | U::Down => "You're down.",
+                    U::Incapacitated => "Incapacitated: not now.",
+                    U::ActionSpent => "Action spent.",
+                    U::BonusActionSpent => "Bonus action spent.",
+                    U::ReactionSpent => "Reaction spent.",
+                    U::NeedsRecharge => "Needs recharge.",
+                    U::NoUses(_) => "No uses left.",
+                    U::NoSlot(_) => "No slot of that level left.",
+                    U::SlotTooLow(_) => "That slot is too low for this spell.",
+                    U::NeedsSlot(_) => "Choose a slot.",
+                    U::BonusSpellRule => "Bonus action spell this turn: only an action cantrip.",
+                    U::OneSlotPerTurn => "A spell slot was already used this turn.",
+                    U::OwnTurn => "Not on its own turn.",
+                    _ => "Not available now.",
+                },
+            )
         }
         _ => Fail::Api(not_found()),
     }
@@ -1228,6 +1477,13 @@ fn acting_pcs(state: &CombatState, cmd: &Command, account: &str) -> BTreeSet<Com
         &serde_json::to_value(cmd).unwrap_or(Value::Null),
         &mut named,
     );
+    // A cast's id names its caster (0.3.3: a player applies or drops their own cast).
+    let casters: Vec<String> = named
+        .iter()
+        .filter_map(|s| state.casts.iter().find(|c| c.id.0 == *s))
+        .map(|c| c.caster.0.clone())
+        .collect();
+    named.extend(casters);
     let mut out = BTreeSet::new();
     for id in named {
         let id = CombatantId::new(id);
@@ -1314,7 +1570,14 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
             }) && c.state.combatant(pc).is_some_and(|x| !x.removed)
         };
         let ok = match (&w.op, own.as_deref()) {
-            (Op::Resolve { .. }, Some(id)) => member_pc(&CombatantId::new(id)),
+            // A prompt for the PC, or (0.3.3) for a creature it controls.
+            (Op::Resolve { .. }, Some(id)) => {
+                let cid = CombatantId::new(id);
+                match c.state.combatant(&cid).map(|x| &x.controller) {
+                    Some(Controller::Player { pc }) => member_pc(pc),
+                    _ => member_pc(&cid),
+                }
+            }
             (Op::Engine(cmd), _) => {
                 let pcs = acting_pcs(&c.state, cmd, &w.account);
                 party_combat::engine::player_may(&c.state, &w.account, cmd)
@@ -1633,35 +1896,75 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
                 let kind: String = row.try_get(0)?;
                 let payload: Value =
                     serde_json::from_str(&row.try_get::<String, _>(1)?).map_err(internal)?;
-                let hp = match hp {
-                    Some(h) => Some(Hp {
-                        current: h.current,
-                        max: h.max,
-                        temp: h.temp,
-                    }),
-                    None => {
-                        let m = roster_now.get(&id);
-                        let owner = m.and_then(|m| m.owner.clone()).unwrap_or_default();
-                        let character = m.and_then(|m| m.character.clone()).unwrap_or_default();
-                        let hub = Arc::clone(&state.hub);
-                        tokio::task::spawn_blocking(move || hub.cards.get(&owner, &character))
-                            .await
-                            .map_err(internal)?
-                            .as_ref()
-                            .and_then(card_hp)
+                let amount = payload
+                    .get("amount")
+                    .and_then(Value::as_i64)
+                    .and_then(|a| i32::try_from(a).ok())
+                    .unwrap_or(0);
+                let critical_hit = payload
+                    .get("criticalHit")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let creature = c
+                    .state
+                    .combatant(&CombatantId::new(id.clone()))
+                    .is_some_and(|x| !x.is_character());
+                if creature {
+                    // 0.3.3: a creature the player controls takes the DM's damage (or healing) when its player
+                    // accepts: the player's own write, the amount as the DM's resistances left it.
+                    let target = CombatantId::new(id.clone());
+                    let cmd = if kind == "damage" {
+                        Command::Damage {
+                            target,
+                            parts: vec![party_combat::command::DamagePart {
+                                amount: party_dice::DiceInput::typed(amount),
+                                damage_type: None,
+                            }],
+                            magical: false,
+                            apply_qualified: false,
+                            critical_hit,
+                        }
+                    } else {
+                        Command::Heal {
+                            target,
+                            amount: party_dice::DiceInput::typed(amount),
+                        }
+                    };
+                    let mut die = c.die;
+                    let o = apply(&c.state, &actor, &cmd, &mut die)
+                        .map_err(|e| refusal(w.writer, &e))?;
+                    out.state = o.state;
+                    out.die = die;
+                    out.dm = o.events.dm;
+                    out.players = o.events.players;
+                    out.journal = Some("apply prompt");
+                }
+                let hp = if creature {
+                    None
+                } else {
+                    match hp {
+                        Some(h) => Some(Hp {
+                            current: h.current,
+                            max: h.max,
+                            temp: h.temp,
+                        }),
+                        None => {
+                            let m = roster_now.get(&id);
+                            let owner = m.and_then(|m| m.owner.clone()).unwrap_or_default();
+                            let character = m.and_then(|m| m.character.clone()).unwrap_or_default();
+                            let hub = Arc::clone(&state.hub);
+                            tokio::task::spawn_blocking(move || hub.cards.get(&owner, &character))
+                                .await
+                                .map_err(internal)?
+                                .as_ref()
+                                .and_then(card_hp)
+                        }
                     }
                 };
                 if let Some(hp) = hp {
-                    let damage = (kind == "damage").then(|| DamageTaken {
-                        amount: payload
-                            .get("amount")
-                            .and_then(Value::as_i64)
-                            .and_then(|a| i32::try_from(a).ok())
-                            .unwrap_or(0),
-                        critical_hit: payload
-                            .get("criticalHit")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false),
+                    let damage = (kind == "damage").then_some(DamageTaken {
+                        amount,
+                        critical_hit,
                     });
                     let cmd = Command::SyncPlayerHp {
                         id: CombatantId::new(id.clone()),
@@ -1877,7 +2180,15 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
     };
     let snap = snapshot(&mut tx, after, &state.hub.cards).await?;
     let tell = refresh_views(&mut tx, &snap).await?;
-    let dm = dm_id(&mut tx, &party).await?;
+    // 0.3.3: the DM hears of a write only when the DM view changed (a sync of a PC's HP, a player's private cast or
+    // their creature's numbers change nothing the DM sees), or when the DM wrote (their other tabs).
+    let dm = match dm_id(&mut tx, &party).await? {
+        Some(d) => {
+            let changed = refresh_dm_view(&mut tx, &snap, &d).await?;
+            (changed || w.writer == Writer::Dm).then_some(d)
+        }
+        None => None,
+    };
     tx.commit().await?;
     let notices = if w.writer == Writer::Player {
         Vec::new()
@@ -1917,11 +2228,11 @@ async fn announce(state: &AppState, combat: &str, done: &Done) {
             &json!({ "party": done.party, "combat": combat, "seq": done.seq }),
         );
     }
-    for (owner, pseq) in &done.tell {
+    for (owner, pseq, characters) in &done.tell {
         state.hub.deliver(
             owner,
             COMBAT_EVENT,
-            &json!({ "party": done.party, "combat": combat, "pseq": pseq }),
+            &json!({ "party": done.party, "combat": combat, "pseq": pseq, "characters": characters }),
         );
     }
     if done.ended {
@@ -2524,11 +2835,11 @@ pub async fn party_combat(
             )));
         }
         let mut conn = state.db.pool().acquire().await?;
-        if role(&mut conn, &user.id, &party).await?.is_none() {
+        let Some(who) = role(&mut conn, &user.id, &party).await? else {
             return Err(Fail::Api(ApiError::NotFound(
                 "There is no such party, invite or character here.".into(),
             )));
-        }
+        };
         let id: Option<String> =
             sqlx::query("SELECT id FROM combats WHERE party_id = $1 AND status = 'live'")
                 .bind(&party)
@@ -2536,7 +2847,16 @@ pub async fn party_combat(
                 .await?
                 .map(|r| r.try_get(0))
                 .transpose()?;
-        Ok(json!({ "combat": id }))
+        // 0.3.3: a player's characters in the fight, for the Play tab's combat section.
+        let mut fighting = Vec::new();
+        if let (Some(id), Role::Player) = (&id, who) {
+            if let Some(c) = load(&mut conn, id).await? {
+                let characters = my_characters(&mut conn, &user.id, &party).await?;
+                let roster = roster(&mut conn, id).await?;
+                fighting = in_initiative(&c.state, &roster, &user.id, &characters);
+            }
+        }
+        Ok(json!({ "combat": id, "characters": fighting }))
     };
     match run.await {
         Ok(v) => Json(v).into_response(),
@@ -2587,26 +2907,19 @@ pub async fn log(
             return Err(Fail::Api(not_found()));
         }
         let limit = q.limit.unwrap_or(100).clamp(1, 200);
-        let rows = sqlx::query(
-            "SELECT seq, at, author, event_json FROM combat_log WHERE combat_id = $1 AND seq < $2
-             ORDER BY seq DESC, n DESC LIMIT $3",
+        // 0.3.3: never the players' numbers or their private casts (`dm_may_see`).
+        let state_now = load(&mut conn, &combat)
+            .await?
+            .ok_or_else(|| Fail::Api(not_found()))?
+            .state;
+        let (entries, more) = dm_feed(
+            &mut conn,
+            &combat,
+            &state_now,
+            q.before,
+            usize::try_from(limit).unwrap_or(100),
         )
-        .bind(&combat)
-        .bind(q.before.unwrap_or(i64::MAX))
-        .bind(limit + 1)
-        .fetch_all(&mut *conn)
         .await?;
-        let more = i64::try_from(rows.len()).unwrap_or(0) > limit;
-        let mut entries = Vec::new();
-        for row in rows.iter().take(usize::try_from(limit).unwrap_or(100)) {
-            let event: String = row.try_get(3)?;
-            entries.push(json!({
-                "seq": row.try_get::<i64, _>(0)?,
-                "at": row.try_get::<i64, _>(1)?,
-                "author": row.try_get::<String, _>(2)?,
-                "event": serde_json::from_str::<Value>(&event).map_err(internal)?,
-            }));
-        }
         Ok(json!({ "entries": entries, "more": more }))
     };
     match run.await {
@@ -2619,19 +2932,16 @@ pub async fn log(
 const NOT_OFFERED: [&str; 2] = ["add_combatant", "sync_player_hp"];
 /// The server's own actions only the DM may take. What else a player may do is the engine's call (their PC and the
 /// creatures it controls), checked again by the server for membership.
-const DM_ACTIONS: [&str; 12] = [
+const DM_ACTIONS: [&str; 8] = [
     "undo",
     "end",
     "add_creature",
     "remove_creature",
     "export",
-    // Spells and stat block actions (0.3.2): the DM's. A player answers only their own PC's row (resolve_cast_row).
-    "cast_spell",
-    "apply_cast",
-    "cancel_cast",
+    // Zones and stat block actions are the DM's. Since 0.3.3 a player casts for their own PC and its creatures
+    // (`cast_spell`, `apply_cast`, `cancel_cast`, `standard_action`, as the engine's `player_may` allows).
     "apply_zone",
     "perform_statblock",
-    "standard_action",
     "bind_to_concentration",
 ];
 
@@ -2816,7 +3126,7 @@ async fn act_inner(
             )
         }
         "cast_spell" => {
-            let command = cast_command(state, user, combat, &args).await?;
+            let command = cast_command(state, user, combat, &args, player).await?;
             (Op::Engine(Box::new(command)), None)
         }
         "apply_zone" | "perform_statblock" => {
@@ -2943,12 +3253,21 @@ fn spellcasting(
 /// it; a DM's own `spec` (an ad hoc effect) is used as sent, after the engine's closed schema reads it. Economy,
 /// slots, targets and the edition rules are the engine's checks when it applies the command (`force` overrides
 /// them, never a missing slot).
+///
+/// A player's `cast_spell` (0.3.3) is for their own PC or a creature it controls (the engine's `player_may`; the
+/// server checks membership in the write): always compiled from the **player's own** content, never a client
+/// `spec`, `precast` or `force`. A PC has no stat block, so its numbers come from the player's sheet with the cast:
+/// `dc`, `attack`, `mod` and `cantripTier`; its slot is spent on the sheet, never in the combat.
 async fn cast_command(
     state: &AppState,
     user: &User,
     combat: &str,
     args: &Map<String, Value>,
+    player: bool,
 ) -> Res<Command> {
+    if player {
+        return player_cast_command(state, user, combat, args).await;
+    }
     let bad = |m: &str| Fail::Api(ApiError::Invalid(m.to_string()));
     let st = {
         let mut conn = state.db.pool().acquire().await?;
@@ -3019,6 +3338,164 @@ async fn cast_command(
     }
     serde_json::from_value(Value::Object(cmd))
         .map_err(|e| Fail::Api(ApiError::Invalid(format!("Not a valid cast_spell: {e}"))))
+}
+
+/// The sheet numbers a player sends with a PC's cast, each in range.
+fn sheet_number(args: &Map<String, Value>, key: &str, lo: i64, hi: i64) -> Res<Option<i64>> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_i64()
+            .filter(|n| (lo..=hi).contains(n))
+            .map(Some)
+            .ok_or(Fail::Player(
+                StatusCode::BAD_REQUEST,
+                "That cast isn't valid.",
+            )),
+    }
+}
+
+/// [`cast_command`] for a player. Anything malformed or not theirs is the one 404; a spell that isn't in their content
+/// is a fixed 400.
+async fn player_cast_command(
+    state: &AppState,
+    user: &User,
+    combat: &str,
+    args: &Map<String, Value>,
+) -> Res<Command> {
+    let (st, dm) = {
+        let mut conn = state.db.pool().acquire().await?;
+        let loaded = load(&mut conn, combat)
+            .await?
+            .ok_or_else(|| Fail::Api(not_found()))?;
+        let dm = dm_id(&mut conn, &loaded.party).await?;
+        (loaded.state, dm)
+    };
+    let caster = args
+        .get("caster")
+        .and_then(Value::as_str)
+        .filter(|id| id_ok(id))
+        .and_then(|id| st.combatant(&CombatantId::new(id)))
+        .filter(|c| {
+            !c.removed
+                && party_combat::engine::account_of(&st, c).as_deref() == Some(user.id.as_str())
+        })
+        .ok_or_else(|| Fail::Api(not_found()))?;
+    let ability = match args.get("ability") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_str()
+                .and_then(|key| caster.abilities.iter().find(|a| a.key == key))
+                .ok_or_else(|| Fail::Api(not_found()))?,
+        ),
+    };
+    let link = ability.and_then(|a| a.spell.as_ref());
+    let key = match args.get("spellKey") {
+        None | Some(Value::Null) => link.and_then(|l| l.key.clone()),
+        Some(v) => Some(
+            v.as_str()
+                .filter(|k| !k.is_empty() && k.len() <= 200)
+                .ok_or_else(|| Fail::Api(not_found()))?
+                .to_string(),
+        ),
+    };
+    let dc = sheet_number(args, "dc", 1, 40)?;
+    let attack = sheet_number(args, "attack", -10, 30)?;
+    let modifier = sheet_number(args, "mod", -10, 15)?;
+    let tier = sheet_number(args, "cantripTier", 1, 4)?;
+    let fallback = ability.and_then(|a| a.mech.as_deref());
+    let spec = match &key {
+        Some(key) => {
+            // Any installed content (the user, 2026-11-14): the DM's own definition of the spell when the DM has one
+            // (a DM-defined or confirmed draft), else the player's (the curated SRD rows, their own); no definition
+            // is a ruling the DM confirms.
+            let mut lib = crate::spells::library(state, &user.id).await?;
+            if let Some(dm) = dm.as_deref().filter(|d| *d != user.id) {
+                let dm_lib = crate::spells::library(state, dm).await?;
+                if dm_lib
+                    .mechanics(crate::spells::ruleset_of(st.edition), key)
+                    .is_some_and(|r| r.origin != "srd")
+                {
+                    lib = dm_lib;
+                }
+            }
+            // The same spell by name in the party's edition when this copy has no mechanics; only then a ruling.
+            let key = lib
+                .same_spell_with_mechanics(key, crate::spells::ruleset_of(st.edition))
+                .unwrap_or_else(|| key.clone());
+            lib.compile(st.edition, &key, caster, link, fallback)
+        }
+        .map_err(|_| Fail::Player(StatusCode::BAD_REQUEST, "That spell can't be cast here."))?,
+        None => fallback.cloned(),
+    };
+    // Nobody defined it: a draft from the player's own copy (5etools data), unreviewed, before a ruling.
+    let spec = match (spec, &key) {
+        (Some(s), Some(k)) if s.origin == party_combat::spell::MechOrigin::Ruling => {
+            match crate::spells::draft_mech(
+                state,
+                &user.id,
+                k,
+                crate::spells::ruleset_of(st.edition),
+            )
+            .await?
+            {
+                Some(mut mech) => {
+                    mech.key.clone_from(k);
+                    mech.edition = st.edition;
+                    Some(party_combat::spell::CastSpec {
+                        v: party_combat::spell::MECH_VERSION,
+                        origin: party_combat::spell::MechOrigin::Draft { key: k.clone() },
+                        mech,
+                        ..s
+                    })
+                }
+                None => Some(s),
+            }
+        }
+        (s, _) => s,
+    };
+    let Some(mut spec) = spec else {
+        if key.is_none() {
+            return Err(Fail::Api(not_found()));
+        }
+        return Err(Fail::Player(
+            StatusCode::BAD_REQUEST,
+            "That spell isn't in your content.",
+        ));
+    };
+    if caster.is_character() {
+        // The sheet's numbers (a PC has no stat block in the fight).
+        spec.dc = dc.and_then(|n| u32::try_from(n).ok()).or(spec.dc);
+        spec.attack = attack.and_then(|n| i32::try_from(n).ok()).or(spec.attack);
+        if let Some(m) = modifier.and_then(|n| i32::try_from(n).ok()) {
+            spec.modifier = m;
+        }
+        if let Some(t) = tier.and_then(|n| u8::try_from(n).ok()) {
+            spec.cantrip_tier = t;
+        }
+    }
+    let mut cmd = Map::new();
+    for k in [
+        "caster",
+        "ability",
+        "slot",
+        "targets",
+        "rows",
+        "amounts",
+        "crit_amounts",
+        "choices",
+    ] {
+        if let Some(v) = args.get(k) {
+            cmd.insert(k.into(), v.clone());
+        }
+    }
+    cmd.insert("command".into(), json!("cast_spell"));
+    cmd.insert("id".into(), json!(new_id()));
+    cmd.insert(
+        "spec".into(),
+        serde_json::to_value(&spec).map_err(internal)?,
+    );
+    serde_json::from_value(Value::Object(cmd)).map_err(|_| Fail::Api(not_found()))
 }
 
 /// Cast an encounter's precast spells (`encounter_casts`) into a combat being set up: each with its real effect,
@@ -3276,6 +3753,11 @@ async fn export(state: &AppState, user: &User, combat: &str) -> Res<Value> {
     let mut log = Vec::new();
     for row in rows {
         let event: String = row.try_get(2)?;
+        // 0.3.3: the DM's file never holds the players' numbers or private casts.
+        let event: DmEvent = serde_json::from_str(&event).map_err(internal)?;
+        if !party_combat::visibility::dm_may_see(&c.state, &event) {
+            continue;
+        }
         log.push(party_combat::combat::LogEntry {
             seq: u64::try_from(row.try_get::<i64, _>(0)?).unwrap_or(0),
             author: match row.try_get::<String, _>(1)?.as_str() {
@@ -3283,12 +3765,19 @@ async fn export(state: &AppState, user: &User, combat: &str) -> Res<Value> {
                 "system" => Author::System,
                 _ => Author::Dm,
             },
-            event: serde_json::from_str(&event).map_err(internal)?,
+            event,
         });
     }
     let roster = roster(&mut conn, combat).await?;
+    let players_side: BTreeSet<String> = c
+        .state
+        .combatants
+        .iter()
+        .filter(|x| party_combat::visibility::player_owned(x))
+        .map(|x| x.id.0.clone())
+        .collect();
     let engine = Combat {
-        state: c.state,
+        state: party_combat::visibility::redacted_for_dm(&c.state),
         die: c.die,
         journal: VecDeque::new(),
         log,
@@ -3304,9 +3793,14 @@ async fn export(state: &AppState, user: &User, combat: &str) -> Res<Value> {
                 json!({ "ownerId": m.owner, "characterId": m.character }),
             );
         } else {
+            let block = if players_side.contains(&id) {
+                None
+            } else {
+                m.block
+            };
             creatures.insert(
                 id,
-                json!({ "encounterCreatureId": m.encounter_creature, "statBlock": m.block, "name": m.name, "origin": m.origin }),
+                json!({ "encounterCreatureId": m.encounter_creature, "statBlock": block, "name": m.name, "origin": m.origin }),
             );
         }
     }

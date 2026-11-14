@@ -291,8 +291,12 @@ fn assert_d6(member: &Value) {
         .keys()
         .map(String::as_str)
         .collect();
-    // No combat before 0.4.x: no health band either (D6, the user's choice: during combat only).
-    for hidden in ["stats", "ownerId", "online", "readAt", "band"] {
+    // 0.3.3 (the user, 2026-11-14): the other members always see the health band, never a number.
+    assert!(
+        keys.contains(&"band"),
+        "no band for another member: {member}"
+    );
+    for hidden in ["stats", "ownerId", "online", "readAt"] {
         assert!(
             !keys.contains(&hidden),
             "{hidden} shown to another member: {member}"
@@ -303,10 +307,7 @@ fn assert_d6(member: &Value) {
     }
     let text = member.to_string();
     assert!(
-        !text.contains("armorClass")
-            && !text.contains("hpMax")
-            && !text.contains("unhurt")
-            && !text.contains("bloodied"),
+        !text.contains("armorClass") && !text.contains("hpMax") && !text.contains("\"hp\""),
         "{text}"
     );
 }
@@ -407,16 +408,17 @@ async fn live_flow(state: AppState) {
         assert!(events.parties(Duration::ZERO).await.is_empty(), "{name}");
     }
 
-    // Bloodied, outside combat: the DM hears; the players see no band, so they hear nothing and their sequence stays.
+    // Bloodied, outside combat: the DM hears, and so do the other members (0.3.3: the band is always theirs to see).
     let to_bloodied = u32::try_from(max - 1 - max / 2).unwrap();
     damage(&alice, &a, to_bloodied).await;
     assert!(dm_events.party(ARRIVES).await.is_some());
     assert!(
-        bob_events.parties(QUIET).await.is_empty(),
-        "a band change reached a player outside combat"
+        bob_events.party(ARRIVES).await.is_some(),
+        "a band change reaches the other members"
     );
     let (seen, seq) = member(&bob, &party, &a).await;
-    assert_eq!(seq, bob_seq);
+    assert!(seq > bob_seq, "the players' sequence moved for a new band");
+    assert_eq!(seen["band"], "bloodied", "{seen}");
     assert_d6(&seen);
     for (name, events) in [
         ("carol", &mut carol_events),
@@ -515,9 +517,8 @@ async fn live_flow(state: AppState) {
     assert_eq!(e.payload["kind"], "roster");
     dm_events.parties(QUIET).await;
     damage(&alice, &a, 100).await;
-    // Down: only the DM hears (the owner made the change, and no player sees a band outside combat).
+    // Down: the DM and the party's players hear (0.3.3: a new band); the removed member doesn't.
     assert!(dm_events.party(ARRIVES).await.is_some());
-    assert!(alice_events.parties(QUIET).await.is_empty());
     assert!(
         bob_events.parties(QUIET).await.is_empty(),
         "a removed member still hears the party"

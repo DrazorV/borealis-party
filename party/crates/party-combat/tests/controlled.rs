@@ -294,15 +294,31 @@ fn the_player_acts_only_for_their_own_pc_and_its_creatures() {
 #[test]
 fn a_summons_hp_lives_in_combat_state() {
     let mut combat = fight();
+    // 0.3.3: the player owns their creature's numbers. The DM's damage is a prompt to the player...
     let ev = dm(&mut combat, hit("owl", 1, None));
+    assert!(c(&combat, "owl").life.is_alive());
+    assert!(ev.players.iter().any(|p| matches!(
+        p,
+        PlayerEvent::DamagePrompt { id: who, owner, amount: 1, .. } if who == &id("owl") && owner == ALICE
+    )));
+    assert!(
+        ev.dm.iter().all(|e| !e.private),
+        "the DM knows what it sent"
+    );
+    // ...and the player's own damage applies, privately.
+    let ev = combat.execute(&alice(), &hit("owl", 1, None)).unwrap();
     assert!(c(&combat, "owl").life.is_dead());
     assert!(
         !ev.players
             .iter()
             .any(|p| matches!(p, PlayerEvent::DamagePrompt { .. })),
-        "prompts are for PCs only"
+        "the player applies their own damage"
     );
     assert!(ev.players.contains(&PlayerEvent::Changed { id: id("owl") }));
+    assert!(ev
+        .dm
+        .iter()
+        .any(|e| e.private && matches!(e.kind, DmEventKind::Damage { .. })));
 }
 
 #[test]

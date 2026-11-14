@@ -458,22 +458,22 @@ async fn members(
             (Card::default(), "unreadable")
         };
         let mine = owner == user.id;
-        let viewer = if role == Role::Dm {
-            Viewer::Dm
-        } else if mine {
+        let viewer = if mine {
             Viewer::Owner
-        } else {
-            Viewer::Member {
+        } else if role == Role::Dm {
+            Viewer::Dm {
                 in_combat: in_combat(&party.id),
             }
+        } else {
+            Viewer::Member
         };
         let mut member = serde_json::Map::new();
         member.insert("characterId".into(), json!(character));
         member.insert("ownerName".into(), json!(owner_name));
-        if !matches!(viewer, Viewer::Member { .. }) {
+        if role == Role::Dm || mine {
             member.insert("ownerId".into(), json!(owner));
         }
-        if viewer == Viewer::Dm {
+        if role == Role::Dm {
             member.insert("online".into(), json!(state.hub.online(&owner)));
         }
         member.insert("mine".into(), json!(mine));
@@ -565,7 +565,11 @@ async fn dm_offers(state: &AppState, party: &str) -> ApiResult<Vec<Value>> {
                 offer.insert("inviteId".into(), json!(invite));
                 offer.insert("ownerName".into(), json!(owner_name));
                 offer.insert("characterId".into(), json!(character));
-                offer.extend(card_view_for(Viewer::Dm, &card, file_state));
+                offer.extend(card_view_for(
+                    Viewer::Dm { in_combat: false },
+                    &card,
+                    file_state,
+                ));
                 offer.insert("createdAt".into(), json!(created));
                 Value::Object(offer)
             },
@@ -1615,17 +1619,31 @@ pub(crate) async fn publish(
     id: Option<&str>,
     players: bool,
 ) {
+    publish_to(state, party, kind, id, true, players).await;
+}
+
+/// [`publish`] to the DM only when `dm` (0.3.3: a change the DM doesn't see moves nothing the DM can count).
+pub(crate) async fn publish_to(
+    state: &AppState,
+    party: &str,
+    kind: &str,
+    id: Option<&str>,
+    dm_too: bool,
+    players: bool,
+) {
     if !crate::config::features().parties {
         return;
     }
     match audience(state, party).await {
         Ok(Some((dm, owners))) => {
-            let (dm_seq, players_seq) = state.hub.bump(party, players);
-            state.hub.deliver(
-                &dm,
-                PARTY_EVENT,
-                &json!({ "party": party, "pseq": dm_seq, "kind": kind, "id": id }),
-            );
+            let (dm_seq, players_seq) = state.hub.bump_for(party, dm_too, players);
+            if let Some(dm_seq) = dm_seq {
+                state.hub.deliver(
+                    &dm,
+                    PARTY_EVENT,
+                    &json!({ "party": party, "pseq": dm_seq, "kind": kind, "id": id }),
+                );
+            }
             if let Some(seq) = players_seq {
                 let payload = json!({ "party": party, "pseq": seq, "kind": kind, "id": id });
                 for owner in owners {
@@ -1733,8 +1751,20 @@ pub(crate) async fn refresh_card(
         .await;
     match read {
         Ok(Some((snapshot, changed))) => {
-            if changed.dm {
-                publish(state, party, "card", Some(character), changed.players).await;
+            // 0.3.3: the DM hears of a card only when the DM's view of it changed (never for HP alone), the other
+            // members when theirs did (the band in combat).
+            if changed.dm || changed.players {
+                publish_to(
+                    state,
+                    party,
+                    "card",
+                    Some(character),
+                    changed.dm,
+                    changed.players,
+                )
+                .await;
+            }
+            if changed.stored {
                 crate::combat::card_changed(state, party, owner, character).await;
             }
             Some(snapshot)
@@ -1868,6 +1898,14 @@ pub fn card_target(command: &str, args: &serde_json::Map<String, Value>) -> Card
     }
 }
 
+/// The account's content changed outside an RPC command (a homebrew save or delete, share links added): its party
+/// cards are read again from its open workspace, so the DM's roster shows the new classes and numbers (0.3.3).
+pub(crate) async fn content_changed(state: &AppState, owner: &str) {
+    if let Some(workspace) = state.workspaces.loaded_now(owner) {
+        after_command(state, owner, &workspace, CardTarget::All).await;
+    }
+}
+
 /// After a command of `owner`'s worked (`rpc.rs`): refresh the cards it may have changed, and take a deleted
 /// character out of its party. Never fails the command.
 pub async fn after_command(
@@ -1966,9 +2004,66 @@ impl Drop for Viewing {
 /// What a view leaves out of upstream's snapshot: where the owner keeps things, and their library's own marks.
 const VIEW_HIDES: [&str; 5] = ["displayPath", "dirty", "vaultNote", "group", "favorite"];
 
+/// The keys of a sheet's `play` the DM's read-only view keeps (0.3.3, an allowlist: "DM should never know players
+/// HP and resources"): speeds, exhaustion, Heroic Inspiration, defenses, senses, advantages, save DCs, masteries, the
+/// concentration spells it knows, and whether it concentrates now. Never hit points, hit dice, slots, resources,
+/// trackers, toggles, free casts, Wild Shape or the player's notes.
+pub(crate) const DM_SHEET_PLAY: &[&str] = &[
+    "speeds",
+    "exhaustion",
+    "inspiration",
+    "defenses",
+    "senses",
+    "advantages",
+    "initiativeAdvantage",
+    "saveDcs",
+    "masteries",
+    "concentrationSpells",
+    "compatibility",
+    "concentration",
+];
+
+/// A sheet snapshot as the DM may read it (0.3.3): `play` cut to [`DM_SHEET_PLAY`] (concentration as yes/no), no
+/// maximum HP, no spell slot tables, and companions without their hit points.
+pub(crate) fn dm_sheet(snapshot: &mut Value) {
+    let Some(map) = snapshot.as_object_mut() else {
+        return;
+    };
+    if let Some(Value::Object(play)) = map.get_mut("play") {
+        let concentrating = play.get("concentration").is_some_and(|c| !c.is_null());
+        play.retain(|k, _| DM_SHEET_PLAY.contains(&k.as_str()));
+        play.insert("concentration".into(), json!(concentrating));
+    }
+    if let Some(Value::Object(stats)) = map.get_mut("stats") {
+        stats.remove("hpMax");
+    }
+    if let Some(Value::Object(casting)) = map.get_mut("spellcasting") {
+        casting.remove("slots");
+        casting.remove("multiclassSlots");
+        if let Some(Value::Array(classes)) = casting.get_mut("classes") {
+            for c in classes.iter_mut().filter_map(Value::as_object_mut) {
+                c.remove("pact");
+            }
+        }
+    }
+    let no_hp = |c: &mut serde_json::Map<String, Value>| {
+        c.remove("hp");
+        c.remove("hpNote");
+    };
+    if let Some(Value::Object(c)) = map.get_mut("companion") {
+        no_hp(c);
+    }
+    if let Some(Value::Array(list)) = map.get_mut("companions") {
+        list.iter_mut()
+            .filter_map(Value::as_object_mut)
+            .for_each(no_hp);
+    }
+}
+
 /// `POST /api/parties/{party}/members/{owner}/{character}/view/snapshot`: the DM reads a member character, as its
 /// owner has it now, without opening a session or writing anything. Owner and character come from the member row;
-/// nothing else of the request is used.
+/// nothing else of the request is used. Since 0.3.3, while the party is in a combat it has none of the sheet's hit
+/// points or resources ([`dm_sheet`]).
 pub async fn view_snapshot(
     State(state): State<AppState>,
     user: User,
@@ -2011,12 +2106,23 @@ pub async fn view_snapshot(
             map.remove(key);
         }
     }
+    // 0.3.3: during a combat the DM reads no HP or resources of the sheet (the build, yes).
+    let fighting = in_combat(&party);
+    if fighting {
+        dm_sheet(&mut snapshot);
+    }
     crate::rpc::scrub_paths(&mut snapshot);
     let (card, file_state) = cards(&state, &[(owner, character)])
         .await?
         .pop()
         .unwrap_or((Card::default(), "unreadable"));
-    let mut card = card_view_for(Viewer::Dm, &card, file_state);
+    let mut card = card_view_for(
+        Viewer::Dm {
+            in_combat: fighting,
+        },
+        &card,
+        file_state,
+    );
     card.insert("ownerName".into(), json!(owner_name));
     Ok(Json(json!({
         "snapshot": snapshot,

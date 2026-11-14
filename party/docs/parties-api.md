@@ -53,7 +53,7 @@ An outsider never gets 403 for a party: always 404.
 
 **Member** (a roster card, always made by one projection, `card_view_for` in `hub.rs`)
 
-What you see depends on who you are (plan 3.5, decision D6):
+What you see depends on who you are (plan 3.5, decision D6 as the user set it on 2026-11-14; see `role-views.md`):
 
 | Field | DM of the party | Owner | Another member |
 |---|---|---|---|
@@ -61,8 +61,8 @@ What you see depends on who you are (plan 3.5, decision D6):
 | `name`, `level`, `classes`, `ruleset`, `state` | yes | yes | yes |
 | `ownerId` | yes | yes | no |
 | `online` (the owner has the app open) | yes | no | no |
-| `stats`, `readAt` | yes | yes | no |
-| `band` (during a combat only; absent otherwise, and always in 0.2.x) | no | no | yes |
+| `stats`, `readAt` | outside a combat: all; in a combat: `stats` without `hp`, `hpMax`, `tempHp` (concentration yes/no), no `readAt` | yes | no |
+| `band` | in a combat only | no | yes, always (in and out of combat) |
 
 ```json
 {
@@ -84,7 +84,7 @@ What you see depends on who you are (plan 3.5, decision D6):
     "exhaustion": 0, "concentration": "Bless", "inspiration": false
   },
   "readAt": 1762970000,          // when `stats` were read, seconds
-  "band": "bloodied",            // another member, in a combat only: "unhurt" | "bloodied" (at or under half) | "down" | null
+  "band": "bloodied",            // another member (always), the DM in a combat: "unhurt" | "bloodied" (at or under half) | "down" | null
   "build": null,
   "joinedAt": 1762970000
 }
@@ -231,7 +231,7 @@ Party events come on the account's existing event stream (no second connection),
 | `party://content-changed` | `{ account, kind, command }` | (0.2.3) Your own content changed and the change is complete: refetch the content lists. `kind`: `packs`, `indexes` or `fivetools`; `command`: what changed it (`remove_packs` for the bulk removal, `add_share_links`, a job's command when it ends). Only your own streams get it |
 
 - **Two audiences per party,** each with its own `pseq`: the DM's, and the players'. The players' only moves when what
-  players see changes (a member joins or leaves, a rename, a name, class or level; a health band only in a combat), never for an invite,
+  players see changes (a member joins or leaves, a rename, a name, class or level; a health band), never for an invite,
   an offer or damage that keeps the same band. `GET /api/parties/{id}` and `…/roster` answer with your audience's
   `pseq`; ignore an event whose `pseq` isn't newer.
 - **Who hears** is read from the database when the event is sent: a removed member or a deleted party's players hear

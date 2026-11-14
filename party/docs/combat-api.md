@@ -7,6 +7,10 @@ players see a **projection** of it in which hidden creatures don't exist. The co
 `plans/borealis-party-roadmap-2026-11-12.md` 3.0, 3.5, 3.6 (M-combat), 3.7, 4.4, 4.4b, and the user's decisions D5 a,
 D6, D7 a, D16, D20 b, D21, D23 b, D32 a, D43, D44, D45.
 
+**0.3.3:** the DM view no longer holds any HP or resource of a PC or a player-controlled creature, players cast
+from their own character, and the log, export, roster and sheet view follow. See `party/docs/role-views.md`, which
+takes precedence over this file where they differ.
+
 Everything is JSON. Times are seconds since the epoch. Every response carries `Cache-Control: no-store, private`.
 Errors have the server's usual shape `{ "code", "message" }`. The routes exist only while parties are switched on in
 the server config (`BOREALIS__FEATURES__PARTIES`).

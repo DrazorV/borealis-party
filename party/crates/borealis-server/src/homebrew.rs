@@ -1764,8 +1764,10 @@ fn with_element(
 }
 
 /// After a save: the account's open pages reload their content lists.
-fn after_change(state: &AppState, user: &User) {
+async fn after_change(state: &AppState, user: &User) {
     crate::content_events::changed(&state.hub, &user.id, "packs", "homebrew");
+    // And the party cards (0.3.3: the DM's roster was stale after a homebrew change).
+    crate::parties::content_changed(state, &user.id).await;
 }
 
 /// Every pack of the account.
@@ -1940,7 +1942,7 @@ pub async fn update_pack(
             Ok(())
         })
         .await?;
-    after_change(state, user);
+    after_change(state, user).await;
     Ok(pack.detail())
 }
 
@@ -1966,6 +1968,7 @@ pub async fn delete_pack(state: &AppState, user: &User, pack_id: &str) -> ApiRes
         .await?;
     remove_pack_file(&dir, &pack.id)?;
     crate::content_events::changed(&state.hub, &user.id, "packs", "homebrew");
+    crate::parties::content_changed(state, &user.id).await;
     Ok(json!({ "deleted": pack.id }))
 }
 
@@ -2115,7 +2118,7 @@ pub async fn save(
     if !report.ok {
         return Err(refused(&report, Some(&xml)));
     }
-    after_change(state, user);
+    after_change(state, user).await;
     let mut out = element_json(
         next.element(&id)
             .ok_or_else(|| ApiError::Internal("element".into()))?,
@@ -2171,7 +2174,7 @@ pub async fn delete_element(
     if !report.ok {
         return Err(refused(&report, None));
     }
-    after_change(state, user);
+    after_change(state, user).await;
     Ok(json!({ "deleted": element_id, "pack": next.summary() }))
 }
 

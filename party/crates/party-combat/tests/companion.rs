@@ -52,19 +52,33 @@ fn a_thin_companion_fights_like_anyone() {
     for _ in 0..5 {
         dm(&mut combat, Command::NextTurn);
     }
-    // Damage with unknown HP changes nothing and never panics; the DM sets HP when known.
-    dm(&mut combat, hit("t", 5, Some(DamageType::Fire)));
+    // Damage with unknown HP changes nothing and never panics; the player sets HP when known (0.3.3: a player's
+    // creature's numbers are the player's, so the DM's damage is a prompt the player applies).
+    let alice = Actor::Player {
+        account: ALICE.into(),
+    };
+    combat
+        .execute(&alice, &hit("t", 5, Some(DamageType::Fire)))
+        .unwrap();
     assert!(c(&combat, "t").life.is_alive());
-    dm(
-        &mut combat,
-        Command::SetHp {
-            id: id("t"),
-            current: 9,
-            max: Some(9),
-            temp: None,
-        },
-    );
-    dm(&mut combat, hit("t", 4, None));
+    combat
+        .execute(
+            &alice,
+            &Command::SetHp {
+                id: id("t"),
+                current: 9,
+                max: Some(9),
+                temp: None,
+            },
+        )
+        .unwrap();
+    let sent = dm(&mut combat, hit("t", 4, None));
+    assert_eq!(c(&combat, "t").hp.current, 9, "the DM's damage is a prompt");
+    assert!(sent.players.iter().any(|e| matches!(
+        e,
+        party_combat::PlayerEvent::DamagePrompt { owner, amount: 4, .. } if owner == ALICE
+    )));
+    combat.execute(&alice, &hit("t", 4, None)).unwrap();
     assert_eq!(c(&combat, "t").hp.current, 5);
     // Conditions, effects and concentration work.
     let mut spec = effect("", "t");
