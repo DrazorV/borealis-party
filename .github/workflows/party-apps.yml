@@ -35,6 +35,12 @@ on:
   push:
     tags: ["party-v*"]
   workflow_dispatch:
+    inputs:
+      only:
+        description: "Build only these apps (a check run; a tag push always builds all)"
+        type: choice
+        default: all
+        options: [all, ios, android, desktop]
 
 concurrency:
   group: party-apps-${{ github.ref }}
@@ -83,6 +89,7 @@ jobs:
 
   android:
     name: Android APK (${{ matrix.abi }})
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.only == 'all' || inputs.only == 'android' }}
     needs: version
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -115,6 +122,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust }}
+
+      # The same for Gradle's rust build task (see the iOS job).
+      - name: Stable Rust for Tauri's build scripts
+        run: party/ci/pin-stable-toolchain.sh
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -195,6 +206,7 @@ jobs:
 
   ios:
     name: iOS app
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.only == 'all' || inputs.only == 'ios' }}
     needs: version
     runs-on: macos-26
     timeout-minutes: 150
@@ -234,6 +246,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ steps.mode.outputs.rust }}
+
+      # Tauri's iOS build runs cargo inside Xcode's "Build Rust Code" phase with only the TAURI*, WRY*, CARGO_*,
+      # RUST_*, PATH and TMPDIR variables (tauri-cli mobile/mod.rs env_vars), so RUSTUP_TOOLCHAIN never reaches it and
+      # upstream's rust-toolchain.toml pin would win there (0.3.2's first iOS run failed downloading that pin). A
+      # rustup directory override beats the toolchain file and lives in ~/.rustup, not in the checkout; the check
+      # runs without RUSTUP_TOOLCHAIN, from where Xcode's phase runs cargo.
+      - name: Stable Rust for Tauri's build scripts
+        run: party/ci/pin-stable-toolchain.sh
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -331,6 +351,7 @@ jobs:
   # With the updater key the Windows installer and the AppImages are signed for the party feed (.sig beside each).
   desktop:
     name: Desktop (${{ matrix.name }})
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.only == 'all' || inputs.only == 'desktop' }}
     needs: version
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
