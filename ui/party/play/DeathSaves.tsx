@@ -10,6 +10,7 @@ import { DEATH_SAVE_OUTCOMES } from "../combat/shared/outcomeInputs";
 import type { D20Input } from "../combat/shared/types";
 import "../combat/shared/combat.css";
 import { useDigitalDiceHidden } from "./dicePrefs";
+import { DEATH_TOTAL, NO_TOTAL, deathOutcomeName } from "./outcomes";
 import "./quick-wins.css";
 
 /**
@@ -103,9 +104,12 @@ export function DeathSavesCard({ s }: { s: CharacterSnapshot }) {
   const state = dead ? "Dead" : stable ? "Stable" : "Dying";
   const roll = async (input: D20Input) => {
     let total: number;
-    if (input.kind === "typed") {
+    if (input.kind === "outcome") {
+      total = DEATH_TOTAL[input.outcome];
+      addRoll({ characterId: s.id, label: "Death save", total: NO_TOTAL, breakdown: `${deathOutcomeName(input.outcome)} at the table` });
+    } else if (input.kind === "typed") {
       total = input.total;
-      addRoll({ characterId: s.id, label: "Death save", total, breakdown: `${outcomeName(total)} at the table` });
+      addRoll({ characterId: s.id, label: "Death save", total, breakdown: "rolled at the table" });
     } else {
       const r = rollD20(0, "normal", currentDie());
       total = r.total;
@@ -144,11 +148,4 @@ export function DeathSavesCard({ s }: { s: CharacterSnapshot }) {
       </div>
     </section>
   );
-}
-
-/** The outcome a typed death save stands for, for the roll history. */
-function outcomeName(total: number): string {
-  if (total >= 20) return "Natural 20";
-  if (total <= 1) return "Natural 1";
-  return total >= 10 ? "Success" : "Failure";
 }

@@ -67,7 +67,8 @@ export function RollProvider({ characterId, children }: { characterId: string; c
   const answer = useCallback((input: D20Input) => {
     const a = asked;
     setAsked(null);
-    if (!a) return;
+    // The sheet is a number box (RollOrType): a pressed outcome never comes from it.
+    if (!a || input.kind === "outcome") return;
     if (a.kind === "dice") {
       if (input.kind === "app") { appDice(a.request, true); return; }
       const entry = addRoll({ characterId, label: a.request.label, total: input.total, breakdown: "rolled at the table" });

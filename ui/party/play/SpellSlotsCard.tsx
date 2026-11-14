@@ -12,6 +12,7 @@ import { passFail } from "../combat/shared/outcomeInputs";
 import type { D20Input } from "../combat/shared/types";
 import { answerConcentration, dropConcentrationChecks, useConcentrationCheck, type ConcentrationCheck } from "./concentration";
 import { useDigitalDiceHidden } from "./dicePrefs";
+import { NO_TOTAL } from "./outcomes";
 import { markShareable } from "./rolls/shareable";
 import "../combat/shared/combat.css";
 import "./quick-wins.css";
@@ -43,10 +44,13 @@ function SavePrompt({ check, modifier }: { check: ConcentrationCheck; modifier: 
   const label = `Concentration save, DC ${check.dc}`;
   const roll = async (input: D20Input) => {
     let saved: boolean;
-    if (input.kind === "typed") {
-      // An outcome button: the DC for Saved, one under it for Failed. Only the outcome means anything here.
+    if (input.kind === "outcome") {
+      // Saved or Failed, pressed at the table: the outcome itself, no number.
+      saved = input.outcome === "pass" || input.outcome === "nat20";
+      addRoll({ characterId: check.characterId, label, total: NO_TOTAL, breakdown: `${saved ? "Saved" : "Failed"} at the table` });
+    } else if (input.kind === "typed") {
       saved = input.total >= check.dc;
-      addRoll({ characterId: check.characterId, label, total: input.total, breakdown: `${saved ? "Saved" : "Failed"} at the table` });
+      addRoll({ characterId: check.characterId, label, total: input.total, breakdown: "rolled at the table" });
     } else {
       const r = rollD20(modifier, "normal", currentDie());
       saved = r.total >= check.dc;
@@ -65,7 +69,7 @@ function SavePrompt({ check, modifier }: { check: ConcentrationCheck; modifier: 
   return (
     <section className="combat-prompt bp-conc-save" role="alertdialog" aria-label={label}>
       <p className="combat-prompt-q">{label} <span className="muted">({check.damage} damage)</span></p>
-      <OutcomeButtons label="Concentration save" outcomes={passFail(check.dc)} onPick={(i) => void roll(i)}
+      <OutcomeButtons label="Concentration save" outcomes={passFail()} onPick={(i) => void roll(i)}
         rollLabel={`Roll for me (${mod})`} onRoll={hideApp ? undefined : () => void roll({ kind: "app", modifier, mode: "normal" })} />
       <Button small variant="ghost" onClick={() => answerConcentration(check.id)}>Not now</Button>
     </section>
