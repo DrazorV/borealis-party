@@ -17,7 +17,7 @@ use crate::model::{
 use crate::visibility::PlayerSummary;
 use party_dice::{
     resolve_d20, resolve_dice, roll_d20, D20Input, D20Result, DiceInput, DiceResult, DieRoller,
-    RollMode,
+    RollMode, TableOutcome,
 };
 use serde::{Deserialize, Serialize};
 
@@ -182,7 +182,22 @@ pub fn player_may(state: &CombatState, account: &str, cmd: &Command) -> bool {
             ..
         } => {
             !use_lr
-                && !matches!(roll, crate::command::RowRoll::Outcome { .. })
+                && match roll {
+                    // 0.3.5: their own save's result pressed at the table (saved or failed only).
+                    crate::command::RowRoll::Outcome { outcome } => {
+                        matches!(
+                            outcome,
+                            crate::model::RowOutcome::Saved | crate::model::RowOutcome::Failed
+                        ) && state.casts.iter().any(|c| {
+                            &c.id == cast
+                                && matches!(
+                                    c.spec.mech.delivery,
+                                    crate::spell::Delivery::Save { .. }
+                                )
+                        })
+                    }
+                    _ => true,
+                }
                 && state.casts.iter().any(|c| {
                     &c.id == cast
                         && c.rows.iter().any(|r| &r.target == target)
@@ -584,6 +599,7 @@ impl Cx<'_> {
                     .iter_mut()
                     .find(|a| &a.key == ability)
                     .ok_or_else(|| CombatError::UnknownAbility(ability.clone()))?;
+                let what = a.name.clone();
                 let r = a
                     .recharge
                     .as_mut()
@@ -591,7 +607,11 @@ impl Cx<'_> {
                 r.ready = *ready;
                 let n = self.name(id);
                 let state = if *ready { "ready" } else { "spent" };
-                self.ev(Some(id), K::RechargeSet, format!("{n}: {ability} {state}"));
+                self.ev(
+                    Some(id),
+                    K::RechargeSet,
+                    format!("{n}: recharge {what}: {state}"),
+                );
                 Ok(())
             }
             Command::SetLegendaryPool { pool, value } => {
@@ -2118,14 +2138,47 @@ impl Cx<'_> {
         else {
             return Err(CombatError::NotDying);
         };
-        let r = resolve_d20(roll, self.die)?;
-        self.report_d20(id, "Death save", &r);
-        let natural = r
-            .natural
-            .or_else(|| u32::try_from(r.total).ok().filter(|t| *t == 1 || *t == 20));
         let name = self.name(id);
-        let text = format!("{name} death save: {}", r.breakdown);
-        self.ev(Some(id), K::DeathSave { roll: r.clone() }, text);
+        // 0.3.5: an outcome pressed at the table is the result itself, with no number.
+        let (natural, success) = if let D20Input::Outcome { outcome } = roll {
+            let word = match outcome {
+                TableOutcome::Pass => "success",
+                TableOutcome::Fail => "failure",
+                TableOutcome::Nat20 => "natural 20",
+                TableOutcome::Nat1 => "natural 1",
+            };
+            self.ev(
+                Some(id),
+                K::DeathSave {
+                    roll: None,
+                    outcome: Some(*outcome),
+                },
+                format!("{name} death save: {word}"),
+            );
+            let natural = match outcome {
+                TableOutcome::Nat20 => Some(20),
+                TableOutcome::Nat1 => Some(1),
+                _ => None,
+            };
+            (natural, outcome.passed())
+        } else {
+            let r = resolve_d20(roll, self.die)?;
+            self.report_d20(id, "Death save", &r);
+            let natural = r
+                .natural
+                .or_else(|| u32::try_from(r.total).ok().filter(|t| *t == 1 || *t == 20));
+            let text = format!("{name} death save: {}", r.breakdown);
+            let success = r.total >= 10;
+            self.ev(
+                Some(id),
+                K::DeathSave {
+                    roll: Some(r),
+                    outcome: None,
+                },
+                text,
+            );
+            (natural, success)
+        };
         if natural == Some(20) {
             let c = &mut self.s.combatants[i];
             c.hp.current = 1;
@@ -2143,7 +2196,7 @@ impl Cx<'_> {
         }
         let (s, f) = if natural == Some(1) {
             (successes, failures + 2)
-        } else if r.total >= 10 {
+        } else if success {
             (successes + 1, failures)
         } else {
             (successes, failures + 1)
@@ -2325,18 +2378,37 @@ impl Cx<'_> {
         if self.s.combatants[i].pending_concentration.is_empty() {
             return Err(CombatError::NoPendingCheck);
         }
-        let r = resolve_d20(roll, self.die)?;
-        self.report_d20(id, "Concentration save", &r);
-        let check = self.s.combatants[i].pending_concentration.remove(0);
-        let kept = r.total >= check.dc as i32;
         let name = self.name(id);
-        let text = format!(
-            "{name} concentration save {} vs DC {}: {}",
-            r.total,
-            check.dc,
-            if kept { "kept" } else { "lost" }
+        let (r, outcome) = match roll {
+            D20Input::Outcome { outcome } => (None, Some(*outcome)),
+            _ => {
+                let r = resolve_d20(roll, self.die)?;
+                self.report_d20(id, "Concentration save", &r);
+                (Some(r), None)
+            }
+        };
+        let check = self.s.combatants[i].pending_concentration.remove(0);
+        let kept = match (&r, outcome) {
+            (Some(r), _) => r.total >= check.dc as i32,
+            (None, o) => o.is_some_and(TableOutcome::passed),
+        };
+        let word = if kept { "kept" } else { "lost" };
+        let text = match &r {
+            Some(r) => format!(
+                "{name} concentration save {} vs DC {}: {word}",
+                r.total, check.dc
+            ),
+            None => format!("{name} concentration save (DC {}): {word}", check.dc),
+        };
+        self.ev(
+            Some(id),
+            K::ConcentrationSave {
+                roll: r,
+                outcome,
+                kept,
+            },
+            text,
         );
-        self.ev(Some(id), K::ConcentrationSave { roll: r, kept }, text);
         if !kept {
             self.end_concentration(id, "failed the save");
         }
@@ -2508,23 +2580,41 @@ impl Cx<'_> {
             .spec
             .repeat_save
             .ok_or(CombatError::NoSave)?;
-        let r = resolve_d20(roll, self.die)?;
-        let success = r.total >= save.dc as i32;
         let target = self.s.effects[k].spec.target.clone();
-        self.report_d20(&target, &format!("{} save", save.ability), &r);
-        let text = format!(
-            "{} {} save {} vs DC {}: {}",
-            self.name(&target),
-            save.ability,
-            r.total,
-            save.dc,
-            if success { "success" } else { "failure" }
-        );
+        let (r, outcome) = match roll {
+            D20Input::Outcome { outcome } => (None, Some(*outcome)),
+            _ => {
+                let r = resolve_d20(roll, self.die)?;
+                self.report_d20(&target, &format!("{} save", save.ability), &r);
+                (Some(r), None)
+            }
+        };
+        let success = match (&r, outcome) {
+            (Some(r), _) => r.total >= save.dc as i32,
+            (None, o) => o.is_some_and(TableOutcome::passed),
+        };
+        let word = if success { "success" } else { "failure" };
+        let text = match &r {
+            Some(r) => format!(
+                "{} {} save {} vs DC {}: {word}",
+                self.name(&target),
+                save.ability,
+                r.total,
+                save.dc
+            ),
+            None => format!(
+                "{} {} save (DC {}): {word}",
+                self.name(&target),
+                save.ability,
+                save.dc
+            ),
+        };
         self.ev(
             Some(&target),
             K::EffectSave {
                 effect,
                 roll: r,
+                outcome,
                 success,
             },
             text,

@@ -47,7 +47,11 @@ export type RollMode = "normal" | "advantage" | "disadvantage";
 /** A d20 test (initiative, death save, a save): a typed table roll (D43), or rolled by the server (D21). */
 export type D20Input =
   | { kind: "typed"; total: number; natural?: number }
-  | { kind: "app"; modifier?: number; mode?: RollMode; crit_range?: number };
+  | { kind: "app"; modifier?: number; mode?: RollMode; crit_range?: number }
+  /** 0.3.5: a pass/fail roll's result pressed at the table, with no number (`party_dice::TableOutcome`). */
+  | { kind: "outcome"; outcome: TableOutcome };
+
+export type TableOutcome = "pass" | "fail" | "nat20" | "nat1";
 
 /** Damage, healing, recharge: a typed total, or dice the server rolls. */
 export type DiceInput =

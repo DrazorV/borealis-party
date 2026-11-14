@@ -52,8 +52,8 @@ export function projection(partyId: string, order: WireCombatant[], me: WireMine
   };
 }
 
-/** What an in-app roll comes to here: 10 plus the modifier. */
-const rolled = (r: D20Input) => (r.kind === "typed" ? r.total : 10 + r.modifier);
+/** What an in-app roll comes to here: 10 plus the modifier (an outcome: a pass or a fail). */
+const rolled = (r: D20Input) => (r.kind === "typed" ? r.total : r.kind === "outcome" ? (r.outcome === "pass" || r.outcome === "nat20" ? 10 : 9) : 10 + r.modifier);
 const amountOf = (a: { kind: string; total?: number }) => (a.kind === "typed" ? a.total! : 4);
 
 /** One of my controlled creatures, as the server sends it: a row in the order and an entry in `me`. */

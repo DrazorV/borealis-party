@@ -6,7 +6,12 @@
  */
 export type D20Input =
   | { kind: "typed"; total: number; natural?: number }
-  | { kind: "app"; modifier: number; mode?: "normal" | "advantage" | "disadvantage" };
+  | { kind: "app"; modifier: number; mode?: "normal" | "advantage" | "disadvantage" }
+  /** 0.3.5: a pass/fail roll's result pressed at the table, with no number (`party_dice::TableOutcome`). */
+  | { kind: "outcome"; outcome: TableOutcome };
+
+/** What the table's die gave on a pass/fail roll. */
+export type TableOutcome = "pass" | "fail" | "nat20" | "nat1";
 
 /** Damage, healing or recharge dice the same way (`party-dice` `DiceInput`). */
 export type DiceInput =

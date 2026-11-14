@@ -780,9 +780,13 @@ impl Sim {
                     };
                     self.timeline.push(format!("R{round} {name} {word}{by}"));
                 }
-                DmEventKind::DeathSave { roll } => {
+                DmEventKind::DeathSave { roll, outcome } => {
                     let t = self.tallies.entry(s.clone()).or_default();
-                    if roll.total >= 10 {
+                    let success = roll.as_ref().map_or_else(
+                        || outcome.is_some_and(party_combat::party_dice::TableOutcome::passed),
+                        |r| r.total >= 10,
+                    );
+                    if success {
                         t.death_saves.0 += 1;
                     } else {
                         t.death_saves.1 += 1;
@@ -1783,7 +1787,7 @@ impl Sim {
                         D20Input::Typed { total, natural } => {
                             (RowRoll::Typed { total, natural }, total < dc)
                         }
-                        D20Input::App { .. } => (RowRoll::App, false),
+                        D20Input::App { .. } | D20Input::Outcome { .. } => (RowRoll::App, false),
                     }
                 };
                 let hp = self.state.combatant(t).map_or(0, |c| c.hp.current);

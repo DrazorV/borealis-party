@@ -54,6 +54,7 @@ export function emptyState(edition: CombatState["edition"] = "2024"): CombatStat
 }
 
 function d20(roll: D20Input, die: DieRoller): D20Result {
+  if (roll.kind === "outcome") throw new CombatRefusal("This roll needs its number, not just pass or fail.");
   if (roll.kind === "typed") {
     const natural = roll.natural ?? null;
     return {
@@ -242,8 +243,19 @@ class Run {
         const c = this.c(cmd.id);
         const life = c.life;
         if (life?.state !== "dying") return refuse("Not making death saves.", "not_dying");
-        const r = d20(cmd.roll, this.m.die);
         let { successes, failures } = life;
+        if (cmd.roll.kind === "outcome") {
+          const o = cmd.roll.outcome;
+          if (o === "nat20") { c.hp.current = 1; this.revive(c); this.ev(c.id, "death_save", `${c.label} death save: natural 20, back up`, { outcome: o }); return; }
+          if (o === "nat1") failures += 2; else if (o === "pass") successes++; else failures++;
+          const word = o === "pass" ? "success" : o === "fail" ? "failure" : "natural 1";
+          if (failures >= 3) { c.life = { state: "dead" }; this.ev(c.id, "died", `${c.label} dies`); return; }
+          if (successes >= 3) { c.life = { state: "stable" }; this.ev(c.id, "stabilized", `${c.label} is stable`); return; }
+          c.life = { state: "dying", successes, failures };
+          this.ev(c.id, "death_save", `${c.label} death save: ${word}`, { outcome: o });
+          return;
+        }
+        const r = d20(cmd.roll, this.m.die);
         if (r.is_nat20) { c.hp.current = 1; this.revive(c); this.ev(c.id, "death_save", `${c.label} rolls a natural 20 and is back up`, { roll: r }); return; }
         if (r.is_nat1) failures += 2; else if (r.total >= 10) successes++; else failures++;
         if (failures >= 3) { c.life = { state: "dead" }; this.ev(c.id, "died", `${c.label} dies`); return; }
@@ -276,10 +288,10 @@ class Run {
       case "resolve_concentration": {
         const c = this.c(cmd.id);
         const check = c.pending_concentration?.[0] ?? refuse("No concentration check is waiting.", "no_pending_check");
-        const r = d20(cmd.roll.kind === "app" ? { ...cmd.roll, modifier: cmd.roll.modifier ?? 0 } : cmd.roll, this.m.die);
+        const r = cmd.roll.kind === "outcome" ? null : d20(cmd.roll.kind === "app" ? { ...cmd.roll, modifier: cmd.roll.modifier ?? 0 } : cmd.roll, this.m.die);
         c.pending_concentration = c.pending_concentration!.slice(1);
-        const kept = r.total >= check.dc;
-        this.ev(c.id, "concentration_save", `${c.label} concentration save ${r.total} vs DC ${check.dc}: ${kept ? "kept" : "lost"}`, { roll: r, kept });
+        const kept = r ? r.total >= check.dc : cmd.roll.kind === "outcome" && (cmd.roll.outcome === "pass" || cmd.roll.outcome === "nat20");
+        this.ev(c.id, "concentration_save", r ? `${c.label} concentration save ${r.total} vs DC ${check.dc}: ${kept ? "kept" : "lost"}` : `${c.label} concentration save (DC ${check.dc}): ${kept ? "kept" : "lost"}`, { ...(r ? { roll: r } : {}), kept });
         if (!kept) this.endConcentration(c, "failed the save");
         return;
       }
@@ -297,9 +309,9 @@ class Run {
       case "resolve_effect_save": {
         const e = s.effects.find((x) => x.id === cmd.effect) ?? refuse("No such effect.");
         const save = e.repeat_save ?? refuse("The effect has no repeated save.", "no_save");
-        const r = d20(cmd.roll, this.m.die);
-        const success = r.total >= save.dc;
-        this.ev(e.target, "effect_save", `${this.name(e.target)} ${save.ability.toUpperCase()} save ${r.total} vs DC ${save.dc} against ${e.name}: ${success ? "ends" : "stays"}`, { roll: r, success });
+        const r = cmd.roll.kind === "outcome" ? null : d20(cmd.roll, this.m.die);
+        const success = r ? r.total >= save.dc : cmd.roll.kind === "outcome" && (cmd.roll.outcome === "pass" || cmd.roll.outcome === "nat20");
+        this.ev(e.target, "effect_save", `${this.name(e.target)} ${save.ability.toUpperCase()} save ${r ? `${r.total} vs DC ${save.dc}` : `(DC ${save.dc})`} against ${e.name}: ${success ? "ends" : "stays"}`, { ...(r ? { roll: r } : {}), success });
         if (success) this.endEffect(e.id, "saved", true);
         return;
       }

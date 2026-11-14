@@ -168,7 +168,7 @@ export function CombatantCard({ state, c, block, blockName, blockOf, send, disab
         {!mine && (c.pending_concentration ?? []).map((check, i) => (
           <div key={i} className="cb-conc-check" role="alert">
             <b>Concentration check: CON save DC {check.dc}</b> <span className="muted cb-small">({check.damage} damage)</span>
-            {i === 0 && !pc && <OutcomeButtons label="CON save" disabled={disabled} outcomes={passFail(check.dc, "Kept it", "Lost it")}
+            {i === 0 && !pc && <OutcomeButtons label="CON save" disabled={disabled} outcomes={passFail("Kept it", "Lost it")}
               rollLabel={`Roll for me (${signed(saveBonus(block, "con"))})`}
               onRoll={() => send({ command: "resolve_concentration", id: c.id, roll: { kind: "app", modifier: saveBonus(block, "con"), mode: "normal" } })}
               onPick={(roll) => send({ command: "resolve_concentration", id: c.id, roll })} />}

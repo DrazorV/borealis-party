@@ -337,7 +337,7 @@ fn fireball_one_roll_halved_with_resistance_and_a_pc_row() {
     assert_eq!(c(&cb, "m").spell_slots[&3].remaining, 2, "spent at cast");
     let cast_id = pending(&cb).id.clone();
 
-    // Only Alice answers her row, and only with a roll.
+    // Only Alice answers her row: a roll, or (0.3.5) her save's result pressed at the table, never another outcome.
     let row = |roll: RowRoll| Command::ResolveCastRow {
         cast: cast_id.clone(),
         target: id("w"),
@@ -350,7 +350,7 @@ fn fireball_one_roll_halved_with_resistance_and_a_pc_row() {
         .execute(
             &alice(),
             &row(RowRoll::Outcome {
-                outcome: RowOutcome::Saved
+                outcome: RowOutcome::Hit
             })
         )
         .is_err());

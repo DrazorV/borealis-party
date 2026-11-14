@@ -103,7 +103,7 @@ function EffectRow({ e, state, send, disabled, open, toggle }: { e: Effect; stat
       </div>
       {open && e.detail && <p className="cb-small cb-fx-detail">{e.detail}</p>}
       {e.repeat_save && saving && (
-        <OutcomeButtons label={`${e.repeat_save.ability.toUpperCase()} save DC ${e.repeat_save.dc}`} disabled={disabled} outcomes={passFail(e.repeat_save.dc)}
+        <OutcomeButtons label={`${e.repeat_save.ability.toUpperCase()} save DC ${e.repeat_save.dc}`} disabled={disabled} outcomes={passFail()}
           onRoll={() => { setSaving(false); send({ command: "resolve_effect_save", effect: e.id, roll: { kind: "app", modifier: 0, mode: "normal" } }); }}
           onPick={(roll) => { setSaving(false); send({ command: "resolve_effect_save", effect: e.id, roll }); }} />
       )}
