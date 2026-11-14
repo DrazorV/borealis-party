@@ -52,7 +52,7 @@ src-tauri/src/settings.rs branch:feat/hidden-elements
 # Sources page: Source elements found by name, so the playtest flag and book descriptions work: the content_packs.rs
 # and tests/source_flags.rs part is upstream PR https://github.com/TeamBorealis/borealis/pull/48 (fix only, as
 # upstream asked). The "Restrict playtest / third-party content" toggles, their settings and the thirdParty flag
-# are fork-only (upstream holds them: beyond Aurora). The fork carries both, so every file maps to the local
+# are fork-only (upstream holds them: beyond Aurora; discussed in https://github.com/TeamBorealis/borealis/issues/50). The fork carries both, so every file maps to the local
 # branch with the full patch; rebase it onto upstream/main once #48 merges.
 src-tauri/src/content_dto.rs branch:feat/source-toggles
 src-tauri/src/content_packs.rs branch:feat/source-toggles
