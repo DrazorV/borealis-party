@@ -125,7 +125,7 @@ test.describe("Encounters (0.3.0)", () => {
       // Reveal one Owlbear by name.
       const owlbear = page.getByRole("listitem", { name: "Owlbear 1" });
       await owlbear.getByRole("switch", { name: "Owlbear 1: shown to players" }).tap();
-      await expect(owlbear).toContainText('Players see "Monstrosity" and its stat block');
+      await expect(owlbear).toContainText('Players see its name, "Monstrosity"');
       // A pet for a goblin: picked in the same sheet, shown under its owner.
       await page.getByRole("button", { name: "More for Goblin Warrior 1" }).tap();
       await page.getByRole("dialog", { name: "Goblin Warrior 1" }).getByRole("button", { name: "Add a pet or summon" }).tap();
@@ -171,12 +171,10 @@ test.describe("Encounters (0.3.0)", () => {
         await next.tap();
         const seen = playerPage.getByLabel("Goblin ambush");
         await expect(seen.getByText("Monstrosity", { exact: true })).toBeVisible();
-        // A revealed creature comes with its whole stat block (D20 b).
-        await seen.getByRole("button", { name: "Stat block of Monstrosity" }).tap();
-        const sheet = playerPage.getByRole("article", { name: "Monstrosity" });
-        await expect(sheet).toContainText("Armor Class");
-        await fits(playerPage, testInfo, ".enc-statblock");
-        await playerPage.getByRole("dialog").getByRole("button", { name: "Close" }).last().tap();
+        // 0.3.3 (the user: "only the name and if bloodied"): a revealed creature is its name and band, no stat block.
+        await expect(seen.getByText("Unhurt")).toBeVisible();
+        await expect(seen.getByRole("button", { name: "Stat block of Monstrosity" })).toHaveCount(0);
+        await expect(seen).not.toContainText("Armor Class");
         const text = (await playerPage.locator("main").textContent()) ?? "";
         expect(text).not.toContain("secret name");
         expect(text).not.toContain("Goblin Warrior");

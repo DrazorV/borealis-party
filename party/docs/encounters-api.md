@@ -8,7 +8,7 @@ the stat block copies, overrides and the player view are in `party/crates/party-
 C20, C23).
 
 The user's decisions behind it (2026-11-13): **no XP or difficulty anywhere** (D16: CR and XP are not reliable; CR is
-only a printed stat and a search filter); **hidden or revealed with the whole stat block**, no reveal levels (D20 b);
+only a printed stat and a search filter); **hidden or revealed (name and band only since 0.3.3)**, no reveal levels (D20 b);
 **the party's edition**, no per-encounter override (D23 b); **companions too** (D17 b); per-encounter **overrides** on
 a copied block (D41 A); rules are a banner plus on/off flags (D42); average HP by default, rolled per encounter (D22);
 every DM roll can be rolled in the app or typed (D21).
@@ -41,19 +41,17 @@ Every answer a player gets is built by one function, `view_for(viewer, …)`. Fo
   "publicName": "Goblin ambush",
   "status": "ready",
   "creatures": [
-    { "id": "…uuid…", "publicName": "Big beast", "kind": "monster", "size": ["large"], "type": "Monstrosity",
-      "conditions": [], "hp": { "current": 59, "max": 59 }, "statBlock": { "…MonsterData, overrides applied, no xp…": 0 } },
-    { "id": "…", "publicName": "Bird", "kind": "companion", "size": ["tiny"], "type": "Beast", "conditions": [],
-      "hp": { "current": 1, "max": 1 }, "statBlock": { "…CompanionDetail…": 0 }, "ownerId": "…only when its owner is revealed too…" }
+    { "id": "…uuid…", "publicName": "Big beast", "band": "unhurt" },
+    { "id": "…", "publicName": "Bird", "band": "unhurt" }
   ]
 }
 ```
 
 - **Hidden creatures are absent:** no row, no count, no slot, no id. Revealed creatures keep the DM's order among
   themselves; positions and sort numbers are never sent.
-- **Revealed = the whole stat block** (D20 b): the block the encounter uses (overrides applied), without `xp` /
-  `xp_lair`. A monster's is `MonsterData` (snake_case); a companion's is the bestiary's `CompanionDetail` (camelCase,
-  nulls where Aurora prints nothing). Rich text renders through upstream `SafeHtml` only.
+- **Revealed = the public name and the health band** (0.3.3, the user: "only the name and if bloodied"; this narrows
+  D20 b): `{ id, publicName, band }`, `band` being `"unhurt"` before the fight, or null when the HP isn't known. No stat
+  block, kind, size, type, AC, HP, abilities or owner. See `role-views.md`.
 - **Never sent to players:** the DM's `name` of the encounter, `dmNotes`, `hpMode`, `updatedAt`, warnings, creature
   `dmLabel`, `elementId`, `packId`, `packRev`, `overrides` (the DM's note included), `initMode`, effects and rules, and
   `ownerId` of a creature whose owner is hidden.

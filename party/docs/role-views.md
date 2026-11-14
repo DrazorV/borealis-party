@@ -127,6 +127,9 @@ rolls. New in 0.3.3:
 A DM creature's row in `order` is exactly `{ "id", "kind": "creature", "name", "mine": false, "band" }`
 (`combat::CREATURE_FOR_PLAYERS`): the public name and `unhurt` / `bloodied` / `down` / null. No `view`, no
 `statBlock`, AC, HP, conditions, abilities, legendary counts or owner. Hidden creatures stay absent as before.
+The same holds before the fight: a shown encounter's revealed creatures (`GET /api/encounters/{id}` as a player) are
+`{ id, publicName, band }` (`encounters::CREATURE_FOR_PLAYERS`; `encounters-api.md`), and the builder says "Players see
+its name".
 Another player's PC or creature: `{ id, kind, name, mine, band, life, conditions, exhaustion, concentration }` (+
 `initiative` for a PC, `ownerId` when visible), no `view`. My PC and my creatures: in full (`view`, and `statBlock`
 for my creatures). A save request (`casts[]`) still names a revealed caster's spell.

@@ -679,7 +679,7 @@ async fn leak_suite(t: &Table) {
     ] {
         assert!(!all.contains(leak), "{leak} reached a player");
     }
-    // The projection: the revealed creatures with their whole stat blocks (D20 b), nothing of the DM's.
+    // The projection: the revealed creatures as a name and a band only (0.3.3, narrowing D20 b), nothing of the DM's.
     let (_, _, text) = raw(
         &t.router,
         Some(&t.player.token),
@@ -704,12 +704,19 @@ async fn leak_suite(t: &Table) {
     // Pets sit right after their owner, so the loose wolf comes before the Owlbear.
     assert_eq!(shown, [b.loose_pet.as_str(), b.revealed.as_str()], "{v}");
     let owlbear = &v["creatures"][1];
-    assert_eq!(
-        (owlbear["publicName"].clone(), owlbear["type"].clone()),
-        (json!("Big beast"), json!("Monstrosity"))
-    );
-    assert_eq!(owlbear["hp"]["max"], 59, "{v}");
-    assert!(owlbear["statBlock"]["abilities"].is_object());
+    assert_eq!(owlbear["publicName"], "Big beast");
+    assert_eq!(owlbear["band"], "unhurt");
+    for c in v["creatures"].as_array().unwrap() {
+        let keys: std::collections::BTreeSet<&str> =
+            c.as_object().unwrap().keys().map(String::as_str).collect();
+        let allowed: std::collections::BTreeSet<&str> = crate::encounters::CREATURE_FOR_PLAYERS
+            .into_iter()
+            .collect();
+        assert_eq!(keys, allowed, "only the name and the band: {c}");
+    }
+    for leak in ["statBlock", "\"ac\"", "\"hp\"", "abilities"] {
+        assert!(!text.contains(leak), "{leak} reached a player: {text}");
+    }
     // The loose pet never names its hidden owner.
     assert!(v["creatures"][0].get("ownerId").is_none(), "{v}");
     assert!(
@@ -736,6 +743,7 @@ async fn leak_suite(t: &Table) {
         !text.contains(&b.hidden_pet) && !text.contains("SECRET"),
         "{text}"
     );
+    // 0.3.3: a revealed owner is listed, but no creature names its owner (only the name and the band).
     let v: Value = serde_json::from_str(&text).unwrap();
     let pet = v["creatures"]
         .as_array()
@@ -743,7 +751,12 @@ async fn leak_suite(t: &Table) {
         .iter()
         .find(|c| c["id"] == b.loose_pet.as_str())
         .unwrap();
-    assert_eq!(pet["ownerId"], b.hidden.as_str());
+    assert!(pet.get("ownerId").is_none(), "{pet}");
+    assert!(v["creatures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c["id"] == b.hidden.as_str()));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1123,13 +1136,9 @@ async fn editions_and_controlled(t: &Table) {
     .await;
     let seen: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(seen["creatures"].as_array().unwrap().len(), 1, "{seen}");
-    assert_eq!(
-        (
-            seen["creatures"][0]["kind"].clone(),
-            seen["creatures"][0]["statBlock"]["hp"].clone()
-        ),
-        (json!("companion"), json!(3))
-    );
+    // 0.3.3: the companion is a name and a band to players (3 HP: unhurt), no kind or stat block.
+    assert_eq!(seen["creatures"][0]["band"], "unhurt", "{seen}");
+    assert!(seen["creatures"][0].get("statBlock").is_none());
     assert!(seen["creatures"][0].get("ownerId").is_none());
     assert!(
         !text.contains(&goblin) && !text.contains(&wolf) && !text.contains("ID_TEST"),
