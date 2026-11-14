@@ -41,4 +41,13 @@ describe("ImportedFrom", () => {
     expect(screen.queryByRole("searchbox")).toBeNull();
     expect(whenText({ lastImported: "not a date", lastChecked: null })).toBeNull();
   });
+
+  it("is the one place a 5etools source is listed: Update and Remove each (0.3.3)", () => {
+    const onUpdate = vi.fn();
+    const onRemove = vi.fn();
+    render(<ImportedFrom sources={[SOURCE]} packNames={NAMES} title={(u) => u} busy={false} onUpdate={onUpdate} onRemove={onRemove} />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove https://example.com/data/" }));
+    expect(onRemove).toHaveBeenCalledWith("https://example.com/data/");
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
 });

@@ -23,7 +23,7 @@ html.phone .party-activity button { min-height: var(--ph-hit); }
  * top (pages/ImportSection.tsx) does each of these. Upstream's sections name themselves in aria-label (Section.tsx).
  * - Custom content: only "Import files" (and the desktop folder import): the whole section.
  * - 5etools-format import: the .zip / homebrew / folder choosers, and the books and report of upstream's own flow.
- * - Import from an address: the form and its intro; its list of addresses (Update, Remove) stays, the section with it.
+ * - Import from an address: the whole section since 0.3.3 (its sources are in the Import section's 5etools card).
  * - Index files: the Fetch form; the list (Remove) stays.
  */
 .v4-content section.v4-csec[aria-label="Custom content"],
@@ -94,3 +94,16 @@ html.phone .party-compact-sort { flex: 1 1 100%; }
   html:not(.phone) .v4-content .party-import > .body > .card:nth-child(-n + 3) .party-import-link .input { flex: 1 1 0; min-width: 6em; }
   html:not(.phone) .v4-content .party-import > .body > .card:nth-child(-n + 3) .party-import-link > .btn { flex: none; white-space: nowrap; }
 }
+/* "Update content" (UpdateAllCard.tsx, 0.3.3): one button for the index files and every 5etools source. Upstream's
+   "Update content files" and its "Import from an address" list of 5etools sources are replaced by it and by the
+   Import section's 5etools card, so each source shows once. */
+.v4-content section.v4-csec:is([aria-label="Update content files"], [aria-label="Import from an address"]) { display: none; }
+.party-update-all { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.party-update-line { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; min-width: 0; }
+.party-update-text { flex: 1 1 16em; min-width: 0; overflow-wrap: anywhere; }
+.party-update-line > .btn { flex: none; }
+.party-update-failed { margin: 0; padding-left: 1.2em; color: var(--danger, #b22222); overflow-wrap: anywhere; }
+.party-update-opts { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; justify-content: space-between; }
+.party-update-auto { flex: 1 1 18em; min-width: 0; overflow-wrap: anywhere; }
+html.phone .party-update-line > .btn { flex: 1 1 100%; justify-content: center; min-height: var(--ph-hit); }
+html.phone .party-update-opts > .btn { min-height: var(--ph-hit); }

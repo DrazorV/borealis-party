@@ -25,6 +25,7 @@ mod bestiary;
 mod combat;
 mod config;
 mod content_events;
+mod content_update;
 mod db;
 mod encounters;
 mod error;
@@ -475,6 +476,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         started: std::time::Instant::now(),
         hub: Arc::new(hub::PartyHub::new(cards)),
     };
+    // The automatic content update when an account's workspace opens (content_update.rs).
+    content_update::install(Arc::clone(&state.hub));
     let router = app(
         state,
         &web,

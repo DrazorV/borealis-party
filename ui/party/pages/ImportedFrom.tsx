@@ -6,7 +6,7 @@ import { matches, plural, stripFormat, usePref } from "../content/compact";
 
 /**
  * "Imported from" in the Import section's 5etools card: each 5etools source on one line (its name, how many packs,
- * when it was last imported, Update), its packs folded under "Show packs" as a list of chips with a search once there
+ * when it was last imported, Update, Remove), its packs folded under "Show packs" as a list of chips with a search once there
  * are many. The packs are named without the "5etools-format:" each one carries: the line says it once. Whether a
  * source's packs are shown is kept on this device (../content/compact.ts).
  */
@@ -41,8 +41,8 @@ function Packs({ names }: { names: string[] }) {
   );
 }
 
-function SourceRow({ source, title, packName, busy, onUpdate }: {
-  source: FiveToolsUrl; title: string; packName: (id: string) => string; busy: boolean; onUpdate: () => void;
+function SourceRow({ source, title, packName, busy, onUpdate, onRemove }: {
+  source: FiveToolsUrl; title: string; packName: (id: string) => string; busy: boolean; onUpdate: () => void; onRemove?: () => void;
 }) {
   const [open, setOpen] = usePref(`imported.${source.url}`, false);
   const listId = useId();
@@ -64,15 +64,19 @@ function SourceRow({ source, title, packName, busy, onUpdate }: {
             {open ? "Hide packs" : "Show packs"}<Icon name={open ? "up" : "down"} />
           </button>
         )}
-        <Button disabled={busy} aria-label={`Update from ${title}`} onClick={onUpdate}>Update</Button>
+        {/* One source at a time; "Update all content" (UpdateAllCard) does every source and the index files. */}
+        <Button small disabled={busy} aria-label={`Update from ${title}`} onClick={onUpdate}>Update</Button>
+        {onRemove && <Button small variant="danger" disabled={busy} aria-label={`Remove ${title}`} onClick={onRemove}>Remove</Button>}
       </div>
       {open && packs.length > 0 && <div id={listId} className="party-import-known-packs"><Packs names={names} /></div>}
     </li>
   );
 }
 
-export function ImportedFrom({ sources, packNames, title, busy, onUpdate }: {
+export function ImportedFrom({ sources, packNames, title, busy, onUpdate, onRemove }: {
   sources: FiveToolsUrl[]; packNames: Record<string, string>; title: (url: string) => string; busy: boolean; onUpdate: (url: string) => void;
+  /** Forget the source (its packs stay). Since 0.3.3 the only place a 5etools source is listed. */
+  onRemove?: (url: string) => void;
 }) {
   const packName = useMemo(() => (id: string) => packNames[id] ?? id, [packNames]);
   if (sources.length === 0) return null;
@@ -81,7 +85,8 @@ export function ImportedFrom({ sources, packNames, title, busy, onUpdate }: {
       <h3 id="party-5et-known">Imported from</h3>
       <ul aria-labelledby="party-5et-known">
         {sources.map((s) => (
-          <SourceRow key={s.url} source={s} title={title(s.url)} packName={packName} busy={busy} onUpdate={() => onUpdate(s.url)} />
+          <SourceRow key={s.url} source={s} title={title(s.url)} packName={packName} busy={busy} onUpdate={() => onUpdate(s.url)}
+            onRemove={onRemove && (() => onRemove(s.url))} />
         ))}
       </ul>
     </div>

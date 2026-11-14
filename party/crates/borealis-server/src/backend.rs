@@ -225,17 +225,72 @@ async fn stage_5etools_url(app: AppHandle, url: String) -> ApiResult<PickedPathD
 #[tauri::command]
 async fn update_5etools_url(app: AppHandle, url: String) -> ApiResult<FiveToolsUrlUpdate> {
     blocking(app, move |state, sink| {
-        let update =
-            state.update_5etools_url(&crate::net_guard::Guarded::new(HttpsFetcher), &url, sink)?;
-        if let (Some(report), Some(dir)) = (
-            &update.report,
-            crate::bestiary::staged_download(&state.paths.data),
-        ) {
-            crate::bestiary::capture_logged(state, &dir, report);
-        }
-        Ok(update)
+        update_5etools_one(state, sink, &url)
     })
     .await
+}
+
+/// One 5etools source's update, as `update_5etools_url` runs it (also for `update_all_content`).
+///
+/// # Errors
+/// The update's own.
+pub(crate) fn update_5etools_one(
+    state: &AppState,
+    sink: &dyn borealis_lib::content_packs::EventSink,
+    url: &str,
+) -> ApiResult<FiveToolsUrlUpdate> {
+    update_5etools_with(
+        state,
+        &crate::net_guard::Guarded::new(HttpsFetcher),
+        sink,
+        url,
+    )
+}
+
+/// [`update_5etools_one`] with its downloads through `fetch` (`update_all_content` and its tests).
+///
+/// # Errors
+/// The update's own.
+pub(crate) fn update_5etools_with(
+    state: &AppState,
+    fetch: &dyn borealis_lib::content_fivetools_remote::RemoteFetcher,
+    sink: &dyn borealis_lib::content_packs::EventSink,
+    url: &str,
+) -> ApiResult<FiveToolsUrlUpdate> {
+    let update = state.update_5etools_url(fetch, url, sink)?;
+    if let (Some(report), Some(dir)) = (
+        &update.report,
+        crate::bestiary::staged_download(&state.paths.data),
+    ) {
+        crate::bestiary::capture_logged(state, &dir, report);
+    }
+    Ok(update)
+}
+
+/// Index files and every 5etools source in one go ([`crate::content_update`]). `auto`: the automatic check.
+#[tauri::command]
+async fn update_all_content(
+    app: AppHandle,
+    auto: Option<bool>,
+) -> ApiResult<crate::content_update::UpdateAll> {
+    blocking(app, move |state, sink| {
+        crate::content_update::run(state, sink, auto.unwrap_or(false))
+    })
+    .await
+}
+
+/// Upstream's status-bar status, from the server's own automatic check ([`crate::content_update::status`]).
+#[tauri::command(async)]
+fn content_update_status(
+    state: tauri::State<'_, AppState>,
+) -> ApiResult<borealis_lib::settings_dto::ContentUpdateStatus> {
+    Ok(crate::content_update::status(&state))
+}
+
+/// The Update all line: `{ auto, everyHours, indexes, sources, last }`.
+#[tauri::command(async)]
+fn content_update_info(state: tauri::State<'_, AppState>) -> ApiResult<Value> {
+    Ok(crate::content_update::info(&state))
 }
 
 /// Upstream's; then the creature details the import drops are read from the same 5etools folder
@@ -634,7 +689,8 @@ fn offered(name: &str, invocation: &Invocation) -> Option<Result<Value, Value>> 
         commands_content::list_sources,
         list_indexes,
         commands_content::list_5etools_urls,
-        commands_settings::content_update_status,
+        content_update_status,
+        content_update_info,
         commands_play::preview_convert_to_2024,
         // Characters.
         commands::create_character,
@@ -736,6 +792,7 @@ fn offered(name: &str, invocation: &Invocation) -> Option<Result<Value, Value>> 
         stage_5etools_url,
         commands_content::remove_5etools_url,
         update_5etools_url,
+        update_all_content,
         import_5etools,
         // Bundle files, made from and previewed and applied in the account's own folder.
         bundle_export,

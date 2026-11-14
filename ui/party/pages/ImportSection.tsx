@@ -4,6 +4,7 @@ import type { Api, ContentProgress, FiveToolsImportReport, FiveToolsSource, Five
 import { Button } from "../../src/components/Button";
 import { Card } from "../../src/components/Card";
 import { useConfirm } from "../../src/components/Confirm";
+import { useToast } from "../../src/components/Toast";
 import { Check } from "../../src/components/Fields";
 import { Icon, type IconName } from "../../src/components/Icon";
 import { useImportNotice } from "../../src/components/ImportNotice";
@@ -148,6 +149,7 @@ function saveCustom(url: string) {
 export function ImportSection() {
   const api = useApi();
   const confirm = useConfirm();
+  const toast = useToast();
   const notice = useImportNotice();
   const previewClosed = usePreviewOutcome();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -174,6 +176,13 @@ export function ImportSection() {
   useEffect(() => { let live = true; void defaultFiveToolsSource().then((u) => { if (live) setDefaultUrl(u); }); return () => { live = false; }; }, []);
   /** How a 5etools source is named: the server's default by that name, any other by its address. */
   const sourceTitle = (url: string) => (defaultUrl && sameUrl(url, defaultUrl) ? "Default 5etools data" : url);
+  /** Forget a 5etools source; its packs stay installed (remove those under Installed packs). */
+  const removeSource = async (url: string) => {
+    const r = await confirm({ title: "Remove 5etools source", body: `Forget ${sourceTitle(url)}? Its packs stay installed; remove them under Installed packs.`, confirmLabel: "Remove", danger: true });
+    if (r !== "confirm") return;
+    try { await api.remove5etoolsUrl({ url }); } catch (e) { toast.push(errorMessage(e), "error"); }
+    refreshSources();
+  };
   const nav = useNavigate();
   const [busy, setBusyState] = useState(false);
   // Read by work that outlives a render (the inbox is emptied in a loop).
@@ -456,7 +465,8 @@ export function ImportSection() {
             <p id="party-5et-hint" className="muted small">A GitHub repository of 5etools data (a mirror or a fork), a branch or folder in one (…/tree/branch/data), or the https:// address of any data folder that has books.json. Homebrew .json files go in through Choose files.</p>
           </section>
         </div>
-        <ImportedFrom sources={sources} packNames={packNames} title={sourceTitle} busy={busy} onUpdate={(url) => void fromSource(url)} />
+        <ImportedFrom sources={sources} packNames={packNames} title={sourceTitle} busy={busy} onUpdate={(url) => void fromSource(url)}
+          onRemove={(url) => void removeSource(url)} />
       </Card>
       {rows.length > 0 && (
         <Card title="Results" actions={<Button small disabled={busy} onClick={() => setRows([])}>Clear</Button>}>

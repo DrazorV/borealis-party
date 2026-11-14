@@ -113,9 +113,11 @@ test.describe("every import entry point leads to the Import section on Additiona
     }
     await expect(page.getByLabel("Index URL")).toBeHidden();
     await expect(page.getByLabel("Address of 5etools-format data")).toBeHidden();
-    // Management stays: the installed packs and the Update of index files.
+    // Management stays: the installed packs, and one Update all content (0.3.3) in place of upstream's Update content files.
     await expect(page.getByRole("region", { name: "Installed packs" })).toBeVisible();
-    await expect(page.getByRole("region", { name: "Update content files" })).toBeAttached();
+    await expect(page.getByRole("region", { name: "Update content" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Update content files" })).toBeHidden();
+    await expect(page.getByRole("region", { name: "Import from an address" })).toBeHidden();
     await page.screenshot({ path: testInfo.outputPath("one-import-page.png") });
     await page.locator("section.v4-csec[aria-label='Installed packs']").scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath("one-import-page-management.png") });

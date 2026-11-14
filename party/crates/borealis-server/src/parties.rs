@@ -1810,7 +1810,7 @@ const READS: [&str; 13] = [
 /// Upstream commands that reload the account's content (or recheck its characters against it): any card's class
 /// line and numbers may change, so all of the owner's member cards are read again. A test checks each is offered.
 /// The jobs (`job_start`) refresh nothing when they end; a card catches up on the owner's next command.
-pub const CONTENT_COMMANDS: [&str; 13] = [
+pub const CONTENT_COMMANDS: [&str; 14] = [
     "bundle_accept",
     "recheck_missing_content",
     "import_pack",
@@ -1823,6 +1823,7 @@ pub const CONTENT_COMMANDS: [&str; 13] = [
     "clear_downloaded_content",
     "remove_5etools_url",
     "update_5etools_url",
+    "update_all_content",
     "import_5etools",
 ];
 
