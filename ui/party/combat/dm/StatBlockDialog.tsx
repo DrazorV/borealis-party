@@ -12,7 +12,9 @@ export function StatBlockDialog({ title, block, onClose }: { title: string; bloc
   return (
     <Dialog title={`${title}: stat block`} onClose={onClose}>
       <div className="cb-statblock" data-testid="stat-block">
-        <EncounterStatBlock title={title} block={block as unknown as EncounterBlock} />
+        {/* The tracker's blocks are monster-shaped; one that leaves out its size or type (a thin or hand-made block)
+            must still read as a monster, not an Aurora companion (which has no `creature_type` key). */}
+        <EncounterStatBlock title={title} block={{ ...block, size: block.size ?? [], creature_type: block.creature_type ?? "" } as unknown as EncounterBlock} />
       </div>
     </Dialog>
   );

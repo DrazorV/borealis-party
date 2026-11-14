@@ -132,13 +132,13 @@ test.describe("Combat quick wins (0.3.5): the DM's stat block", () => {
     const sb = dialog.getByTestId("stat-block");
     await expect(sb.getByText("Armor Class")).toBeVisible();
     await expect(sb.getByRole("list", { name: "Ability scores" })).toBeVisible();
-    await expect(sb.getByRole("region", { name: "Actions" })).toContainText("Multiattack.");
-    await expect(sb.getByRole("region", { name: "Reactions" })).toContainText("Parry.");
+    await expect(sb.getByRole("region", { name: "Actions", exact: true })).toContainText("Multiattack.");
+    await expect(sb.getByRole("region", { name: "Reactions", exact: true })).toContainText("Parry.");
     expect((await measureOverflow(page)).page, "the page scrolls sideways").toBeLessThanOrEqual(0);
     await shot(page, testInfo, "stat-block");
     // The end of the block can be reached (the dialog scrolls, not the page).
-    await sb.getByRole("region", { name: "Reactions" }).scrollIntoViewIfNeeded();
-    await expect(sb.getByRole("region", { name: "Reactions" })).toBeInViewport();
+    await sb.getByRole("region", { name: "Reactions", exact: true }).scrollIntoViewIfNeeded();
+    await expect(sb.getByRole("region", { name: "Reactions", exact: true })).toBeInViewport();
     await dialog.getByRole("button", { name: /close/i }).first().click();
     await expect(dialog).toHaveCount(0);
   });
