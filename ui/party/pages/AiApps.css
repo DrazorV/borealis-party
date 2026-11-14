@@ -31,5 +31,6 @@ html.phone .ai-apps .input, html.phone .ai-consent .input { font-size: 16px; }
 .ai-guide-note { margin: var(--sp-1) 0; font-size: var(--fs-sm); }
 .ai-keys { margin-top: var(--sp-3); }
 .ai-keys > summary { cursor: pointer; }
-.ai-instructions-text { white-space: pre-wrap; overflow-x: hidden; }
+.ai-apps .ai-instructions-text { white-space: pre-wrap; overflow-x: hidden; height: auto; min-height: 18em; font-family: inherit; }
 html.phone .ai-keys > summary { min-height: var(--ph-hit); display: flex; align-items: center; }
+html.phone .ai-guides [role="tab"] { min-height: var(--ph-hit); }

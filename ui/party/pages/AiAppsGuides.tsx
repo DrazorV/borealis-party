@@ -102,7 +102,7 @@ export function AssistantInstructions({ text, onCopy }: { text: string; onCopy: 
     <div className="party-field ai-instructions">
       <h3 className="ai-head">Instructions for the assistant</h3>
       <span className="party-note muted">Connected apps get these automatically; for ChatGPT, also paste them into a Project's instructions.</span>
-      <textarea className="input ai-snippet ai-instructions-text" readOnly rows={12} aria-label="Instructions for the assistant" value={text} />
+      <textarea className="input textarea ai-snippet ai-instructions-text" readOnly rows={12} aria-label="Instructions for the assistant" value={text} />
       <div className="party-inline"><Button onClick={() => onCopy(text)}>Copy instructions</Button></div>
     </div>
   );
