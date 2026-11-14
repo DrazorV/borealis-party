@@ -171,14 +171,27 @@ impl Workspaces {
         };
         let dir = self.dir(account);
         let content = self.content.clone();
+        let opened = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let opening = Arc::clone(&opened);
         let workspace = cell
             .get_or_try_init(|| async move {
-                tokio::task::spawn_blocking(move || open_now(dir, content))
+                let workspace = tokio::task::spawn_blocking(move || open_now(dir, content))
                     .await
-                    .map_err(|e| ApiError::Internal(format!("open task: {e}")))?
+                    .map_err(|e| ApiError::Internal(format!("open task: {e}")))??;
+                opening.store(true, Ordering::Relaxed);
+                Ok::<_, ApiError>(workspace)
             })
             .await?;
         workspace.last_used.store(now(), Ordering::Relaxed);
+        if opened.load(Ordering::Relaxed) {
+            // Just opened: the automatic content update, when it is due (crate::content_update).
+            crate::content_update::schedule(
+                Arc::clone(&self.jobs),
+                account.to_string(),
+                Arc::clone(workspace),
+                crate::content_update::AUTO_DELAY,
+            );
+        }
         Ok(Arc::clone(workspace))
     }
 

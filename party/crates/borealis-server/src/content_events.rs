@@ -24,6 +24,8 @@ pub fn kind_of(command: &str) -> Option<&'static str> {
     Some(match command {
         "add_index" | "remove_index" | "update_indexes" | "clear_downloaded_content" => "indexes",
         "remove_5etools_url" | "update_5etools_url" | "import_5etools" => "fivetools",
+        // Index files and 5etools sources: a client fetches every list again whatever the kind.
+        "update_all_content" => "packs",
         "import_pack"
         | "install_import_preview"
         | "set_pack_enabled"

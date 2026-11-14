@@ -37,7 +37,12 @@ pub const COMMANDS: [&str; 2] = ["job_start", "job_status"];
 
 /// The commands that may run as a job: the downloads that can outlast a proxy's timeout (party/README.md,
 /// Measurements). Everything else stays one request.
-pub const JOBS: [&str; 3] = ["update_indexes", "stage_5etools_url", "update_5etools_url"];
+pub const JOBS: [&str; 4] = [
+    "update_indexes",
+    "stage_5etools_url",
+    "update_5etools_url",
+    crate::content_update::COMMAND,
+];
 
 /// Sent when a job ends: `{ jobId, command, state }`.
 pub const JOB_DONE: &str = "party://job-done";

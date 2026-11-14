@@ -21,6 +21,8 @@ use crate::{api_routes, AppState, Config};
 #[path = "sync_tests.rs"]
 mod sync_tests;
 
+#[path = "content_update_tests.rs"]
+mod content_update_tests;
 #[path = "jobs_tests.rs"]
 mod jobs_tests;
 
