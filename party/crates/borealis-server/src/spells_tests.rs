@@ -692,7 +692,7 @@ async fn check_upgraded(location: &Location, data: &Path, enc: &str, creature: &
         .try_get(0)
         .unwrap();
     assert_eq!(version, i64::try_from(Db::schema_version()).unwrap());
-    assert_eq!(version, 9);
+    assert!(version >= 9, "the spell tables come with step 9");
     assert!(has_table(&db, "spell_mechanics").await && has_table(&db, "encounter_casts").await);
     let effects: i64 =
         sqlx::query("SELECT COUNT(*) FROM encounter_effects WHERE encounter_id = $1")
