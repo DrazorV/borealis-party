@@ -825,7 +825,7 @@ describe("the player screen (0.3.3): the Play tab with the live combat on top", 
     renderPlay();
     const pane = await openCombatTab();
     const panel = within(pane).getByRole("region", { name: "Your turn panel" });
-    expect(within(panel).getByRole("heading", { name: "Your turn" })).toBeTruthy();
+    expect(within(panel).getByRole("heading", { name: "Your actions" })).toBeTruthy();
     const before = (await api.getSnapshot({ characterId: hero })).play.spellSlots.find((x) => x.level === 1)!;
     expect(within(panel).getByLabelText(new RegExp(`^Level 1: ${before.max - before.used} of ${before.max} left`))).toBeTruthy();
     const spell = within(panel).getAllByRole("button").find((b) => / L1 · \d+ slots?$/.test(b.textContent ?? "") && !b.hasAttribute("disabled"))!;

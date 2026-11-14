@@ -78,7 +78,7 @@ export function TurnPanel({ combat, me, s }: { combat: PlayerCombat; me: PlayerC
   return (
     <section className="card combat-turn" aria-label="Your turn panel">
       <div className="combat-turn-head">
-        <h2 className="combat-h">{mine ? "Your turn" : "Your actions"}</h2>
+        <h2 className="combat-h">Your actions</h2>
         <span className="combat-econ" role="group" aria-label="Action economy">
           {(Object.keys(COST_WORD) as Cost[]).map((c) => (
             <button key={c} type="button" className={`combat-econ-pip${economy.spent[c] ? " spent" : ""}`} aria-pressed={economy.spent[c]}

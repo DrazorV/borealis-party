@@ -118,6 +118,8 @@ test.describe("Role screens: the DM's Combat tab and the player's Play tab (0.3.
       await expect(phone.getByRole("group", { name: "Rests" })).toBeVisible();
       expect((await measureOverflow(phone)).page).toBeLessThanOrEqual(0);
       await shot(phone, "player-turn");
+      await phone.getByRole("group", { name: "Rests" }).scrollIntoViewIfNeeded();
+      await shot(phone, "player-rests");
 
       // The DM's Combat tab: the PC's row and card show no HP of the PC anywhere.
       await desk.goto(`/#/combat/${started.id}`);
@@ -151,6 +153,18 @@ test.describe("Role screens: the DM's Combat tab and the player's Play tab (0.3.
       await expect(sent).toContainText(/Accepted|Answered/, { timeout: 10_000 });
       await expect(card.getByText(new RegExp(`\\b${after}/${sheetHp.max}\\b`))).toHaveCount(0);
       await shot(desk, "dm-accepted");
+      // The player's Play tab on a desktop: the rests sit on the stat tiles' row.
+      const wide = await context(browser, baseURL!, player, DESK);
+      await wide.goto("/#/characters");
+      await wide.getByRole("button", { name: /Your turn/ }).first().click({ timeout: 30_000 });
+      const rests = wide.getByRole("group", { name: "Rests" });
+      await expect(rests).toBeVisible({ timeout: 30_000 });
+      const tile = await wide.locator(".bp-stat-row .stat").first().boundingBox();
+      const restBox = await rests.boundingBox();
+      expect(Math.abs((restBox?.y ?? 0) - (tile?.y ?? 999)), "the rests are on the tiles' row").toBeLessThan(12);
+      await rests.scrollIntoViewIfNeeded();
+      await shot(wide, "player-desktop-rests");
+      await wide.context().close();
 
       // The player casts Bless on themself from their own turn panel.
       const panel = pane.getByRole("region", { name: "Your turn panel" });
