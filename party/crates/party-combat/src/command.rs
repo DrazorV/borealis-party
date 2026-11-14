@@ -1,9 +1,10 @@
 //! Commands: every change to a combat is one [`Command`], issued by an [`Actor`].
 
 use crate::model::{
-    Combatant, CombatantId, DamageType, EffectId, EffectSpec, EncounterRule, LegendaryPool, Pool,
-    Settings,
+    CastId, Combatant, CombatantId, DamageType, EffectId, EffectSpec, EncounterRule, LegendaryPool,
+    Pool, RowOutcome, Settings,
 };
+use crate::spell::{CastChoices, CastSpec};
 use party_dice::{D20Input, DiceInput};
 use serde::{Deserialize, Serialize};
 
@@ -503,6 +504,220 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         roll: Option<D20Input>,
     },
+
+    // --- Spells and stat block actions (0.3.2) ---
+    /// Casts a spell: checks the slot, the economy and the edition rules (`force` overrides the economy, the
+    /// edition rules, target filters and the armor check, never a missing slot), spends them, starts concentration
+    /// and opens a [`crate::PendingCast`] with a row per target. When every row and every amount is given (typed
+    /// first, D21, or `app`), it resolves and applies at once: one undo step. A summon spell's options come back as
+    /// a `summon_options` DM event; nothing spawns.
+    CastSpell {
+        /// Who casts.
+        caster: CombatantId,
+        /// The stat block entry it uses (its `mech` is the spec when `spec` is absent; its uses are spent).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ability: Option<String>,
+        /// The compiled definition, embedded by the server (`None`: the ability's `mech`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spec: Option<Box<CastSpec>>,
+        /// The slot level spent (`None`: a cantrip, at will or per day).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slot: Option<u8>,
+        /// The targets, in order (a target listed twice takes two rays). Empty for a self spell.
+        #[serde(default)]
+        targets: Vec<CombatantId>,
+        /// Rolls or outcomes for the rows, if known now.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        rows: Vec<RowInput>,
+        /// The amounts (damage, healing, temp HP) in the order of the definition's amount primitives, if known now.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        amounts: Vec<AmountRoll>,
+        /// Critical-hit amounts for crit rows (typed); `app` or absent rolls the doubled dice in the app.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        crit_amounts: Vec<AmountRoll>,
+        /// Choices (a damage type).
+        #[serde(default)]
+        choices: CastChoices,
+        /// Cast before the fight (a precast starting effect): no economy or edition rules, the slot is spent.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        precast: bool,
+        /// The DM's one-tap override.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        force: bool,
+        /// The cast's id (the server's random id); the engine numbers it when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<CastId>,
+    },
+    /// Resolves one row of a pending cast: a typed save or attack (first), a roll in the app (save bonus, Bless,
+    /// advantage and automatic failure applied), or an outcome. `use_lr` spends Legendary Resistance to turn a
+    /// failed save into a success. A player may resolve their own PC's row.
+    ResolveCastRow {
+        /// The cast.
+        cast: CastId,
+        /// The target.
+        target: CombatantId,
+        /// The ray (0 unless the target takes several).
+        #[serde(default)]
+        ray: u32,
+        /// The roll or outcome.
+        roll: RowRoll,
+        /// Spend Legendary Resistance on a failure.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        use_lr: bool,
+    },
+    /// Applies a pending cast: one amount roll for everyone, halved for savers, critical dice for crit rows,
+    /// through damage (resistances, concentration checks), healing and the effects. Unresolved rows are refused
+    /// unless `force` (they are skipped).
+    ApplyCast {
+        /// The cast.
+        cast: CastId,
+        /// The amounts, as in [`Command::CastSpell`].
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        amounts: Vec<AmountRoll>,
+        /// Critical amounts.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        crit_amounts: Vec<AmountRoll>,
+        /// Skip unresolved rows.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        force: bool,
+    },
+    /// Drops a pending cast (countered, or a mistake). With `refund` its slot and per-day use come back; the
+    /// economy and concentration stay as they are.
+    CancelCast {
+        /// The cast.
+        cast: CastId,
+        /// Give the slot back.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        refund: bool,
+    },
+    /// Applies a spell effect's zone (its [Apply to…] button) to the creatures the DM taps: the zone's save and
+    /// damage, as a pending cast that spends nothing. With every roll given it applies at once.
+    ApplyZone {
+        /// The effect carrying the zone.
+        effect: EffectId,
+        /// Who is in it.
+        targets: Vec<CombatantId>,
+        /// Rolls or outcomes.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        rows: Vec<RowInput>,
+        /// The damage.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        amounts: Vec<AmountRoll>,
+        /// The pending cast's id.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<CastId>,
+    },
+    /// Uses a stat block attack or save ability (its `mech`, or `spec`) through the cast pipeline: spends its
+    /// economy, recharge, uses, legendary actions and group limit, then rows and amounts as a cast.
+    PerformStatblock {
+        /// Who.
+        id: CombatantId,
+        /// The ability key.
+        ability: String,
+        /// The definition, when the ability has none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spec: Option<Box<CastSpec>>,
+        /// The targets.
+        #[serde(default)]
+        targets: Vec<CombatantId>,
+        /// Rolls or outcomes.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        rows: Vec<RowInput>,
+        /// The amounts.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        amounts: Vec<AmountRoll>,
+        /// Critical amounts.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        crit_amounts: Vec<AmountRoll>,
+        /// The DM's override (target filters).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        force: bool,
+        /// The pending cast's id.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cast_id: Option<CastId>,
+    },
+    /// Dodge, Dash, Disengage or Help: spends the action (or the bonus action) and adds the marker effect.
+    StandardAction {
+        /// Who.
+        id: CombatantId,
+        /// Which.
+        action: StandardActionKind,
+        /// Help's ally.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<CombatantId>,
+        /// Spend the bonus action instead (Cunning Action and similar).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        bonus: bool,
+    },
+    /// Binds a controlled creature to its owner's current concentration: it is dismissed when that concentration
+    /// ends (a conjured beast added with Add creature). Undo brings it back.
+    BindToConcentration {
+        /// The controlled creature.
+        id: CombatantId,
+    },
+}
+
+/// A row's roll: typed first (D21), in the app, or an outcome the DM sets.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RowRoll {
+    /// The total read off physical dice, everything included (Bless's d4 too).
+    Typed {
+        /// The total.
+        total: i32,
+        /// The natural d20 (needed for a natural 20 or 1 on attacks).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        natural: Option<u32>,
+    },
+    /// Rolled in the app: the save bonus (or attack bonus), roll dice and advantage from the effects.
+    App,
+    /// The DM's verdict without a roll.
+    Outcome {
+        /// The outcome.
+        outcome: RowOutcome,
+    },
+}
+
+/// A row's input inside a cast command.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RowInput {
+    /// The target.
+    pub target: CombatantId,
+    /// The ray.
+    #[serde(default)]
+    pub ray: u32,
+    /// The roll.
+    pub roll: RowRoll,
+    /// Spend Legendary Resistance on a failure.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub use_lr: bool,
+}
+
+/// An amount: typed (D21 first) or rolled in the app from the definition's formula at the cast's slot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AmountRoll {
+    /// The total read off physical dice (modifier included).
+    Typed {
+        /// The total.
+        total: i32,
+    },
+    /// Rolled in the app.
+    App,
+}
+
+/// A standard action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StandardActionKind {
+    /// Attacks against it have disadvantage and it has advantage on DEX saves, until its next turn starts.
+    Dodge,
+    /// Extra movement this turn.
+    Dash,
+    /// No opportunity attacks this turn.
+    Disengage,
+    /// An ally's next check or attack has advantage.
+    Help,
 }
 
 impl Command {
@@ -540,6 +755,7 @@ impl Command {
                 | Command::SetRecharge { .. }
                 | Command::AdjustSlot { .. }
                 | Command::AdjustResource { .. }
+                | Command::ResolveCastRow { .. }
         )
     }
 
@@ -603,6 +819,14 @@ impl Command {
             Command::Summon { .. } => "summon",
             Command::Dismiss { .. } => "dismiss",
             Command::SetInitiativeMode { .. } => "initiative mode",
+            Command::CastSpell { .. } => "cast spell",
+            Command::ResolveCastRow { .. } => "cast roll",
+            Command::ApplyCast { .. } => "apply cast",
+            Command::CancelCast { .. } => "cancel cast",
+            Command::ApplyZone { .. } => "apply zone",
+            Command::PerformStatblock { .. } => "stat block action",
+            Command::StandardAction { .. } => "standard action",
+            Command::BindToConcentration { .. } => "bind to concentration",
         }
     }
 }

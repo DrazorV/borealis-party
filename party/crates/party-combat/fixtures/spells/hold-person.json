@@ -1,0 +1,21 @@
+[
+  {
+    "v": 1, "key": "ID_PHB_SPELL_HOLD_PERSON", "edition": "2014", "name": "Hold Person", "rev": 1,
+    "level": 2, "concentration": true, "cast": "action",
+    "targeting": { "kind": "creatures", "max": "1+slot_above", "filter": { "kind": "type", "types": ["humanoid"] } },
+    "delivery": { "kind": "save", "ability": "wis", "success": "none" },
+    "on_land": [{ "kind": "condition", "condition": "paralyzed", "repeat_save": { "ability": "wis", "at": "end" } }],
+    "duration": { "kind": "minutes", "n": 1 },
+    "tier": "auto",
+    "notes": ["Extra targets must be within 30 feet of each other."]
+  },
+  {
+    "v": 1, "key": "ID_2024_SPELL_HOLD_PERSON", "edition": "2024", "name": "Hold Person", "rev": 1,
+    "level": 2, "concentration": true, "cast": "action",
+    "targeting": { "kind": "creatures", "max": "1+slot_above", "filter": { "kind": "type", "types": ["humanoid"] } },
+    "delivery": { "kind": "save", "ability": "wis", "success": "none" },
+    "on_land": [{ "kind": "condition", "condition": "paralyzed", "repeat_save": { "ability": "wis", "at": "end" } }],
+    "duration": { "kind": "minutes", "n": 1 },
+    "tier": "auto"
+  }
+]

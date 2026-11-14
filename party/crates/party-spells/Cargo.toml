@@ -1,0 +1,17 @@
+[package]
+name = "party-spells"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+description = "Spell data for Borealis Party: curated SRD spell mechanics, the canonical-spell resolver, and drafts from a user's own 5etools spells"
+
+[lints]
+workspace = true
+
+[dependencies]
+# The spell mechanics schema (`party_combat::spell`).
+party-combat = { path = "../party-combat" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

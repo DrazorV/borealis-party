@@ -21,6 +21,8 @@ use party_dice::{
 };
 use serde::{Deserialize, Serialize};
 
+mod cast;
+
 /// The new state and what happened.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Outcome {
@@ -674,6 +676,14 @@ impl Cx<'_> {
                 self.ev(Some(id), K::OrderChanged, text);
                 Ok(())
             }
+            Command::CastSpell { .. }
+            | Command::ResolveCastRow { .. }
+            | Command::ApplyCast { .. }
+            | Command::CancelCast { .. }
+            | Command::ApplyZone { .. }
+            | Command::PerformStatblock { .. }
+            | Command::StandardAction { .. }
+            | Command::BindToConcentration { .. } => self.spell_command(cmd),
         }
     }
 

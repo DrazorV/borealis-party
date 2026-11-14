@@ -1,0 +1,786 @@
+{
+  "ID_SRD521_MONSTER_ADULT_BLACK_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 17,
+      "hit": 9,
+      "lists": [
+        "At will: Acid Arrow [ID_2024_SPELL_ACID_ARROW] @3, Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Fear [ID_2024_SPELL_FEAR]",
+        "1/day each: Speak with Dead [ID_2024_SPELL_SPEAK_WITH_DEAD], Vitriolic Sphere [ID_2024_SPELL_VITRIOLIC_SPHERE]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ADULT_BLUE_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 18,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Invisibility [ID_2024_SPELL_INVISIBILITY], Mage Hand [ID_2024_SPELL_MAGE_HAND], Shatter [ID_2024_SPELL_SHATTER]",
+        "1/day each: Scrying [ID_2024_SPELL_SCRYING], Sending [ID_2024_SPELL_SENDING]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ADULT_BRASS_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 16,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Minor Illusion [ID_2024_SPELL_MINOR_ILLUSION], Scorching Ray [ID_2024_SPELL_SCORCHING_RAY], Shapechange [ID_2024_SPELL_SHAPECHANGE], Speak with Animals [ID_2024_SPELL_SPEAK_WITH_ANIMALS]",
+        "1/day each: Detect Thoughts [ID_2024_SPELL_DETECT_THOUGHTS], Control Weather [ID_2024_SPELL_CONTROL_WEATHER]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ADULT_BRONZE_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 17,
+      "hit": 10,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Guiding Bolt [ID_2024_SPELL_GUIDING_BOLT] @2, Shapechange [ID_2024_SPELL_SHAPECHANGE], Speak with Animals [ID_2024_SPELL_SPEAK_WITH_ANIMALS], Thaumaturgy [ID_2024_SPELL_THAUMATURGY]",
+        "1/day each: Detect Thoughts [ID_2024_SPELL_DETECT_THOUGHTS], Water Breathing [ID_2024_SPELL_WATER_BREATHING]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ADULT_COPPER_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 17,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Mind Spike [ID_2024_SPELL_MIND_SPIKE] @4, Minor Illusion [ID_2024_SPELL_MINOR_ILLUSION], Shapechange [ID_2024_SPELL_SHAPECHANGE]",
+        "1/day each: Greater Restoration [ID_2024_SPELL_GREATER_RESTORATION], Major Image [ID_2024_SPELL_MAJOR_IMAGE]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ADULT_GOLD_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 21,
+      "hit": 13,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Guiding Bolt [ID_2024_SPELL_GUIDING_BOLT] @2, Shapechange [ID_2024_SPELL_SHAPECHANGE]",
+        "1/day each: Flame Strike [ID_2024_SPELL_FLAME_STRIKE], Zone of Truth [ID_2024_SPELL_ZONE_OF_TRUTH]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ADULT_GREEN_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 17,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Mind Spike [ID_2024_SPELL_MIND_SPIKE] @3",
+        "1/day: Geas [ID_2024_SPELL_GEAS]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ADULT_RED_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 20,
+      "hit": 12,
+      "lists": [
+        "At will: Command [ID_2024_SPELL_COMMAND] @2, Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Scorching Ray [ID_2024_SPELL_SCORCHING_RAY]",
+        "1/day: Fireball [ID_2024_SPELL_FIREBALL]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ADULT_SILVER_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 19,
+      "hit": 11,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Hold Monster [ID_2024_SPELL_HOLD_MONSTER], Ice Knife [ID_2024_SPELL_ICE_KNIFE], Shapechange [ID_2024_SPELL_SHAPECHANGE]",
+        "1/day each: Ice Storm [ID_2024_SPELL_ICE_STORM] @5, Zone of Truth [ID_2024_SPELL_ZONE_OF_TRUTH]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ANCIENT_BLACK_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 21,
+      "hit": 13,
+      "lists": [
+        "At will: Acid Arrow [ID_2024_SPELL_ACID_ARROW] @4, Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Fear [ID_2024_SPELL_FEAR]",
+        "1/day each: Create Undead [ID_2024_SPELL_CREATE_UNDEAD], Speak with Dead [ID_2024_SPELL_SPEAK_WITH_DEAD], Vitriolic Sphere [ID_2024_SPELL_VITRIOLIC_SPHERE] @5"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ANCIENT_BLUE_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 22,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Invisibility [ID_2024_SPELL_INVISIBILITY], Mage Hand [ID_2024_SPELL_MAGE_HAND], Shatter [ID_2024_SPELL_SHATTER] @3",
+        "1/day each: Scrying [ID_2024_SPELL_SCRYING], Sending [ID_2024_SPELL_SENDING]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ANCIENT_BRASS_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 20,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Minor Illusion [ID_2024_SPELL_MINOR_ILLUSION], Scorching Ray [ID_2024_SPELL_SCORCHING_RAY] @3, Shapechange [ID_2024_SPELL_SHAPECHANGE], Speak with Animals [ID_2024_SPELL_SPEAK_WITH_ANIMALS]",
+        "1/day each: Control Weather [ID_2024_SPELL_CONTROL_WEATHER], Detect Thoughts [ID_2024_SPELL_DETECT_THOUGHTS]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ANCIENT_BRONZE_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 22,
+      "hit": 14,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Guiding Bolt [ID_2024_SPELL_GUIDING_BOLT] @2, Shapechange [ID_2024_SPELL_SHAPECHANGE], Speak with Animals [ID_2024_SPELL_SPEAK_WITH_ANIMALS], Thaumaturgy [ID_2024_SPELL_THAUMATURGY]",
+        "1/day each: Detect Thoughts [ID_2024_SPELL_DETECT_THOUGHTS], Control Water [ID_2024_SPELL_CONTROL_WATER], Scrying [ID_2024_SPELL_SCRYING], Water Breathing [ID_2024_SPELL_WATER_BREATHING]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ANCIENT_COPPER_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 21,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Mind Spike [ID_2024_SPELL_MIND_SPIKE] @5, Minor Illusion [ID_2024_SPELL_MINOR_ILLUSION], Shapechange [ID_2024_SPELL_SHAPECHANGE]",
+        "1/day each: Greater Restoration [ID_2024_SPELL_GREATER_RESTORATION], Major Image [ID_2024_SPELL_MAJOR_IMAGE], Project Image [ID_2024_SPELL_PROJECT_IMAGE]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ANCIENT_GOLD_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 24,
+      "hit": 16,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Guiding Bolt [ID_2024_SPELL_GUIDING_BOLT] @4, Shapechange [ID_2024_SPELL_SHAPECHANGE]",
+        "1/day each: Flame Strike [ID_2024_SPELL_FLAME_STRIKE] @6, Word of Recall [ID_2024_SPELL_WORD_OF_RECALL], Zone of Truth [ID_2024_SPELL_ZONE_OF_TRUTH]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ANCIENT_GREEN_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 21,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Mind Spike [ID_2024_SPELL_MIND_SPIKE] @5",
+        "1/day each: Geas [ID_2024_SPELL_GEAS], Modify Memory [ID_2024_SPELL_MODIFY_MEMORY]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ANCIENT_RED_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 23,
+      "hit": 15,
+      "lists": [
+        "At will: Command [ID_2024_SPELL_COMMAND] @2, Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Scorching Ray [ID_2024_SPELL_SCORCHING_RAY] @3",
+        "1/day each: Fireball [ID_2024_SPELL_FIREBALL] @6, Scrying [ID_2024_SPELL_SCRYING]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ANCIENT_SILVER_DRAGON": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 23,
+      "hit": 15,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Hold Monster [ID_2024_SPELL_HOLD_MONSTER], Ice Knife [ID_2024_SPELL_ICE_KNIFE] @2, Shapechange [ID_2024_SPELL_SHAPECHANGE]",
+        "1/day each: Control Weather [ID_2024_SPELL_CONTROL_WEATHER], Ice Storm [ID_2024_SPELL_ICE_STORM] @7, Teleport [ID_2024_SPELL_TELEPORT], Zone of Truth [ID_2024_SPELL_ZONE_OF_TRUTH]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ARCHMAGE": [
+    {
+      "ability": "int",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 17,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Detect Thoughts [ID_2024_SPELL_DETECT_THOUGHTS], Disguise Self [ID_2024_SPELL_DISGUISE_SELF], Invisibility [ID_2024_SPELL_INVISIBILITY], Light [ID_2024_SPELL_LIGHT], Mage Armor [ID_2024_SPELL_MAGE_ARMOR] (in AC), Mage Hand [ID_2024_SPELL_MAGE_HAND], Prestidigitation [ID_2024_SPELL_PRESTIDIGITATION]",
+        "2/day each: Fly [ID_2024_SPELL_FLY], Lightning Bolt [ID_2024_SPELL_LIGHTNING_BOLT] @7",
+        "1/day each: Cone of Cold [ID_2024_SPELL_CONE_OF_COLD] @9, Mind Blank [ID_2024_SPELL_MIND_BLANK]*, Scrying [ID_2024_SPELL_SCRYING], Teleport [ID_2024_SPELL_TELEPORT]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_CLOUD_GIANT": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 15,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Fog Cloud [ID_2024_SPELL_FOG_CLOUD], Light [ID_2024_SPELL_LIGHT]",
+        "1/day each: Control Weather [ID_2024_SPELL_CONTROL_WEATHER], Gaseous Form [ID_2024_SPELL_GASEOUS_FORM], Telekinesis [ID_2024_SPELL_TELEKINESIS]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_COUATL": [
+    {
+      "ability": "wis",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 15,
+      "hit": null,
+      "lists": [
+        "At will: Detect Evil and Good [ID_2024_SPELL_DETECT_EVIL_AND_GOOD], Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Detect Thoughts [ID_2024_SPELL_DETECT_THOUGHTS], Shapechange [ID_2024_SPELL_SHAPECHANGE]",
+        "1/day each: Create Food and Water [ID_2024_SPELL_CREATE_FOOD_AND_WATER], Dream [ID_2024_SPELL_DREAM], Greater Restoration [ID_2024_SPELL_GREATER_RESTORATION], Scrying [ID_2024_SPELL_SCRYING], Sleep [ID_2024_SPELL_SLEEP]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_CULTIST_FANATIC": [
+    {
+      "ability": "wis",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 12,
+      "hit": 4,
+      "lists": [
+        "At will: Light [ID_2024_SPELL_LIGHT], Thaumaturgy [ID_2024_SPELL_THAUMATURGY]",
+        "2/day: Command [ID_2024_SPELL_COMMAND]",
+        "1/day: Hold Person [ID_2024_SPELL_HOLD_PERSON]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_DEVA": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 17,
+      "hit": null,
+      "lists": [
+        "At will: Detect Evil and Good [ID_2024_SPELL_DETECT_EVIL_AND_GOOD], Shapechange [ID_2024_SPELL_SHAPECHANGE]",
+        "1/day each: Commune [ID_2024_SPELL_COMMUNE], Raise Dead [ID_2024_SPELL_RAISE_DEAD]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_DJINNI": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 17,
+      "hit": null,
+      "lists": [
+        "At will: Detect Evil and Good [ID_2024_SPELL_DETECT_EVIL_AND_GOOD], Detect Magic [ID_2024_SPELL_DETECT_MAGIC]",
+        "2/day each: Create Food and Water [ID_2024_SPELL_CREATE_FOOD_AND_WATER], Tongues [ID_2024_SPELL_TONGUES], Wind Walk [ID_2024_SPELL_WIND_WALK]",
+        "1/day each: Creation [ID_2024_SPELL_CREATION], Gaseous Form [ID_2024_SPELL_GASEOUS_FORM], Invisibility [ID_2024_SPELL_INVISIBILITY], Major Image [ID_2024_SPELL_MAJOR_IMAGE], Plane Shift [ID_2024_SPELL_PLANE_SHIFT]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_DRUID": [
+    {
+      "ability": "wis",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 13,
+      "hit": null,
+      "lists": [
+        "At will: Druidcraft [ID_2024_SPELL_DRUIDCRAFT], Speak with Animals [ID_2024_SPELL_SPEAK_WITH_ANIMALS]",
+        "2/day each: Entangle [ID_2024_SPELL_ENTANGLE], Thunderwave [ID_2024_SPELL_THUNDERWAVE]",
+        "1/day each: Animal Messenger [ID_2024_SPELL_ANIMAL_MESSENGER], Longstrider [ID_2024_SPELL_LONGSTRIDER], Moonbeam [ID_2024_SPELL_MOONBEAM]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_DRYAD": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 14,
+      "hit": null,
+      "lists": [
+        "At will: Animal Friendship [ID_2024_SPELL_ANIMAL_FRIENDSHIP], Charm Monster [ID_2024_SPELL_CHARM_MONSTER], Druidcraft [ID_2024_SPELL_DRUIDCRAFT]",
+        "1/day each: Entangle [ID_2024_SPELL_ENTANGLE], Pass without Trace [ID_2024_SPELL_PASS_WITHOUT_TRACE]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_EFREETI": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 16,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Elementalism [ID_2024_SPELL_ELEMENTALISM]",
+        "1/day each: Gaseous Form [ID_2024_SPELL_GASEOUS_FORM], Invisibility [ID_2024_SPELL_INVISIBILITY], Major Image [ID_2024_SPELL_MAJOR_IMAGE], Plane Shift [ID_2024_SPELL_PLANE_SHIFT], Tongues [ID_2024_SPELL_TONGUES], Wall of Fire [ID_2024_SPELL_WALL_OF_FIRE] @7"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_GIANT_OWL": [
+    {
+      "ability": "wis",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": null,
+      "hit": null,
+      "lists": [
+        "At will: Detect Evil and Good [ID_2024_SPELL_DETECT_EVIL_AND_GOOD], Detect Magic [ID_2024_SPELL_DETECT_MAGIC]",
+        "1/day: Clairvoyance [ID_2024_SPELL_CLAIRVOYANCE]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_GLABREZU": [
+    {
+      "ability": "int",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 16,
+      "hit": null,
+      "lists": [
+        "At will: Darkness [ID_2024_SPELL_DARKNESS], Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Dispel Magic [ID_2024_SPELL_DISPEL_MAGIC]",
+        "1/day each: Confusion [ID_2024_SPELL_CONFUSION], Fly [ID_2024_SPELL_FLY], Power Word Stun [ID_2024_SPELL_POWER_WORD_STUN]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_GREEN_HAG": [
+    {
+      "ability": "wis",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 12,
+      "hit": 4,
+      "lists": [
+        "At will: Dancing Lights [ID_2024_SPELL_DANCING_LIGHTS], Disguise Self [ID_2024_SPELL_DISGUISE_SELF], Invisibility [ID_2024_SPELL_INVISIBILITY], Minor Illusion [ID_2024_SPELL_MINOR_ILLUSION], Ray of Sickness [ID_2024_SPELL_RAY_OF_SICKNESS] @3"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_GUARDIAN_NAGA": [
+    {
+      "ability": "wis",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 16,
+      "hit": null,
+      "lists": [
+        "At will: Thaumaturgy [ID_2024_SPELL_THAUMATURGY]",
+        "1/day each: Clairvoyance [ID_2024_SPELL_CLAIRVOYANCE], Cure Wounds [ID_2024_SPELL_CURE_WOUNDS] @6, Flame Strike [ID_2024_SPELL_FLAME_STRIKE] @6, Geas [ID_2024_SPELL_GEAS], True Seeing [ID_2024_SPELL_TRUE_SEEING]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_INCUBUS": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 15,
+      "hit": null,
+      "lists": [
+        "At will: Disguise Self [ID_2024_SPELL_DISGUISE_SELF], Etherealness [ID_2024_SPELL_ETHEREALNESS]",
+        "1/day each: Dream [ID_2024_SPELL_DREAM], Hypnotic Pattern [ID_2024_SPELL_HYPNOTIC_PATTERN]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_LAMIA": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 13,
+      "hit": null,
+      "lists": [
+        "At will: Disguise Self [ID_2024_SPELL_DISGUISE_SELF], Minor Illusion [ID_2024_SPELL_MINOR_ILLUSION]",
+        "1/day each: Geas [ID_2024_SPELL_GEAS], Major Image [ID_2024_SPELL_MAJOR_IMAGE], Scrying [ID_2024_SPELL_SCRYING]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_LICH": [
+    {
+      "ability": "int",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 20,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Detect Thoughts [ID_2024_SPELL_DETECT_THOUGHTS], Dispel Magic [ID_2024_SPELL_DISPEL_MAGIC], Fireball [ID_2024_SPELL_FIREBALL] @5, Invisibility [ID_2024_SPELL_INVISIBILITY], Lightning Bolt [ID_2024_SPELL_LIGHTNING_BOLT] @5, Mage Hand [ID_2024_SPELL_MAGE_HAND], Prestidigitation [ID_2024_SPELL_PRESTIDIGITATION]",
+        "2/day each: Animate Dead [ID_2024_SPELL_ANIMATE_DEAD], Dimension Door [ID_2024_SPELL_DIMENSION_DOOR], Plane Shift [ID_2024_SPELL_PLANE_SHIFT]",
+        "1/day each: Chain Lightning [ID_2024_SPELL_CHAIN_LIGHTNING], Finger of Death [ID_2024_SPELL_FINGER_OF_DEATH], Power Word Kill [ID_2024_SPELL_POWER_WORD_KILL], Scrying [ID_2024_SPELL_SCRYING]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_MAGE": [
+    {
+      "ability": "int",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 14,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Light [ID_2024_SPELL_LIGHT], Mage Armor [ID_2024_SPELL_MAGE_ARMOR] (in AC), Mage Hand [ID_2024_SPELL_MAGE_HAND], Prestidigitation [ID_2024_SPELL_PRESTIDIGITATION]",
+        "2/day each: Fireball [ID_2024_SPELL_FIREBALL] @4, Invisibility [ID_2024_SPELL_INVISIBILITY]",
+        "1/day each: Cone of Cold [ID_2024_SPELL_CONE_OF_COLD], Fly [ID_2024_SPELL_FLY]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_MUMMY_LORD": [
+    {
+      "ability": "wis",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 17,
+      "hit": 9,
+      "lists": [
+        "At will: Dispel Magic [ID_2024_SPELL_DISPEL_MAGIC], Thaumaturgy [ID_2024_SPELL_THAUMATURGY]",
+        "1/day each: Animate Dead [ID_2024_SPELL_ANIMATE_DEAD], Harm [ID_2024_SPELL_HARM], Insect Plague [ID_2024_SPELL_INSECT_PLAGUE] @7"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_NIGHT_HAG": [
+    {
+      "ability": "int",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 14,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Etherealness [ID_2024_SPELL_ETHEREALNESS], Magic Missile [ID_2024_SPELL_MAGIC_MISSILE] @4",
+        "2/day each: Phantasmal Killer [ID_2024_SPELL_PHANTASMAL_KILLER], Plane Shift [ID_2024_SPELL_PLANE_SHIFT]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_ONI": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 13,
+      "hit": null,
+      "lists": [
+        "1/day each: Charm Person [ID_2024_SPELL_CHARM_PERSON] @2, Darkness [ID_2024_SPELL_DARKNESS], Gaseous Form [ID_2024_SPELL_GASEOUS_FORM], Sleep [ID_2024_SPELL_SLEEP]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_PIT_FIEND": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 21,
+      "hit": null,
+      "lists": [],
+      "name": "Hellfire Spellcasting",
+      "origin": "text"
+    }
+  ],
+  "ID_SRD521_MONSTER_PLANETAR": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 20,
+      "hit": null,
+      "lists": [
+        "At will: Detect Evil and Good [ID_2024_SPELL_DETECT_EVIL_AND_GOOD]",
+        "1/day each: Commune [ID_2024_SPELL_COMMUNE], Control Weather [ID_2024_SPELL_CONTROL_WEATHER], Dispel Evil and Good [ID_2024_SPELL_DISPEL_EVIL_AND_GOOD], Raise Dead [ID_2024_SPELL_RAISE_DEAD]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_PRIEST": [
+    {
+      "ability": "wis",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 13,
+      "hit": null,
+      "lists": [
+        "At will: Light [ID_2024_SPELL_LIGHT], Thaumaturgy [ID_2024_SPELL_THAUMATURGY]",
+        "1/day: Spirit Guardians [ID_2024_SPELL_SPIRIT_GUARDIANS]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_PRIEST_ACOLYTE": [
+    {
+      "ability": "wis",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": null,
+      "hit": null,
+      "lists": [
+        "At will: Light [ID_2024_SPELL_LIGHT], Thaumaturgy [ID_2024_SPELL_THAUMATURGY]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_RAKSHASA": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 18,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Detect Thoughts [ID_2024_SPELL_DETECT_THOUGHTS], Disguise Self [ID_2024_SPELL_DISGUISE_SELF], Mage Hand [ID_2024_SPELL_MAGE_HAND], Minor Illusion [ID_2024_SPELL_MINOR_ILLUSION]",
+        "1/day each: Fly [ID_2024_SPELL_FLY], Invisibility [ID_2024_SPELL_INVISIBILITY], Major Image [ID_2024_SPELL_MAJOR_IMAGE], Plane Shift [ID_2024_SPELL_PLANE_SHIFT]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_SOLAR": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 25,
+      "hit": null,
+      "lists": [
+        "At will: Detect Evil and Good [ID_2024_SPELL_DETECT_EVIL_AND_GOOD]",
+        "1/day each: Commune [ID_2024_SPELL_COMMUNE], Control Weather [ID_2024_SPELL_CONTROL_WEATHER], Dispel Evil and Good [ID_2024_SPELL_DISPEL_EVIL_AND_GOOD], Resurrection [ID_2024_SPELL_RESURRECTION]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_SPHINX_OF_LORE": [
+    {
+      "ability": "int",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 16,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Identify [ID_2024_SPELL_IDENTIFY], Mage Hand [ID_2024_SPELL_MAGE_HAND], Minor Illusion [ID_2024_SPELL_MINOR_ILLUSION], Prestidigitation [ID_2024_SPELL_PRESTIDIGITATION]",
+        "1/day each: Dispel Magic [ID_2024_SPELL_DISPEL_MAGIC], Legend Lore [ID_2024_SPELL_LEGEND_LORE], Locate Object [ID_2024_SPELL_LOCATE_OBJECT], Plane Shift [ID_2024_SPELL_PLANE_SHIFT], Remove Curse [ID_2024_SPELL_REMOVE_CURSE], Tongues [ID_2024_SPELL_TONGUES]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_SPHINX_OF_VALOR": [
+    {
+      "ability": "wis",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 20,
+      "hit": null,
+      "lists": [
+        "At will: Detect Evil and Good [ID_2024_SPELL_DETECT_EVIL_AND_GOOD], Thaumaturgy [ID_2024_SPELL_THAUMATURGY]",
+        "1/day each: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Dispel Magic [ID_2024_SPELL_DISPEL_MAGIC], Greater Restoration [ID_2024_SPELL_GREATER_RESTORATION], Heroes’ Feast [ID_2024_SPELL_HEROES_FEAST], Zone of Truth [ID_2024_SPELL_ZONE_OF_TRUTH]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_SPIRIT_NAGA": [
+    {
+      "ability": "int",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 14,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Mage Hand [ID_2024_SPELL_MAGE_HAND], Minor Illusion [ID_2024_SPELL_MINOR_ILLUSION], Water Breathing [ID_2024_SPELL_WATER_BREATHING]",
+        "2/day each: Detect Thoughts [ID_2024_SPELL_DETECT_THOUGHTS], Dimension Door [ID_2024_SPELL_DIMENSION_DOOR], Hold Person [ID_2024_SPELL_HOLD_PERSON] @3, Lightning Bolt [ID_2024_SPELL_LIGHTNING_BOLT] @4"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_STORM_GIANT": [
+    {
+      "ability": "wis",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 18,
+      "hit": null,
+      "lists": [
+        "At will: Detect Magic [ID_2024_SPELL_DETECT_MAGIC], Light [ID_2024_SPELL_LIGHT]",
+        "1/day: Control Weather [ID_2024_SPELL_CONTROL_WEATHER]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ],
+  "ID_SRD521_MONSTER_UNICORN": [
+    {
+      "ability": "cha",
+      "casterLevel": null,
+      "chips": [],
+      "class": null,
+      "dc": 14,
+      "hit": null,
+      "lists": [
+        "At will: Detect Evil and Good [ID_2024_SPELL_DETECT_EVIL_AND_GOOD], Druidcraft [ID_2024_SPELL_DRUIDCRAFT]",
+        "1/day each: Calm Emotions [ID_2024_SPELL_CALM_EMOTIONS], Dispel Evil and Good [ID_2024_SPELL_DISPEL_EVIL_AND_GOOD], Entangle [ID_2024_SPELL_ENTANGLE], Pass without Trace [ID_2024_SPELL_PASS_WITHOUT_TRACE], Word of Recall [ID_2024_SPELL_WORD_OF_RECALL]"
+      ],
+      "name": "Spellcasting",
+      "origin": "structured"
+    }
+  ]
+}

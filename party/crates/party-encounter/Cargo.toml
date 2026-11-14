@@ -15,6 +15,8 @@ workspace = true
 borealis-content = { path = "../../../crates/borealis-content" }
 # The combat engine's combatant a copy builds (`combatant`).
 party-combat = { path = "../party-combat" }
+# The canonical-spell resolver monster spellbooks link through (`spellbook::link`).
+party-spells = { path = "../party-spells" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
