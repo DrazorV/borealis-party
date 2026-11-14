@@ -26,6 +26,8 @@ mod jobs_tests;
 
 #[path = "ai_auth_tests.rs"]
 mod ai_auth_tests;
+#[path = "ai_oauth_tests.rs"]
+mod ai_oauth_tests;
 #[path = "ai_providers_tests.rs"]
 mod ai_providers_tests;
 #[path = "backup_tests.rs"]

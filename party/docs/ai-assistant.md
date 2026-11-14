@@ -38,7 +38,9 @@ Limits of `device` mode:
   random nonce. The account id and the provider are the associated data, so a sealed key copied to another row
   doesn't open. `key_ring` (a short digest of the server key, never the key) tells a row sealed under an older
   server key, and the person is asked to enter their key again.
-- Without a server key, no key is saved, and the Account page says why. `device` mode still works.
+- Without a server key, no key is saved. Everyone sees "Saving cloud AI keys isn't switched on for this server yet; ask
+  its admin" (`keys.why`); only admins also get the instructions (`keys.adminHelp`, sent to admins only). `device`
+  mode still works, and the browser sign-ins are shown disabled.
 - A key is never logged, never sent back (only `•••• last4`), and is scrubbed from provider errors. It lives in the
   database, not in the account's Borealis folder, so it's never in a bundle, a share code or the offline mirror.
 - "Remove key" deletes the key. "Remove" deletes the whole setup. Both go when the account is deleted.
@@ -76,6 +78,41 @@ Limits of `device` mode:
 tokens per account per day (UTC, in `ai_usage`), and 60 tool calls per account per minute. A conversation has at most
 60 turns, 8000 characters per message and 8 model steps per message.
 
+## Browser sign-in (0.3.2)
+
+**Connect OpenRouter** uses OpenRouter's OAuth PKCE flow
+(<https://openrouter.ai/docs/guides/overview/auth/oauth>): no client id, no client secret, and no admin step beyond
+`server.public_url` (`BOREALIS__SERVER__PUBLIC_URL`) and the server key.
+
+1. `POST /api/ai/oauth/openrouter/start` `{ consent: true, autoApply?, model? }` → `{ url }`. The server keeps a random
+   `state` (only its hash) and a PKCE verifier for 10 minutes, bound to the account and the session that asked; at most
+   3 open per account. The app opens `url` (`https://openrouter.ai/auth?callback_url=…&code_challenge=…&state=…`) in
+   the browser, the system browser in the apps.
+2. OpenRouter sends the browser to `GET {public_url}/api/ai/oauth/openrouter/callback?code=&state=`. The state is taken
+   out at once (single use), must be younger than 10 minutes, and its session must still be signed in as the same
+   account. The code and the verifier go to the fixed `https://openrouter.ai/api/v1/auth/keys`, through the same
+   checked, pinned, no-redirect request as provider calls.
+3. The returned key is saved exactly like a pasted one (OpenAI-compatible at `https://openrouter.ai/api/v1`, model
+   `openrouter/auto` to start), shown as `•••• last4`, removable. The callback page has no scripts and sends no
+   referrer; the card polls `GET /api/ai` every 3 s (and on focus) until the key is there.
+
+The code, the verifier, the state and the key are never logged. `GET /api/ai` has `signIn: { openrouter }`, true when
+the server has a public address. Refusals: `ai_consent_required`, `ai_keys_unavailable`, `ai_sign_in_unavailable`.
+
+**Sign in with ChatGPT: not offered** (checked 2026-11-14 against OpenAI's docs). It is "currently available to
+selected commercial partners through a limited trial" (<https://developers.openai.com/siwc/quickstart>,
+<https://developers.openai.com/siwc/request-client-id>). The self-registering open-source track
+(<https://developers.openai.com/siwc/token-sharing-open-source/sign-in>) allows only loopback redirect URIs
+(`http://127.0.0.1:<port>/…`), and "paid or remotely hosted" apps must use the interest form
+(<https://openai.com/form/sign-in-with-chatgpt-interest/>). A multi-user server at its own address therefore needs a
+partner client id from OpenAI. Plan usage would also need a new adapter: `POST https://api.openai.com/v1/responses`
+with `stream: true`, `store: false` and no system role or `max_output_tokens`
+(<https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference>). The Codex CLI login is not
+reused.
+
+**Claude** has no sign-in for other apps; the card points to "AI apps" (MCP), where claude.ai and Claude Desktop
+connect to Borealis Party.
+
 ## Routes
 
 All answer 404 when `[features] ai = false` (`BOREALIS__FEATURES__AI=false`). That's an emergency switch in the server
@@ -83,7 +120,7 @@ config only, with no admin-page toggle (D40).
 
 | Route | What |
 |---|---|
-| `GET /api/ai` | `{ keys: { canStore, why? }, provider: { provider, mode, baseUrl, model, hasKey, keyLast4, keyReadable, autoApply, profile, consentedAt } \| null, scopes, limits: { requestsPerMinute, tokensPerDay, tokensToday }, defaults }` |
+| `GET /api/ai` | `{ keys: { canStore, why?, adminHelp? }, signIn: { openrouter }, provider: { provider, mode, baseUrl, model, hasKey, keyLast4, keyReadable, autoApply, profile, consentedAt } \| null, scopes, limits: { requestsPerMinute, tokensPerDay, tokensToday }, defaults }` |
 | `PUT /api/ai` | `{ provider, mode?, baseUrl?, model, key?, consent, autoApply?, profile? }`. Leaving `key` out keeps the saved key for the same provider |
 | `DELETE /api/ai`, `DELETE /api/ai/key` | Forget the setup, or only the key |
 | `POST /api/ai/test` | `{ ok, reply? \| status?, message? }`: one tiny request (`server` mode; the app tests `device` mode itself) |

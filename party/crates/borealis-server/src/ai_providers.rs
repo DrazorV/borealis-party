@@ -117,6 +117,12 @@ impl std::fmt::Debug for Secret {
     }
 }
 
+/// What everyone but an admin is told when the server can't save keys ([`Sealer::from_config`] has the admin's
+/// instructions, which only admins see).
+pub const KEYS_OFF_NOTE: &str =
+    "Saving cloud AI keys isn't switched on for this server yet; ask its admin. A model on \
+                                 your own device works without it.";
+
 /// Seals and opens saved keys with the server key.
 pub struct Sealer {
     key: LessSafeKey,
@@ -131,8 +137,9 @@ impl Sealer {
     pub fn from_config(secret: Option<&str>) -> Result<Self, &'static str> {
         let Some(text) = secret.map(str::trim).filter(|t| !t.is_empty()) else {
             return Err(
-                "This server has no key to encrypt AI keys with, so it doesn't save them. The server's admin can \
-                 set BOREALIS__AI__SECRET_KEY (32 random bytes in base64). A model on your own device works without it.",
+                "This server has no key to encrypt AI keys with, so it doesn't save them. Set \
+                 BOREALIS__AI__SECRET_KEY (32 random bytes in base64: `openssl rand -base64 32`) in the server's \
+                 environment and restart it. A model on the person's own device works without it.",
             );
         };
         let bytes = base64::engine::general_purpose::STANDARD
@@ -140,8 +147,8 @@ impl Sealer {
             .ok()
             .filter(|b| b.len() == 32)
             .ok_or(
-                "This server's key for AI keys is not 32 bytes in base64, so it doesn't save keys. The server's \
-                 admin can fix BOREALIS__AI__SECRET_KEY.",
+                "This server's key for AI keys is not 32 bytes in base64, so it doesn't save keys. Fix \
+                 BOREALIS__AI__SECRET_KEY (`openssl rand -base64 32`) and restart the server.",
             )?;
         let unbound = UnboundKey::new(&AES_256_GCM, &bytes)
             .map_err(|_| "This server's key for AI keys can't be used.")?;
@@ -884,6 +891,33 @@ async fn send(
     timeout: Duration,
 ) -> Result<(u16, Value), ProviderError> {
     let key = endpoint.key.as_ref();
+    let provider = endpoint.provider;
+    post_json(url, body, timeout, key, |request| match (provider, key) {
+        (Provider::OpenAi, Some(k)) => request.bearer_auth(k.expose()),
+        (Provider::OpenAi, None) => request,
+        (Provider::Anthropic, k) => request
+            .header("x-api-key", k.map(Secret::expose).unwrap_or_default())
+            .header("anthropic-version", "2023-06-01"),
+        (Provider::Gemini, k) => {
+            request.header("x-goog-api-key", k.map(Secret::expose).unwrap_or_default())
+        }
+    })
+    .await
+}
+
+/// POST the JSON `body` to `url`: the address checked and pinned ([`checked_addresses`]), no redirects, `auth` adding
+/// any header, the reply read up to [`MAX_REPLY_BYTES`]. `key` is scrubbed from every error. Answers the status and
+/// the JSON body of a successful reply. Also used by the browser sign-ins (`ai_oauth.rs`) for their fixed hosts.
+///
+/// # Errors
+/// A refused address, no answer, an error answer, in words for the person.
+pub(crate) async fn post_json(
+    url: &str,
+    body: &Value,
+    timeout: Duration,
+    key: Option<&Secret>,
+    auth: impl FnOnce(reqwest::RequestBuilder) -> reqwest::RequestBuilder,
+) -> Result<(u16, Value), ProviderError> {
     let checked = {
         let url = url.to_string();
         // The mock ports are per thread: decided here, before the check moves to a blocking thread.
@@ -908,20 +942,12 @@ async fn send(
     let client = builder
         .build()
         .map_err(|_| ProviderError::new(None, "The server could not start a request.", key))?;
-    let mut request = client
-        .post(url)
-        .header("content-type", "application/json")
-        .body(body.to_string());
-    request = match (endpoint.provider, key) {
-        (Provider::OpenAi, Some(k)) => request.bearer_auth(k.expose()),
-        (Provider::OpenAi, None) => request,
-        (Provider::Anthropic, k) => request
-            .header("x-api-key", k.map(Secret::expose).unwrap_or_default())
-            .header("anthropic-version", "2023-06-01"),
-        (Provider::Gemini, k) => {
-            request.header("x-goog-api-key", k.map(Secret::expose).unwrap_or_default())
-        }
-    };
+    let request = auth(
+        client
+            .post(url)
+            .header("content-type", "application/json")
+            .body(body.to_string()),
+    );
     let mut response = request.send().await.map_err(|e| {
         let why = if e.is_timeout() {
             "The provider took too long to answer."
