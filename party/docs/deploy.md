@@ -89,7 +89,7 @@ tool:
 
 ```sh
 docker run --rm -it -v /docker/borealis-party/config:/config -e PGPASSWORD \
-  --entrypoint /usr/lib/postgresql/18/bin/pg_restore ghcr.io/drazorv/borealis-party:latest \
+  --entrypoint /usr/lib/postgresql/18/bin/pg_restore ghcr.io/fortress-soft/borealis-party:latest \
   --host db.example --username borealis_party --dbname borealis_party \
   --clean --if-exists --no-owner /config/backups/borealis_party-0.3.0-to-0.3.1-20261113T190512Z.dump
 ```

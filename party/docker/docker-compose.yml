@@ -4,7 +4,7 @@
 services:
   borealis-party:
     container_name: "borealis-party"
-    image: "ghcr.io/drazorv/borealis-party:latest"
+    image: "ghcr.io/fortress-soft/borealis-party:latest"
     # Or build it yourself from a checkout of the repository:
     # build:
     #   context: "../.."

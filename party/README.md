@@ -16,7 +16,7 @@ on an empty one.
 services:
   borealis-party:
     container_name: "borealis-party"
-    image: "ghcr.io/drazorv/borealis-party:latest"
+    image: "ghcr.io/fortress-soft/borealis-party:latest"
     environment:
       - "TZ=Europe/Athens"
       - "PUID=1026"
@@ -42,7 +42,7 @@ and the version in `party/Cargo.toml` (`.github/workflows/party-image.yml`; star
 image). To build the image yourself, from the repository root:
 
 ```sh
-docker build -f party/docker/Dockerfile -t ghcr.io/drazorv/borealis-party:latest .
+docker build -f party/docker/Dockerfile -t ghcr.io/fortress-soft/borealis-party:latest .
 ```
 
 ## Settings
@@ -172,7 +172,7 @@ Then sign in or create an account.
 
 A browser on the website sees a small, dismissible note on the sign-in page and the Start page, recommending the app
 for its system from the `server.app_download` folder (by default
-`https://github.com/DrazorV/borealis-party/releases/latest/download`), with the address to enter in the app:
+`https://github.com/fortress-soft/borealis-party/releases/latest/download`), with the address to enter in the app:
 
 - Android: `borealis-party-arm64.apk`.
 - Windows: `borealis-party-windows-x64-setup.exe`.
@@ -607,7 +607,7 @@ Set `BOREALIS_TEST_POSTGRES_URL` to a database the tests may wipe to run them on
 
 Every `party-v<version>` tag builds the phone and desktop apps and attaches them to that GitHub release
 (`.github/workflows/party-apps.yml`). The names carry no version, so these links always fetch the newest release
-(each one is `https://github.com/DrazorV/borealis-party/releases/latest/download/` followed by the asset name):
+(each one is `https://github.com/fortress-soft/borealis-party/releases/latest/download/` followed by the asset name):
 
 | App | Asset |
 |---|---|

@@ -12,7 +12,7 @@ const FIREFOX_LINUX = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:132.0) Gecko/2
 const CHROMEBOOK = "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
 
 const os = (userAgent: string, maxTouchPoints = 0, platform?: string) => visitorOs({ userAgent, maxTouchPoints, platform });
-const BASE = "https://github.com/DrazorV/borealis-party/releases/latest/download";
+const BASE = "https://github.com/fortress-soft/borealis-party/releases/latest/download";
 
 describe("visitorOs", () => {
   it("knows phones and tablets", () => {
@@ -76,7 +76,7 @@ describe("offerFor", () => {
 
 describe("releasesPage", () => {
   it("is the GitHub release page, or the folder itself", () => {
-    expect(releasesPage(BASE)).toBe("https://github.com/DrazorV/borealis-party/releases/latest");
+    expect(releasesPage(BASE)).toBe("https://github.com/fortress-soft/borealis-party/releases/latest");
     expect(releasesPage("https://github.com/o/r/releases/download/party-v0.2.0/")).toBe("https://github.com/o/r/releases/tag/party-v0.2.0");
     expect(releasesPage("https://files.example.com/apps/")).toBe("https://files.example.com/apps");
   });

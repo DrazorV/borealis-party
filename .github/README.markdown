@@ -7,12 +7,12 @@
 **Borealis for the whole table: a self-hosted, multi-user server for playing fifth edition together.**
 
 <p>
-<a href="https://github.com/DrazorV/borealis-party/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/DrazorV/borealis-party?style=for-the-badge&label=release&color=2f875b&labelColor=070a0d"></a>
+<a href="https://github.com/fortress-soft/borealis-party/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/fortress-soft/borealis-party?style=for-the-badge&label=release&color=2f875b&labelColor=070a0d"></a>
 <a href="https://github.com/TeamBorealis/borealis"><img alt="Built on Borealis" src="https://img.shields.io/badge/built%20on-Borealis-6fd0b5?style=for-the-badge&labelColor=070a0d"></a>
 <a href="#licence"><img alt="Licence MIT OR Apache-2.0" src="https://img.shields.io/badge/licence-MIT%20OR%20Apache--2.0-e3b64a?style=for-the-badge&labelColor=070a0d"></a>
 </p>
 
-<p><a href="https://github.com/DrazorV/borealis-party/releases/latest"><b>Download the apps</b></a> &nbsp;·&nbsp; <a href="#run-your-own-server">Run a server</a> &nbsp;·&nbsp; <a href="https://github.com/DrazorV/borealis-party/issues">Issues</a> &nbsp;·&nbsp; <a href="https://github.com/TeamBorealis/borealis">Borealis</a></p>
+<p><a href="https://github.com/fortress-soft/borealis-party/releases/latest"><b>Download the apps</b></a> &nbsp;·&nbsp; <a href="#run-your-own-server">Run a server</a> &nbsp;·&nbsp; <a href="https://github.com/fortress-soft/borealis-party/issues">Issues</a> &nbsp;·&nbsp; <a href="https://github.com/TeamBorealis/borealis">Borealis</a></p>
 
 </div>
 
@@ -39,7 +39,7 @@ to them as pull requests.
 Borealis keeps everything on one device. Borealis Party puts the same app on a server you run, so a whole group can use
 it from any device:
 
-- **A self-hosted server.** One Docker image (`ghcr.io/drazorv/borealis-party`), with SQLite or PostgreSQL. It runs
+- **A self-hosted server.** One Docker image (`ghcr.io/fortress-soft/borealis-party`), with SQLite or PostgreSQL. It runs
   the Borealis rules engine and stores every account's characters and content.
 - **Accounts.** Each account has its own characters and its own content. New accounts wait for an admin's approval
   (by default), with optional email confirmation. The admin page approves, disables and resets accounts and keeps an
@@ -64,7 +64,7 @@ With Docker (or a Portainer stack), using SQLite:
 ```yaml
 services:
   borealis-party:
-    image: "ghcr.io/drazorv/borealis-party:latest"
+    image: "ghcr.io/fortress-soft/borealis-party:latest"
     ports:
       - "8787:8787/tcp"
     restart: "unless-stopped"
@@ -84,7 +84,7 @@ internet). Ready-made files are in [`party/docker`](/party/docker).
 
 ## Install the apps
 
-The apps are on the **[latest release](https://github.com/DrazorV/borealis-party/releases/latest)**. On first launch,
+The apps are on the **[latest release](https://github.com/fortress-soft/borealis-party/releases/latest)**. On first launch,
 enter your server's address (such as `party.example.com`), then sign in.
 
 | System | File |

@@ -1,6 +1,6 @@
 name: Party image
 
-# Builds the Borealis Party server image from main and pushes it to ghcr.io/drazorv/borealis-party.
+# Builds the Borealis Party server image from main and pushes it to ghcr.io/fortress-soft/borealis-party.
 # Tags: latest, sha-<short commit>, and the version in party/Cargo.toml.
 # This file belongs to the fork (party/check-upstream.sh accepts .github/workflows/party-*.yml).
 on:
@@ -26,11 +26,11 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/drazorv/borealis-party
+  IMAGE: ghcr.io/fortress-soft/borealis-party
 
 jobs:
   image:
-    if: github.repository == 'DrazorV/borealis-party'
+    if: github.repository == 'fortress-soft/borealis-party'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
