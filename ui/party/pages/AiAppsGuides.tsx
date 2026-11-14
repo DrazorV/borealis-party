@@ -86,7 +86,7 @@ export function ConnectGuides({ url, oauth }: { url: string; oauth: boolean }) {
   const [tab, setTab] = useState<GuideId>("chatgpt");
   return (
     <div className="ai-guides">
-      <h3 className="ai-head">Connect an app</h3>
+      <h3 className="ai-head">Connect ChatGPT or Claude</h3>
       <Tabs tabs={TABS} active={tab} onChange={(id) => setTab(id as GuideId)} label="Connection guides" idPrefix="ai-guide" />
       <TabPanel active={tab} idPrefix="ai-guide">
         <Guide id={tab} url={url} oauth={oauth} />

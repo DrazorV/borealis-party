@@ -206,3 +206,32 @@ it("guides each app in tabs, copies the address and the instructions, and keeps 
   await settle();
   expect(writes).toEqual([`${BASE}/api/mcp`, INSTRUCTIONS]);
 });
+
+it("puts connecting ChatGPT or Claude first, then the instructions, then keys; it never calls an AI service (0.3.3)", async () => {
+  signIn();
+  answers["GET /api/me/ai"] = {
+    status: 200,
+    body: { mcpUrl: `${BASE}/api/mcp`, oauth: true, scopes: SCOPES, defaultDays: 90, maxDays: 365, maxTokens: 25, callsPerMinute: 60, instructions: "Use real dice." },
+  };
+  answers["GET /api/me/ai/tokens"] = { status: 200, body: { tokens: [] } };
+  answers["GET /api/me/ai/apps"] = { status: 200, body: { apps: [] } };
+  const { container } = render(<AiAppsCard />);
+  await settle();
+
+  const text = container.textContent ?? "";
+  expect(text).toContain("Borealis Party uses your own ChatGPT or Claude");
+  expect(text).toContain("Borealis Party never calls an AI service itself.");
+  const at = (el: Element | null) => {
+    expect(el).toBeTruthy();
+    return text.indexOf(el!.textContent!.slice(0, 20));
+  };
+  const guides = at(screen.getByRole("heading", { name: "Connect ChatGPT or Claude" }));
+  const instructions = at(screen.getByRole("heading", { name: "Instructions for the assistant" }));
+  const keys = at(screen.getByText("Keys for developer tools", { selector: "summary" }));
+  expect(guides).toBeGreaterThan(0);
+  expect(guides).toBeLessThan(instructions);
+  expect(instructions).toBeLessThan(keys);
+  // Nothing of the removed in-app assistant.
+  expect(text).not.toMatch(/Your AI|OpenRouter|Assistant panel/);
+  expect(requests.every((r) => r.path.startsWith("/api/me/ai"))).toBe(true);
+});

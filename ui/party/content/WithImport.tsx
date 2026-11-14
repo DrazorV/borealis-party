@@ -1,5 +1,4 @@
 import { PacksTab as UpstreamPacksTab } from "../../src/pages/content/PacksTab";
-import { AssistantContentCard } from "../assistant/AssistantButton";
 import { ImportSection } from "../pages/ImportSection";
 import { BestiaryCoverage } from "./BestiaryCoverage";
 import { ContentActivity } from "./ContentActivity";
@@ -23,7 +22,6 @@ export function PacksTab() {
       <ContentActivity areas={PACKS} />
       <ContentScope><UpstreamPacksTab /></ContentScope>
       <BestiaryCoverage />
-      <AssistantContentCard />
     </>
   );
 }

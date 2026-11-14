@@ -97,7 +97,7 @@ The form (`ElementForm`) has these fields:
 
 The form and the XML say the same thing. XML the form has no field for goes to `extraXml` and comes back unchanged.
 
-## Tools (party-tools: MCP and the assistant)
+## Tools (party-tools, over MCP)
 
 `homebrew::tools()` lists each tool's `name`, `title`, `scope` (`ToolScope`, serialized as `homebrew:read` or
 `homebrew:write`), `description` and JSON `input_schema`. `homebrew::call_tool(state, user, name, args)` runs one tool
@@ -117,8 +117,7 @@ user wrote appears only in named fields (`xml`, `description`, `files[].text`). 
 | `homebrew_delete` | write | deletes an element |
 | `index_build` | read | `{ packId, version, base, indexUrl, files: [{ path, text }], zip: { fileName, contentBase64 } }` for `baseUrl` (required) |
 
-The local agent writes `files` into the repository and pushes. The assistant panel offers `zip` as a download and never
-sends it back to the model.
+The local agent writes `files` into the repository and pushes. A chat app gets `zip` to offer as a download.
 
 ## Tests
 

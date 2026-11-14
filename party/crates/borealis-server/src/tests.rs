@@ -26,10 +26,6 @@ mod jobs_tests;
 
 #[path = "ai_auth_tests.rs"]
 mod ai_auth_tests;
-#[path = "ai_oauth_tests.rs"]
-mod ai_oauth_tests;
-#[path = "ai_providers_tests.rs"]
-mod ai_providers_tests;
 #[path = "backup_tests.rs"]
 mod backup_tests;
 #[path = "bestiary_tests.rs"]
@@ -48,6 +44,8 @@ mod index_subs_tests;
 mod live_tests;
 #[path = "mcp_tests.rs"]
 mod mcp_tests;
+#[path = "no_vendor_calls_tests.rs"]
+mod no_vendor_calls_tests;
 #[path = "parties_tests.rs"]
 mod parties_tests;
 #[path = "shares_tests.rs"]

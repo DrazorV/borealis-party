@@ -120,16 +120,8 @@ on_upgrade = "auto"
 # Emergency switches, for this file only (no admin page toggles them). A feature switched off answers 404 on all its
 # routes and keeps its data; switch it back on and restart.
 parties = true
-# Bring your own AI: the assistant panel and each account's own AI provider (ai_providers.rs).
+# AI apps: personal API tokens and the OAuth server ChatGPT and Claude connect through (tokens.rs, oauth.rs, mcp.rs).
 ai = true
-
-[ai]
-# Keys people save for their own AI provider are encrypted with this server key: 32 random bytes in base64, from
-# `openssl rand -base64 32`. Set it as BOREALIS__AI__SECRET_KEY, not here. Without it nobody can save a key (models on
-# a person's own device still work). Changing it makes every saved key unreadable, and people enter theirs again.
-# Model calls per account per minute, and tokens per account per day (UTC).
-requests_per_minute = 20
-tokens_per_day = 200000
 
 [log]
 # error, warn, info, debug or trace. RUST_LOG, when set, wins.
@@ -160,7 +152,7 @@ pub struct Settings {
     pub backup: BackupSettings,
     /// Emergency kill switches.
     pub features: FeatureSettings,
-    /// Bring your own AI (`ai_providers.rs`).
+    /// `[ai]`: unused since 0.3.3, still accepted (see [`AiSettings`]).
     pub ai: AiSettings,
     /// Logging.
     pub log: LogSettings,
@@ -208,9 +200,8 @@ pub enum OnUpgrade {
 pub struct FeatureSettings {
     /// Parties (`parties.rs`).
     pub parties: bool,
-    /// AI: personal API tokens and the OAuth server for AI apps (`tokens.rs`, `oauth.rs`), and bring your own AI
-    /// (`ai_providers.rs`). `BOREALIS__FEATURES__AI=false` turns them off: their routes answer 404 and no token is
-    /// accepted.
+    /// AI apps: personal API tokens, the OAuth server and the MCP endpoint (`tokens.rs`, `oauth.rs`, `mcp.rs`).
+    /// `BOREALIS__FEATURES__AI=false` turns them off: their routes answer 404 and no token is accepted.
     pub ai: bool,
 }
 
@@ -223,49 +214,34 @@ impl Default for FeatureSettings {
     }
 }
 
-/// `[ai]`: bring your own AI.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default, deny_unknown_fields)]
+/// `[ai]`: the in-app assistant's settings, unused since 0.3.3 (Borealis Party never calls an AI service itself; AI
+/// apps connect to it over MCP). Still accepted, so a config file or a `BOREALIS__AI__*` variable from 0.3.1 or 0.3.2
+/// never stops the server from starting; main.rs logs once that they are no longer used.
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct AiSettings {
-    /// The key saved provider keys are encrypted with (base64 of 32 bytes), best given as `BOREALIS__AI__SECRET_KEY`.
-    pub secret_key: Option<String>,
-    /// Model calls per account per minute.
-    pub requests_per_minute: usize,
-    /// Tokens per account per day.
-    pub tokens_per_day: i64,
+    /// Whatever the section held (`secret_key`, `requests_per_minute`, `tokens_per_day`), of any type, unread.
+    #[serde(flatten)]
+    pub unused: toml::Table,
 }
 
-impl Default for AiSettings {
-    fn default() -> Self {
-        Self {
-            secret_key: None,
-            requests_per_minute: 20,
-            tokens_per_day: 200_000,
-        }
+impl AiSettings {
+    /// The old settings' names, sorted, when any is set.
+    #[must_use]
+    pub fn names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.unused.keys().cloned().collect();
+        names.sort();
+        names
     }
 }
 
+/// The values are never printed: `secret_key` was a key.
 impl std::fmt::Debug for AiSettings {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AiSettings")
-            .field(
-                "secret_key",
-                &self.secret_key.as_ref().map(|_| "<redacted>"),
-            )
-            .field("requests_per_minute", &self.requests_per_minute)
-            .field("tokens_per_day", &self.tokens_per_day)
+            .field("unused", &self.names())
             .finish()
     }
-}
-
-static AI: std::sync::OnceLock<AiSettings> = std::sync::OnceLock::new();
-
-/// The `[ai]` settings [`Settings::load`] read at start, or the defaults with no key (tests that build the routes by
-/// hand). Tests read their own (`ai_assistant.rs`).
-#[must_use]
-#[cfg_attr(test, allow(dead_code))]
-pub fn ai() -> AiSettings {
-    AI.get().cloned().unwrap_or_default()
 }
 
 static FEATURES: std::sync::OnceLock<FeatureSettings> = std::sync::OnceLock::new();
@@ -680,7 +656,6 @@ impl Settings {
         let _ = NETWORK.set(settings.network());
         let _ = FEATURES.set(settings.features);
         let _ = IMPORT.set(settings.import.clone());
-        let _ = AI.set(settings.ai.clone());
         Ok(settings)
     }
 
@@ -1059,5 +1034,43 @@ trusted_proxies = [\"npm\"]",
             Settings::resolve(Path::new("/config"), Path::new("/data")),
             Path::new("/data")
         );
+    }
+
+    #[test]
+    fn the_old_ai_settings_still_parse_and_are_never_printed() {
+        // A 0.3.1/0.3.2 config.toml and stack env: accepted and unread since 0.3.3.
+        let old = format!(
+            "{DEFAULT_FILE}
+[ai]
+requests_per_minute = 20
+tokens_per_day = 200000
+"
+        );
+        let s = Settings::parse(
+            &old,
+            vars(&[
+                (
+                    "BOREALIS__AI__SECRET_KEY",
+                    "c2VjcmV0LXNlY3JldC1zZWNyZXQtc2VjcmV0LXNlY3I=",
+                ),
+                ("BOREALIS__AI__REQUESTS_PER_MINUTE", "30"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            s.ai.names(),
+            ["requests_per_minute", "secret_key", "tokens_per_day"]
+        );
+        let shown = format!("{s:?}");
+        assert!(!shown.contains("c2VjcmV0"), "{shown}");
+        assert!(Settings::parse(DEFAULT_FILE, [])
+            .unwrap()
+            .ai
+            .names()
+            .is_empty());
+        // The kill switch still parses.
+        let off =
+            Settings::parse(DEFAULT_FILE, vars(&[("BOREALIS__FEATURES__AI", "false")])).unwrap();
+        assert!(!off.features.ai);
     }
 }

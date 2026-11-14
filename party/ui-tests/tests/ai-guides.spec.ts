@@ -4,6 +4,8 @@ import { expect, measureOverflow, minTap, open, smallTargets, test } from "./fix
 
 /**
  * Account → AI apps (0.3.2) at 1440x900 (desktop-wide) and 384x832 (android-portrait):
+ * - since 0.3.3 the only AI: connecting ChatGPT or Claude comes first, then the instructions, then keys, and the
+ *   page says Borealis Party never calls an AI service itself; there is no "Your AI" card any more;
  * - the connection guides in tabs (ChatGPT, Claude, Developer tools), with numbered steps and example prompts;
  * - the keys in their own collapsible section;
  * - the instructions for the assistant, read-only with Copy, as the real server sends them.
@@ -73,4 +75,36 @@ test("AI apps: connection guides, keys and the assistant's instructions", async 
   await expect(card.getByRole("button", { name: "Copy instructions" })).toBeVisible();
   await fits(page, testInfo, ".ai-instructions");
   await shot(page, testInfo, "instructions");
+});
+
+test("AI apps comes first as the only AI: guides, then instructions, then keys; no Your AI (0.3.3)", async ({ page, signIn }, testInfo) => {
+  test.skip(!["desktop-wide", "android-portrait"].includes(testInfo.project.name), "1440x900 and 384x832");
+  await page.route("**/api/me/ai", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const response = await route.fetch();
+    const body = (await response.json()) as Record<string, unknown>;
+    await route.fulfill({ response, json: { ...body, mcpUrl: MCP, oauth: true } });
+  });
+  // The removed assistant's routes are gone from the server.
+  const old = await page.request.get("/api/ai");
+  expect(old.status()).toBe(404);
+  await signIn("player");
+  if (testInfo.project.name === "android-portrait") await open(page, "/account");
+  else await page.goto("/#/account");
+  const card = page.locator("section.ai-apps");
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(card).toContainText("Borealis Party uses your own ChatGPT or Claude");
+  await expect(card).toContainText("Borealis Party never calls an AI service itself.");
+  await expect(page.getByRole("heading", { name: "Your AI" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Connect OpenRouter" })).toHaveCount(0);
+
+  const top = async (locator: ReturnType<typeof card.locator>) => (await locator.boundingBox())!.y;
+  const guides = await top(card.getByRole("heading", { name: "Connect ChatGPT or Claude" }));
+  const instructions = await top(card.getByRole("heading", { name: "Instructions for the assistant" }));
+  const keys = await top(card.locator("details.ai-keys > summary"));
+  expect(guides, "the guides come before the instructions").toBeLessThan(instructions);
+  expect(instructions, "the instructions come before the keys").toBeLessThan(keys);
+  await fits(page, testInfo, "section.ai-apps");
+  await card.getByRole("heading", { name: "Connect ChatGPT or Claude" }).scrollIntoViewIfNeeded();
+  await shot(page, testInfo, "order");
 });

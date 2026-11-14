@@ -419,6 +419,9 @@ const MIGRATIONS: &[&[&str]] = &[
     // 8 (M-ai-providers, 0.3.1), after M-ai-auth. Bring your own AI (ai_providers.rs): one provider per account, its key encrypted with the
     // server's `[ai] secret_key` (never stored in the clear, never in the account's folder, so never in a bundle or a
     // share), and each account's tokens per day for the budget. Both go with the account.
+    // UNUSED since 0.3.3, which removed the in-app assistant: nothing reads or writes them, the sealed keys stay unread.
+    // They stay (no destructive migration on a production database), as do their MARKERS entry and migrate.rs lists,
+    // so upgrades and the SQLite → PostgreSQL copy work as before (docs/ai-assistant.md).
     &[
         "CREATE TABLE IF NOT EXISTS ai_providers (
             user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,

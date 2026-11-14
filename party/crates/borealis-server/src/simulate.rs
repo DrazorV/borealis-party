@@ -413,6 +413,8 @@ pub type DeciderSource = fn(AppState, User) -> DeciderFuture;
 static DECIDERS: LazyLock<Mutex<Option<DeciderSource>>> = LazyLock::new(|| Mutex::new(None));
 
 /// Install the assistant's provider (part C calls this at start-up).
+// Unused since 0.3.3 removed the account model (simulate_ai.rs); part C removes the assistant oracle.
+#[allow(dead_code)]
 pub fn install_decider(source: DeciderSource) {
     if let Ok(mut d) = DECIDERS.lock() {
         *d = Some(source);

@@ -74,27 +74,24 @@ async function prepare(request: APIRequestContext, testInfo: TestInfo) {
 
 const box = async (page: Page, selector: string) => (await page.locator(selector).first().boundingBox())!;
 
-/** The list's heading row (0.3.2): ENCOUNTERS, then Assistant and New encounter beside it, none on top of another. */
+/** The list's heading row: ENCOUNTERS and New encounter, apart (0.3.2); no Assistant since 0.3.3. */
 async function headingRow(page: Page, testInfo: TestInfo) {
   const head = page.locator(".enc-list-card .card-head").first();
   const title = await head.locator("h2").boundingBox();
-  const assistant = await head.getByRole("button", { name: "Assistant" }).boundingBox();
   const add = await head.getByRole("button", { name: "New encounter" }).boundingBox();
-  expect(title && assistant && add, "the heading row has ENCOUNTERS, Assistant and New encounter").toBeTruthy();
+  expect(title && add, "the heading row has ENCOUNTERS and New encounter").toBeTruthy();
+  await expect(page.getByRole("button", { name: "Assistant" })).toHaveCount(0);
   const apart = (p: { x: number; y: number; width: number; height: number }, q: typeof p) =>
     p.x + p.width <= q.x + 0.5 || q.x + q.width <= p.x + 0.5 || p.y + p.height <= q.y + 0.5 || q.y + q.height <= p.y + 0.5;
-  expect(apart(title!, assistant!), "Assistant doesn't sit on the heading").toBe(true);
   expect(apart(title!, add!), "New encounter doesn't sit on the heading").toBe(true);
-  expect(apart(assistant!, add!), "Assistant and New encounter don't overlap").toBe(true);
-  // The two buttons share a line: beside the heading when the column has room, else together under it.
+  // Beside the heading when the column has room, else under it.
   const mid = (b: { y: number; height: number }) => b.y + b.height / 2;
-  expect(Math.abs(mid(add!) - mid(assistant!)), "Assistant and New encounter share a line").toBeLessThanOrEqual(2);
-  const beside = Math.abs(mid(assistant!) - mid(title!)) <= 8;
-  const under = assistant!.y >= title!.y + title!.height + 4;
-  expect(beside || under, `the buttons are on the heading's line or clearly under it (${testInfo.project.name})`).toBe(true);
+  const beside = Math.abs(mid(add!) - mid(title!)) <= 8;
+  const under = add!.y >= title!.y + title!.height + 4;
+  expect(beside || under, `the button is on the heading's line or clearly under it (${testInfo.project.name})`).toBe(true);
   // Nothing of the list's card sits above its own heading row.
   const card = await page.locator(".enc-list-card").first().boundingBox();
-  expect(Math.min(title!.y, assistant!.y, add!.y)).toBeGreaterThanOrEqual(card!.y - 0.5);
+  expect(Math.min(title!.y, add!.y)).toBeGreaterThanOrEqual(card!.y - 0.5);
 }
 
 test.describe("Encounters and Combat tabs (0.3.1)", () => {

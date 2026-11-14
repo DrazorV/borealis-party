@@ -85,10 +85,8 @@ Put passwords in variables rather than in the file.
 | `BOREALIS__BACKUP__ON_UPGRADE` | `auto` | `skip` starts without the backup (emergencies only) |
 | `BOREALIS__BACKUP__POSTGRES_BIN` | the PATH | Folder with `pg_dump` and `pg_restore`; the image sets the PostgreSQL 18 client |
 | `BOREALIS__LOG__LEVEL` | `info` | `error` to `trace` |
-| `BOREALIS__AI__SECRET_KEY` | | 32 random bytes in base64 (`openssl rand -base64 32`): encrypts the AI keys people save for the assistant. Without it no key is saved (models on a person's own device still work); changing it makes saved keys unreadable, and people enter theirs again. See `docs/ai-assistant.md` |
-| `BOREALIS__AI__REQUESTS_PER_MINUTE` | `20` | Assistant model calls per account per minute |
-| `BOREALIS__AI__TOKENS_PER_DAY` | `200000` | Assistant tokens per account per day (UTC), through the server |
-| `BOREALIS__FEATURES__AI` | `true` | `false` switches the assistant and Your AI off (emergency switch; the routes answer 404) |
+| `BOREALIS__AI__SECRET_KEY` | | No longer used since 0.3.3 (the in-app assistant was removed): accepted and ignored, logged once at start. It can be removed from the stack. See `docs/ai-assistant.md` |
+| `BOREALIS__FEATURES__AI` | `true` | `false` switches AI apps off: MCP, API tokens and the OAuth server (emergency switch; the routes answer 404) |
 
 `OPEN_REGISTRATION`, `REQUIRE_APPROVAL` and `TRUSTED_PROXIES` can also be changed on the admin page while the server
 runs. What is saved there is kept in the database and wins over the file and the variables.
