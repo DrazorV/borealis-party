@@ -46,6 +46,6 @@ export default defineConfig({
     // A desktop browser window, for the specs that cover phones and desktops alike.
     { name: "desktop", testMatch: /(unify-imports|combat-tracker|content-refresh|content-compact)\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } } },
     // A DM's big screen for session prep (0.3.1): the Encounters and Combat tabs use the whole width.
-    { name: "desktop-wide", testMatch: /(encounter-tab|ai-signin|spell-combat|combat-end|ai-guides)\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
+    { name: "desktop-wide", testMatch: /(encounter-tab|spell-combat|combat-end|ai-guides)\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
   ],
 });

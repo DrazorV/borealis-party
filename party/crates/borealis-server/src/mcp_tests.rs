@@ -369,7 +369,7 @@ async fn conformance(t: &Table) {
     assert_eq!(b["result"]["protocolVersion"], "2025-06-18");
     assert!(b["result"]["capabilities"]["tools"].is_object());
     assert_eq!(b["result"]["serverInfo"]["name"], "borealis-party");
-    // The DM's-assistant workflow, the same text the Account page shows and the in-app assistant uses.
+    // The DM's-assistant workflow, the same text the AI apps page shows.
     let instructions = b["result"]["instructions"].as_str().unwrap();
     assert_eq!(instructions, party_tools::mcp::INSTRUCTIONS);
     for needed in [
@@ -386,10 +386,6 @@ async fn conformance(t: &Table) {
         assert!(instructions.contains(needed), "{needed} missing");
     }
     assert!(instructions.lines().count() <= 40);
-    assert!(
-        crate::ai_assistant::system_prompt(crate::ai_tools::Purpose::Encounter)
-            .contains(instructions.trim_end())
-    );
     assert!(h.get("mcp-session-id").is_none());
     let (s, _, b) = post(
         r,

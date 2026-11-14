@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
 import { Button } from "../../src/components/Button";
 import { Alert, Card, Chip, EmptyState } from "../../src/components/Card";
@@ -76,18 +76,15 @@ function NewEncounterDialog({ partyId, onClose }: { partyId: string; onClose: ()
  * hidden, and a button for a new one. No XP or difficulty (the user's D16). `current`: the one open beside it (the
  * Encounters tab's left column on a big screen).
  */
-export function DmEncounterList({ partyId, list, current, onNew, tools }: {
+export function DmEncounterList({ partyId, list, current, onNew }: {
   partyId: string;
   list: Extract<EncounterList, { role: "dm" }>;
   current?: string;
   onNew: () => void;
-  /** More buttons for the heading row, before New encounter (the Assistant). */
-  tools?: ReactNode;
 }) {
   return (
-    <Card title="Encounters" className="enc-list-card" actions={(tools || list.encounters.length < 50) ? (
+    <Card title="Encounters" className="enc-list-card" actions={list.encounters.length < 50 ? (
       <span className="enc-list-actions">
-        {tools}
         {list.encounters.length < 50 && <Button small icon="plus" variant="primary" onClick={onNew}>New encounter</Button>}
       </span>) : undefined}>
       {list.encounters.length === 0 && <EmptyState title="No encounters yet">Build one from your monsters, then show it to your players when it's ready.</EmptyState>}

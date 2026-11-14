@@ -5,7 +5,6 @@ import { Tabs } from "../../src/components/Tabs";
 import { errorMessage } from "../../src/state/useAsync";
 import { useDmRole } from "../api/dmRole";
 import { dungeonMaster, listParties, type PartySummary } from "../api/overrides/parties";
-import { AssistantButton } from "../assistant/AssistantButton";
 import { EncounterBuilder } from "./EncounterBuilder";
 import { useWide } from "./EncounterToolPanel";
 import { DmEncounterList, encountersPath, NewEncounterDialog, usePartyEncounters } from "./EncountersPage";
@@ -128,8 +127,7 @@ function PartyList({ partyId, current }: { partyId: string; current?: string }) 
       {error && <Alert tone="danger">{error}</Alert>}
       {list === undefined && !error && <p className="muted">Loading encounters…</p>}
       {list === null && <Alert tone="info">This party isn't there any more, or it isn't yours.</Alert>}
-      {list?.role === "dm" && <DmEncounterList partyId={partyId} list={list} current={current} onNew={() => setCreating(true)}
-        tools={<AssistantButton purpose="encounter" context={{ partyId }} onChanged={() => void reload()} />} />}
+      {list?.role === "dm" && <DmEncounterList partyId={partyId} list={list} current={current} onNew={() => setCreating(true)} />}
       {creating && <NewEncounterDialog partyId={partyId} onClose={() => setCreating(false)} />}
     </>
   );

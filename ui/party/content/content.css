@@ -89,5 +89,3 @@ html.phone .party-compact-sort { flex: 1 1 100%; }
   html:not(.phone) .v4-content .party-import > .body { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
   html:not(.phone) .v4-content .party-import > .body > :nth-child(n + 4) { grid-column: 1 / -1; }
 }
-/* The Assistant section (assistant/AssistantButton.tsx): one of the page's sections, its note like theirs. */
-.party-assistant-note { margin: 0; }

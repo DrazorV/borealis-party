@@ -1,4 +1,3 @@
-import { AssistantButton } from "../assistant/AssistantButton";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { Button, IconButton } from "../../src/components/Button";
@@ -28,7 +27,7 @@ import "./encounters.css";
 
 /**
  * The tool beside the creatures (EncounterToolPanel): a column on a big screen, a full-screen sheet on a phone. One at a
- * time; dialogs open over it without closing it. Part C's assistant joins this union.
+ * time; dialogs open over it without closing it.
  */
 type Tool = { kind: "picker"; owner?: Creature };
 
@@ -206,9 +205,8 @@ export function EncounterBuilder() {
       {statusChip}
       {enc.visibleToPlayers && <Chip tone="gold" title="Players see this encounter">Shown</Chip>}
       <span className="grow" />
-      {/* Actions on the whole encounter: part E's Simulate and part C's assistant go here too. */}
+      {/* Actions on the whole encounter. */}
       <div className="enc-head-actions">
-        <AssistantButton purpose="encounter" context={{ partyId, encounterId: enc.id, label: enc.name }} onChanged={() => void load()} />
         {wide && enc.warnings.length > 0 && (
           <Button small icon="info" onClick={() => setDialog({ kind: "warnings" })} aria-label={`Edition notes (${enc.warnings.length})`}>Edition notes ({enc.warnings.length})</Button>
         )}

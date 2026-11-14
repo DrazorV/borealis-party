@@ -18,10 +18,6 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 
 mod admin;
-mod ai_assistant;
-mod ai_oauth;
-mod ai_providers;
-mod ai_tools;
 mod auth;
 mod backend;
 mod backup;
@@ -50,7 +46,6 @@ mod rpc;
 mod settings;
 mod shares;
 mod simulate;
-mod simulate_ai;
 mod simulate_tools;
 mod spells;
 mod sync;
@@ -65,10 +60,9 @@ use config::Settings;
 use db::Db;
 use workspaces::Workspaces;
 
-// `connect-src` also allows a model on the person's own computer (Ollama, LM Studio): the assistant's "On this device"
-// mode, where the browser calls it and the server never does (ai_assistant.rs).
+// The page calls only this server: Borealis Party never calls an AI service itself (AI apps connect to it over MCP).
 const CSP: &str = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; \
-                   connect-src 'self' http://localhost:* http://127.0.0.1:* http://[::1]:*; \
+                   connect-src 'self'; \
                    object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 #[derive(Parser)]
@@ -179,7 +173,6 @@ pub fn api_routes(state: AppState, max_upload: usize) -> Router {
         .merge(tokens::routes())
         .merge(oauth::routes())
         .merge(mcp::routes())
-        .merge(ai_assistant::routes())
         .merge(homebrew::routes())
         .merge(spells::routes())
         .route("/api/{*rest}", any(no_such_route))
@@ -322,8 +315,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "{e}: API tokens and connected AI apps will stop working when the server restarts"
         );
     }
-    // The simulator's assistant oracle plays with the account's own hosted model (0.3.1 parts C and E).
-    simulate_ai::install();
+    // 0.3.1 and 0.3.2 had an in-app assistant that called AI services; its `[ai]` settings are accepted and unread.
+    if !settings.ai.names().is_empty() {
+        tracing::info!(
+            "[ai] {} (BOREALIS__AI__*) is no longer used: Borealis Party never calls an AI service itself since 0.3.3; the setting can be removed",
+            settings.ai.names().join(", ")
+        );
+    }
     let location = settings.database(dir)?;
     tracing::info!(
         "config {}, database {}",

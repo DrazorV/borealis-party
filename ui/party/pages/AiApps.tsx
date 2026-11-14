@@ -9,7 +9,8 @@ import { loadSession } from "../api/session";
 import { AssistantInstructions, ConnectGuides } from "./AiAppsGuides";
 import "./AiApps.css";
 
-// The Account page's "AI apps & API tokens" (0.3.1, plan 4.5a part A; server: tokens.rs and oauth.rs).
+// The Account page's "AI apps & API tokens" (0.3.1, plan 4.5a part A; server: tokens.rs and oauth.rs). Since 0.3.3 it is
+// the only AI in Borealis Party: ChatGPT or Claude connect to it over MCP, and the server never calls an AI service.
 
 export interface ScopeInfo { id: string; label: string; default: boolean }
 
@@ -191,7 +192,7 @@ function Chips({ scopes }: { scopes: string[] }) {
 
 type Asking = { kind: "token"; token: ApiToken } | { kind: "app"; app: ConnectedApp };
 
-/** Account → AI apps & API tokens. Hidden when the server turned AI apps off (BOREALIS__FEATURES__AI=false). */
+/** Account → AI apps & API tokens: connect ChatGPT or Claude first, then the instructions, apps and keys. Hidden when the server turned AI apps off (BOREALIS__FEATURES__AI=false). */
 export function AiAppsCard() {
   const toast = useToast();
   const [info, setInfo] = useState<AiOverview | null>(null);
@@ -227,10 +228,13 @@ export function AiAppsCard() {
   };
   return (
     <Card title="AI apps & API tokens" className="ai-apps">
+      <p className="muted ai-lead">
+        Borealis Party uses your own ChatGPT or Claude: you connect the app to your account here, and your own plan
+        pays for it. Borealis Party never calls an AI service itself.
+      </p>
       <p className="muted">
-        Connect AI apps and assistants (ChatGPT, Claude, Claude Code, Cursor and other MCP clients) to your account.
-        They can do only what you can: DM-only actions still need you to be that party's DM, and players never see
-        hidden monsters through them. They have no access to live combat.
+        A connected app can do only what you can: DM-only actions still need you to be that party's DM, and players
+        never see hidden monsters through it. It has no access to live combat.
       </p>
       {info?.mcpUrl && (
         <div className="party-field">
@@ -241,12 +245,14 @@ export function AiAppsCard() {
           </div>
           <span className="party-note muted">
             {info.oauth
-              ? "Add it to your AI app as a custom connector (the steps are below); you approve it here."
+              ? "Add it to ChatGPT or Claude as a custom connector (the steps are below); you approve it here."
               : "Use it with a key for developer tools."}
           </span>
         </div>
       )}
       {info?.mcpUrl && <ConnectGuides url={info.mcpUrl} oauth={info.oauth} />}
+
+      {info?.instructions && <AssistantInstructions text={info.instructions} onCopy={(t) => void copyText(t)} />}
 
       <h3 className="ai-head">Connected apps</h3>
       {apps.length === 0 ? <p className="muted">No apps are connected.</p> : (
@@ -285,8 +291,6 @@ export function AiAppsCard() {
         <Button variant="primary" disabled={!info || (info && tokens.length >= info.maxTokens)} onClick={() => setMaking(true)}>New token</Button>
       </div>
       </details>
-
-      {info?.instructions && <AssistantInstructions text={info.instructions} onCopy={(t) => void copyText(t)} />}
 
       {making && info && (
         <NewTokenDialog info={info} onClose={() => setMaking(false)}
