@@ -286,3 +286,8 @@ html.phone .cb-page .cb-type-select, html.phone .cb-page .cb-cond-add { flex: 1 
 .cb-multi-row .cb-roll-box { width: 6.5em; }
 /* 0.3.5: the roster head holds Creature and Party member: wrap rather than squeeze */
 .cb-roster .cb-panel-head { flex-wrap: wrap; row-gap: 4px; }
+/* 0.3.5: Multiattack and other features as lines above the action buttons */
+.cb-passive-lines { list-style: none; margin: 0 0 var(--sp-2); padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.cb-passive-lines .cb-ability { padding: 4px var(--sp-2); }
+.cb-passive-lines .cb-ability-name { font-weight: 700; display: inline; }
+.cb-passive-lines .cb-ability-text { display: inline; margin: 0; }

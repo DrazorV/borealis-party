@@ -113,9 +113,8 @@ describe("CombatTracker", () => {
     fireEvent.click(within(c).getByRole("button", { name: "Damage" }));
     await waitFor(() => expect(byId(state(), "mage")!.hp.current).toBe(16));
     await within(card()).findByText(/CON save DC 12/);
-    // A typed failed save ends it.
-    fireEvent.change(within(card()).getByLabelText("CON save: typed result"), { target: { value: "8" } });
-    fireEvent.click(within(card()).getByRole("button", { name: "Enter" }));
+    // 0.3.5: the outcome, pressed: a lost save ends it.
+    fireEvent.click(within(card()).getByRole("button", { name: "Lost it" }));
     await waitFor(() => expect(byId(state(), "mage")!.concentration).toBeUndefined());
   });
 

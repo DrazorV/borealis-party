@@ -68,20 +68,15 @@ describe("spells and mechanics in the tracker (0.3.2)", () => {
     await waitFor(() => expect(byId(state(), "mage")!.spell_slots!["4"]!.remaining).toBe(2));
 
     const res = await screen.findByRole("dialog", { name: "Fireball · Mage" });
-    // Typed first: the number field leads each row; Enter goes to the next creature row.
-    const knightBox = within(res).getByLabelText("Knight: DEX save: typed result");
-    fireEvent.change(knightBox, { target: { value: "15" } });
-    fireEvent.keyDown(knightBox, { key: "Enter" });
+    // 0.3.5: a save is an outcome: roll at the table, press Saved or Failed (no number box).
+    expect(within(res).queryByLabelText("Knight: DEX save: typed result")).toBeNull();
+    fireEvent.click(within(res.querySelector<HTMLElement>('[data-target="knight"]')!).getByRole("button", { name: "Saved" }));
     await waitFor(() => expect(openCasts(state())[0]!.rows[0]!.outcome).toBe("saved"));
-    await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Cultist 1: DEX save: typed result"));
     fireEvent.click(within(res.querySelector<HTMLElement>('[data-target="cultist1"]')!).getByRole("button", { name: "Failed" }));
-    // A player's row waits for the player; the DM can type it.
+    // A player's row waits for the player; the DM can press their result.
     const aria = res.querySelector<HTMLElement>('[data-target="pc-aria"]')!;
-    expect(within(aria).getByText("Waiting for Aria's player")).toBeTruthy();
-    fireEvent.click(within(aria).getByRole("button", { name: "Type it" }));
-    const ariaBox = within(aria).getByLabelText("Aria: DEX save: typed result");
-    fireEvent.change(ariaBox, { target: { value: "8" } });
-    fireEvent.keyDown(ariaBox, { key: "Enter" });
+    expect(within(aria).getByText(/Waiting for Aria's player/)).toBeTruthy();
+    fireEvent.click(within(aria).getByRole("button", { name: "Failed" }));
     await waitFor(() => expect(openCasts(state())[0]!.rows.every((r) => r.outcome)).toBe(true));
     // One damage roll, typed: half for the knight, full for the others.
     fireEvent.change(within(res).getByLabelText("Fireball damage: typed total"), { target: { value: "30" } });

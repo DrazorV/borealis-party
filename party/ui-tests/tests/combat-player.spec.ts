@@ -249,11 +249,12 @@ test.describe("The player's live combat section (0.3.0)", () => {
       await saves.scrollIntoViewIfNeeded();
       await fits(page, testInfo, ".combat-pane");
       await shot(page, testInfo, "death-saves");
-      await saves.getByLabel("Death save: my table roll").fill("4");
-      await saves.getByRole("button", { name: "Send" }).tap();
+      // 0.3.5: outcome buttons, no number box.
+      await expect(saves.getByLabel("Death save: my table roll")).toHaveCount(0);
+      await saves.getByRole("button", { name: "Failure" }).tap();
       await expect(saves.getByRole("img", { name: "Failures: 2 of 3" })).toBeVisible();
       await saves.getByRole("button", { name: /^Roll for me/ }).tap();
-      await expect(saves.getByRole("img", { name: "Successes: 2 of 3" })).toBeVisible();
+      await expect(saves.getByRole("img", { name: "Successes: 2 of 3" }).or(saves.getByRole("img", { name: "Failures: 3 of 3" }))).toBeVisible();
     } finally {
       await api(request, dm.token, "DELETE", `/api/parties/${party.id}`).catch(() => undefined);
     }

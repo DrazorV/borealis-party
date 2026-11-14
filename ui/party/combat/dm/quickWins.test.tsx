@@ -50,12 +50,12 @@ describe("multi-target damage (D13)", () => {
     const pc = m.view.state.combatants.find((c) => c.kind === "character")!;
     fireEvent.click(within(sheet).getByLabelText(`Target ${pc.label}`));
     expect(screen.getByRole("button", { name: /Apply to 3 targets/ }).hasAttribute("disabled")).toBe(true);
-    fireEvent.change(within(sheet).getByLabelText(`${pc.label}: DEX save, typed`), { target: { value: "17" } });
+    fireEvent.click(within(sheet.querySelector<HTMLElement>(`[data-target="${pc.id}"]`)!).getByRole("button", { name: "Saved" }));
     fireEvent.click(within(sheet).getByRole("button", { name: "Roll creature saves (2)" }));
     fireEvent.click(screen.getByRole("button", { name: /Apply to 3 targets/ }));
     expect(send).toHaveBeenCalledWith({
       command: "multi_damage", amount: { kind: "app", notation: "8d6" }, save: { ability: "dex", dc: 15, half: true },
-      targets: [{ id: "cultist1", save: { kind: "app" } }, { id: "cultist2", save: { kind: "app" } }, { id: pc.id, save: { kind: "typed", total: 17 } }],
+      targets: [{ id: "cultist1", save: { kind: "app" } }, { id: "cultist2", save: { kind: "app" } }, { id: pc.id, save: { kind: "outcome", outcome: "saved" } }],
     });
     expect(close).toHaveBeenCalled();
   });
@@ -72,5 +72,19 @@ describe("a late-joining party member (A2)", () => {
     expect(add).toHaveBeenLastCalledWith("c_2", { kind: "typed", total: 14 });
     fireEvent.click(screen.getByRole("button", { name: "Roll for me" }));
     expect(add).toHaveBeenLastCalledWith("c_2", { kind: "app", modifier: 0, mode: "normal" });
+  });
+});
+
+describe("Multiattack is a feature, not an action (0.3.5)", () => {
+  it("has no button; it is a line with its stat block text, and the attacks it names stay buttons", async () => {
+    const { turnButtons, passiveLines } = await import("./turn");
+    const { SAMPLE_STATBLOCKS } = await import("./fixtures");
+    const m = sampleCombat();
+    const knight = byId(m.view.state, "knight")!;
+    const block = SAMPLE_STATBLOCKS.knight!.data;
+    const buttons = turnButtons(m.view.state, knight, block);
+    expect(buttons.some((b) => b.ability?.name === "Multiattack")).toBe(false);
+    expect(buttons.some((b) => b.ability?.name === "Greatsword")).toBe(true);
+    expect(passiveLines(knight, block)).toEqual([{ key: "multiattack", name: "Multiattack", text: "The knight makes two melee attacks." }]);
   });
 });

@@ -55,8 +55,9 @@ export function multiDamageCommand(f: {
 
 /**
  * Multi-target damage (0.3.5, D13) from the plain Damage keypad: one roll (typed first, or dice the server rolls
- * once), several targets, and each target's save: the table roll typed, Saved or Failed, or [Roll creature saves]
- * for the DM's creatures. Half on a success (or none). A PC's save is asked at the table and typed here; its damage
+ * once), several targets, and each target's save as an outcome (0.3.5: roll at the table, press Saved or Failed) or
+ * [Roll for me] / [Roll creature saves] for the DM's creatures. Half on a success (or none). A PC's save is asked at
+ * the table and pressed here; its damage
  * reaches the player as a prompt (D7), so the DM never sees its HP.
  */
 export function MultiDamageSheet({ state, first, blockOf, send, onClose }: {
@@ -151,11 +152,10 @@ function TargetRow({ c, on, save, ability, entry, mod, onToggle, onSave }: {
         <span className="cb-res-entry">
           {entry.kind === "app" ? <span className="chip" role="status">Rolled in the app</span>
             : entry.kind === "saved" || entry.kind === "failed" ? <span className={`chip ${entry.kind === "saved" ? "success" : "danger"}`}>{entry.kind === "saved" ? "Saved" : "Failed"}</span>
-              : <input className="input cb-roll-box" inputMode="numeric" placeholder="Table roll" aria-label={`${c.label}: ${ability.toUpperCase()} save, typed`}
-                value={entry.kind === "typed" ? entry.text : ""} onChange={(e) => onSave(e.target.value ? { kind: "typed", text: e.target.value } : { kind: "none" })} />}
+              : !pc ? <Button small icon="dice" variant="ghost" onClick={() => onSave({ kind: "app" })} aria-label={`${c.label}: roll the ${ability.toUpperCase()} save for me`}>Roll for me</Button> : null}
           <Button small onClick={() => onSave({ kind: "failed" })}>Failed</Button>
           <Button small onClick={() => onSave({ kind: "saved" })}>Saved</Button>
-          {entry.kind !== "none" && entry.kind !== "typed" && <Button small variant="ghost" onClick={() => onSave({ kind: "none" })}>Clear</Button>}
+          {entry.kind !== "none" && <Button small variant="ghost" onClick={() => onSave({ kind: "none" })}>Clear</Button>}
           {mod != null && <span className="cb-small muted cb-res-mod">save {signed(mod)}</span>}
         </span>
       )}

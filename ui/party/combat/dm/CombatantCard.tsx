@@ -5,6 +5,8 @@ import { usePhone } from "../../../src/lib/phone";
 import { ConditionChips } from "./ConditionToggles";
 import { HpBar } from "./HpBar";
 import { RollInput } from "./RollInput";
+import { DEATH_SAVE_OUTCOMES, passFail } from "../shared/outcomeInputs";
+import { OutcomeButtons } from "../shared/OutcomeButtons";
 import type { Condition } from "./common";
 import { AbilityTabs } from "./AbilityTabs";
 import { TextDialog } from "./dialogs";
@@ -146,7 +148,9 @@ export function CombatantCard({ state, c, block, blockName, blockOf, send, disab
         {!mine && life.state === "dying" && (
           <div className="cb-death">
             <span>Death saves: {life.successes} ✓ · {life.failures} ✗</span>
-            {!pc && <RollInput kind="d20" label="Death save" modifier={0} disabled={disabled} onSubmit={(roll) => send({ command: "death_save", id: c.id, roll })} />}
+            {!pc && <OutcomeButtons label="Death save" disabled={disabled} outcomes={DEATH_SAVE_OUTCOMES}
+              onRoll={() => send({ command: "death_save", id: c.id, roll: { kind: "app", modifier: 0, mode: "normal" } })}
+              onPick={(roll) => send({ command: "death_save", id: c.id, roll })} />}
             <Button small disabled={disabled} onClick={() => send({ command: "stabilize", id: c.id })}>Stabilize</Button>
             {pc && <span className="cb-small muted">The player rolls their own death saves.</span>}
           </div>
@@ -162,7 +166,10 @@ export function CombatantCard({ state, c, block, blockName, blockOf, send, disab
         {!mine && (c.pending_concentration ?? []).map((check, i) => (
           <div key={i} className="cb-conc-check" role="alert">
             <b>Concentration check: CON save DC {check.dc}</b> <span className="muted cb-small">({check.damage} damage)</span>
-            {i === 0 && !pc && <RollInput kind="d20" label="CON save" modifier={saveBonus(block, "con")} disabled={disabled} onSubmit={(roll) => send({ command: "resolve_concentration", id: c.id, roll })} />}
+            {i === 0 && !pc && <OutcomeButtons label="CON save" disabled={disabled} outcomes={passFail(check.dc, "Kept it", "Lost it")}
+              rollLabel={`Roll for me (${signed(saveBonus(block, "con"))})`}
+              onRoll={() => send({ command: "resolve_concentration", id: c.id, roll: { kind: "app", modifier: saveBonus(block, "con"), mode: "normal" } })}
+              onPick={(roll) => send({ command: "resolve_concentration", id: c.id, roll })} />}
             {i === 0 && pc && <span className="cb-small muted"> The player rolls it.</span>}
           </div>
         ))}

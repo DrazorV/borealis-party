@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import type { Page, TestInfo } from "@playwright/test";
-import { expect, measureOverflow, signedInShell, test } from "./fixtures";
+import { expect, measureOverflow, open, signedInShell, test } from "./fixtures";
 
 /**
  * 0.3.5 combat quick wins on the DM's 1440x900 screen, against the tracker's mock server (`party.combatMock`):
@@ -17,10 +17,13 @@ async function shot(page: Page, testInfo: TestInfo, name: string) {
   await page.screenshot({ path: join(dir, `${testInfo.project.name}-combat-quick-wins-${name}.png`), fullPage: false });
 }
 
-async function started(page: Page) {
+async function started(page: Page, phone = false) {
   await page.addInitScript(() => { localStorage.setItem("party.combatMock", "1"); localStorage.removeItem("party.combatMock.state"); });
-  await page.goto("/#/combat/c1");
-  await expect(page.locator("main").first()).toBeVisible({ timeout: 30_000 });
+  if (phone) await open(page, "/combat/c1");
+  else {
+    await page.goto("/#/combat/c1");
+    await expect(page.locator("main").first()).toBeVisible({ timeout: 30_000 });
+  }
   await signedInShell(page);
   await expect(page.locator("[data-combatant]").first()).toBeVisible({ timeout: 30_000 });
   for (const [label, n] of [["Knight", 18], ["Adult Red Dragon", 12], ["Priest", 10], ["Cultist 1", 9], ["Cultist 2", 8], ["Mage", 5], ["Druid", 4]] as const) {
@@ -28,7 +31,7 @@ async function started(page: Page) {
     await box.fill(String(n));
     await box.press("Enter");
   }
-  await page.locator(".cb-top-actions .cb-next:visible").first().click();
+  await page.locator(".cb-thumb:visible .btn, .cb-top-actions .cb-next:visible").first().click();
   await expect(page.getByText("ROUND 1").first()).toBeVisible();
 }
 
@@ -52,9 +55,9 @@ test.describe("Combat quick wins (0.3.5): the DM", () => {
     await sheet.getByLabel("Target Cultist 2").check();
     await sheet.getByLabel("Target Priest").check();
     await sheet.getByLabel("Target Aria").check();
-    // Typed table rolls first: the PC's save, asked at the table; one creature's typed; the rest rolled in the app.
-    await sheet.getByLabel("Aria: DEX save, typed").fill("16");
-    await sheet.getByLabel("Cultist 1: DEX save, typed").fill("4");
+    // Saves are outcomes (0.3.5): the PC's asked at the table and pressed; one creature's pressed; the rest rolled.
+    await sheet.locator('[data-target="pc-aria"]').getByRole("button", { name: "Saved" }).click();
+    await sheet.locator('[data-target="cultist1"]').getByRole("button", { name: "Failed" }).click();
     await sheet.locator('[data-target="priest"]').getByRole("button", { name: "Saved" }).click();
     await sheet.getByRole("button", { name: "Roll creature saves (1)" }).click();
     await expect(sheet.getByRole("button", { name: "Apply to 4 targets" })).toBeEnabled();
@@ -66,7 +69,7 @@ test.describe("Combat quick wins (0.3.5): the DM", () => {
     // Cultist 1 failed: 12 of its 9 HP; the priest saved: 6.
     await page.locator('[data-combatant="priest"] .cb-row-main').click();
     await expect(page.locator("#cb-card").getByRole("meter", { name: "Priest hit points" })).toHaveAttribute("aria-valuenow", "21");
-    // The PC saved (16 vs 13): half, as a prompt on the player's side; the DM sees it was sent, never Aria's HP.
+    // The PC saved: half, as a prompt on the player's side; the DM sees it was sent, never Aria's HP.
     await page.locator('[data-combatant="pc-aria"] .cb-row-main').click();
     await expect(page.locator("#cb-card").getByRole("list", { name: /^Sent to/ })).toContainText("6");
     await expect(page.locator("#cb-card").getByRole("meter", { name: /Aria hit points/ })).toHaveCount(0);
@@ -92,5 +95,25 @@ test.describe("Combat quick wins (0.3.5): the DM", () => {
     expect(ids.indexOf("pc-c_late")).toBeLessThan(ids.indexOf("priest"));
     await expect(roster.getByRole("button", { name: "Party member" })).toHaveCount(0);
     await shot(page, testInfo, "member-added");
+  });
+});
+
+test.describe("Combat quick wins (0.3.5): stat block features", () => {
+  test.beforeEach(({}, testInfo) => {
+    test.skip(!["android-portrait", "desktop-wide"].includes(testInfo.project.name), "the S26 Ultra and a DM's 1440x900 screen");
+  });
+
+  test("Multiattack is a feature line, not a button; the attacks it names are buttons", async ({ page, signIn }, testInfo) => {
+    await signIn("admin");
+    await started(page, testInfo.project.name === "android-portrait");
+    // The knight acts first; its card shows its turn panel.
+    const card = page.locator("#cb-card");
+    const line = card.locator('[data-feature="multiattack"]');
+    await expect(line).toContainText("Multiattack: The knight makes two melee attacks.");
+    await expect(card.getByRole("button", { name: /^Multiattack/ })).toHaveCount(0);
+    await expect(card.getByRole("button", { name: /^Greatsword/ })).toBeVisible();
+    await line.scrollIntoViewIfNeeded();
+    expect((await measureOverflow(page)).page, "the page scrolls sideways").toBeLessThanOrEqual(0);
+    await shot(page, testInfo, "multiattack");
   });
 });

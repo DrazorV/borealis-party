@@ -116,10 +116,25 @@ const STANDARD: { key: StandardAction; label: string; detail: string }[] = [
 ];
 
 /** Every button of a combatant's turn panel, in its groups. */
+/**
+ * A stat block entry that is a feature, not something the creature uses (user, 0.3.5: "Multiattack is not an
+ * action"): Multiattack says how many attacks an Attack action makes; the attacks it names are the buttons. Matched by
+ * name, so it holds for any installed content (SRD or imported).
+ */
+export const isPassiveFeature = (a: Pick<Ability, "name" | "kind">): boolean =>
+  a.kind === "passive" || /^multiattack\b/i.test(a.name.trim());
+
+/** The passive lines shown above the action buttons: each feature's name and its stat block text. */
+export function passiveLines(c: Combatant, block: StatBlock | undefined): { key: string; name: string; text: string }[] {
+  return (c.abilities ?? []).filter((a) => a.kind !== "passive" && isPassiveFeature(a)).map((a) => ({
+    key: a.key, name: a.name, text: featureFor(block, a)?.text ?? a.text ?? "",
+  }));
+}
+
 export function turnButtons(state: CombatState, c: Combatant, block: StatBlock | undefined, suggested: ReadonlySet<string> = new Set()): TurnButton[] {
   const listed = new Set(spellLists(block).flatMap((l) => l.lists.flatMap((x) => x.spells.map((s) => s.replace(/\s*\(.*\)$/, "").toLowerCase()))));
   const out: TurnButton[] = [];
-  for (const a of (c.abilities ?? []).filter((x) => x.kind !== "passive")) {
+  for (const a of (c.abilities ?? []).filter((x) => !isPassiveFeature(x))) {
     const f = featureFor(block, a);
     if (isSpellAbility(a, listed)) {
       const mech = mechOf(a);

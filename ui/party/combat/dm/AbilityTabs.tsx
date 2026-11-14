@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "../../../src/components/Button";
 import { Segmented } from "../../../src/components/Tabs";
 import { CastSheet } from "./CastSheet";
-import { RollInput } from "./RollInput";
+import { OutcomeButtons } from "../shared/OutcomeButtons";
 import { isDefeated } from "./derive";
 import { spellDetail } from "./spellApi";
 import { asCommand, COVERAGE_HELP, COVERAGE_WORD, mechOf, spellOf } from "./spellTypes";
@@ -41,7 +41,7 @@ export function AbilityTabs({ state, c, block, blockOf, send, disabled, onDefine
   );
 }
 
-/** Spent recharge abilities: the d6 typed from the table first, or rolled in the app. */
+/** Spent recharge abilities (0.3.5): roll the d6 at the table and press Mark ready on a hit, or let the app roll. */
 function RechargeRows({ c, send, disabled }: { c: Combatant; send: (cmd: Command) => void; disabled: boolean }) {
   const spent = (c.abilities ?? []).filter((a) => a.recharge && !a.recharge.ready);
   if (!spent.length) return null;
@@ -49,9 +49,10 @@ function RechargeRows({ c, send, disabled }: { c: Combatant; send: (cmd: Command
     <section className="cb-recharges">
       {spent.map((a) => (
         <div key={a.key} className="cb-recharge">
-          <RollInput kind="dice" label={`Recharge ${a.name} (d6, ${a.recharge!.min}–6)`} notation="1d6" min={1} max={6} disabled={disabled}
-            onSubmit={(roll) => send({ command: "roll_recharge", id: c.id, ability: a.key, roll })} />
-          <Button small variant="ghost" disabled={disabled} onClick={() => send({ command: "set_recharge", id: c.id, ability: a.key, ready: true })}>Mark ready</Button>
+          <OutcomeButtons label={`Recharge ${a.name} (d6, ${a.recharge!.min}–6)`} disabled={disabled}
+            onRoll={() => send({ command: "roll_recharge", id: c.id, ability: a.key, roll: { kind: "app", notation: "1d6" } })}
+            outcomes={[{ label: "Mark ready", value: true, variant: "primary" }]}
+            onPick={() => send({ command: "set_recharge", id: c.id, ability: a.key, ready: true })} />
         </div>
       ))}
     </section>
