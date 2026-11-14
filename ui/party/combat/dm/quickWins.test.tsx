@@ -104,3 +104,12 @@ describe("the DM's stat block dialog (0.3.5)", () => {
     expect(within(sb).getByRole("region", { name: "Traits" }).textContent).toContain("Brave.");
   });
 });
+
+describe("the DM's stat block dialog: thin blocks", () => {
+  it("renders a block without size or type as a monster", async () => {
+    const { StatBlockDialog } = await import("./StatBlockDialog");
+    const { SAMPLE_STATBLOCKS } = await import("./fixtures");
+    render(<StatBlockDialog title="Knight" block={SAMPLE_STATBLOCKS.knight!.data} onClose={() => {}} />);
+    expect(screen.getByRole("region", { name: "Actions" }).textContent).toContain("Multiattack.");
+  });
+});

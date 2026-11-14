@@ -3,3 +3,9 @@
 .roll-outcomes-label { font-size: var(--fs-sm); font-weight: 600; }
 .roll-outcomes-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: stretch; }
 .roll-outcomes-row > .btn { flex: 1 1 0; min-width: 6.5em; }
+/* Many outcomes (a death save's four) on a phone: two columns, Roll for me across the first row; labels wrap, never clip. */
+@media (max-width: 600px) {
+  .roll-outcomes-row.many { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .roll-outcomes-row.many > .btn { min-width: 0; white-space: normal; }
+  .roll-outcomes-row.many > .btn:first-child:nth-last-child(odd) { grid-column: 1 / -1; }
+}

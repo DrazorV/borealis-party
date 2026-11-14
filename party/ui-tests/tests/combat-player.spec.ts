@@ -96,7 +96,9 @@ async function serveCombat(page: Page, state: { combat: Combat | null }) {
     } };
     const row = c.order.find((x) => x.id === args.id);
     const own = c.me.find((x) => x.id === args.id);
-    const total = args.roll?.kind === "typed" ? args.roll.total! : 10 + (args.roll?.modifier ?? 0);
+    // 0.3.5: a pass/fail outcome pressed at the table comes as `{ kind: "outcome" }`.
+    const outcome = (args.roll as { outcome?: string } | undefined)?.outcome;
+    const total = args.roll?.kind === "typed" ? args.roll.total! : args.roll?.kind === "outcome" ? (outcome === "pass" || outcome === "nat20" ? 10 : 9) : 10 + (args.roll?.modifier ?? 0);
     if (action === "set_initiative" && row) row.initiative = total;
     if (action === "summon" && args.combatant) {
       const id = `s${c.order.length}`;
@@ -249,8 +251,14 @@ test.describe("The player's live combat section (0.3.0)", () => {
       await saves.scrollIntoViewIfNeeded();
       await fits(page, testInfo, ".combat-pane");
       await shot(page, testInfo, "death-saves");
-      // 0.3.5: outcome buttons, no number box.
+      // 0.3.5: outcome buttons, no number box; on a phone they wrap into two columns inside the card, none clipped.
       await expect(saves.getByLabel("Death save: my table roll")).toHaveCount(0);
+      const box = (await saves.boundingBox())!;
+      for (const b of await saves.getByRole("button").all()) {
+        const r = (await b.boundingBox())!;
+        expect(r.x >= box.x - 1 && r.x + r.width <= box.x + box.width + 1, `${await b.textContent()} inside the card`).toBe(true);
+        expect(await b.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), `${await b.textContent()} not clipped`).toBe(true);
+      }
       await saves.getByRole("button", { name: "Failure" }).tap();
       await expect(saves.getByRole("img", { name: "Failures: 2 of 3" })).toBeVisible();
       await saves.getByRole("button", { name: /^Roll for me/ }).tap();

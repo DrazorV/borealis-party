@@ -25,7 +25,7 @@ export function OutcomeButtons<T>({ label, outcomes, onPick, onRoll, rollLabel =
   return (
     <div className="roll-outcomes" role="group" aria-label={label}>
       <span className="roll-outcomes-label">{label}</span>
-      <div className="roll-outcomes-row">
+      <div className={`roll-outcomes-row${outcomes.length > 2 ? " many" : ""}`}>
         {onRoll && <Button icon="dice" disabled={disabled} onClick={onRoll}>{rollLabel}</Button>}
         {outcomes.map((o) => (
           <Button key={o.label} variant={o.variant} disabled={disabled} onClick={() => onPick(o.value)}>{o.label}</Button>
