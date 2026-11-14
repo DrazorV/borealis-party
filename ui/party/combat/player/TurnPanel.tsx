@@ -60,9 +60,13 @@ function readySpells(s: CharacterSnapshot): SpellEntry[] {
   return s.spellcasting.classes.flatMap((c) => c.spells).filter((x) => x.ready && !seen.has(x.id) && Boolean(seen.add(x.id)));
 }
 
-function casterNumbers(s: CharacterSnapshot, spell: SpellEntry): { saveDc?: number; attackBonus?: number } {
+/** The sheet's numbers for a cast: save DC, spell attack, the ability's modifier, and the cantrip tier by level. */
+export function casterNumbers(s: CharacterSnapshot, spell: SpellEntry): { saveDc?: number; attackBonus?: number; mod?: number; cantripTier: number } {
+  const level = s.level?.total ?? 1;
+  const cantripTier = level >= 17 ? 4 : level >= 11 ? 3 : level >= 5 ? 2 : 1;
   const block = s.spellcasting.classes.find((c) => c.spells.some((x) => x.id === spell.id));
-  return block ? { saveDc: block.saveDc, attackBonus: block.attackBonus } : {};
+  if (!block) return { cantripTier };
+  return { saveDc: block.saveDc, attackBonus: block.attackBonus, mod: block.attackBonus - s.stats.proficiencyBonus, cantripTier };
 }
 
 export function TurnPanel({ combat, me, s }: { combat: PlayerCombat; me: PlayerCombatant; s: CharacterSnapshot }) {

@@ -23,6 +23,8 @@ vi.mock("../../src/components/Confirm", () => ({ useConfirm: () => async () => "
 const { CombatTracker } = await import("./CombatTracker");
 
 let server: MockServer;
+/** The DM view's `feed` the fake server adds (party/docs/role-views.md); undefined = a server without it. */
+let feed: { seq: number; author: string; event: { round: number; event: string; text: string } }[] | undefined;
 const combat = () => server.combats.get("c1")!;
 const typed = (total: number) => ({ kind: "typed" as const, total });
 const row = (id: string) => document.querySelector<HTMLElement>(`[data-combatant="${id}"]`)!;
@@ -64,10 +66,11 @@ beforeEach(() => {
   Object.assign(combatDeps, server.deps, {
     fetch: async (...a: Parameters<typeof fetch>) => {
       const out = (await fetch(...a)) as DmCombat | undefined;
-      return out && typeof out === "object" && "state" in out ? { ...out, state: structuredClone(combat().view.state) } : out;
+      return out && typeof out === "object" && "state" in out ? { ...out, state: structuredClone(combat().view.state), ...(feed ? { feed: [...feed] } : {}) } : out;
     },
   });
   toasts.length = 0;
+  feed = undefined;
 });
 afterEach(() => { resetCombatDeps(); vi.unstubAllGlobals(); });
 
@@ -135,5 +138,23 @@ describe("DM screen privacy", () => {
     await waitFor(() => expect(toasts).toContain("Aria cast Shield of Faith: Aria."));
     server.notify("c1");
     await waitFor(() => expect(toasts.filter((t) => t.includes("Shield of Faith"))).toHaveLength(1));
+  });
+
+  it("with the server's feed, each new player entry says so once (an attack too); the DM's own entries don't", async () => {
+    feed = [{ seq: 1, author: "dm", event: { round: 1, event: "turn", text: "Round 1" } }];
+    fullState();
+    page();
+    await waitFor(() => expect(row("pc-aria")).toBeTruthy());
+    feed = [
+      { seq: 3, author: "player", event: { round: 1, event: "attack", text: "Aria attacks Dragon: 17, a hit." } },
+      { seq: 2, author: "dm", event: { round: 1, event: "damage", text: "The DM's own note" } },
+      ...feed,
+    ];
+    execute(combat(), { command: "add_effect", effect: { name: "Mark", source: "dragon", target: "knight" } });
+    server.notify("c1");
+    await waitFor(() => expect(toasts).toContain("Aria attacks Dragon: 17, a hit."));
+    expect(toasts).not.toContain("The DM's own note");
+    server.notify("c1");
+    await waitFor(() => expect(toasts.filter((t) => t.startsWith("Aria attacks"))).toHaveLength(1));
   });
 });

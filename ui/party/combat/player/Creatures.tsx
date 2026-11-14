@@ -86,6 +86,23 @@ function CreatureCard({ combat, c }: { combat: PlayerCombat; c: PlayerCombatant 
           {c.ac != null && <Chip>AC {c.ac}</Chip>}
         </span>
       </div>
+      {/* The DM's damage or healing on my creature is a prompt I answer (party/docs/role-views.md); the amount as sent. */}
+      {combat.prompts.flatMap((p) => (p.combatant === c.id && (p.kind === "damage" || p.kind === "heal") ? [p] : [])).map((p) => {
+        const what = p.kind === "damage"
+          ? `${c.name}: take ${p.amount}${p.damageType ? ` ${p.damageType}` : ""} damage${p.critical ? " (critical hit)" : ""}?`
+          : `${c.name}: regain ${(p as { amount: number }).amount} hit points?`;
+        const answer = (applied: boolean) => run(() => playerWrite(combat, "resolve_prompt", { promptId: p.id, applied },
+          (x) => ({ ...x, prompts: x.prompts.filter((y) => y.id !== p.id) })));
+        return (
+          <section key={p.id} className="combat-prompt" role="alertdialog" aria-label={what}>
+            <p className="combat-prompt-q">{what}</p>
+            <div className="combat-prompt-actions">
+              <Button variant="primary" disabled={busy} onClick={() => void answer(true)}>Apply</Button>
+              <Button disabled={busy} onClick={() => void answer(false)}>Not now</Button>
+            </div>
+          </section>
+        );
+      })}
       {hp.max > 0 && <div className="combat-hp-bar" aria-hidden="true"><span className={tone} style={{ width: `${share * 100}%` }} /></div>}
       <ConditionChips conditions={c.conditions} label={`${c.name} conditions`} onRemove={(name) => void removeCondition(name)} />
       <div className="combat-creature-row">

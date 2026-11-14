@@ -366,15 +366,21 @@ export interface PlayerCast {
   /** The caster's numbers from the sheet, for a save DC or a spell attack. */
   saveDc?: number;
   attackBonus?: number;
+  /** The spellcasting ability's modifier, and the cantrip damage tier by character level (1–4). */
+  mod?: number;
+  cantripTier?: number;
   concentration?: boolean;
 }
 
 /**
- * The `cast_spell` args a player sends (the engine command's own names): the server compiles the definition from
- * `spellKey` and the caster; the rest of {@link PlayerCast} is what this device uses (the economy, the sheet).
+ * The `cast_spell` args a player sends (party/docs/role-views.md): the server compiles the definition from `spellKey`
+ * with the sheet's numbers (`dc`, `attack`, `mod`, `cantripTier`); the slot level is the one the app spends on the
+ * sheet. The rest of {@link PlayerCast} is what this device uses (the economy).
  */
 export const castArgs = (c: PlayerCast): Record<string, unknown> => ({
-  caster: c.caster, spellKey: c.spellKey, targets: c.targets, ...(c.slot != null ? { slot: c.slot } : {}),
+  caster: c.caster, spellKey: c.spellKey, targets: c.targets, slot: c.slot ?? null,
+  ...(c.saveDc != null ? { dc: c.saveDc } : {}), ...(c.attackBonus != null ? { attack: c.attackBonus } : {}),
+  ...(c.mod != null ? { mod: c.mod } : {}), ...(c.cantripTier != null ? { cantripTier: c.cantripTier } : {}),
 });
 
 const COMBAT_EVENT = "party://combat";

@@ -23,7 +23,7 @@ import { upNext } from "../combat/dm/mockEngine";
 import { ResourcePanel, RuleBanners } from "../combat/dm/ResourcePanel";
 import { Roster } from "../combat/dm/Roster";
 import { playerSide } from "../combat/dm/privacy";
-import type { Ability, Combatant, Command, CombatState } from "../combat/dm/types";
+import type { Ability, Combatant, Command, CombatState, DmEvent } from "../combat/dm/types";
 import { useCombat } from "../combat/dm/useCombat";
 import "../combat/dm/tracker.css";
 
@@ -59,7 +59,7 @@ export function CombatTracker() {
   const resRef = useRef<HTMLDivElement>(null);
   const lastTurn = useRef<string | undefined>(undefined);
   const state = view?.state;
-  usePlayerCastNotes(state, toast.push);
+  usePlayerCastNotes(state, (view as { feed?: FeedEntry[] } | null)?.feed, toast.push);
 
   // C4/C26: a new turn selects its combatant; on a phone the card scrolls into view.
   useEffect(() => {
@@ -300,10 +300,23 @@ export function CombatTracker() {
  * an effect"): a new effect a player's combatant put on anyone, or a new cast of theirs, says so once in a toast. It
  * shows in the log and as the effect chips on the targets too. Nothing of the player's HP or slots is in it.
  */
-function usePlayerCastNotes(state: CombatState | undefined, push: (m: string) => void) {
+/** An entry of the DM view's `feed` (party/docs/role-views.md): the last log entries the DM may see. */
+interface FeedEntry { seq: number; at?: number; author?: string; event: DmEvent }
+
+function usePlayerCastNotes(state: CombatState | undefined, feed: FeedEntry[] | undefined, push: (m: string) => void) {
   const seen = useRef<Set<string> | null>(null);
+  const lastSeq = useRef<number | null>(null);
+  // The server's feed, when it sends one: each new entry a player wrote (a cast, an attack, an effect) says so once.
   useEffect(() => {
-    if (!state) return;
+    if (!feed) return;
+    const top = feed.reduce((m, e) => Math.max(m, e.seq), 0);
+    if (lastSeq.current === null) { lastSeq.current = top; return; }
+    const fresh = feed.filter((e) => e.seq > lastSeq.current! && e.author === "player" && e.event?.text).sort((a, b) => a.seq - b.seq);
+    lastSeq.current = Math.max(lastSeq.current, top);
+    for (const e of fresh) push(e.event.text);
+  }, [feed, push]);
+  useEffect(() => {
+    if (!state || feed) return;
     const keys = [...state.effects.map((e) => `e${e.id}`), ...(state.casts ?? []).map((k) => `k${k.id}`)];
     if (seen.current === null) { seen.current = new Set(keys); return; }
     const known = seen.current;
@@ -324,7 +337,7 @@ function usePlayerCastNotes(state: CombatState | undefined, push: (m: string) =>
     }
     keys.forEach((x) => known.add(x));
     for (const [what, on] of notes) push(on.size ? `${what}: ${[...on].join(", ")}.` : `${what}.`);
-  }, [state, push]);
+  }, [state, feed, push]);
 }
 
 /** Phones: the header's More menu, so End combat is one tap away without crowding the header row. */

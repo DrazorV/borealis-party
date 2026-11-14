@@ -629,6 +629,20 @@ describe("summons and pets (controlled creatures)", () => {
     return w;
   }
 
+  it("the DM's damage on my creature is a prompt I answer: Apply sends resolve_prompt for it (role-views.md)", async () => {
+    const user = userEvent.setup();
+    const w = withPets();
+    w.me.find((m) => m.id === "wolf1")!.prompts = [{ id: "pw", kind: "damage", amount: 4, parts: [{ amount: 4, damage_type: "piercing" }] }];
+    server.combats.set("p1", w);
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    const prompt = within(pane).getByRole("alertdialog", { name: "Wolf: take 4 piercing damage?" });
+    await user.click(within(prompt).getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(within(pane).queryByRole("alertdialog", { name: /Wolf: take/ })).toBeNull());
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/resolve_prompt", body: { args: { promptId: "pw", applied: true } } });
+  });
+
   it("follow their owner in the turn order; other players' are there but not mine to play", async () => {
     server.combats.set("p1", withPets());
     await start();
@@ -800,7 +814,8 @@ describe("the player screen (0.3.3): the Play tab with the live combat on top", 
     await user.click(within(sheet).getByRole("button", { name: "Goblin" }));
     await user.click(within(sheet).getByRole("button", { name: `Cast ${name}` }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: `Cast ${name}` })).toBeNull());
-    expect(server.calls.find((x) => x.path === "/api/combats/c-p1/cast_spell")).toMatchObject({ body: { args: { caster: "me1", targets: ["cr1"], slot: 1 } } });
+    expect(server.calls.find((x) => x.path === "/api/combats/c-p1/cast_spell")).toMatchObject({ body: { args: {
+      caster: "me1", targets: ["cr1"], slot: 1, dc: expect.any(Number), attack: expect.any(Number), mod: expect.any(Number), cantripTier: 1 } } });
     await waitFor(async () => expect((await api.getSnapshot({ characterId: hero })).play.spellSlots.find((x) => x.level === 1)!.used).toBe(before.used + 1));
   });
 
