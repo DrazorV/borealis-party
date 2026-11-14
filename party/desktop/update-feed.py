@@ -46,7 +46,7 @@ def main(argv: list[str]) -> None:
     if len(argv) not in (4, 5):
         raise SystemExit(__doc__.strip().splitlines()[-1])
     folder, version, tag = Path(argv[1]), argv[2], argv[3]
-    base = argv[4] if len(argv) == 5 else f"https://github.com/fortress-soft/meadhall/releases/download/{tag}"
+    base = argv[4] if len(argv) == 5 else f"https://github.com/fortress-soft/borealis-connect/releases/download/{tag}"
     out = json.dumps(feed(folder, version, base.rstrip("/")), indent=2) + "\n"
     (folder / FEED).write_text(out, encoding="utf-8")
     print(out, end="")

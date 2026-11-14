@@ -21,7 +21,7 @@ Characters and settings are not touched: they live in the app's data folder (`%A
 All of it is in the fork's own files; upstream's code is used as it is.
 
 - `party/tauri.party.desktop.json` gives upstream's updater plugin the party feed
-  (`https://github.com/fortress-soft/meadhall/releases/latest/download/borealis-party-latest.json`, then the address
+  (`https://github.com/fortress-soft/borealis-connect/releases/latest/download/borealis-party-latest.json`, then the address
   apps up to 0.3.2 have built in, `https://github.com/DrazorV/borealis-party/...`, which GitHub redirects after the
   repository moved; never create a new `DrazorV/borealis-party` repository, or that redirect stops) and the party
   public key (`plugins.updater`), and lets the main window use the plugin's `check` and `download_and_install`

@@ -1,7 +1,7 @@
 name: Party apps
 
 # Builds the Borealis Party phone and desktop apps and, for a party-v<version> tag, attaches them to that GitHub
-# release, so https://github.com/fortress-soft/meadhall/releases/latest/download/<asset> always points at the newest
+# release, so https://github.com/fortress-soft/borealis-connect/releases/latest/download/<asset> always points at the newest
 # build. The tag's version must be the one in party/Cargo.toml. Asset names carry no version (party/README.md lists
 # them):
 #   borealis-party-arm64.apk                signed release APK for phones
@@ -54,7 +54,7 @@ env:
 
 jobs:
   version:
-    if: github.repository == 'fortress-soft/meadhall'
+    if: github.repository == 'fortress-soft/borealis-connect'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}

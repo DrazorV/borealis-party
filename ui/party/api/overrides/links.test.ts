@@ -40,8 +40,8 @@ describe("web pages from the apps", () => {
 
   it("party pages go to the device's vault_open_url (the system browser)", async () => {
     const { d, calls } = deps();
-    await openExternal("https://github.com/fortress-soft/meadhall/releases/latest", d);
-    expect(calls).toEqual(["vaultOpenUrl https://github.com/fortress-soft/meadhall/releases/latest"]);
+    await openExternal("https://github.com/fortress-soft/borealis-connect/releases/latest", d);
+    expect(calls).toEqual(["vaultOpenUrl https://github.com/fortress-soft/borealis-connect/releases/latest"]);
   });
 
   it("when the device can't open it, an app dialog offers to copy the address", async () => {
@@ -84,7 +84,7 @@ describe("links tapped on a page", () => {
   };
 
   it("a link to another web site is caught, from a child of the link too", () => {
-    expect(externalHref(anchor("https://github.com/fortress-soft/meadhall/releases/latest"), here)).toBe("https://github.com/fortress-soft/meadhall/releases/latest");
+    expect(externalHref(anchor("https://github.com/fortress-soft/borealis-connect/releases/latest"), here)).toBe("https://github.com/fortress-soft/borealis-connect/releases/latest");
   });
 
   it("same-site links, mail and script links are left to the page", () => {

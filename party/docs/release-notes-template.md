@@ -20,7 +20,7 @@ Re-pull the image and restart (in Portainer: "Update the stack" with re-pull).
    (`.sqlite` on SQLite). If it fails, the server stops and the database is left as it was; the log says why.
    Copying the backup off the host is recommended.
 2. After the first start, `SELECT version FROM schema_version;` lists `1` to `M`.
-3. Going back to the previous version: [Going back to an older version](https://github.com/fortress-soft/meadhall/blob/main/party/docs/deploy.md#going-back-to-an-older-version).
+3. Going back to the previous version: [Going back to an older version](https://github.com/fortress-soft/borealis-connect/blob/main/party/docs/deploy.md#going-back-to-an-older-version).
 
 <!-- Without migrations: -->
 No database changes. The server still writes an automatic backup on the first start of the new version, to
