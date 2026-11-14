@@ -418,6 +418,8 @@ pub async fn canonical(state: &AppState, owner: &str, key: &str) -> ApiResult<Op
 ///
 /// # Errors
 /// When the workspace or the database fails.
+// Only the tests call it in 0.3.2; spellbook seeding and the planned MCP spell tools (0.3.3) are its callers.
+#[cfg_attr(not(test), allow(dead_code))]
 pub async fn resolve_name(
     state: &AppState,
     owner: &str,
