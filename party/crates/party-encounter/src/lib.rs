@@ -1,4 +1,4 @@
-//! The encounter builder's stat block copies for Borealis Party (release 0.3.0).
+//! The encounter builder's stat block copies for Borealis Connect (release 0.3.0).
 //!
 //! * [`creature`]: the copy of a creature an encounter keeps (a typed `Monster` element's `MonsterData`, or an Aurora
 //!   `Companion` element's printed block, plan D17 b), its fingerprint for "Refresh stat block", and what players see

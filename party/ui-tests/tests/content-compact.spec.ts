@@ -149,7 +149,7 @@ test("a source's packs open as chips with a search", async ({ page }, testInfo) 
   await page.screenshot({ path: testInfo.outputPath("packs-open.png"), fullPage: true });
 });
 
-test("the page has no Assistant section: AI apps connect to Borealis Party instead (0.3.3)", async ({ page }, testInfo) => {
+test("the page has no Assistant section: AI apps connect to Borealis Connect instead (0.3.3)", async ({ page }, testInfo) => {
   await openContent(page, testInfo);
   await expect(bestiary(page)).toContainText(/creatures with stat blocks/, { timeout: 30_000 });
   await expect(page.getByRole("region", { name: "Assistant" })).toHaveCount(0);

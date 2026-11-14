@@ -11,7 +11,7 @@ export function tooLargeToShare(bytes: number): ApiError {
   const mb = (n: number) => `${(n / (1024 * 1024)).toFixed(1)} MB`;
   return {
     code: "invalid_argument",
-    message: `This bundle is ${mb(bytes)}, and a phone can share at most ${mb(MAX_WEB_SHARE_BYTES)} at a time. Choose fewer characters or "No content packs", or export it from Borealis Party on a computer. Sharing by code, with no file on the phone, comes in a later version.`,
+    message: `This bundle is ${mb(bytes)}, and a phone can share at most ${mb(MAX_WEB_SHARE_BYTES)} at a time. Choose fewer characters or "No content packs", or export it from Borealis Connect on a computer. Sharing by code, with no file on the phone, comes in a later version.`,
   } as unknown as ApiError;
 }
 

@@ -1,4 +1,4 @@
-# Combat API (Borealis Party 0.3.0)
+# Combat API (Borealis Connect 0.3.0)
 
 The combat server's routes and live events: a party's DM runs a combat built from an encounter, and the party's
 players see a **projection** of it in which hidden creatures don't exist. The code is

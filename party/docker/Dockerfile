@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
-# Borealis Party server. Build from the repository root:
-#   docker build -f party/docker/Dockerfile -t borealis-party .
+# Borealis Connect server. Build from the repository root:
+#   docker build -f party/docker/Dockerfile -t borealis-connect .
 
 # The PostgreSQL client major version for the automatic backup (see the last stages).
 ARG PG_CLIENT_MAJOR=18

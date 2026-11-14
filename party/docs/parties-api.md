@@ -1,4 +1,4 @@
-# Parties API (Borealis Party 0.2.1)
+# Parties API (Borealis Connect 0.2.1)
 
 The server side of parties: `party/crates/borealis-server/src/parties.rs`. A party is rows in the database only.
 Characters never leave their owner's folder (`data/users/<owner>/characters/`), and nobody but the owner writes them.

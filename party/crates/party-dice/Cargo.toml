@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Dice notation, d20 tests and a seeded die for Borealis Party combat; every roll also takes a typed total"
+description = "Dice notation, d20 tests and a seeded die for Borealis Connect combat; every roll also takes a typed total"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

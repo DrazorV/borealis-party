@@ -9,7 +9,7 @@ import type { ServerSession } from "../session";
 import { override } from "./registry";
 
 /**
- * "Open with" / "Share to Borealis Party" (plan I4, decision D11). The OS hands the app a file; the app keeps it in the
+ * "Open with" / "Share to Borealis Connect" (plan I4, decision D11). The OS hands the app a file; the app keeps it in the
  * device's queue (Android's activity, or Rust on iOS and the desktop) until the page asks with `take_opened_files`.
  * The apps are built without device-link, so that is the only queue: `take_opened_bundles` does not exist.
  * - Android reads every opened file into that queue as bytes, `.borealis` included.
@@ -126,7 +126,7 @@ let offlineNoticeShown = false;
 export async function noticeOffline(deps: Pick<OpenedDeps, "ask"> = openedDeps): Promise<void> {
   if (!offline() || offlineNoticeShown) return;
   offlineNoticeShown = true;
-  await deps.ask(OFFLINE_TITLE, "The server can't be reached, so the file you opened is kept on this device. Borealis Party imports it into your account when it is connected again (open the app once it is back online).", [{ id: "ok", label: "OK" }]);
+  await deps.ask(OFFLINE_TITLE, "The server can't be reached, so the file you opened is kept on this device. Borealis Connect imports it into your account when it is connected again (open the app once it is back online).", [{ id: "ok", label: "OK" }]);
 }
 
 let watching = false;

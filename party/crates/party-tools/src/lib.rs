@@ -1,4 +1,4 @@
-//! The one tool registry for the AI apps that connect to Borealis Party over MCP (`/api/mcp`). See
+//! The one tool registry for the AI apps that connect to Borealis Connect over MCP (`/api/mcp`). See
 //! `party/docs/party-tools.md`.
 //!
 //! * A tool is a [`ToolSpec`]: a name, a JSON schema and one [`Scope`].

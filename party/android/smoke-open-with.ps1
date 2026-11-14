@@ -1,4 +1,4 @@
-# Android smoke run for "Open with Borealis Party" (plan M7b, I4). Run from the repository root.
+# Android smoke run for "Open with Borealis Connect" (plan M7b, I4). Run from the repository root.
 #   party/android/smoke-open-with.ps1 -Build        build the x86_64 debug APK first, then run
 #   party/android/smoke-open-with.ps1               run with the debug APK already built
 #

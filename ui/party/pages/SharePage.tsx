@@ -55,7 +55,7 @@ async function copy(text: string): Promise<boolean> {
 /** The code just made: large, with Copy (and the phone's share sheet where there is one). */
 function MadeCode({ made, onDone }: { made: MadeShare; onDone: () => void }) {
   const [copied, setCopied] = useState("");
-  const text = made.link ? `Borealis Party share code: ${made.code}\n${made.link}` : `Borealis Party share code: ${made.code}`;
+  const text = made.link ? `Borealis Connect share code: ${made.code}\n${made.link}` : `Borealis Connect share code: ${made.code}`;
   const share = typeof navigator.share === "function" ? () => navigator.share({ text }).catch(() => undefined) : null;
   return (
     <Card title="Your share code">

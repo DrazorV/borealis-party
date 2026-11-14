@@ -68,23 +68,23 @@ export async function checkNow(deps: CheckDeps = checkDeps): Promise<void> {
     update = await deps.check();
   } catch (e) {
     setStatus("");
-    await deps.ask(CHECK_TITLE, `Borealis Party couldn't check for updates: ${errorMessage(e)}`, OK);
+    await deps.ask(CHECK_TITLE, `Borealis Connect couldn't check for updates: ${errorMessage(e)}`, OK);
     return;
   }
   setStatus("");
   if (!update) {
-    await deps.ask(CHECK_TITLE, `You're up to date (Borealis Party ${deps.version()}).`, OK);
+    await deps.ask(CHECK_TITLE, `You're up to date (Borealis Connect ${deps.version()}).`, OK);
     return;
   }
   const answer = await deps.ask(CHECK_TITLE,
-    `Borealis Party ${update.version} is available (this is ${update.currentVersion}). Your characters stay as they are.`,
+    `Borealis Connect ${update.version} is available (this is ${update.currentVersion}). Your characters stay as they are.`,
     [{ id: "install", label: "Install and restart", variant: "highlight" }, { id: "later", label: "Later" }]);
   const install = answer === "install";
   if (deps.offer({ update, install }) || !install) return;
   // No update bar on screen to show the download: install with the status line instead.
-  setStatus(`Downloading Borealis Party ${update.version}…`);
+  setStatus(`Downloading Borealis Connect ${update.version}…`);
   try {
-    await deps.install(update, (f) => setStatus(`Downloading Borealis Party ${update.version}${f === null ? "…" : ` (${Math.round(f * 100)}%)`}`));
+    await deps.install(update, (f) => setStatus(`Downloading Borealis Connect ${update.version}${f === null ? "…" : ` (${Math.round(f * 100)}%)`}`));
   } catch (e) {
     setStatus("");
     await deps.ask(CHECK_TITLE, `The update could not be installed: ${errorMessage(e)}`, OK);

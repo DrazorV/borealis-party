@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { applyBrand, BRAND_EDITS, brandedFile, PRODUCT_NAME } from "./branding";
+import { applyBrand, BRAND_EDITS, brandedFile, INSTALLED_NAME, PRODUCT_NAME } from "./branding";
 
 /** Vitest runs in ui/. */
 const upstream = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
@@ -31,7 +31,11 @@ describe("party branding (user: \"make it say borealis party not borealis\")", (
 
   it("the apps' own names are already the party's", () => {
     const repo = (f: string) => readFileSync(join(process.cwd(), "..", f), "utf8");
-    expect(JSON.parse(repo("party/tauri.party.desktop.json"))).toMatchObject({ productName: PRODUCT_NAME });
+    // productName is the installed name (install folder, uninstall key), kept so updates replace the installed app.
+    const desktop = JSON.parse(repo("party/tauri.party.desktop.json"));
+    expect(desktop).toMatchObject({ productName: INSTALLED_NAME, mainBinaryName: "borealis-party", identifier: "app.borealis.party" });
+    expect(desktop.app.windows[0].title).toBe(PRODUCT_NAME);
+    expect(repo("party/android/res/values/strings.xml")).toContain(`<string name="main_activity_title">"${PRODUCT_NAME}"</string>`);
     expect(repo("party/android/res/values/strings.xml")).toContain(`<string name="app_name">"${PRODUCT_NAME}"</string>`);
     expect(repo("party/ios/Info.plist")).toMatch(new RegExp(`<key>CFBundleDisplayName</key>\\s*<string>${PRODUCT_NAME}</string>`));
   });

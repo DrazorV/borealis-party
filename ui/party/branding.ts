@@ -1,14 +1,19 @@
 /**
- * The product name a user reads in the party build is "Borealis Party" (user, 2026-11-14: "make it say borealis party
- * not borealis"). Upstream writes "Borealis" as plain text in a few of its own files; the party build rewrites exactly
- * those strings when it compiles them (vite.config.ts `partyBrand`), so upstream's files stay as they are. Each edit
- * must match once: the build fails if upstream changes the text, rather than shipping the plain name.
+ * The product name a user reads in the party build is "Borealis Connect" (the user, 2026-11-14; before that
+ * "Borealis Party"). Upstream writes "Borealis" as plain text in a few of its own files; the
+ * party build rewrites exactly those strings when it compiles them (vite.config.ts `partyBrand`), so upstream's files
+ * stay as they are. Each edit must match once: the build fails if upstream changes the text, rather than shipping the
+ * plain name.
  *
- * Elsewhere the name is already the party's: the page title (vite.config.ts `partyPage`), the desktop app's
- * productName and window title (party/tauri.party.desktop.json), the Android label (party/android/res/values/strings.xml)
- * and the iPhone's (party/ios/Info.plist CFBundleDisplayName).
+ * Elsewhere the name is already the party's: the page title (vite.config.ts `partyPage`), the desktop app's window
+ * title (party/tauri.party.desktop.json), the Android label (party/android/res/values/strings.xml) and the iPhone's
+ * (party/ios/Info.plist CFBundleDisplayName). The desktop app's Tauri productName stays {@link INSTALLED_NAME}: the
+ * Windows installer derives its install folder and uninstall key from it, so a new name would install a second copy.
  */
-export const PRODUCT_NAME = "Borealis Party";
+export const PRODUCT_NAME = "Borealis Connect";
+
+/** The desktop app's Tauri productName, kept from before the rename so installed apps update in place. */
+export const INSTALLED_NAME = "Borealis Party";
 
 export interface BrandEdit { from: string; to: string }
 

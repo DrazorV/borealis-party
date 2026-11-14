@@ -81,7 +81,7 @@ describe("Update content (0.3.3)", () => {
     const { unmount } = render(<UpdateAllCard />);
     await settle();
     expect(screen.getByRole("status").textContent).toContain("· 2 updated");
-    expect(screen.getByText(/Automatic Updates is on: checked when you open Borealis Party, at most once every 24 hours/)).toBeTruthy();
+    expect(screen.getByText(/Automatic Updates is on: checked when you open Borealis Connect, at most once every 24 hours/)).toBeTruthy();
     // The setting is the existing one, under Settings: no second switch here.
     expect(screen.queryByRole("checkbox")).toBeNull();
     unmount();

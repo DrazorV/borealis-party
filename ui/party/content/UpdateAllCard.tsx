@@ -79,7 +79,7 @@ export function UpdateAllCard() {
         <div className="party-update-opts">
           <span className="muted small party-update-auto">
             {info && (info.auto
-              ? `Automatic Updates is on: checked when you open Borealis Party, at most once every ${info.everyHours} hours.`
+              ? `Automatic Updates is on: checked when you open Borealis Connect, at most once every ${info.everyHours} hours.`
               : "Automatic Updates is off.")} Change it under Settings, Data files.
           </span>
           <Button small disabled={busy || !info || info.indexes === 0} onClick={() => void clear()}>Clear downloaded content</Button>

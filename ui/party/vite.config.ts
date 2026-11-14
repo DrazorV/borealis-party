@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, mergeConfig, type Plugin } from "vite";
 import upstream from "../vite.config";
-import { applyBrand, BRAND_EDITS, brandedFile } from "./branding";
+import { applyBrand, BRAND_EDITS, brandedFile, PRODUCT_NAME } from "./branding";
 import { cargoVersion } from "./version";
 
 const local = (path: string) => fileURLToPath(new URL(path, import.meta.url));
@@ -80,7 +80,7 @@ function partyEntry(): Plugin {
 }
 
 /**
- * "Borealis Party" where upstream's own files write "Borealis" (./branding.ts): the title bar, a phone's title bar,
+ * "Borealis Connect" where upstream's own files write "Borealis" (./branding.ts): the title bar, a phone's title bar,
  * the splash and the log file's name. The build fails if one of them is no longer there to change.
  */
 function partyBrand(): Plugin {
@@ -116,7 +116,7 @@ function partyPage(): Plugin {
     transformIndexHtml(html) {
       if (!TITLE.test(html)) throw new Error("party-page: upstream index.html no longer has <title>Borealis</title>");
       return {
-        html: html.replace(TITLE, "<title>Borealis Party</title>"),
+        html: html.replace(TITLE, `<title>${PRODUCT_NAME}</title>`),
         tags: [
           link({ rel: "icon", href: "/favicon.ico", sizes: "48x48" }),
           link({ rel: "icon", href: "/favicon.svg", type: "image/svg+xml" }),

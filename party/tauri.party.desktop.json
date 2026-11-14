@@ -6,7 +6,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Borealis Party",
+        "title": "Borealis Connect",
         "visible": false,
         "width": 1200,
         "height": 800,
@@ -22,7 +22,7 @@
         "splash",
         {
           "identifier": "party-updater",
-          "description": "Borealis Party: the web view checks the party release feed and installs a signed update (party/desktop/updates.md).",
+          "description": "Borealis Connect: the web view checks the party release feed and installs a signed update (party/desktop/updates.md).",
           "windows": [
             "main"
           ],

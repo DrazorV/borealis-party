@@ -28,7 +28,7 @@ No database changes. The server still writes an automatic backup on the first st
 
 ## Apps
 
-- Android: `BorealisParty-<version>-arm64.apk` installs over the earlier build.
+- Android: `borealis-party-arm64.apk` installs over the earlier build.
 - Desktop: updates itself (Windows setup.exe, AppImage).
 - iPhone: ...
 ```

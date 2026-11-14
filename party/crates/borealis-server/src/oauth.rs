@@ -187,7 +187,7 @@ pub async fn resource_metadata(State(state): State<AppState>) -> ApiResult<Json<
     let base = issuer(&state)?;
     Ok(Json(json!({
         "resource": format!("{base}/api/mcp"),
-        "resource_name": "Borealis Party",
+        "resource_name": "Borealis Connect",
         "authorization_servers": [base],
         "scopes_supported": Scopes::all().names(),
         "bearer_methods_supported": ["header"],
@@ -571,7 +571,7 @@ fn error_page(text: &str) -> Response {
          content=\"width=device-width, initial-scale=1\"><title>Can't connect the app</title></head>\
          <body style=\"font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 16px; \
          line-height: 1.5\"><h1 style=\"font-size: 1.4rem\">Can't connect the app</h1><p>{}</p>\
-         <p><a href=\"/\">Open Borealis Party</a></p></body></html>",
+         <p><a href=\"/\">Open Borealis Connect</a></p></body></html>",
         escape(text)
     );
     no_store((StatusCode::BAD_REQUEST, Html(html)))

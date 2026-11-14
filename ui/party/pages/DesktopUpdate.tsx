@@ -10,7 +10,7 @@ export const RECHECK_MS = 6 * 60 * 60_000;
 type Phase = { kind: "offer" } | { kind: "installing"; fraction: number | null } | { kind: "failed"; message: string };
 
 /**
- * The desktop app: "Borealis Party <version> is available", and Install and restart. Nothing shows elsewhere.
+ * The desktop app: "Borealis Connect <version> is available", and Install and restart. Nothing shows elsewhere.
  * `floating`: over the top of a full-height page (the sign-in), instead of in line under the account bar.
  */
 export function DesktopUpdate({ floating = false }: { floating?: boolean }) {
@@ -55,7 +55,7 @@ export function DesktopUpdate({ floating = false }: { floating?: boolean }) {
     <div className={floating ? "party-offline party-update floating" : "party-offline party-update"} role="status">
       {phase.kind === "installing" ? (
         <span>
-          Downloading Borealis Party {update.version}
+          Downloading Borealis Connect {update.version}
           {phase.fraction === null ? "…" : ` (${Math.round(phase.fraction * 100)}%)`}. It restarts by itself when the update is in.
         </span>
       ) : phase.kind === "failed" ? (
@@ -66,7 +66,7 @@ export function DesktopUpdate({ floating = false }: { floating?: boolean }) {
         </>
       ) : (
         <>
-          <span>Borealis Party {update.version} is available (this is {update.currentVersion}). Your characters stay as they are.</span>
+          <span>Borealis Connect {update.version} is available (this is {update.currentVersion}). Your characters stay as they are.</span>
           <Button small variant="highlight" onClick={install}>Install and restart</Button>
           <Button small onClick={() => setLater(true)}>Later</Button>
         </>

@@ -1,6 +1,6 @@
 name: Party image
 
-# Builds the Borealis Party server image from main and pushes it to ghcr.io/fortress-soft/borealis-connect.
+# Builds the Borealis Connect server image from main and pushes it to ghcr.io/fortress-soft/borealis-connect.
 # Tags: latest, sha-<short commit>, and the version in party/Cargo.toml.
 # This file belongs to the fork (party/check-upstream.sh accepts .github/workflows/party-*.yml).
 on:
@@ -60,7 +60,7 @@ jobs:
             type=sha,prefix=sha-
             type=raw,value=${{ steps.version.outputs.version }}
           labels: |
-            org.opencontainers.image.title=Borealis Party
+            org.opencontainers.image.title=Borealis Connect
             org.opencontainers.image.description=Multi-user Borealis server for Dungeon Masters and their players
             org.opencontainers.image.licenses=MIT OR Apache-2.0
 

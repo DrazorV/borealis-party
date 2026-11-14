@@ -35,7 +35,7 @@ function call<T>(method: string, path: string, body?: unknown): Promise<T> {
 /** Checks that an address really is one of our servers. */
 export async function checkServer(baseUrl: string): Promise<ServerInfo> {
   const info = (await serverFetch({ baseUrl, token: "" }, "GET", "/api/server")) as ServerInfo | null;
-  if (info?.app !== "borealis-party") throw new Error("That address isn't a Borealis Party server.");
+  if (info?.app !== "borealis-party" && info?.app !== "borealis-connect") throw new Error("That address isn't a Borealis Connect server.");
   return info;
 }
 

@@ -327,7 +327,7 @@ fn party_source(data: &Path) -> String {
 }
 
 /// What the preview names as the source of a bundle that another account made.
-const FROM_ANOTHER_ACCOUNT: &str = "another Borealis Party account";
+const FROM_ANOTHER_ACCOUNT: &str = "another Borealis Connect account";
 /// What the preview names as the source of a bundle that this account made.
 const FROM_THIS_ACCOUNT: &str = "this account";
 

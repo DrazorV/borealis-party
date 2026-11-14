@@ -42,7 +42,7 @@ it("offers a newer version a little after start, and Later hides it", async () =
   await pass(FIRST_CHECK_MS - 1);
   expect(tauri.calls).toEqual([]);
   await pass(1);
-  expect(screen.getByRole("status").textContent).toContain("Borealis Party 0.1.2 is available (this is 0.1.1)");
+  expect(screen.getByRole("status").textContent).toContain("Borealis Connect 0.1.2 is available (this is 0.1.1)");
   fireEvent.click(screen.getByRole("button", { name: "Later" }));
   expect(screen.queryByRole("status")).toBeNull();
 });
@@ -89,7 +89,7 @@ it("Install and restart: downloads that update with progress, then restarts", as
     channel!.onmessage({ event: "Started", data: { contentLength: 200 } });
     channel!.onmessage({ event: "Progress", data: { chunkLength: 50 } });
   });
-  expect(screen.getByRole("status").textContent).toContain("Downloading Borealis Party 0.1.2 (25%)");
+  expect(screen.getByRole("status").textContent).toContain("Downloading Borealis Connect 0.1.2 (25%)");
   await act(async () => { finish(); await Promise.resolve(); });
   expect(tauri.calls.map((c) => c.cmd)).toContain("restart_app");
 });
@@ -112,10 +112,10 @@ it("Help → Check for updates…: shows what it found even after Later, and ins
   expect(screen.queryByRole("status")).toBeNull();
   const newer = { rid: 9, currentVersion: "0.1.1", version: "0.1.3" };
   act(() => { expect(offerUpdate({ update: newer, install: false })).toBe(true); });
-  expect(screen.getByRole("status").textContent).toContain("Borealis Party 0.1.3 is available");
+  expect(screen.getByRole("status").textContent).toContain("Borealis Connect 0.1.3 is available");
   act(() => { offerUpdate({ update: newer, install: true }); });
   expect(tauri.calls.at(-1)).toMatchObject({ cmd: "plugin:updater|download_and_install", args: { rid: 9 } });
-  expect(screen.getByRole("status").textContent).toContain("Downloading Borealis Party 0.1.3");
+  expect(screen.getByRole("status").textContent).toContain("Downloading Borealis Connect 0.1.3");
 });
 
 it("with no update bar shown, an offer reaches nobody", () => {
@@ -130,5 +130,5 @@ it("an offer while a download is under way leaves it alone", async () => {
   act(() => { offerUpdate({ update: { ...offer, rid: 8 }, install: false }); });
   act(() => { offerUpdate({ update: { ...offer, rid: 8 }, install: true }); });
   expect(tauri.calls.filter((c) => c.cmd === "plugin:updater|download_and_install")).toHaveLength(1);
-  expect(screen.getByRole("status").textContent).toContain("Downloading Borealis Party 0.1.2");
+  expect(screen.getByRole("status").textContent).toContain("Downloading Borealis Connect 0.1.2");
 });

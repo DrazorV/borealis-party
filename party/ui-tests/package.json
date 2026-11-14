@@ -1,7 +1,7 @@
 {
   "name": "borealis-party-ui-tests",
   "private": true,
-  "description": "Phone UI tests for Borealis Party: Playwright against a throwaway local party server.",
+  "description": "Phone UI tests for Borealis Connect: Playwright against a throwaway local party server.",
   "type": "module",
   "scripts": {
     "test": "playwright test",

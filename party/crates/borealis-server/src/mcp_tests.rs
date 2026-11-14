@@ -368,7 +368,7 @@ async fn conformance(t: &Table) {
     assert_eq!(s, StatusCode::OK, "{b}");
     assert_eq!(b["result"]["protocolVersion"], "2025-06-18");
     assert!(b["result"]["capabilities"]["tools"].is_object());
-    assert_eq!(b["result"]["serverInfo"]["name"], "borealis-party");
+    assert_eq!(b["result"]["serverInfo"]["name"], "borealis-connect");
     // The DM's-assistant workflow, the same text the AI apps page shows.
     let instructions = b["result"]["instructions"].as_str().unwrap();
     assert_eq!(instructions, party_tools::mcp::INSTRUCTIONS);
