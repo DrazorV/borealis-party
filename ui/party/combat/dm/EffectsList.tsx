@@ -14,6 +14,17 @@ const modText = (m: Modifier): string => {
     case "speed_halve": return "speed halved";
     case "speed_zero": return "speed 0";
     case "cover": return m.value === "half" ? "half cover" : "three-quarters cover";
+    // 0.3.2 (the spell engine).
+    case "ac_base": return `AC ${m.value.base}${m.value.add_dex ? " + Dex" : ""}`;
+    case "ac_min": return `AC at least ${m.value}`;
+    case "roll_dice": {
+      const t = m.value.term;
+      return `${t.sign === "minus" ? "−" : "+"}${t.count}d${t.sides} to ${m.value.ability ? `${m.value.ability} ` : ""}${m.value.on}`;
+    }
+    case "roll_mode": return `${m.value.mode} on ${m.value.ability ? `${m.value.ability} ` : ""}${m.value.on.replace("_", " ")}`;
+    case "defense": return `${{ resist: "resistance", immune: "immunity", vuln: "vulnerability" }[m.value.defense]} to ${m.value.damage_type}`;
+    case "max_hp": return `max HP ${m.value >= 0 ? "+" : ""}${m.value}`;
+    case "speed_set_mode": return `${m.value.mode} speed ${m.value.ft} ft`;
   }
 };
 
