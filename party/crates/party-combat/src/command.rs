@@ -632,6 +632,9 @@ pub enum Command {
         /// The DM's override (target filters).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         force: bool,
+        /// Spend the reaction instead of the ability's own kind (an opportunity attack with a melee action).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        as_reaction: bool,
         /// The pending cast's id.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cast_id: Option<CastId>,

@@ -869,7 +869,7 @@ fn stat_block_attacks_spend_the_action() {
     cb2.state.combatants.retain(|x| x.id != id("o"));
     cb2.state.combatants.push(o);
     cb = cb2;
-    let perform = |rows: Vec<RowInput>| Command::PerformStatblock {
+    let perform_as = |rows: Vec<RowInput>, as_reaction: bool| Command::PerformStatblock {
         id: id("o"),
         ability: "beak".into(),
         spec: None,
@@ -879,7 +879,9 @@ fn stat_block_attacks_spend_the_action() {
         crit_amounts: vec![],
         force: false,
         cast_id: None,
+        as_reaction,
     };
+    let perform = |rows: Vec<RowInput>| perform_as(rows, false);
     let ev = dm(
         &mut cb,
         perform(vec![RowInput {
@@ -900,6 +902,54 @@ fn stat_block_attacks_spend_the_action() {
     assert!(matches!(
         dm_err(&mut cb, perform(vec![])),
         CombatError::Unavailable(Unavailable::ActionSpent)
+    ));
+    // An opportunity attack spends the reaction instead, once; the ability stays an action.
+    let miss = || {
+        vec![RowInput {
+            target: id("f"),
+            ray: 0,
+            roll: RowRoll::Typed {
+                total: 3,
+                natural: Some(1),
+            },
+            use_lr: false,
+        }]
+    };
+    dm(&mut cb, perform_as(miss(), true));
+    assert!(c(&cb, "o").economy.reaction);
+    assert_eq!(
+        c(&cb, "o").ability("beak").unwrap().kind,
+        AbilityKind::Action
+    );
+    assert_eq!(c(&cb, "f").hp.current, 44, "a natural 1 misses");
+    assert!(matches!(
+        dm_err(&mut cb, perform_as(miss(), true)),
+        CombatError::Unavailable(Unavailable::ReactionSpent)
+    ));
+}
+
+#[test]
+fn invisibility_carries_the_attack_reminder() {
+    let mut cb = fight(E14);
+    let invis = adhoc(json!({
+        "key": "invis", "edition": "2014", "name": "Unseen", "level": 2, "concentration": true,
+        "cast": "action", "targeting": {"kind": "creatures", "max": "1", "include_self": true},
+        "delivery": {"kind": "auto"},
+        "always": [{"kind": "condition", "condition": "invisible", "ends_on_attack": true}],
+        "duration": {"kind": "minutes", "n": 60}, "tier": "auto"
+    }));
+    dm(&mut cb, cast("m", invis, Some(2), &["m"]).cmd());
+    let e = cb
+        .state
+        .effects
+        .iter()
+        .find(|e| e.spec.name == "Unseen")
+        .unwrap();
+    assert!(e.spec.ends_on_attack && !e.spec.ends_on_damage);
+    assert!(derive::has_condition(
+        &cb.state,
+        &id("m"),
+        Condition::Invisible
     ));
 }
 

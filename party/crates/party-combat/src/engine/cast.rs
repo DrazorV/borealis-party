@@ -11,8 +11,9 @@ use crate::derive::{self, AttackContext};
 use crate::error::{invalid, CombatError};
 use crate::event::{DmEventKind as K, PlayerEvent};
 use crate::model::{
-    Boundary, CastId, CastRow, CombatantId, Controller, Duration, EffectId, EffectOrigin,
-    EffectSpec, HpAuthority, Modifier, PendingCast, RepeatSave, RowOutcome, SpellTurn,
+    AbilityKind, Boundary, CastId, CastRow, CombatantId, Controller, Duration, EffectId,
+    EffectOrigin, EffectSpec, HpAuthority, Modifier, PendingCast, RepeatSave, RowOutcome,
+    SpellTurn,
 };
 use crate::spell::{
     AdvDis, AttackKind, CastChoices, CastSpec, CastTime, Delivery, FormulaVars, MechOrigin, ModeOn,
@@ -198,6 +199,7 @@ impl Cx<'_> {
                 crit_amounts,
                 force,
                 cast_id,
+                as_reaction,
             } => {
                 let i = self.idx(id)?;
                 let ab = self.s.combatants[i]
@@ -214,7 +216,21 @@ impl Cx<'_> {
                             ab.name
                         ))
                     })?;
-                self.use_ability(id, ability, None)?;
+                if *as_reaction {
+                    // Spend the reaction: use the ability as a reaction for this one use.
+                    let k = self.s.combatants[i]
+                        .abilities
+                        .iter()
+                        .position(|a| &a.key == ability)
+                        .expect("found above");
+                    let kind = self.s.combatants[i].abilities[k].kind;
+                    self.s.combatants[i].abilities[k].kind = AbilityKind::Reaction;
+                    let used = self.use_ability(id, ability, None);
+                    self.s.combatants[i].abilities[k].kind = kind;
+                    used?;
+                } else {
+                    self.use_ability(id, ability, None)?;
+                }
                 if spec.mech.concentration {
                     self.start_concentration(id, &spec.mech.name);
                 }
@@ -1131,10 +1147,12 @@ impl Cx<'_> {
                     condition,
                     repeat_save,
                     ends_on_damage,
+                    ends_on_attack,
                 } => {
                     any = true;
                     spec.conditions.push(*condition);
                     spec.ends_on_damage |= *ends_on_damage;
+                    spec.ends_on_attack |= *ends_on_attack;
                     if let (Some(rs), Some(dc), None) = (repeat_save, c.spec.dc, spec.repeat_save) {
                         spec.repeat_save = Some(RepeatSave {
                             ability: rs.ability,
@@ -1355,6 +1373,7 @@ impl Cx<'_> {
                 condition: *cond,
                 repeat_save: None,
                 ends_on_damage: false,
+                ends_on_attack: false,
             });
         }
         let spec = CastSpec {
