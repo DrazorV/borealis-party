@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { APIRequestContext, Page, TestInfo } from "@playwright/test";
-import { ACCOUNTS } from "./accounts";
 import { expect, open, signedInShell, test } from "./fixtures";
 
 /**
@@ -33,15 +32,30 @@ async function shot(page: Page, testInfo: TestInfo, name: string) {
 
 test("the Build notice lines up with the rows, reads in words and can be dismissed", async ({ page, signIn, request }, testInfo) => {
   test.skip(!["android-portrait", "desktop-wide"].includes(testInfo.project.name), "384x832 and 1440x900 only");
-  const r = await request.post("/api/auth/login", { data: { username: "player", password: ACCOUNTS.player.password } });
-  const { token } = (await r.json()) as { token: string };
-  const hero = (await api<{ summary: { id: string } }>(request, token, "/api/rpc/import_character", { fileName: "d5-hero.dnd5e", contentBase64: CHARACTER })).summary.id;
-  await api(request, token, "/api/rpc/load_character", { characterId: hero });
   await signIn("player");
-  if (desktop(testInfo)) {
-    await page.goto("/#/builder/race");
-    await signedInShell(page);
-  } else await open(page, "/builder/race");
+  const go = async (route: string) => {
+    if (desktop(testInfo)) {
+      await page.goto(`/#${route}`);
+      await signedInShell(page);
+    } else await open(page, route);
+  };
+  await go("/characters");
+  const token = await page.evaluate(() => (JSON.parse(localStorage.getItem("party.session") ?? "{}") as { token?: string }).token ?? "");
+  const { summary } = await api<{ summary: { name: string } }>(request, token, "/api/rpc/import_character", { fileName: "d5-hero.dnd5e", contentBase64: CHARACTER });
+  const name = summary.name;
+  // open it from the collection, as a player does (the list was read before the import)
+  await page.reload();
+  await signedInShell(page);
+  const card = page.getByRole("button", { name: new RegExp(`^${name},`) }).first();
+  // a desktop opens a card on double-click; a phone selects it and shows Open
+  if (desktop(testInfo)) await card.dblclick();
+  else {
+    await card.click();
+    await page.getByRole("button", { name: `Open ${name}`, exact: true }).first().click();
+  }
+  await expect(page).not.toHaveURL(/#\/characters/, { timeout: 30_000 });
+  await go("/builder/race");
+  await expect(page.locator(".bp-left .pick-stack").first()).toBeVisible({ timeout: 30_000 });
 
   const notice = page.getByRole("region", { name: "Content notices" });
   await expect(notice).toBeVisible();
@@ -64,13 +78,17 @@ test("the Build notice lines up with the rows, reads in words and can be dismiss
 
   const close = notice.getByRole("button", { name: "Dismiss notices" });
   const c = await close.boundingBox();
-  if (!desktop(testInfo)) expect(Math.min(c!.width, c!.height), "the × is a 44 px touch target").toBeGreaterThanOrEqual(44);
+  if (!desktop(testInfo)) {
+    expect(Math.min(c!.width, c!.height), "the × is a 44 px touch target").toBeGreaterThanOrEqual(44);
+    const d = await details.locator("summary").boundingBox();
+    expect(d!.height, "Details is a 44 px touch target").toBeGreaterThanOrEqual(44);
+  }
   await close.click();
   await expect(notice).toHaveCount(0);
   await shot(page, testInfo, "dismissed");
   // remembered for the session: another Build section and back
-  await page.goto(desktop(testInfo) ? "/#/builder/class" : "/?mock=mobile#/builder/class");
-  await page.goto(desktop(testInfo) ? "/#/builder/race" : "/?mock=mobile#/builder/race");
+  await go("/builder/class");
+  await go("/builder/race");
   await expect(page.locator(".bp-left .pick-stack").first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("region", { name: "Content notices" })).toHaveCount(0);
 });

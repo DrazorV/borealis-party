@@ -15,4 +15,5 @@ html.phone .party-notices:has(> .party-notices-body > .bp-notices-toggle) .party
 .party-notices-details { margin-top: 4px; font-size: var(--fs-sm); }
 .party-notices-details > summary { cursor: pointer; width: max-content; opacity: .8; }
 .party-notices-details > code { display: block; margin-top: 2px; user-select: all; }
-html.phone .party-notices-details > summary { min-height: 44px; display: flex; align-items: center; }
+/* a 44 px touch target that keeps the disclosure marker (a flex summary loses it) */
+html.phone .party-notices-details > summary { padding: 12px 0; line-height: 20px; }
