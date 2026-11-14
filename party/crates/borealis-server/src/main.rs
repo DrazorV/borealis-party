@@ -19,6 +19,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 
 mod admin;
 mod ai_assistant;
+mod ai_oauth;
 mod ai_providers;
 mod ai_tools;
 mod auth;

@@ -20,9 +20,14 @@ export const SAVED: SavedProvider = {
   hasKey: true, keyLast4: "wxyz", keyReadable: true, autoApply: false, profile: "small", consentedAt: 1,
 };
 
-export function status(provider: SavedProvider | null, canStore = true): AiStatus {
+export const KEYS_OFF = "Saving cloud AI keys isn't switched on for this server yet; ask its admin. A model on your own device works without it.";
+export const ADMIN_HELP = "This server has no key to encrypt AI keys with, so it doesn't save them. Set BOREALIS__AI__SECRET_KEY and restart it.";
+
+/** As `GET /api/ai` answers; `admin` adds the admin's instructions when keys can't be saved, as the server does. */
+export function status(provider: SavedProvider | null, canStore = true, admin = false): AiStatus {
   return {
-    keys: canStore ? { canStore } : { canStore, why: "This server has no key to encrypt AI keys with. BOREALIS__AI__SECRET_KEY" },
+    keys: canStore ? { canStore } : { canStore, why: KEYS_OFF, ...(admin ? { adminHelp: ADMIN_HELP } : {}) },
+    signIn: { openrouter: true },
     provider,
     scopes: ["bestiary:read", "characters:read", "encounters:read", "encounters:write", "encounters:simulate", "homebrew:read", "homebrew:write"],
     limits: { requestsPerMinute: 20, tokensPerDay: 200000, tokensToday: 1234 },
@@ -68,6 +73,10 @@ export function fakeAi(saved: SavedProvider | null = SAVED): FakeAi {
       }
       if (path === "/api/ai/key") { ai.status = status(ai.status.provider && { ...ai.status.provider, hasKey: false, keyLast4: null }); return ai.status; }
       if (path === "/api/ai" && method === "DELETE") { ai.status = status(null); return ai.status; }
+      if (path === "/api/ai/oauth/openrouter/start") {
+        if (!ai.status.keys.canStore) throw { code: "ai_keys_unavailable", message: KEYS_OFF };
+        return { url: "https://openrouter.ai/auth?callback_url=x&code_challenge=y&code_challenge_method=S256&state=z" };
+      }
       if (path === "/api/ai/test") return { ok: true, reply: "OK" };
       if (path.startsWith("/api/ai/tools?")) return { system: "SYSTEM", tools: TOOLS, autoApply: ai.autoApply };
       if (path === "/api/ai/chat") {

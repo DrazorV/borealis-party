@@ -27,25 +27,25 @@ const KEY: &str = "sk-test-PLAINTEXT-KEY-1234567890-wxyz";
 // A mock provider.
 
 #[derive(Clone, Debug)]
-struct Seen {
-    path: String,
-    headers: HeaderMap,
-    body: Value,
+pub(super) struct Seen {
+    pub(super) path: String,
+    pub(super) headers: HeaderMap,
+    pub(super) body: Value,
 }
 
-struct Mock {
-    url: String,
+pub(super) struct Mock {
+    pub(super) url: String,
     seen: Arc<Mutex<Vec<Seen>>>,
 }
 
 impl Mock {
-    fn seen(&self) -> Vec<Seen> {
+    pub(super) fn seen(&self) -> Vec<Seen> {
         self.seen.lock().unwrap().clone()
     }
 }
 
 /// A server on 127.0.0.1 that answers `replies` in turn (the last one again after that) and keeps what it was sent.
-async fn mock(replies: Vec<(u16, Value)>) -> Mock {
+pub(super) async fn mock(replies: Vec<(u16, Value)>) -> Mock {
     let seen: Arc<Mutex<Vec<Seen>>> = Arc::default();
     let replies = Arc::new(replies);
     let count = Arc::new(Mutex::new(0usize));
@@ -507,7 +507,7 @@ fn walk(dir: &Path) -> Vec<std::path::PathBuf> {
 
 /// Collects every log line on this thread.
 #[derive(Clone, Default)]
-struct Logs(Arc<Mutex<Vec<u8>>>);
+pub(super) struct Logs(pub(super) Arc<Mutex<Vec<u8>>>);
 
 impl std::io::Write for Logs {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -521,7 +521,7 @@ impl std::io::Write for Logs {
 
 /// Every log line of this test program, from the first test that asks on: one subscriber for all threads (a scoped one
 /// misses events from callsites other threads registered first). `None` when another subscriber was set already.
-fn captured_logs() -> Option<&'static Logs> {
+pub(super) fn captured_logs() -> Option<&'static Logs> {
     static LOGS: std::sync::OnceLock<Option<Logs>> = std::sync::OnceLock::new();
     LOGS.get_or_init(|| {
         let logs = Logs::default();
@@ -649,7 +649,8 @@ async fn with_no_server_key_keys_are_refused_but_a_device_model_works() {
     let me = sign_up(&router, "ai-nokey").await;
     let (_, out) = me.get("/api/ai").await;
     assert_eq!(out["keys"]["canStore"], false);
-    assert!(out["keys"]["why"]
+    // The first account is the admin: it is told how to switch keys on (ai_oauth_tests has the other accounts).
+    assert!(out["keys"]["adminHelp"]
         .as_str()
         .unwrap()
         .contains("BOREALIS__AI__SECRET_KEY"));

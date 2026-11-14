@@ -40,7 +40,10 @@ export interface SavedProvider {
 }
 
 export interface AiStatus {
-  keys: { canStore: boolean; why?: string };
+  /** `why` is for everyone; `adminHelp` (how to switch keys on) is sent to admins only. */
+  keys: { canStore: boolean; why?: string; adminHelp?: string };
+  /** Browser sign-ins this server offers (0.3.2); absent from older servers. */
+  signIn?: { openrouter: boolean };
   provider: SavedProvider | null;
   scopes: string[];
   limits: { requestsPerMinute: number; tokensPerDay: number; tokensToday: number };
@@ -108,6 +111,10 @@ export const aiStatus = () => call<AiStatus>("GET", "/api/ai");
 export const saveAi = (form: SaveForm) => call<AiStatus>("PUT", "/api/ai", form);
 export const removeAi = () => call<AiStatus>("DELETE", "/api/ai");
 export const removeAiKey = () => call<AiStatus>("DELETE", "/api/ai/key");
+/** "Connect OpenRouter" (0.3.2): the openrouter.ai address to open in the browser. OpenRouter sends the browser back to
+ * the server, which saves the key like a pasted one; the card sees it on its next `GET /api/ai`. */
+export const startOpenRouter = (form: { consent: true; autoApply: boolean; model?: string }) =>
+  call<{ url: string }>("POST", "/api/ai/oauth/openrouter/start", form);
 export const toolbox = (purpose: Purpose) => call<Toolbox>("GET", `/api/ai/tools?purpose=${purpose}`);
 /** One tool call; `callId` (the model's id for it) becomes a write's request id, so a retried write is done once. */
 export const runTool = (name: string, args: Record<string, unknown>, confirmed: boolean, callId?: string) =>
