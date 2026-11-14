@@ -851,6 +851,43 @@ describe("the player screen (0.3.3): the Play tab with the live combat on top", 
     expect(section()).toBeNull();
   });
 
+  it("my own cast: the attack roll typed first, then the damage typed and applied (myCasts, role-views.md)", async () => {
+    const user = userEvent.setup();
+    server.combats.set("p1", liveWith({ turn: { kind: "combatant", id: "me1", round: 2 }, myCasts: [{
+      cast: "k1", caster: "me1", spell: "Fire Bolt", slot: null, delivery: "attack",
+      rows: [{ target: "cr1", ray: 0, outcome: null }], amounts: [{ kind: "damage", dice: "1d10", damage_type: "fire" }], needs_apply: false,
+    }] }));
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    const card = within(pane).getByRole("article", { name: "Fire Bolt" });
+    await user.type(within(card).getByLabelText("Fire Bolt attack on Goblin: my table roll"), "18");
+    await user.click(within(card).getByRole("button", { name: "Send" }));
+    await within(card).findByText("Hit");
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/resolve_cast_row", body: { args: { cast: "k1", target: "cr1", roll: { kind: "typed", total: 18 } } } });
+    await user.type(within(card).getByLabelText("Damage 1d10: my table roll"), "7");
+    await user.click(within(card).getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(within(pane).queryByRole("article", { name: "Fire Bolt" })).toBeNull());
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/apply_cast", body: { args: { cast: "k1", amounts: [{ kind: "typed", total: 7 }] } } });
+  });
+
+  it("a DM creature's save on my spell waits for the DM; Cancel drops my cast", async () => {
+    const user = userEvent.setup();
+    server.combats.set("p1", liveWith({ myCasts: [{
+      cast: "k2", caster: "me1", spell: "Sacred Flame", slot: null, delivery: "save",
+      rows: [{ target: "cr1", ray: 0, outcome: null }], amounts: [{ kind: "damage", dice: "1d8", damage_type: "radiant" }], needs_apply: false,
+    }] }));
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    const card = within(pane).getByRole("article", { name: "Sacred Flame" });
+    expect(within(card).getByText("Waiting for the DM's roll")).toBeTruthy();
+    expect(within(card).queryByRole("button", { name: "Apply" })).toBeNull();
+    await user.click(within(card).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(within(pane).queryByRole("article", { name: "Sacred Flame" })).toBeNull());
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/cancel_cast", body: { args: { cast: "k2" } } });
+  });
+
   it("Short Rest and Long Rest sit on the stat tiles' row of the Play sub-tab, not on Traits", async () => {
     const user = userEvent.setup();
     server.combats.set("p1", null);

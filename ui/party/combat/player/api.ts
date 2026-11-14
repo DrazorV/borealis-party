@@ -104,6 +104,22 @@ export interface WireCastRow {
   from?: string;
 }
 
+/**
+ * One of the player's own open casts (party/docs/role-views.md `myCasts`): the attack rows are theirs to roll
+ * (`resolve_cast_row`), the DM's creatures' save rows wait for the DM (outcome null), and once every row has an
+ * outcome the amounts are theirs to roll and apply (`apply_cast`, in this order). Rows on hidden combatants are left out.
+ */
+export interface MyCast {
+  cast: string;
+  caster: string;
+  spell: string;
+  slot: number | null;
+  delivery: "auto" | "attack" | "save";
+  rows: { target: string; ray?: number | null; outcome: null | "lands" | "hit" | "crit" | "miss" | "saved" | "failed" }[];
+  amounts: { kind: "damage" | "heal" | "temp_hp"; dice: string; damage_type?: string | null; choice?: string[]; add_mod?: boolean }[];
+  needs_apply: boolean;
+}
+
 export interface WireProjection {
   id: string;
   partyId: string;
@@ -115,6 +131,8 @@ export interface WireProjection {
   order: WireCombatant[];
   me: WireMine[];
   casts?: WireCastRow[];
+  /** 0.3.3 (role-views.md): the player's own open casts (their PC's and its creatures'). */
+  myCasts?: MyCast[];
 }
 
 // ---- the view model -------------------------------------------------------------------------------------------------
@@ -196,6 +214,8 @@ export interface PlayerCombat {
   combatants: PlayerCombatant[];
   prompts: CombatPrompt[];
   log: CombatLogEntry[];
+  /** The player's own open casts. */
+  myCasts: MyCast[];
 }
 
 /** What `fromWire` knows besides the projection: the party's own characters of this account. */
@@ -278,7 +298,7 @@ export function fromWire(w: WireProjection, ctx: WireContext = {}): PlayerCombat
   return {
     id: w.id, partyId: w.partyId, partyName: ctx.partyName, title: w.encounter?.publicName ?? null,
     seq: w.pseq ?? 0, status: w.status, round: roundOf(w.turn), pointer: w.turn ?? { kind: "not_started" },
-    combatants, prompts, log: [],
+    combatants, prompts, log: [], myCasts: w.myCasts ?? [],
   };
 }
 

@@ -148,3 +148,16 @@ html.phone .combat-turn-buttons > .btn { flex: 1 1 calc(50% - 6px); min-height: 
 .combat-target.on { background: var(--accent); color: var(--on-accent, #fff); }
 html.phone .combat-target { min-height: var(--ph-hit, 44px); }
 .bp-play-combat { margin: 0 0 var(--sp-3, 12px); scroll-margin-top: 8px; }
+
+/* The player's own open casts (../player/MyCasts.tsx). */
+.combat-my-casts { display: flex; flex-direction: column; gap: var(--sp-2); }
+.combat-my-cast { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2) 0; border-top: var(--border-w) solid var(--border); }
+.combat-my-cast-head { display: flex; align-items: center; gap: var(--sp-2); }
+.combat-my-cast-head .spacer { flex: 1; }
+.combat-my-cast-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.combat-my-cast-rows li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.combat-my-cast-target { min-width: 7em; font-weight: 600; }
+.combat-my-cast-apply { display: flex; flex-direction: column; gap: var(--sp-2); }
+.combat-my-cast-amount { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.combat-my-cast-amount .input { width: 7em; font-size: var(--fs-md); text-align: center; }
+html.phone .combat-my-cast-amount .input, html.phone .combat-my-cast-head .btn { min-height: var(--ph-hit, 44px); }

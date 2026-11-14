@@ -12,6 +12,7 @@ import { ConditionChips } from "../shared/ConditionChips";
 import { HealthBand } from "../shared/HealthBand";
 import { RollOrType } from "../shared/RollOrType";
 import { Creatures } from "./Creatures";
+import { MyCasts } from "./MyCasts";
 import { TurnPanel } from "./TurnPanel";
 import { deviceDeps, playerWrite, useCombatStore } from "./store";
 import "../shared/combat.css";
@@ -304,6 +305,7 @@ export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSn
         <PromptCard key={p.id} combat={combat} prompt={p} me={me} modifier={conSave}
           saveOf={(a) => (s.abilities.save as Record<string, { bonus?: number } | undefined>)[a]?.bonus ?? 0} />
       ))}
+      <MyCasts combat={combat} />
       {me && <TurnPanel combat={combat} me={me} s={s} />}
       {me && <Me combat={combat} me={me} s={s} />}
       {me && <Creatures combat={combat} me={me} s={s} />}

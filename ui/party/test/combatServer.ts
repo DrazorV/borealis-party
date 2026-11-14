@@ -211,6 +211,25 @@ export function fakeCombatServer(parties: FakeCombatServer["parties"]): FakeComb
             mineAt.rolls = [{ id: `r${c.pseq}`, name: String(args.label ?? "Attack"), total, source: args.roll?.kind ?? "app", breakdown: `${total}` }, ...(mineAt.rolls ?? [])];
             break;
           }
+          // 0.3.3 (role-views.md): the player's own casts, `myCasts`.
+          case "resolve_cast_row": {
+            const k = (c.myCasts ?? []).find((x) => x.cast === (args as { cast?: string }).cast);
+            if (!k) throw fail("not_found", NOT_FOUND);
+            const row = k.rows.find((r) => r.target === args.target);
+            if (!row || k.delivery !== "attack") throw fail("not_found", NOT_FOUND);
+            const total = args.roll?.kind === "typed" ? args.roll.total : 15;
+            row.outcome = total >= 13 ? "hit" : "miss";
+            k.needs_apply = k.rows.every((r) => r.outcome !== null) && k.rows.some((r) => r.outcome === "hit");
+            if (k.rows.every((r) => r.outcome !== null) && !k.needs_apply) c.myCasts = c.myCasts!.filter((x) => x !== k);
+            break;
+          }
+          case "apply_cast":
+          case "cancel_cast": {
+            const id = (args as { cast?: string }).cast;
+            if (!(c.myCasts ?? []).some((x) => x.cast === id)) throw fail("not_found", NOT_FOUND);
+            c.myCasts = c.myCasts!.filter((x) => x.cast !== id);
+            break;
+          }
           case "resolve_prompt": {
             const holder = c.me.find((x) => (x.prompts ?? []).some((p) => p.id === args.promptId));
             if (!holder) throw fail("not_found", NOT_FOUND);
