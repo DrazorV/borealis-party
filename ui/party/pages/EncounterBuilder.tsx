@@ -62,7 +62,7 @@ function CreatureRow({ c, encId, ruleset, owner, act, open }: {
               c.hpMode === "fixed" && c.hpMax != null ? `HP ${c.hpMax} (typed)` : c.hp ? `HP ${c.hp.average}` : null].filter(Boolean).join(" · ")}
           </span>
           {owner && <span className="muted party-note">{c.initMode === "own" ? INIT_WORD.own : `Acts right after ${owner.dmLabel}`}</span>}
-          <span className="muted party-note">{c.hidden ? "Hidden from players" : `Players see "${c.publicName}" and its stat block`}</span>
+          <span className="muted party-note">{c.hidden ? "Hidden from players" : `Players see its name, "${c.publicName}"`}</span>
         </span>
         {c.kind === "companion" && <Chip tone="info">Companion</Chip>}
         {c.modified && <Chip tone="warning" title="Changed for this encounter">Changed</Chip>}

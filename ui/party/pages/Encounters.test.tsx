@@ -279,7 +279,7 @@ describe("encounter builder (DM)", () => {
     const row = screen.getByRole("listitem", { name: "Owlbear" });
     expect(within(row).queryByRole("radiogroup")).toBeNull();
     fireEvent.click(within(row).getByRole("switch", { name: "Owlbear: shown to players" }));
-    await waitFor(() => expect(within(row).getByText('Players see "Monstrosity" and its stat block')).toBeTruthy());
+    await waitFor(() => expect(within(row).getByText('Players see its name, "Monstrosity"')).toBeTruthy());
     expect(server.calls.filter((c) => c.method === "PATCH").map((c) => c.body)).toEqual([{ hidden: false }]);
     expect(screen.getByRole("status", { name: "Encounter summary" }).textContent).toContain("1 revealed");
   });
@@ -431,7 +431,7 @@ describe("encounter builder (DM)", () => {
 });
 
 describe("players", () => {
-  it("see 'Next:' only once the DM shows an encounter, and only revealed creatures, with their stat blocks", async () => {
+  it("see 'Next:' only once the DM shows an encounter, and only revealed creatures, as a name and a band", async () => {
     await makeEncounter("DM's own name");
     await addFromPicker([["Goblin Warrior", 1], ["Owlbear", 1]]);
     const owlbear = server.creatures.get(server.encounters[0]!.id)!.find((c) => c.name === "Owlbear")!;
@@ -451,10 +451,10 @@ describe("players", () => {
     const card = await screen.findByLabelText("Goblin ambush");
     await within(card).findByText("Big beast");
     expect(card.textContent).not.toContain("Goblin Warrior");
-    fireEvent.click(within(card).getByRole("button", { name: "Stat block of Big beast" }));
-    const sheet = await screen.findByRole("article", { name: "Big beast" });
-    expect(sheet.textContent).toContain("Armor Class");
-    expect(sheet.textContent).not.toContain("XP");
+    // 0.3.3: the name and the band, no stat block.
+    expect(within(card).getByText("Unhurt")).toBeTruthy();
+    expect(within(card).queryByRole("button", { name: "Stat block of Big beast" })).toBeNull();
+    expect(card.textContent).not.toContain("Armor Class");
   });
 
   it("the DM's party card links to the encounters", () => {

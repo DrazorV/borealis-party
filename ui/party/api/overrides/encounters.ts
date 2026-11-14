@@ -263,18 +263,14 @@ export interface EncounterSummary {
   updatedAt: number;
 }
 
-/** What a player sees of a revealed creature: all of its stat block (D20 b). */
+/**
+ * What a player sees of a revealed creature (0.3.3, the user: "only the name and if bloodied"): its public name and
+ * health band (null when its HP isn't known). No stat block (this narrows D20 b).
+ */
 export interface SeenCreature {
   id: string;
   publicName: string;
-  kind: Kind;
-  size: string[];
-  type: string;
-  conditions: string[];
-  hp: { current: number; max: number };
-  statBlock: StatBlock;
-  /** Its owner, when that one is revealed too. */
-  ownerId?: string;
+  band: "unhurt" | "bloodied" | "down" | null;
 }
 
 /** A player-visible encounter as a player sees it. */

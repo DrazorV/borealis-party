@@ -6,7 +6,7 @@
 //!   that is player-visible (`player_visible` and `ready` or `live`); everyone else, and every id a caller may not see,
 //!   gets one fixed 404. Request bodies are read only after the DM check, so a malformed body changes nothing.
 //! * **One serializer for players:** [`view_for`]. Hidden creatures are not in it at all; revealed ones come with
-//!   their whole stat block (D20 b); the DM's names, notes, element ids and stat block copies' sources never do.
+//!   their public name and band only (0.3.3, narrowing D20 b); the DM's names, notes, element ids and stat blocks never do.
 //! * **Events:** every write tells the DM. Players hear of it only when their projection changed (hashed before and
 //!   after the write), so editing a draft or a hidden creature moves nothing a player can count or time.
 //! * **No difficulty:** there is no XP budget or rating (the user's D16); an encounter uses its party's edition (D23 b)
@@ -24,7 +24,7 @@ use axum::extract::{Path, State};
 use axum::http::{header, HeaderValue};
 use axum::Json;
 use borealis_content::Element;
-use party_encounter::creature::{player_view, Snapshot};
+use party_encounter::creature::Snapshot;
 use party_encounter::overrides::{refresh as refresh_block, Choice, Overrides, OverridesForm};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -563,8 +563,14 @@ fn creature_dm(c: &Creature) -> Value {
     })
 }
 
-/// The only serializer of an encounter. For a player: the public name, status and the revealed creatures with their
-/// stat blocks, nothing else (callers check [`Encounter::visible`] first). For the DM: everything.
+/// Every key of a revealed creature in a player's encounter (0.3.3, the user: "players do not need to know much about
+/// monsters in their tab only the name and if bloodied"): its public name and health band, nothing else. This
+/// narrows D20 b ("revealed = full stat block"), as the combat projection does.
+#[cfg(test)]
+pub(crate) const CREATURE_FOR_PLAYERS: [&str; 3] = ["id", "publicName", "band"];
+
+/// The only serializer of an encounter. For a player: the public name, status and the revealed creatures as
+/// [`CREATURE_FOR_PLAYERS`], nothing else (callers check [`Encounter::visible`] first). For the DM: everything.
 fn view_for(
     viewer: Viewer,
     enc: &Encounter,
@@ -572,27 +578,13 @@ fn view_for(
     dm: Option<(Vec<Value>, Vec<Value>, Vec<Value>)>,
 ) -> Value {
     if viewer == Viewer::Player {
-        let revealed: BTreeSet<&str> = list
-            .iter()
-            .filter(|c| !c.hidden)
-            .map(|c| c.id.as_str())
-            .collect();
         let shown: Vec<Value> = list
             .iter()
             .filter(|c| !c.hidden)
             .map(|c| {
-                let hp = c.start_hp();
-                // An owner players can't see is never named.
-                let owner = c.owner.as_deref().filter(|o| revealed.contains(o));
-                player_view(
-                    &c.id,
-                    &c.public_name,
-                    &c.snapshot,
-                    &c.overrides,
-                    (hp, hp),
-                    &[],
-                    owner,
-                )
+                // Before the fight a creature is at its starting HP: unhurt, or no band when its HP isn't known.
+                let band = (c.start_hp() > 0).then_some("unhurt");
+                json!({ "id": c.id, "publicName": c.public_name, "band": band })
             })
             .collect();
         return json!({

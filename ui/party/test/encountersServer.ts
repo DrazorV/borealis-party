@@ -78,14 +78,10 @@ export function fakeEncountersServer(partyId = "p1", dmId = "dm1"): FakeEncounte
   };
   const playerView = (e: Row) => {
     const list = s.creatures.get(e.id) ?? [];
-    const shown = new Set(list.filter((c) => !c.hidden).map((c) => c.id));
+    // Like the server (0.3.3): a revealed creature is its public name and band only.
     return {
       id: e.id, partyId: e.partyId, publicName: e.publicName, status: e.status,
-      creatures: list.filter((c) => !c.hidden).map((c) => ({
-        id: c.id, publicName: c.publicName, kind: c.kind, size: c.size, type: c.type, conditions: [],
-        hp: { current: c.hp?.average ?? 1, max: c.hp?.average ?? 1 }, statBlock: c.statBlock,
-        ...(c.ownerId && shown.has(c.ownerId) ? { ownerId: c.ownerId } : {}),
-      })),
+      creatures: list.filter((c) => !c.hidden).map((c) => ({ id: c.id, publicName: c.publicName, band: "unhurt" as const })),
     };
   };
   const mine = (id: string) => s.encounters.find((e) => e.id === id && e.dmId === s.me);

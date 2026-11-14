@@ -7,8 +7,7 @@ import { errorMessage } from "../../src/state/useAsync";
 import {
   createEncounter, LIMITS, listEncounters, seeEncounter, STATUS_WORD, watchEncounters, type EncounterList, type SeenEncounter,
 } from "../api/overrides/encounters";
-import { loadParty, type Party } from "../api/overrides/parties";
-import { EncounterStatBlock } from "./EncounterStatBlock";
+import { BAND_LABEL, loadParty, type Party } from "../api/overrides/parties";
 import "./party.css";
 import "./encounters.css";
 
@@ -175,17 +174,20 @@ export function EncountersPage() {
   );
 }
 
-/** A shown encounter as a player sees it: its name and the creatures the DM revealed, each with its stat block. */
+const BAND_TONE = { unhurt: "success", bloodied: "warning", down: "danger" } as const;
+
+/**
+ * A shown encounter as a player sees it: its name and the creatures the DM revealed, each as its name and health band
+ * (0.3.3, the user: "only the name and if bloodied").
+ */
 export function SeenEncounterCard({ id }: { id: string }) {
   const [seen, setSeen] = useState<SeenEncounter | null | undefined>(undefined);
-  const [open, setOpen] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
     seeEncounter(id).then((s) => { if (live) setSeen(s); }, () => { if (live) setSeen(null); });
     return () => { live = false; };
   }, [id]);
   if (!seen) return seen === null ? null : <p className="muted">Loading…</p>;
-  const creature = seen.creatures.find((c) => c.id === open);
   return (
     <div className="party-member enc-seen" aria-label={seen.publicName}>
       <div className="party-member-head">
@@ -198,21 +200,12 @@ export function SeenEncounterCard({ id }: { id: string }) {
           <ul className="party-list">
             {seen.creatures.map((c) => (
               <li key={c.id} className="party-line enc-seen-row">
-                <span className="grow">
-                  <strong>{c.publicName}</strong>
-                  <span className="muted party-note">{[c.size.join(" or "), c.type.toLowerCase()].filter(Boolean).join(" ")}</span>
-                </span>
-                {c.kind === "companion" && <Chip tone="info">Companion</Chip>}
-                <Button small onClick={() => setOpen(c.id)} aria-label={`Stat block of ${c.publicName}`}>Stat block</Button>
+                <strong className="grow">{c.publicName}</strong>
+                {c.band && <Chip tone={BAND_TONE[c.band]}>{BAND_LABEL[c.band]}</Chip>}
               </li>
             ))}
           </ul>
         )}
-      {creature && (
-        <Modal title={creature.publicName} onClose={() => setOpen(null)} footer={<Button onClick={() => setOpen(null)}>Close</Button>}>
-          <EncounterStatBlock title={creature.publicName} block={creature.statBlock} hp={creature.hp} />
-        </Modal>
-      )}
     </div>
   );
 }
