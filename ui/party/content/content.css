@@ -88,4 +88,9 @@ html.phone .party-compact-sort { flex: 1 1 100%; }
   html:not(.phone) .v4-content > .party-import { max-width: none; margin: 0 0 26px; padding: 0; }
   html:not(.phone) .v4-content .party-import > .body { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
   html:not(.phone) .v4-content .party-import > .body > :nth-child(n + 4) { grid-column: 1 / -1; }
+  /* Files, Share code and Paste a link (0.3.3): one height, the action row first in each, its button beside the field. */
+  html:not(.phone) .v4-content .party-import > .body > .card:nth-child(-n + 3) { align-self: stretch; }
+  html:not(.phone) .v4-content .party-import > .body > .card:nth-child(-n + 3) .party-import-link { flex-wrap: nowrap; }
+  html:not(.phone) .v4-content .party-import > .body > .card:nth-child(-n + 3) .party-import-link .input { flex: 1 1 0; min-width: 6em; }
+  html:not(.phone) .v4-content .party-import > .body > .card:nth-child(-n + 3) .party-import-link > .btn { flex: none; white-space: nowrap; }
 }

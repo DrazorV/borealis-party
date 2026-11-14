@@ -402,10 +402,11 @@ export function ImportSection() {
       <header><h2>Import</h2></header>
       <div className="body">
       <Card title="Files">
-        <p className="muted">Characters (.dnd5e), Borealis bundles (.borealis), Aurora content (.xml, .index or .zip) and 5etools-format data (.zip or .json). Choose several at once: each file goes where it belongs.</p>
-        <div className="party-import-actions">
+        {/* Like the other two cards: the action first, the help under it (0.3.3). */}
+        <div className="party-import-actions party-import-link">
           <Button variant="primary" icon="upload" disabled={busy} onClick={() => fileRef.current?.click()}>Choose files</Button>
         </div>
+        <p className="muted small">Characters (.dnd5e), Borealis bundles (.borealis), Aurora content (.xml, .index or .zip) and 5etools-format data (.zip or .json). Choose several at once: each file goes where it belongs.</p>
         {/* No accept filter: Android's web view fails on extensions it has no type for, and the files are sniffed anyway. */}
         <input ref={fileRef} type="file" multiple hidden aria-label="Choose files to import"
           onChange={(e) => { const files = Array.from(e.target.files ?? []); e.target.value = ""; sendFiles(files); }} />
