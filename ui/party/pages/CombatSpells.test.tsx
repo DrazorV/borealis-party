@@ -166,15 +166,18 @@ describe("spells and mechanics in the tracker (0.3.2)", () => {
     expect(within(row("fireball")).getByText("Auto")).toBeTruthy();
     expect(within(row("haste")).getByText("Partial")).toBeTruthy();
     expect(within(row("counterspell")).getByText("Ruling")).toBeTruthy();
-    expect(within(row("cone_of_cold")).getByText("Suggested")).toBeTruthy();
-    fireEvent.click(within(row("arcane_word")).getByRole("button", { name: "Define effect…" }));
-    const b = await screen.findByRole("dialog", { name: "Define effect: Arcane Word" });
+    expect(await within(row("cone_of_cold")).findByText("Suggested")).toBeTruthy();
+    expect(within(row("arcane_word")).getByText("Unlinked")).toBeTruthy();
+    fireEvent.click(within(row("misty_step")).getByRole("button", { name: "Define effect…" }));
+    const b = await screen.findByRole("dialog", { name: "Define effect: Misty Step" });
     fireEvent.click(await within(b).findByRole("button", { name: /Damage \+ save/ }));
     fireEvent.change(within(b).getByLabelText("Dice"), { target: { value: "2d6" } });
     fireEvent.change(within(b).getByLabelText("Damage type"), { target: { value: "psychic" } });
-    expect(b.querySelector("[data-preview]")!.textContent).toContain("2d6 psychic at L1");
+    expect(b.querySelector("[data-preview]")!.textContent).toContain("2d6 psychic at L2");
     fireEvent.click(within(b).getByRole("button", { name: "Save effect" }));
-    await waitFor(() => expect(server.spells.mechanics.get("arcane_word:2024")?.def.on_land?.[0]).toEqual({ kind: "damage", dice: "2d6", type: "psychic" }));
+    await waitFor(() => expect(server.spells.rows.find((r) => r.spellKey === "ID_SRD_SPELL_MISTY_STEP")).toMatchObject({
+      kind: "def", ruleset: "dnd2024", origin: "dm", def: { v: 1, name: "Misty Step", level: 2, on_land: [{ kind: "damage", dice: "2d6", damage_type: "psychic" }] },
+    }));
   });
 
   it("a Suggested spell opens its tag draft with fields marked check", async () => {
@@ -182,10 +185,12 @@ describe("spells and mechanics in the tracker (0.3.2)", () => {
     page();
     const card = await screen.findByRole("region", { name: "Mage details" });
     fireEvent.click(within(card).getByRole("button", { name: "Spells" }));
-    fireEvent.click(within(card.querySelector<HTMLElement>('[data-spell="cone_of_cold"]')!).getByRole("button", { name: "Check and confirm…" }));
+    fireEvent.click(await within(card.querySelector<HTMLElement>('[data-spell="cone_of_cold"]')!).findByRole("button", { name: "Check and confirm…" }));
     const b = await screen.findByRole("dialog", { name: "Define effect: Cone of Cold" });
     await waitFor(() => expect((within(b).getByLabelText("Dice") as HTMLInputElement).value).toBe("8d8+(slot_above)d8"));
     expect(within(b).getAllByText("check").length).toBeGreaterThan(0);
+    fireEvent.click(within(b).getByRole("button", { name: "Save effect" }));
+    await waitFor(() => expect(server.spells.rows.find((r) => r.spellKey === "ID_SRD_SPELL_CONE_OF_COLD")).toMatchObject({ origin: "suggested", sourceHash: "mockhash" }));
     expect(within(b).getByRole("button", { name: "60 ft" })).toBeTruthy();
   });
 });

@@ -4,7 +4,7 @@
  * judge (a refused write says why), this only lets the screen say so before the DM taps.
  */
 import { INCAPACITATING, STOPS_MOVEMENT, type Condition } from "./common";
-import type { Ability, Combatant, CombatState, Effect, LegendaryPool, Modifier, Speeds } from "./types";
+import type { Ability, Combatant, CombatState, Effect, LegendaryPool, Speeds } from "./types";
 
 export const byId = (state: CombatState, id: string | undefined): Combatant | undefined =>
   id === undefined ? undefined : state.combatants.find((c) => c.id === id);
@@ -130,8 +130,7 @@ export interface AcBreakdown {
 
 /** The DEX modifier the engine knows (`stats.mods`), for "13 + DEX". */
 export function dexMod(c: Combatant): number {
-  const mods = (c as Combatant & { stats?: { mods?: number[] } }).stats?.mods;
-  return mods?.[1] ?? 0;
+  return c.stats?.mods?.[1] ?? 0;
 }
 
 /**
@@ -146,13 +145,12 @@ export function effectiveAc(state: CombatState, c: Combatant): AcBreakdown {
   let min: { name: string; value: number } | undefined;
   const bonuses: string[] = [];
   for (const e of effectsOn(state, c.id)) {
-    for (const raw of e.modifiers ?? []) {
-      const m = raw as Modifier | { kind: "ac_base"; base: number; add_dex: boolean } | { kind: "ac_min"; value: number };
+    for (const m of e.modifiers ?? []) {
       if (m.kind === "ac") { effects += m.value; bonuses.push(`${e.name} ${m.value < 0 ? `−${-m.value}` : m.value}`); }
       if (m.kind === "cover") cover = Math.max(cover, m.value === "half" ? 2 : 5);
       if (m.kind === "ac_base") {
-        const dex = m.add_dex ? dexMod(c) : 0;
-        if (!setBy || m.base + dex > setBy.base + setBy.dex) setBy = { name: e.name, base: m.base, dex };
+        const dex = m.value.add_dex ? dexMod(c) : 0;
+        if (!setBy || m.value.base + dex > setBy.base + setBy.dex) setBy = { name: e.name, base: m.value.base, dex };
       }
       if (m.kind === "ac_min" && (!min || m.value > min.value)) min = { name: e.name, value: m.value };
     }

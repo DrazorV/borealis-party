@@ -8,8 +8,9 @@ import type { DamageType } from "./common";
 import { byId, isCharacter, isDefeated } from "./derive";
 import { evalCount, preview, varsFor } from "./formula";
 import { asCommand, castingOf, COVERAGE_HELP, COVERAGE_WORD, mechOf, spellOf, type SpellMech, type TargetFilter } from "./spellTypes";
-import { castReason, slotsFrom, type TurnButton } from "./turn";
-import type { Combatant, Command, CombatState, StatBlock } from "./types";
+import { castReason, slotsFrom, statblockSpec, type TurnButton } from "./turn";
+import { featureFor } from "./statRef";
+import type { Combatant, Command, CombatState, StatBlock, Targeting } from "./types";
 
 /** A creature type out of a stat block ("humanoid"), when it prints one. */
 export function creatureType(block: StatBlock | undefined): string | null {
@@ -19,9 +20,9 @@ export function creatureType(block: StatBlock | undefined): string | null {
   return null;
 }
 
-function filterReason(filter: TargetFilter | undefined, block: StatBlock | undefined): string | null {
+function filterReason(filter: TargetFilter | undefined, c: Combatant, block: StatBlock | undefined): string | null {
   if (!filter || filter.kind !== "type") return null;
-  const t = creatureType(block);
+  const t = c.stats?.creature_type?.toLowerCase() ?? creatureType(block);
   if (t === null) return null; // Unknown: the DM decides.
   return filter.types.includes(t) ? null : `not a ${filter.types.join(" or ")}`;
 }
@@ -37,9 +38,11 @@ export interface CastDone { sent: boolean; mech?: SpellMech; slot?: number; cast
  * and capped at its count; then the choices and [Cast]. Statblock attacks and saves ("Scimitar", "Fire Breath") and
  * Help use the same sheet for their targets. Nothing is rolled here: the resolution sheet asks for table rolls next.
  */
-export function CastSheet({ state, caster, button, blockOf, send, onDone }: {
+export function CastSheet({ state, caster, block, button, blockOf, send, onDone }: {
   state: CombatState;
   caster: Combatant;
+  /** The caster's stat block (a statblock action without a definition is compiled from it). */
+  block?: StatBlock;
   button: TurnButton;
   blockOf: (id: string) => StatBlock | undefined;
   send: (cmd: Command) => void;
@@ -53,12 +56,13 @@ export function CastSheet({ state, caster, button, blockOf, send, onDone }: {
   const spellMode = button.kind === "spell";
   const legal = spellMode && level > 0 && (!link?.frequency || link.frequency === "slot") && !a?.uses ? slotsFrom(caster, level) : [];
   const [slot, setSlot] = useState<number | undefined>(legal[0]);
-  const [tier, setTier] = useState(tierFor(castingOf(caster)[0]?.caster_level));
+  const spec = a?.mech;
+  const [tier, setTier] = useState(spec?.cantrip_tier ?? castingOf(caster)[0]?.cantrip_tier ?? tierFor(castingOf(caster)[0]?.caster_level));
   const dmgChoice = mech?.on_land?.find((p) => p.kind === "damage" && p.choice?.length);
   const [damageType, setDamageType] = useState<DamageType | undefined>(dmgChoice && dmgChoice.kind === "damage" ? dmgChoice.choice![0] : undefined);
-  const targeting = mech?.targeting ?? (button.kind === "save" ? { kind: "area" as const, shape: "area", size_ft: 0 } : { kind: "creatures" as const, max: 1 });
+  const targeting: Targeting = mech?.targeting ?? (button.kind === "save" ? { kind: "area", shape: "cone", size_ft: 0 } : { kind: "creatures", max: "1" });
   const selfOnly = targeting.kind === "self";
-  const max = targeting.kind === "creatures" ? evalCount(targeting.max, mech ? varsFor(mech, slot, tier) : {}) : null;
+  const max = targeting.kind === "creatures" ? evalCount(targeting.max, mech ? varsFor(mech, slot, tier, spec?.mod ?? 0) : {}) : null;
   const [targets, setTargets] = useState<string[]>(selfOnly ? [caster.id] : []);
   const filter = targeting.kind === "creatures" ? targeting.filter : undefined;
   const live = useMemo(() => state.combatants.filter((c) => !c.removed && !isDefeated(c) && !c.absent), [state.combatants]);
@@ -82,7 +86,9 @@ export function CastSheet({ state, caster, button, blockOf, send, onDone }: {
         targets: selfOnly ? [caster.id] : targets, ...(damageType ? { choices: { damage_type: damageType } } : {}),
       }));
     } else if (a) {
-      send(asCommand({ command: "perform_statblock", id: caster.id, ability: a.key, targets, ...(button.key.startsWith("oa-") ? { as_reaction: true } : {}) }));
+      const own = a.mech ? undefined : statblockSpec(state.edition, a, featureFor(block, a)) ?? undefined;
+      // An opportunity attack spends the reaction (`as_reaction`, asked of the engine).
+      send({ command: "perform_statblock", id: caster.id, ability: a.key, targets, ...(own ? { spec: own } : {}), ...(button.key.startsWith("oa-") ? { as_reaction: true } : {}) } as Command);
     }
     onDone({ sent: true, mech, slot, caster: caster.id });
   };
@@ -122,7 +128,7 @@ export function CastSheet({ state, caster, button, blockOf, send, onDone }: {
             </div>
           </section>
         )}
-        {mech && <p className="cb-preview" aria-live="polite" data-preview>{preview(mech, legal.length ? slot : undefined, tier)}</p>}
+        {mech && <p className="cb-preview" aria-live="polite" data-preview>{preview(mech, legal.length ? slot : undefined, tier, spec?.mod ?? 0)}</p>}
         {!mech && spellMode && <p className="cb-small muted">{coverage ? COVERAGE_HELP[coverage] : "No mechanics yet."} The slot and the action are spent; you rule what happens.</p>}
         {selfOnly ? <p className="cb-small muted">On {caster.label} (self).</p> : (
           <section aria-label="Targets">
@@ -132,7 +138,7 @@ export function CastSheet({ state, caster, button, blockOf, send, onDone }: {
             </h4>
             <div className="cb-chips" role="group" aria-label="Targets">
               {others.map((c) => {
-                const no = filterReason(filter, blockOf(c.id));
+                const no = filterReason(filter, c, blockOf(c.id));
                 const on = targets.includes(c.id);
                 return (
                   <button key={c.id} type="button" aria-pressed={on} disabled={Boolean(no) || (!on && capped)} title={no ?? undefined}

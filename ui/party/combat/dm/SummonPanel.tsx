@@ -7,22 +7,30 @@ import { errorMessage } from "../../../src/state/useAsync";
 import type { MonsterSummary } from "../../api/bestiary";
 import { isCharacter } from "./derive";
 import { searchCreatures } from "./spellApi";
-import type { SpellMech, SummonOption } from "./spellTypes";
+import type { SpellMech } from "./spellTypes";
 import type { Combatant, CombatState } from "./types";
 
-export const crText = (cr: number): string => (cr === 0.125 ? "1/8" : cr === 0.25 ? "1/4" : cr === 0.5 ? "1/2" : String(cr));
+export const crText = (cr: number | string): string => (typeof cr === "string" ? cr : cr === 0.125 ? "1/8" : cr === 0.25 ? "1/4" : cr === 0.5 ? "1/2" : String(cr));
 
-/** The summon options of a spell at a slot ("one CR 2, two CR 1, …" times the slot's multiplier). */
-export function summonOptions(mech: SpellMech, slot: number | undefined): { options: SummonOption[]; type?: string; note?: string } | null {
-  const p = [...(mech.always ?? []), ...(mech.on_land ?? [])].find((x) => x.kind === "summon_info");
-  if (!p || p.kind !== "summon_info") return null;
+export interface SummonOption { cr: string; count: number }
+
+/**
+ * The summon options of a spell at a slot ("one CR 2, two CR 1, …" times the slot's multiplier), from the engine's
+ * `summon` info. Nothing spawns in 0.3.2: these only pre-fill Add creature.
+ */
+export function summonOptions(mech: SpellMech, slot: number | undefined): { options: SummonOption[]; type?: string } | null {
+  const p = [...(mech.always ?? []), ...(mech.on_land ?? [])].find((x) => x.kind === "summon");
+  if (!p || p.kind !== "summon") return null;
+  const info = p.info;
   const at = slot ?? mech.level;
   let times = 1;
-  for (const [level, n] of Object.entries(p.per_slot ?? {})) if (at >= Number(level)) times = Math.max(times, n);
-  return { options: p.options.map((o) => ({ cr: o.cr, count: o.count * times })), type: p.creature_type, note: p.note };
+  for (const s of info.per_slot ?? []) if (at >= s.slot) times = Math.max(times, s.times);
+  const options = info.by_cr?.length ? info.by_cr.map((o) => ({ cr: o.cr, count: o.count * times }))
+    : info.max_cr ? [{ cr: info.max_cr, count: times }] : [];
+  return { options, type: info.creature_types?.[0] };
 }
 
-export interface AddPreset { type?: string; crMax?: number; count?: number; owner?: string; bind?: boolean; spell?: string }
+export interface AddPreset { type?: string; crMax?: string; count?: number; owner?: string; bind?: boolean; spell?: string }
 
 /**
  * After a summon or conjure spell (0.3.2, user decision: no spawning): an info panel with the spell's options and a
@@ -48,7 +56,6 @@ export function SummonPanel({ mech, slot, caster, onAdd, onClose }: {
           </Button>
         ))}
       </div>
-      {info.note && <p className="cb-small muted">{info.note}</p>}
     </section>
   );
 }
@@ -70,7 +77,7 @@ export function AddCreatureSheet({ state, preset, onCopy, onBestiary, onClose }:
   const creatures = state.combatants.filter((c) => !isCharacter(c) && !c.removed);
   const [tab, setTab] = useState<Tab>(preset || creatures.length === 0 ? "bestiary" : "bestiary");
   const [text, setText] = useState("");
-  const [crMax, setCrMax] = useState(preset?.crMax != null ? crText(preset.crMax) : "");
+  const [crMax, setCrMax] = useState(preset?.crMax ?? "");
   const [type, setType] = useState(preset?.type ?? "");
   const [results, setResults] = useState<MonsterSummary[] | null>(null);
   const [error, setError] = useState("");
@@ -105,7 +112,7 @@ export function AddCreatureSheet({ state, preset, onCopy, onBestiary, onClose }:
       footer={<>
         <Button onClick={onClose}>Cancel</Button>
         {tab === "bestiary"
-          ? <Button variant="primary" disabled={!chosen} onClick={() => chosen && onBestiary({ elementId: chosen.id, count, owner: owner || undefined, bind: canBind && bind, hidden, initiativeMode: mode })}>
+          ? <Button variant="primary" disabled={!chosen || !owner} title={!owner ? "From your bestiary a creature joins under someone's control" : undefined} onClick={() => chosen && onBestiary({ elementId: chosen.id, count, owner: owner || undefined, bind: canBind && bind, hidden, initiativeMode: mode })}>
             Add {count > 1 ? `${count} ` : ""}{chosen ? chosen.name : ""}</Button>
           : <Button variant="primary" disabled={!from} onClick={() => from && onCopy({ from, label: label.trim(), initiative: init.trim(), hidden })}>Add</Button>}
       </>}>
@@ -139,11 +146,12 @@ export function AddCreatureSheet({ state, preset, onCopy, onBestiary, onClose }:
             </label>
             <label className="cb-field"><span>Controlled by</span>
               <select className="input" value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Controlled by">
-                <option value="">The DM (on its own)</option>
+                <option value="">Pick who controls it</option>
                 {state.combatants.filter((c) => !c.removed).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
               </select>
             </label>
           </div>
+          {!owner && <p className="cb-small muted">A creature from your bestiary joins under someone's control (a summon, a pet). For one on its own, add a copy, or add it to the encounter.</p>}
           {owner && <>
             <label className="cb-check"><input type="checkbox" checked={canBind && bind} disabled={!canBind} onChange={(e) => setBind(e.target.checked)} />
               Remove when {ownerC?.concentration ? `${ownerC.label}'s concentration on ${ownerC.concentration.name}` : "its concentration"} ends{!canBind ? " (it isn't concentrating)" : ""}</label>

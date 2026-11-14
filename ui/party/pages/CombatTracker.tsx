@@ -14,7 +14,7 @@ import { EffectBuilder } from "../combat/dm/EffectBuilder";
 import { ResolutionSheet } from "../combat/dm/ResolutionSheet";
 import { addCreatureFromBestiary } from "../combat/dm/spellApi";
 import { castToShow, showCast } from "../combat/dm/castFocus";
-import { coverageOf, openCasts, spellOf } from "../combat/dm/spellTypes";
+import { castName, mechOf, openCasts, spellOf } from "../combat/dm/spellTypes";
 import { AddCreatureSheet, type AddPreset } from "../combat/dm/SummonPanel";
 import { EventLog } from "../combat/dm/EventLog";
 import { upNext } from "../combat/dm/mockEngine";
@@ -120,10 +120,11 @@ export function CombatTracker() {
   const setResolving = (id: string | null) => { showCast(id); setFocusTick((n) => n + 1); };
   const resolvingCast = pending.find((k) => k.id === resolving);
   const addFromBestiary = async (r: { elementId: string; count: number; owner?: string; bind: boolean; hidden: boolean; initiativeMode: "after_owner" | "own" }) => {
+    if (!r.owner) return;
     try {
-      const next = await addCreatureFromBestiary(view.id, { elementId: r.elementId, count: r.count, owner: r.owner, bindToConcentration: r.bind, hidden: r.hidden, rollInitiative: !r.owner || r.initiativeMode === "own", initiativeMode: r.initiativeMode });
-      combat.client.adopt(next);
-      toast.push(`Added ${r.count > 1 ? `${r.count} creatures` : "the creature"}.`);
+      const out = await addCreatureFromBestiary(view.id, state.combatants.map((c) => c.id), { elementId: r.elementId, count: r.count, owner: r.owner, bindToConcentration: r.bind, hidden: r.hidden, initiativeMode: r.initiativeMode });
+      combat.client.adopt(out.view);
+      toast.push(`Added ${out.added.length === 1 ? "the creature" : `${out.added.length} creatures`}.`);
     } catch (e) { toast.push(errorMessage(e), "error"); }
   };
   const add = async (r: { from: Combatant; label: string; initiative: string; hidden: boolean }) => {
@@ -152,7 +153,7 @@ export function CombatTracker() {
           {streamDown && connection === "live" && <span className="chip warning cb-reconnecting" role="status">Reconnecting…</span>}
           {pending.length > 0 && (
             <Button small variant="warning" className="cb-pending" onClick={() => setResolving(pending[pending.length - 1]!.id)}
-              title={pending.map((k) => k.name).join(", ")}>{pending.length} pending</Button>
+              title={pending.map((k) => castName(k)).join(", ")}>{pending.length} pending</Button>
           )}
           {combat.queue.length > 0 && connection === "sending" && <span className="chip cb-saving" role="status" aria-label="Saving">Saving…</span>}
           <span className="cb-round" aria-label={`Round ${state.round}`}>ROUND {state.round || "–"}</span>
@@ -216,7 +217,7 @@ export function CombatTracker() {
         </div>
         <div className="cb-main" ref={cardRef}>
           {chosen ? <CombatantCard state={state} c={chosen} block={view.creatures?.[chosen.id]?.statBlock} blockName={view.creatures?.[chosen.id]?.name ?? undefined} send={send} disabled={disabled}
-            blockOf={blockOf} onDefine={(a) => setDefining({ a, ruleset: spellOf(a)?.ruleset ?? state.edition })} onAddCreature={(p) => { setAddPreset(p); setDialog("add"); }} />
+            blockOf={blockOf} onDefine={(a) => setDefining({ a, ruleset: `dnd${mechOf(a)?.edition ?? state.edition}` })} onAddCreature={(p) => { setAddPreset(p); setDialog("add"); }} />
             : <div className="cb-panel cb-pad muted">Pick a combatant.</div>}
         </div>
         <div className="cb-right">
@@ -238,7 +239,7 @@ export function CombatTracker() {
         onBestiary={(r) => { setDialog(null); setAddPreset(undefined); void addFromBestiary(r); }} />}
       {resolvingCast && <ResolutionSheet state={state} cast={resolvingCast} blockOf={blockOf} send={send} onClose={() => setResolving(null)} />}
       {defining && <EffectBuilder spellKey={spellOf(defining.a)?.key ?? defining.a.key} spellName={defining.a.name} ruleset={defining.ruleset}
-        level={spellOf(defining.a)?.level ?? 1} text={defining.a.text ?? ""} suggested={coverageOf(defining.a) === "suggested"} onClose={() => setDefining(null)} />}
+        level={spellOf(defining.a)?.level ?? 1} text={defining.a.text ?? ""} onClose={() => setDefining(null)} />}
       {dialog === "export" && <ExportDialog text={exported} round={state.round} onClose={() => setDialog(null)} />}
       {dialog === "import" && <ImportDialog onClose={() => setDialog(null)} onImport={async (text) => {
         try {

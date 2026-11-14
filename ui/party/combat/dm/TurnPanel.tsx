@@ -111,7 +111,7 @@ export function TurnPanel({ state, c, block, blockOf, send, disabled, onAddCreat
         );
       })}
       <Button small variant="ghost" icon="plus" disabled={disabled} onClick={() => setMore(true)}>More… (custom effect)</Button>
-      {sheet && <CastSheet state={state} caster={c} button={sheet} blockOf={blockOf} send={send} onDone={done} />}
+      {sheet && <CastSheet state={state} caster={c} block={block} button={sheet} blockOf={blockOf} send={send} onDone={done} />}
       {more && (
         <EffectDialog title={`Custom effect from ${c.label}`} combatants={state.combatants} initial={emptyDraft(c.id, "")}
           onDone={(r) => { setMore(false); if (r) for (const effect of draftSpecs(r.draft)) send({ command: "add_effect", effect }); }} />

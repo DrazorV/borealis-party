@@ -5,10 +5,12 @@ import { Dialog } from "../../../src/components/controls/Dialog";
 import { useToast } from "../../../src/components/Toast";
 import { usePhone } from "../../../src/lib/phone";
 import { errorMessage } from "../../../src/state/useAsync";
-import { ABILITY_NAMES, CONDITIONS, DAMAGE_TYPES, type AbilityName, type DamageType } from "./common";
+import { ABILITY_NAMES, CONDITIONS, DAMAGE_TYPES, type AbilityName, type Condition, type DamageType } from "./common";
 import { preview } from "./formula";
-import { draftMechanic, exportMechanics, importMechanics, listMechanics, saveMechanic, type MechDef, type MechDraft, type Preset } from "./spellApi";
-import type { CastTime, Primitive, SpellMech, SummonOption } from "./spellTypes";
+import { exportMechanics, importMechanics, listMechanics, saveMechanic, spellDetail, type MechRow } from "./spellApi";
+import type { AreaShape, CastTime, Edition, Primitive, SpellMech } from "./types";
+
+export type Preset = "buff" | "damage_save" | "spell_attack" | "heal" | "condition" | "summon" | "ruling" | "note";
 
 export const PRESETS: { id: Preset; title: string; text: string }[] = [
   { id: "buff", title: "Buff", text: "AC, dice on rolls, speed" },
@@ -25,8 +27,8 @@ export const PRESETS: { id: Preset; title: string; text: string }[] = [
 export interface Fields {
   preset: Preset;
   level: string; cast: CastTime; concentration: boolean; duration: string;
-  target: "self" | "creatures" | "area"; max: string; filterType: string; willing: boolean; shape: string; size: string;
-  saveAbility: AbilityName; half: boolean;
+  target: "self" | "creatures" | "area"; max: string; filterType: string; willing: boolean; shape: AreaShape; size: string;
+  saveAbility: AbilityName; half: boolean; attackKind: "melee" | "ranged";
   dice: string; damageType: DamageType | "";
   heal: string; healMod: boolean;
   condition: string; repeatAt: "" | "start" | "end";
@@ -38,7 +40,7 @@ export interface Fields {
 const base = (level: number): Fields => ({
   preset: "buff", level: String(level), cast: "action", concentration: false, duration: "",
   target: "creatures", max: "1", filterType: "", willing: false, shape: "sphere", size: "20",
-  saveAbility: "dex", half: true, dice: "", damageType: "", heal: "", healMod: true,
+  saveAbility: "dex", half: true, attackKind: "ranged", dice: "", damageType: "", heal: "", healMod: true,
   condition: "", repeatAt: "", acBase: "", acDex: true, acBonus: "", rollTerm: "", rollOn: "both", speedMult: false,
   summon: [{ cr: "", count: "1" }], summonType: "beast", question: "", buttons: "Yes, No", note: "",
 });
@@ -59,24 +61,27 @@ export function fieldsFrom(def: Partial<SpellMech>, preset: Preset, level: numbe
   const f = presetFields(preset, base(def.level ?? level));
   if (def.cast) f.cast = def.cast;
   if (def.concentration != null) f.concentration = def.concentration;
-  if (def.duration_turns) f.duration = String(def.duration_turns);
+  const d0 = def.duration;
+  if (d0?.kind === "source_turns" || d0?.kind === "target_turns") f.duration = String(d0.n);
+  if (d0?.kind === "minutes") f.duration = String(d0.n * 10);
   const t = def.targeting;
   if (t?.kind === "self") f.target = "self";
   if (t?.kind === "creatures") { f.target = "creatures"; f.max = String(t.max); f.willing = t.filter?.kind === "willing"; f.filterType = t.filter?.kind === "type" ? t.filter.types.join(", ") : ""; }
   if (t?.kind === "area") { f.target = "area"; f.shape = t.shape; f.size = String(t.size_ft); }
   const d = def.delivery;
   if (d?.kind === "save") { f.saveAbility = d.ability; f.half = d.success === "half"; }
+  if (d?.kind === "attack") f.attackKind = d.attack;
   for (const p of [...(def.on_land ?? []), ...(def.always ?? [])]) {
-    if (p.kind === "damage") { f.dice = String(p.dice); f.damageType = p.type ?? ""; }
-    if (p.kind === "heal") { f.heal = String(p.dice); f.healMod = Boolean(p.add_mod); }
+    if (p.kind === "damage") { f.dice = p.dice; f.damageType = p.damage_type ?? ""; }
+    if (p.kind === "heal") { f.heal = p.dice; f.healMod = Boolean(p.add_mod); }
     if (p.kind === "condition") { f.condition = p.condition; f.repeatAt = p.repeat_save?.at ?? ""; }
-    if (p.kind === "ac_base") { f.acBase = String(p.base); f.acDex = p.add_dex; }
-    if (p.kind === "ac_bonus") f.acBonus = String(p.value);
-    if (p.kind === "roll_dice") f.rollTerm = p.term;
-    if (p.kind === "speed" && p.op === "mult") f.speedMult = true;
-    if (p.kind === "summon_info") { f.summon = p.options.map((o) => ({ cr: String(o.cr), count: String(o.count) })); f.summonType = p.creature_type ?? ""; }
-    if (p.kind === "ruling") { f.question = p.question; f.buttons = p.buttons.join(", "); }
-    if (p.kind === "note") f.note = p.text ?? p.key;
+    if (p.kind === "ac_base") { f.acBase = String(p.base); f.acDex = Boolean(p.add_dex); }
+    if (p.kind === "ac_bonus") f.acBonus = String(p.n);
+    if (p.kind === "roll_dice") f.rollTerm = `${p.term.count}d${p.term.sides}`;
+    if (p.kind === "speed" && p.change.op === "mult") f.speedMult = true;
+    if (p.kind === "summon") { f.summon = (p.info.by_cr ?? []).map((o) => ({ cr: o.cr, count: String(o.count) })); f.summonType = p.info.creature_types?.[0] ?? ""; }
+    if (p.kind === "ruling") { f.question = p.question; f.buttons = p.buttons.map((x) => x.label).join(", "); }
+    if (p.kind === "note") f.note = p.text;
   }
   return f;
 }
@@ -87,39 +92,46 @@ const crValue = (s: string): number | null => {
   return /^\d+(\.\d+)?$/.test(t) ? Number(t) : null;
 };
 
-/** The SpellMech the fields describe (closed schema, numbers only). */
-export function buildMech(key: string, name: string, f: Fields): SpellMech {
+const term = (t: string) => {
+  const m = /^(\d+)d(\d+)$/.exec(t.trim());
+  return m ? { count: Number(m[1]), sides: Number(m[2]) } : null;
+};
+
+/** The SpellMech the fields describe (the engine's closed schema, numbers only). */
+export function buildMech(key: string, name: string, edition: Edition, f: Fields): SpellMech {
   const level = Math.max(0, Math.min(9, Number(f.level) || 0));
   const prim: Primitive[] = [];
   const always: Primitive[] = [];
   const p = f.preset;
-  if ((p === "damage_save" || p === "spell_attack") && f.dice.trim()) prim.push({ kind: "damage", dice: f.dice.trim(), ...(f.damageType ? { type: f.damageType } : {}) });
+  if ((p === "damage_save" || p === "spell_attack") && f.dice.trim()) prim.push({ kind: "damage", dice: f.dice.trim(), ...(f.damageType ? { damage_type: f.damageType } : {}) });
   if (p === "heal" && f.heal.trim()) prim.push({ kind: "heal", dice: f.heal.trim(), add_mod: f.healMod });
-  if ((p === "condition" || p === "damage_save") && f.condition) prim.push({ kind: "condition", condition: f.condition, ...(f.repeatAt ? { repeat_save: { ability: f.saveAbility, at: f.repeatAt } } : {}) });
+  if ((p === "condition" || p === "damage_save") && f.condition) prim.push({ kind: "condition", condition: f.condition as Condition, ...(f.repeatAt ? { repeat_save: { ability: f.saveAbility, at: f.repeatAt } } : {}) });
   if (p === "buff") {
     if (f.acBase.trim()) always.push({ kind: "ac_base", base: Number(f.acBase), add_dex: f.acDex });
-    if (f.acBonus.trim()) always.push({ kind: "ac_bonus", value: Number(f.acBonus) });
-    if (f.rollTerm.trim()) {
-      if (f.rollOn !== "save") always.push({ kind: "roll_dice", on: "attack", term: f.rollTerm.trim() });
-      if (f.rollOn !== "attack") always.push({ kind: "roll_dice", on: "save", term: f.rollTerm.trim() });
+    if (f.acBonus.trim()) always.push({ kind: "ac_bonus", n: Number(f.acBonus) });
+    const t = term(f.rollTerm);
+    if (t) {
+      if (f.rollOn !== "save") always.push({ kind: "roll_dice", on: "attacks", term: t });
+      if (f.rollOn !== "attack") always.push({ kind: "roll_dice", on: "saves", term: t });
     }
-    if (f.speedMult) always.push({ kind: "speed", op: "mult", value: 2 });
+    if (f.speedMult) always.push({ kind: "speed", change: { op: "mult", n: 2 } });
   }
   if (p === "summon") {
-    const options: SummonOption[] = f.summon.map((o) => ({ cr: crValue(o.cr) ?? -1, count: Number(o.count) || 1 })).filter((o) => o.cr >= 0);
-    always.push({ kind: "summon_info", options, ...(f.summonType.trim() ? { creature_type: f.summonType.trim().toLowerCase() } : {}) });
+    const by = f.summon.filter((o) => crValue(o.cr) != null).map((o) => ({ cr: o.cr.trim(), count: Number(o.count) || 1 }));
+    always.push({ kind: "summon", info: { ...(f.summonType.trim() ? { creature_types: [f.summonType.trim().toLowerCase()] } : {}), ...(by.length ? { by_cr: by } : {}) } });
   }
-  if (p === "ruling") prim.push({ kind: "ruling", question: f.question.trim() || "What happens?", buttons: f.buttons.split(",").map((b) => b.trim()).filter(Boolean) });
-  if (p === "note" && f.note.trim()) always.push({ kind: "note", key: "dm_note", text: f.note.trim() });
+  if (p === "ruling") prim.push({ kind: "ruling", question: f.question.trim() || "What happens?", buttons: f.buttons.split(",").map((b) => b.trim()).filter(Boolean).map((label) => ({ label })) });
+  if (p === "note" && f.note.trim()) always.push({ kind: "note", text: f.note.trim() });
   const filterTypes = f.filterType.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+  const turns = Number(f.duration);
   return {
-    key, name, level, concentration: f.concentration, cast: f.cast,
+    v: 1, key, edition, name, level, concentration: f.concentration, cast: f.cast,
     targeting: f.target === "self" ? { kind: "self" } : f.target === "area" ? { kind: "area", shape: f.shape, size_ft: Number(f.size) || 0 }
-      : { kind: "creatures", max: /^\d+$/.test(f.max.trim()) ? Number(f.max) : f.max.trim() || 1, ...(filterTypes.length ? { filter: { kind: "type" as const, types: filterTypes } } : f.willing ? { filter: { kind: "willing" as const } } : {}) },
-    delivery: p === "spell_attack" ? { kind: "attack" } : (p === "damage_save" || p === "condition") ? { kind: "save", ability: f.saveAbility, success: f.half ? "half" : "none" } : { kind: "auto" },
+      : { kind: "creatures", max: f.max.trim() || "1", ...(filterTypes.length ? { filter: { kind: "type" as const, types: filterTypes } } : f.willing ? { filter: { kind: "willing" as const } } : {}) },
+    delivery: p === "spell_attack" ? { kind: "attack", attack: f.attackKind } : (p === "damage_save" || p === "condition") ? { kind: "save", ability: f.saveAbility, success: f.half ? "half" : "none" } : { kind: "auto" },
     ...(prim.length ? { on_land: prim } : {}),
     ...(always.length ? { always } : {}),
-    ...(f.duration.trim() && Number(f.duration) > 0 ? { duration_turns: Number(f.duration) } : {}),
+    ...(Number.isInteger(turns) && turns > 0 ? { duration: { kind: "source_turns", n: turns, at: "start" } } : {}),
     tier: p === "ruling" ? "ruling" : p === "note" ? "utility" : "partial",
   };
 }
@@ -147,45 +159,53 @@ type FieldKey = "dice" | "heal" | "max" | "size" | "duration" | "acBase" | "acBo
  * chips come from the user's own spell text; drafted fields say "check". A live preview shows what a cast does. Saved
  * to the DM's account; exported and imported as JSON. Nothing is guessed from text without the DM's look.
  */
-export function EffectBuilder({ spellKey, spellName, ruleset, level = 1, text = "", suggested, onSaved, onClose }: {
-  spellKey: string; spellName: string; ruleset: string; level?: number; text?: string;
-  /** Fetch a tag draft first ("Suggested"). */
-  suggested?: boolean;
-  onSaved?: (def: MechDef) => void; onClose: () => void;
+export function EffectBuilder({ spellKey, spellName, ruleset, level = 1, text = "", onSaved, onClose }: {
+  /** The spell's element id (the chosen copy). */
+  spellKey: string; spellName: string;
+  /** `dnd2014` or `dnd2024`. */
+  ruleset: string; level?: number;
+  /** The rules text the tracker has, until the spell's own element text loads. */
+  text?: string;
+  onSaved?: (row: MechRow | undefined) => void; onClose: () => void;
 }) {
   const phone = usePhone();
   const toast = useToast();
-  const [f, setF] = useState<Fields | null>(suggested ? null : null);
+  const [f, setF] = useState<Fields | null>(null);
+  const [fromDraft, setFromDraft] = useState<string | undefined>(undefined);
+  const edition: Edition = ruleset.endsWith("2014") ? "2014" : "2024";
   const [checks, setChecks] = useState<Set<string>>(new Set());
   const [draftText, setDraftText] = useState(text);
   const [last, setLast] = useState<FieldKey>("dice");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [library, setLibrary] = useState(false);
-  const [loaded, setLoaded] = useState(!suggested);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let live = true;
     void (async () => {
-      const saved = (await listMechanics().catch(() => [] as MechDef[])).find((d) => d.key === spellKey && d.ruleset === ruleset);
+      const saved = (await listMechanics().catch(() => [] as MechRow[])).find((r) => r.kind === "def" && r.spellKey === spellKey && r.ruleset === ruleset);
+      const detail = await spellDetail(spellKey).catch(() => null);
       if (!live) return;
-      if (saved) { setF(fieldsFrom(saved.def, guessPreset(saved.def), level)); setLoaded(true); return; }
-      if (suggested) {
-        const d: MechDraft | null = await draftMechanic(spellKey, ruleset);
-        if (!live) return;
-        if (d) { setF(fieldsFrom(d.def, d.preset, level)); setChecks(new Set(d.checks)); if (d.text) setDraftText(d.text); }
+      if (detail?.element.description) setDraftText(detail.element.description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+      const def = saved?.def as SpellMech | undefined;
+      if (def && "level" in def) setF(fieldsFrom(def, guessPreset(def), level));
+      else if (detail?.suggested) {
+        setF(fieldsFrom(detail.suggested.mech, guessPreset(detail.suggested.mech), level));
+        setChecks(new Set(detail.suggested.checks.flatMap((c) => CHECK_GROUPS[c] ?? [])));
+        setFromDraft(detail.sourceHash ?? "");
       }
       setLoaded(true);
     })();
     return () => { live = false; };
-  }, [spellKey, ruleset, suggested, level]);
+  }, [spellKey, ruleset, level]);
 
   const set = <K extends keyof Fields>(k: K, v: Fields[K]) => {
     setF((x) => (x ? { ...x, [k]: v } : x));
     setChecks((c) => { const n = new Set(c); for (const g of CHECK_OF[k as string] ?? []) n.delete(g); return n; });
   };
   const chips = useMemo(() => numberChips(draftText), [draftText]);
-  const mech = f ? buildMech(spellKey, spellName, f) : null;
+  const mech = f ? buildMech(spellKey, spellName, edition, f) : null;
   const chip = (c: ReturnType<typeof numberChips>[number]) => {
     if (!f) return;
     if (c.kind === "ability") set("saveAbility", c.value as AbilityName);
@@ -198,9 +218,9 @@ export function EffectBuilder({ spellKey, spellName, ruleset, level = 1, text = 
     setBusy(true);
     setError("");
     try {
-      const def = await saveMechanic(spellKey, ruleset, mech);
+      const row = await saveMechanic(spellKey, ruleset, mech, fromDraft !== undefined ? "suggested" : "dm", fromDraft || undefined);
       toast.push(`${spellName}: saved to your account. The next cast uses it.`);
-      onSaved?.(def);
+      onSaved?.(row);
       onClose();
     } catch (e) { setError(errorMessage(e)); setBusy(false); }
   };
@@ -259,7 +279,7 @@ export function EffectBuilder({ spellKey, spellName, ruleset, level = 1, text = 
               <label className="cb-check"><input type="checkbox" checked={f.willing} onChange={(e) => set("willing", e.target.checked)} />Willing only</label></>}
             {f.target === "area" && <>
               <label className="cb-field cb-narrow"><span>Shape</span>
-                <select className="input" value={f.shape} onChange={(e) => set("shape", e.target.value)} aria-label="Area shape">
+                <select className="input" value={f.shape} onChange={(e) => set("shape", e.target.value as AreaShape)} aria-label="Area shape">
                   {["sphere", "cone", "cube", "line", "cylinder", "emanation"].map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </label>
@@ -273,6 +293,15 @@ export function EffectBuilder({ spellKey, spellName, ruleset, level = 1, text = 
                 </select>
               </label>
               <label className="cb-check"><input type="checkbox" checked={f.half} onChange={(e) => set("half", e.target.checked)} />Half damage on a success</label>
+            </Group>
+          )}
+          {f.preset === "spell_attack" && (
+            <Group title="Attack">
+              <label className="cb-field cb-narrow"><span>Kind</span>
+                <select className="input" value={f.attackKind} onChange={(e) => set("attackKind", e.target.value as Fields["attackKind"])} aria-label="Attack kind">
+                  <option value="ranged">Ranged</option><option value="melee">Melee</option>
+                </select>
+              </label>
             </Group>
           )}
           {(f.preset === "damage_save" || f.preset === "spell_attack") && (
@@ -334,6 +363,7 @@ export function EffectBuilder({ spellKey, spellName, ruleset, level = 1, text = 
           )}
           {f.preset === "note" && <Group title="Reminder"><label className="cb-field"><span>Note</span><input className="input" value={f.note} onChange={(e) => set("note", e.target.value)} aria-label="Note" /></label></Group>}
           {mech && <p className="cb-preview" aria-live="polite" data-preview>Preview: {preview(mech, mech.level > 0 ? mech.level : undefined) || "the slot and the action are spent"}</p>}
+          {fromDraft !== undefined && <p className="cb-small muted">Drafted from your own spell data's tags. Fields marked check need a look; saving confirms it.</p>}
           {error && <p className="cb-why" role="alert">{error}</p>}
           {draftText && <details className="cb-small"><summary>Your spell's text</summary><p className="cb-ability-text">{draftText}</p></details>}
         </div>
@@ -341,6 +371,12 @@ export function EffectBuilder({ spellKey, spellName, ruleset, level = 1, text = 
     </Dialog>
   );
 }
+
+/** The server's draft checks, as the builder's field groups. */
+const CHECK_GROUPS: Record<string, string[]> = {
+  half_on_save: ["delivery"], targets: ["targeting"], area_size: ["targeting"], ac: ["always"], heal: ["on_land"], temp_hp: ["on_land"],
+  summon: ["summon"], damage_type: ["on_land"], condition: ["condition"], dice: ["on_land"], effect: ["always", "cast"],
+};
 
 const CHECK_OF: Record<string, string[]> = {
   level: ["cast"], cast: ["cast"], concentration: ["cast"], duration: ["cast"],
@@ -351,7 +387,7 @@ const CHECK_OF: Record<string, string[]> = {
 
 export function guessPreset(d: Partial<SpellMech>): Preset {
   const all = [...(d.on_land ?? []), ...(d.always ?? [])];
-  if (all.some((p) => p.kind === "summon_info")) return "summon";
+  if (all.some((p) => p.kind === "summon")) return "summon";
   if (all.some((p) => p.kind === "ruling")) return "ruling";
   if (all.some((p) => p.kind === "heal")) return "heal";
   if (d.delivery?.kind === "attack") return "spell_attack";
@@ -372,10 +408,10 @@ function Group({ title, mark, children }: { title: string; mark?: ReactNode; chi
 /** The DM's saved effects: export as JSON, import a file another DM exported. */
 export function EffectLibrary() {
   const toast = useToast();
-  const [items, setItems] = useState<MechDef[] | null>(null);
+  const [items, setItems] = useState<MechRow[] | null>(null);
   const [text, setText] = useState("");
   const [error, setError] = useState("");
-  const reload = () => { void listMechanics().then(setItems, (e: unknown) => setError(errorMessage(e))); };
+  const reload = () => { void listMechanics().then((rows) => setItems(rows.filter((r) => r.kind === "def")), (e: unknown) => setError(errorMessage(e))); };
   useEffect(reload, []);
   const doExport = async () => {
     try { setText(JSON.stringify(await exportMechanics(), null, 2)); } catch (e) { setError(errorMessage(e)); }
@@ -383,13 +419,16 @@ export function EffectLibrary() {
   const doImport = async () => {
     let file: unknown;
     try { file = JSON.parse(text); } catch { setError("That isn't JSON."); return; }
-    try { const r = await importMechanics(file); toast.push(`Imported ${r?.imported ?? 0} effect${r?.imported === 1 ? "" : "s"}.`); setText(""); reload(); } catch (e) { setError(errorMessage(e)); }
+    try { await importMechanics(file); toast.push("Imported."); setText(""); reload(); } catch (e) { setError(errorMessage(e)); }
   };
   return (
     <div className="cb-form">
       <h4 className="cb-group-title">Effects you built</h4>
       {items === null ? <p className="muted">Loading…</p> : items.length === 0 ? <p className="muted cb-small">None yet.</p> : (
-        <ul className="cb-spell-rows">{items.map((d) => <li key={`${d.key}:${d.ruleset}`} className="cb-spell-row"><span className="cb-spell-name">{d.def.name}</span><span className="cb-small muted">{d.ruleset} · L{d.def.level}{d.origin === "import" ? " · imported" : ""}</span></li>)}</ul>
+        <ul className="cb-spell-rows">{items.map((r) => {
+          const d = r.def as SpellMech | undefined;
+          return <li key={`${r.spellKey}:${r.ruleset}`} className="cb-spell-row"><span className="cb-spell-name">{d?.name ?? r.spellKey}</span><span className="cb-small muted">{r.ruleset.replace(/^dnd/, "")} · L{d?.level ?? "?"}{r.origin === "import" ? " · imported" : r.origin === "suggested" ? " · from a draft" : ""}</span></li>;
+        })}</ul>
       )}
       <div className="cb-tool-row">
         <Button small onClick={() => void doExport()}>Export as JSON</Button>

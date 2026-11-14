@@ -10,15 +10,14 @@ import { useToast } from "../../src/components/Toast";
 import { errorMessage } from "../../src/state/useAsync";
 import {
   addCreatures, addEffect, addRule, deleteEncounter, EDITION_WORD, INIT_WORD, LIMITS, loadEncounter, nested,
-  refreshCreature, removeCreature, removeEffect, removeRule, STATUS_WORD, swapCreature, updateCreature, updateEffect,
-  updateEncounter, updateRule, watchEncounters, type Conflict, type Creature, type Effect, type Encounter,
+  addPrecast, refreshCreature, removeCreature, removeEffect, removePrecast, removeRule, updatePrecast, STATUS_WORD, swapCreature, updateCreature, updateEffect,
+  updateEncounter, updateRule, watchEncounters, type Conflict, type Creature, type Effect, type Encounter, type Precast,
   type EncounterFields, type Rule,
 } from "../api/overrides/encounters";
 import type { Ruleset } from "../api/overrides/parties";
 import { LiveCombatLink, StartCombatButton } from "../combat/dm/StartCombatButton";
 import { CreatureDialog, DetailsDialog, EffectDialog, RefreshDialog, RuleDialog, WarningsDialog } from "./EncounterDialogs";
 import { BeforeFightCard, PrecastDialog } from "./EncounterSpells";
-import { addPrecast, deletePrecast, listPrecasts, updatePrecast, type Precast } from "../combat/dm/spellApi";
 import { EncounterPicker } from "./EncounterPicker";
 import { useWide } from "./EncounterToolPanel";
 import { encountersPath } from "./EncountersPage";
@@ -97,10 +96,7 @@ export function EncounterBuilder() {
   const [dialog, setDialog] = useState<Open | null>(null);
   const [tool, setTool] = useState<Tool | null>(null);
   const [notes, setNotes] = useState<string | null>(null);
-  /** 0.3.2: spells cast before the fight (their own route; a server without it shows none). */
-  const [precasts, setPrecasts] = useState<Precast[]>([]);
-  const loadPrecasts = useCallback(() => { listPrecasts(id).then(setPrecasts, () => setPrecasts([])); }, [id]);
-  useEffect(loadPrecasts, [loadPrecasts]);
+
   const root = useRef<HTMLDivElement>(null);
 
   // "/" opens the creature picker (or puts the focus back in its search), unless the DM is typing somewhere.
@@ -294,10 +290,10 @@ export function EncounterBuilder() {
   );
 
   const effects = (
-    <BeforeFightCard creatures={creatures} precasts={precasts} effects={enc.effects} named={(cid) => named(cid ?? "")}
+    <BeforeFightCard creatures={creatures} precasts={enc.casts ?? []} effects={enc.effects} warning={enc.castWarning} named={named}
       canAddEffect={enc.effects.length < LIMITS.effects}
       onPrecast={() => setDialog({ kind: "precast" })} onEditPrecast={(pc) => setDialog({ kind: "precast", precast: pc })}
-      onRemovePrecast={(pc) => { void deletePrecast(enc.id, pc.id).then(loadPrecasts, (e: unknown) => toast.push(errorMessage(e), "error")); }}
+      onRemovePrecast={(pc) => void act(() => removePrecast(enc.id, pc.id))}
       onCustom={() => setDialog({ kind: "effect" })} onEditEffect={(e) => setDialog({ kind: "effect", effect: e })}
       onRemoveEffect={(e) => void act(() => removeEffect(enc.id, e.id))} />
   );
@@ -412,8 +408,12 @@ export function EncounterBuilder() {
           onSave={async (f) => setEnc(await (dialog.effect ? updateEffect(enc.id, dialog.effect.id, f) : addEffect(enc.id, f)))} />
       )}
       {dialog?.kind === "precast" && (
-        <PrecastDialog creatures={creatures} precasts={precasts} precast={dialog.precast} onClose={() => setDialog(null)}
-          onSave={async (f) => { await (dialog.precast ? updatePrecast(enc.id, dialog.precast.id, f) : addPrecast(enc.id, f)); loadPrecasts(); }} />
+        <PrecastDialog creatures={creatures} precasts={enc.casts ?? []} precast={dialog.precast} onClose={() => setDialog(null)}
+          onSave={async (f) => {
+            const next = await (dialog.precast ? updatePrecast(enc.id, dialog.precast.id, f) : addPrecast(enc.id, f));
+            setEnc(next);
+            if (next.castWarning) toast.push(next.castWarning, "warning");
+          }} />
       )}
       {dialog?.kind === "rule" && (
         <RuleDialog creatures={creatures} rule={dialog.rule} onClose={() => setDialog(null)}

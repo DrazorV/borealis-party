@@ -4,12 +4,12 @@ import { buildMech, fieldsFrom, guessPreset, numberChips, presetFields } from ".
 import { sampleCombat } from "./fixtures";
 import { evalCount, evalFormula, preview } from "./formula";
 import { execute, predict } from "./mockEngine";
-import { castsOf, mechOf, openCasts, type SpellCommand } from "./spellTypes";
+import { castAmounts, castsOf, mechOf, openCasts } from "./spellTypes";
 import { summonOptions } from "./SummonPanel";
 import { turnButtons } from "./turn";
 import type { Command } from "./types";
 
-const cmd = (c: SpellCommand) => c as unknown as Command;
+const cmd = (c: Command) => c;
 const typed = (total: number) => ({ kind: "typed" as const, total });
 
 function started() {
@@ -36,6 +36,8 @@ describe("formula previews", () => {
     expect(preview(fireball, 4)).toBe("9d6 fire at L4 · DEX save, half on a success · 20-ft sphere");
     const hold = mechOf(byId(sampleCombat().view.state, "mage")!.abilities!.find((a) => a.key === "hold_person")!)!;
     expect(preview(hold, 3)).toContain("up to 2 targets");
+    const cure = mechOf(byId(sampleCombat().view.state, "priest")!.abilities!.find((a) => a.key === "cure_wounds")!)!;
+    expect(preview(cure, 2, 1, 3)).toBe("heal 4d8+3 at L2 · up to 1 target");
   });
 });
 
@@ -57,7 +59,7 @@ describe("AC with spells", () => {
 
   it("a printed AC higher than the spell's base stays", () => {
     const m = started();
-    execute(m, { command: "add_effect", effect: { name: "Mage Armor", target: "knight", modifiers: [{ kind: "ac_base", base: 13, add_dex: true } as never] } });
+    execute(m, { command: "add_effect", effect: { name: "Mage Armor", target: "knight", modifiers: [{ kind: "ac_base", value: { base: 13, add_dex: true } }] } });
     expect(effectiveAc(m.view.state, byId(m.view.state, "knight")!).total).toBe(18);
   });
 });
@@ -74,8 +76,10 @@ describe("turn buttons", () => {
     expect(knight.find((b) => b.label === "Opportunity attack")?.group).toBe("reaction");
     const mage = turnButtons(s, byId(s, "mage")!, m.view.statblocks.mage!.data);
     expect(mage.find((b) => b.key === "fireball")).toMatchObject({ label: "Fireball L3+", detail: "8d6 · 7 slots", coverage: "auto", group: "action" });
+    expect(mage.find((b) => b.key === "fire_bolt")).toMatchObject({ detail: "2d10 · cantrip" });
     expect(mage.find((b) => b.key === "shield")?.group).toBe("reaction");
-    expect(mage.find((b) => b.key === "cone_of_cold")?.coverage).toBe("suggested");
+    expect(mage.find((b) => b.key === "cone_of_cold")?.coverage).toBe("ruling");
+    expect(turnButtons(s, byId(s, "mage")!, undefined, new Set(["ID_SRD_SPELL_CONE_OF_COLD"])).find((b) => b.key === "cone_of_cold")?.coverage).toBe("suggested");
     expect(mage.find((b) => b.key === "arcane_word")?.coverage).toBe("unlinked");
   });
 
@@ -99,13 +103,14 @@ describe("casts in the mock engine (typed rolls first)", () => {
     const s = () => m.view.state;
     execute(m, cmd({ command: "cast_spell", caster: "mage", ability: "fireball", slot: 4, targets: ["knight", "cultist1"] }));
     const k = openCasts(s())[0]!;
-    expect(k).toMatchObject({ name: "Fireball", dc: 14, damage: { dice: "9d6", type: "fire", half_on_save: true } });
+    expect(k).toMatchObject({ slot: 4, spec: { dc: 14, mech: { name: "Fireball" } } });
+    expect(castAmounts(k)).toEqual([{ kind: "damage", dice: "9d6", type: "fire" }]);
     expect(byId(s(), "mage")!.economy!.action).toBe(true);
-    expect(() => execute(m, cmd({ command: "apply_cast", cast: k.id, damage: typed(30) }))).toThrow(/Waiting on 2 rolls/);
+    expect(() => execute(m, cmd({ command: "apply_cast", cast: k.id, amounts: [typed(30)] }))).toThrow(/Waiting on 2 rolls/);
     execute(m, cmd({ command: "resolve_cast_row", cast: k.id, target: "knight", roll: typed(15) }));
-    execute(m, cmd({ command: "resolve_cast_row", cast: k.id, target: "cultist1", outcome: "failed" }));
+    execute(m, cmd({ command: "resolve_cast_row", cast: k.id, target: "cultist1", roll: { kind: "outcome", outcome: "failed" } }));
     expect(castsOf(s())[0]!.rows.map((r) => r.outcome)).toEqual(["saved", "failed"]);
-    execute(m, cmd({ command: "apply_cast", cast: k.id, damage: typed(30) }));
+    execute(m, cmd({ command: "apply_cast", cast: k.id, amounts: [typed(30)] }));
     expect(byId(s(), "knight")!.hp.current).toBe(52 - 15);
     expect(byId(s(), "cultist1")!.life?.state).toBe("dead");
     expect(openCasts(s())).toHaveLength(0);
@@ -133,9 +138,9 @@ describe("casts in the mock engine (typed rolls first)", () => {
     const m = started();
     execute(m, cmd({ command: "cast_spell", caster: "mage", ability: "fireball", slot: 3, targets: ["dragon"] }));
     const k = openCasts(m.view.state)[0]!;
-    execute(m, cmd({ command: "resolve_cast_row", cast: k.id, target: "dragon", outcome: "failed" }));
-    execute(m, cmd({ command: "resolve_cast_row", cast: k.id, target: "dragon", use_lr: true }));
-    expect(openCasts(m.view.state)[0]!.rows[0]).toMatchObject({ outcome: "saved", lr_used: true });
+    execute(m, cmd({ command: "resolve_cast_row", cast: k.id, target: "dragon", roll: { kind: "outcome", outcome: "failed" } }));
+    execute(m, cmd({ command: "resolve_cast_row", cast: k.id, target: "dragon", roll: { kind: "outcome", outcome: "saved" }, use_lr: true }));
+    expect(openCasts(m.view.state)[0]!.rows[0]).toMatchObject({ outcome: "saved", used_lr: true });
     expect(byId(m.view.state, "dragon")!.legendary_resistance!.remaining).toBe(2);
   });
 
@@ -144,7 +149,8 @@ describe("casts in the mock engine (typed rolls first)", () => {
     execute(m, { command: "next_turn" }); execute(m, { command: "next_turn" }); execute(m, { command: "next_turn" });
     execute(m, cmd({ command: "perform_statblock", id: "dragon", ability: "fire_breath", targets: ["knight", "pc-aria"] }));
     const k = openCasts(m.view.state)[0]!;
-    expect(k).toMatchObject({ dc: 21, damage: { dice: "18d6", type: "fire", half_on_save: true } });
+    expect(k).toMatchObject({ statblock: true, spec: { dc: 21, origin: { kind: "statblock" } } });
+    expect(castAmounts(k)).toEqual([{ kind: "damage", dice: "18d6", type: "fire" }]);
     expect(byId(m.view.state, "dragon")!.abilities!.find((a) => a.key === "fire_breath")!.recharge!.ready).toBe(false);
     execute(m, cmd({ command: "cancel_cast", cast: k.id }));
     expect(openCasts(m.view.state)).toHaveLength(0);
@@ -160,9 +166,9 @@ describe("summon spells (no spawning)", () => {
   it("lists the options, times the slot's multiplier", () => {
     const druid = byId(sampleCombat().view.state, "druid")!;
     const mech = mechOf(druid.abilities!.find((a) => a.key === "conjure_animals")!)!;
-    expect(summonOptions(mech, 3)!.options).toEqual([{ cr: 2, count: 1 }, { cr: 1, count: 2 }, { cr: 0.5, count: 4 }, { cr: 0.25, count: 8 }]);
-    expect(summonOptions(mech, 5)!.options[0]).toEqual({ cr: 2, count: 2 });
-    expect(summonOptions(mech, 7)!.options[3]).toEqual({ cr: 0.25, count: 24 });
+    expect(summonOptions(mech, 3)!.options).toEqual([{ cr: "2", count: 1 }, { cr: "1", count: 2 }, { cr: "1/2", count: 4 }, { cr: "1/4", count: 8 }]);
+    expect(summonOptions(mech, 5)!.options[0]).toEqual({ cr: "2", count: 2 });
+    expect(summonOptions(mech, 7)!.options[3]).toEqual({ cr: "1/4", count: 24 });
   });
 
   it("casting it takes concentration and adds nobody", () => {
@@ -171,16 +177,16 @@ describe("summon spells (no spawning)", () => {
     execute(m, cmd({ command: "cast_spell", caster: "druid", ability: "conjure_animals", slot: 3, targets: [] }));
     expect(m.view.state.combatants).toHaveLength(before);
     expect(byId(m.view.state, "druid")!.concentration?.name).toBe("Conjure Animals");
-    expect(m.view.log.some((e) => e.event === "summon_options")).toBe(true);
+    expect(m.view.log.find((e) => e.event === "summon_options")).toMatchObject({ caster: "druid", concentration: true });
   });
 });
 
 describe("the effect builder", () => {
   it("builds a closed mechanic from the preset fields and reads it back", () => {
     const f = { ...presetFields("damage_save", fieldsFrom({}, "damage_save", 1)), dice: "2d6", damageType: "psychic" as const, saveAbility: "wis" as const, condition: "frightened", repeatAt: "end" as const, target: "creatures" as const };
-    const mech = buildMech("arcane_word", "Arcane Word", f);
-    expect(mech).toMatchObject({ level: 1, delivery: { kind: "save", ability: "wis", success: "half" }, targeting: { kind: "creatures", max: 1 }, tier: "partial" });
-    expect(mech.on_land).toEqual([{ kind: "damage", dice: "2d6", type: "psychic" }, { kind: "condition", condition: "frightened", repeat_save: { ability: "wis", at: "end" } }]);
+    const mech = buildMech("ID_ARCANE_WORD", "Arcane Word", "2024", f);
+    expect(mech).toMatchObject({ v: 1, edition: "2024", level: 1, delivery: { kind: "save", ability: "wis", success: "half" }, targeting: { kind: "creatures", max: "1" }, tier: "partial" });
+    expect(mech.on_land).toEqual([{ kind: "damage", dice: "2d6", damage_type: "psychic" }, { kind: "condition", condition: "frightened", repeat_save: { ability: "wis", at: "end" } }]);
     expect(guessPreset(mech)).toBe("damage_save");
     expect(fieldsFrom(mech, "damage_save", 1)).toMatchObject({ dice: "2d6", condition: "frightened", saveAbility: "wis" });
   });

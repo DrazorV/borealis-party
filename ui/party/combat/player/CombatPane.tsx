@@ -114,8 +114,9 @@ function PromptCard({ combat, prompt, me, modifier, saveOf }: { combat: PlayerCo
     );
   }
   if (prompt.kind === "cast_save") {
-    const what = `${prompt.ability.toUpperCase()} save${prompt.dc != null ? ` DC ${prompt.dc}` : ""} against ${prompt.name}`;
-    const send = (input: D20Input) => go(() => playerWrite(combat, "resolve_cast_row", { cast: prompt.cast, target: me.id, roll: input },
+    const what = `${prompt.ability.toUpperCase()} save${prompt.dc != null ? ` DC ${prompt.dc}` : ""}${prompt.spell ? ` against ${prompt.spell}` : ""}`;
+    const send = (input: D20Input) => go(() => playerWrite(combat, "resolve_cast_row", { cast: prompt.cast, target: prompt.combatant, ...(prompt.ray != null ? { ray: prompt.ray } : {}),
+      roll: input.kind === "typed" ? { kind: "typed", total: input.total } : { kind: "app" } },
       (c) => ({ ...c, prompts: c.prompts.filter((p) => p.id !== prompt.id) })));
     return (
       <section className="combat-prompt" role="alertdialog" aria-label={what}>

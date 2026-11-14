@@ -3,7 +3,7 @@
  * slot. Only for showing; the server compiles the CastSpec and rolls (D21). Variables: slot, slot_above, mod,
  * cantrip_tier. Unknown text is returned as it is.
  */
-import type { Formula, SpellMech } from "./spellTypes";
+import type { DiceTerm, Formula, SpellMech } from "./types";
 
 export interface FormulaVars { slot?: number; slot_above?: number; mod?: number; cantrip_tier?: number }
 
@@ -67,22 +67,25 @@ export function evalCount(f: Formula, vars: FormulaVars): number | null {
   return /^-?\d+$/.test(v) ? Number(v) : null;
 }
 
-export const varsFor = (mech: Pick<SpellMech, "level" | "mod">, slot: number | undefined, cantripTier = 1): FormulaVars => ({
-  slot: slot ?? mech.level, slot_above: Math.max(0, (slot ?? mech.level) - mech.level), mod: mech.mod ?? 0, cantrip_tier: cantripTier,
+export const varsFor = (mech: Pick<SpellMech, "level">, slot: number | undefined, cantripTier = 1, mod = 0): Required<FormulaVars> => ({
+  slot: slot ?? mech.level, slot_above: Math.max(0, (slot ?? mech.level) - mech.level), mod, cantrip_tier: cantripTier,
 });
 
+export const termText = (t: DiceTerm): string => `${t.sign === "minus" ? "−" : "+"}${t.count}d${t.sides}`;
+
 /** The cast sheet's one-line preview: "9d6 fire at L4 · DEX save half · up to 2 targets". */
-export function preview(mech: SpellMech, slot: number | undefined, cantripTier = 1): string {
-  const vars = varsFor(mech, slot, cantripTier);
+export function preview(mech: SpellMech, slot: number | undefined, cantripTier = 1, mod = 0): string {
+  const vars = varsFor(mech, slot, cantripTier, mod);
   const bits: string[] = [];
   for (const p of [...(mech.on_land ?? []), ...(mech.always ?? [])]) {
-    if (p.kind === "damage") bits.push(`${evalFormula(p.dice, vars)}${p.type ? ` ${p.type}` : ""}`);
-    if (p.kind === "heal") bits.push(`heal ${evalFormula(p.dice, vars)}${p.add_mod ? " + mod" : ""}`);
+    if (p.kind === "damage") bits.push(`${evalFormula(p.dice, vars)}${p.damage_type ? ` ${p.damage_type}` : ""}`);
+    if (p.kind === "heal") bits.push(`heal ${evalFormula(p.dice, vars)}${p.add_mod ? (mod ? `+${mod}` : " + mod") : ""}`);
     if (p.kind === "temp_hp") bits.push(`${evalFormula(p.dice, vars)} temp HP`);
     if (p.kind === "condition") bits.push(p.condition);
     if (p.kind === "ac_base") bits.push(`AC ${p.base}${p.add_dex ? " + DEX" : ""}`);
-    if (p.kind === "ac_bonus") bits.push(`AC +${p.value}`);
-    if (p.kind === "roll_dice") bits.push(`${p.sign === -1 ? "−" : "+"}${p.term} ${p.on}s`);
+    if (p.kind === "ac_bonus") bits.push(`AC +${p.n}`);
+    if (p.kind === "ac_min") bits.push(`AC at least ${p.n}`);
+    if (p.kind === "roll_dice") bits.push(`${termText(p.term)} on ${p.on}`);
   }
   const at = mech.level > 0 && slot !== undefined ? ` at L${slot}` : "";
   const head = bits.length ? `${bits.join(", ")}${at}` : at.trim();

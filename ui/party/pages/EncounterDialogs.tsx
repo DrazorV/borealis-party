@@ -8,7 +8,7 @@ import {
   type Effect, type EffectFields, type Encounter, type InitMode, type OverridesForm, type Rule, type RuleFields, type Warning,
 } from "../api/overrides/encounters";
 import { EncounterStatBlock } from "./EncounterStatBlock";
-import { SpellsSection, type SpellsValue } from "./EncounterSpells";
+import { overrideSpells, SpellsSection, type SpellsValue } from "./EncounterSpells";
 
 /** Run `work`, closing on success and showing the error in the dialog otherwise. */
 function useSave(onClose: () => void) {
@@ -91,10 +91,10 @@ export function CreatureDialog({ creature, owner, onSave, onClose }: {
   const [notes, setNotes] = useState(o.notes ?? "");
   const [initMode, setInitMode] = useState<InitMode>(creature.initMode);
   const [spells, setSpells] = useState<SpellsValue>(() => ({
-    spells: o.spells ?? [],
-    slots: Object.fromEntries(Object.entries(o.slots ?? {}).map(([l, n]) => [l, String(n)])),
-    dc: o.casting?.dc != null ? String(o.casting.dc) : "",
-    attack: o.casting?.attack != null ? String(o.casting.attack) : "",
+    spells: o.spells?.spells ?? [],
+    slots: Object.fromEntries(Object.entries(o.spells?.slots ?? {}).map(([l, n]) => [l, String(n)])),
+    dc: o.spells?.saveDc != null ? String(o.spells.saveDc) : "",
+    attack: o.spells?.attackBonus != null ? String(o.spells.attackBonus) : "",
   }));
   const [showBlock, setShowBlock] = useState(false);
   const [rolled, setRolled] = useState("");
@@ -135,9 +135,12 @@ export function CreatureDialog({ creature, owner, onSave, onClose }: {
       saves: saveForm,
       traits: traits.filter((t) => t.name.trim()).map((t) => ({ name: t.name.trim(), text: t.text.trim() })),
       notes: notes.trim() ? notes.trim() : null,
-      ...(spells.spells.length || o.spells?.length ? { spells: spells.spells } : {}),
-      ...(Object.keys(slots).length ? { slots } : o.slots ? { slots: null } : {}),
-      ...(dc != null || attack != null ? { casting: { ...(dc != null ? { dc } : {}), ...(attack != null ? { attack } : {}) } } : o.casting ? { casting: null } : {}),
+      ...(spells.spells.length || Object.keys(slots).length || dc != null || attack != null
+        ? { spells: {
+          spells: overrideSpells(spells.spells).map((s) => (s.frequency.kind === "slots" ? { ...s, frequency: { ...s.frequency, slots: slots[String(s.frequency.level)] ?? 0 } } : s)),
+          ...(Object.keys(slots).length ? { slots } : {}), ...(dc != null ? { saveDc: dc } : {}), ...(attack != null ? { attackBonus: attack } : {}),
+        } }
+        : o.spells ? { spells: null } : {}),
     };
     void save(() => onSave({
       dmLabel: dmLabel.trim(), publicName: publicName.trim(), hpMode: fixed ? "fixed" : "encounter", hpMax: fixed ? fixedHp : null,

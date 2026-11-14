@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "../../../src/components/Button";
 import { Segmented } from "../../../src/components/Tabs";
 import { CastSheet } from "./CastSheet";
 import { RollInput } from "./RollInput";
 import { isDefeated } from "./derive";
+import { spellDetail } from "./spellApi";
 import { asCommand, COVERAGE_HELP, COVERAGE_WORD, mechOf, spellOf } from "./spellTypes";
 import { spellLists } from "./statRef";
 import type { AddPreset } from "./SummonPanel";
@@ -77,7 +78,8 @@ function Spells({ state, c, block, blockOf, send, disabled, onDefine }: {
   const lists = spellLists(block);
   const slots = Object.entries(c.spell_slots ?? {}).sort(([a], [b]) => Number(a) - Number(b));
   const resources = Object.entries(c.resources ?? {});
-  const buttons = turnButtons(state, c, block).filter((b) => b.kind === "spell");
+  const suggested = useSuggested(turnButtons(state, c, block).filter((b) => b.coverage === "ruling" && spellOf(b.ability!)?.key).map((b) => spellOf(b.ability!)!.key!));
+  const buttons = turnButtons(state, c, block, suggested).filter((b) => b.kind === "spell");
   const known = new Set(buttons.map((b) => b.ability!.name.toLowerCase()));
   // Spells the block names that aren't abilities of this combatant: cast as a ruling (the slot and action only).
   const loose = lists.flatMap((l) => l.lists.flatMap((x) => x.spells.map((s) => ({ name: s.replace(/\s*\(.*\)$/, ""), label: x.label }))))
@@ -127,7 +129,7 @@ function Spells({ state, c, block, blockOf, send, disabled, onDefine }: {
                 <span className="cb-spell-name">{a.name}</span>
                 <span className="cb-small muted">{lvl === 0 ? "Cantrip" : `L${lvl}`} · {b.detail}</span>
                 <span className={`cb-cov cb-cov-${cov}`} title={COVERAGE_HELP[cov]}>{COVERAGE_WORD[cov]}</span>
-                {(cov === "ruling" || cov === "unlinked") && <Button small variant="ghost" disabled={disabled} onClick={() => onDefine(a)}>Define effect…</Button>}
+                {cov === "ruling" && spellOf(a)?.key && <Button small variant="ghost" disabled={disabled} onClick={() => onDefine(a)}>Define effect…</Button>}
                 {cov === "suggested" && <Button small variant="ghost" disabled={disabled} onClick={() => onDefine(a)}>Check and confirm…</Button>}
                 <Button small variant="primary" disabled={disabled || Boolean(b.reason)} title={b.reason ?? `Cast ${a.name}`} onClick={() => setCasting(b)}>Cast</Button>
                 {b.reason && <span className="cb-small cb-why">{b.reason}</span>}
@@ -144,18 +146,35 @@ function Spells({ state, c, block, blockOf, send, disabled, onDefine }: {
               <span className="cb-small muted">{s.label}</span>
               <span className="cb-cov cb-cov-unlinked" title={COVERAGE_HELP.unlinked}>{COVERAGE_WORD.unlinked}</span>
               <Button small disabled={disabled || isDefeated(c)} onClick={() => send(asCommand({ command: "cast_spell", caster: c.id, targets: [],
-                adhoc: { key: s.name.toLowerCase().replace(/\W+/g, "_"), name: s.name, level: 0, concentration: false, cast: "action", tier: "ruling", targeting: { kind: "self" }, delivery: { kind: "auto" } } }))}>Cast (ruling)</Button>
+                spec: { v: 1, origin: { kind: "ruling" }, mech: { v: 1, key: s.name.toLowerCase().replace(/\W+/g, "_"), edition: state.edition, name: s.name, level: 0, cast: "action", tier: "ruling", targeting: { kind: "self" }, delivery: { kind: "auto" } } } }))}>Cast (ruling)</Button>
             </li>
           ))}
         </ul>
       )}
       {lists.length === 0 && slots.length === 0 && byLevel.length === 0 && <p className="muted cb-small">No spellcasting in this stat block.</p>}
-      {casting && <CastSheet state={state} caster={c} button={casting} blockOf={blockOf} send={send} onDone={() => setCasting(null)} />}
+      {casting && <CastSheet state={state} caster={c} block={block} button={casting} blockOf={blockOf} send={send} onDone={() => setCasting(null)} />}
     </div>
   );
 }
 
 const levelOf = (a: Ability): number => mechOf(a)?.level ?? spellOf(a)?.level ?? 0;
+
+/**
+ * The spells the server has a tag draft for ("Suggested"): asked once per spell key while the tab is open. The
+ * ability itself doesn't say; the draft comes from the user's own 5etools data on the server.
+ */
+function useSuggested(keys: string[]): ReadonlySet<string> {
+  const [found, setFound] = useState<ReadonlySet<string>>(new Set());
+  const wanted = [...new Set(keys)].sort().join("|");
+  useEffect(() => {
+    let live = true;
+    const list = wanted ? wanted.split("|") : [];
+    Promise.all(list.map((k) => spellDetail(k).then((d) => (d?.suggested ? k : null), () => null)))
+      .then((hits) => { if (live) setFound(new Set(hits.filter((h): h is string => h !== null))); });
+    return () => { live = false; };
+  }, [wanted]);
+  return found;
+}
 
 function Traits({ c, block }: { c: Combatant; block: StatBlock | undefined }) {
   const traits = block?.traits ?? [];

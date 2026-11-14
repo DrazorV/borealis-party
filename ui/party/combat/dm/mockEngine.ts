@@ -7,7 +7,6 @@ import { parseNotation, rollExpr, seededDie, rollD20, type DieRoller } from "../
 import { INCAPACITATING, type D20Input, type D20Result, type DiceInput, type DiceResult } from "./common";
 import { abilityStatus, byId, concentrationDc, conditionsOf, effectiveInitiative, isAlive, poolOf, poolResetOwner, takesTurn, turnOrder } from "./derive";
 import { runSpell, SPELL_COMMANDS, type SpellHost } from "./mockSpells";
-import type { SpellCommand } from "./spellTypes";
 import type { Combatant, CombatState, Command, DamageClause, DamageResult, DmEvent, Effect, EffectSpec, StatBlockSnapshot } from "./types";
 
 /** The mock's own record of a combat: the state, its log and stat blocks (the mock server turns it into the DM view). */
@@ -98,14 +97,14 @@ class Run {
       s: this.s, statblocks: this.m.view.statblocks,
       ev: (a, b, c, d) => this.ev(a, b, c, d), c: (id) => this.c(id),
       d20: (roll) => d20(roll, this.m.die), dice: (input) => dice(input, this.m.die),
-      damage: (cmd) => this.damage(cmd), addEffect: (spec) => this.addEffect(spec as EffectSpec),
+      damage: (cmd) => this.damage(cmd), addEffect: (spec) => this.addEffect(spec),
       startConcentration: (c, name) => this.startConcentration(c, name), refuse,
     };
   }
 
   run(cmd: Command) {
     const s = this.s;
-    if (SPELL_COMMANDS.has(cmd.command)) { runSpell(this.spellHost(), cmd as unknown as SpellCommand); return; }
+    if (SPELL_COMMANDS.has(cmd.command)) { runSpell(this.spellHost(), cmd as Parameters<typeof runSpell>[1]); return; }
     switch (cmd.command) {
       case "add_combatant": {
         if (byId(s, cmd.combatant.id)) refuse(`Combatant ${cmd.combatant.id} already exists.`);

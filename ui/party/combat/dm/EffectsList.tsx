@@ -6,20 +6,27 @@ import { RollInput } from "./RollInput";
 import { byId, durationText, effectsOn, isDefeated } from "./derive";
 import { EffectDialog, draftSpecs, emptyDraft } from "./dialogs";
 import { expectCast } from "./castFocus";
+import { evalFormula, termText } from "./formula";
 import { asCommand, asSpellEffect, type SpellEffect } from "./spellTypes";
 import type { Combatant, Command, CombatState, Effect, Modifier } from "./types";
 
+const signedN = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
+
 const modText = (m: Modifier): string => {
-  const x = m as unknown as { kind: string; base?: number; add_dex?: boolean; value?: number };
-  if (x.kind === "ac_base") return `AC ${x.base}${x.add_dex ? " + DEX" : ""}`;
-  if (x.kind === "ac_min") return `AC at least ${x.value}`;
   switch (m.kind) {
-    case "ac": return `AC ${m.value >= 0 ? "+" : ""}${m.value}`;
-    case "speed_add": return `speed ${m.value >= 0 ? "+" : ""}${m.value} ft`;
+    case "ac": return `AC ${signedN(m.value)}`;
+    case "ac_base": return `AC ${m.value.base}${m.value.add_dex ? " + DEX" : ""}`;
+    case "ac_min": return `AC at least ${m.value}`;
+    case "speed_add": return `speed ${signedN(m.value)} ft`;
     case "speed_multiply": return `speed ×${m.value}`;
     case "speed_halve": return "speed halved";
     case "speed_zero": return "speed 0";
+    case "speed_set_mode": return `${m.value.mode} ${m.value.ft} ft`;
     case "cover": return m.value === "half" ? "half cover" : "three-quarters cover";
+    case "roll_dice": return `${termText(m.value.term)} on ${m.value.on}`;
+    case "roll_mode": return `${m.value.mode} on ${m.value.on.replace("_", " ")}`;
+    case "defense": return `${m.value.defense === "resist" ? "resists" : m.value.defense === "immune" ? "immune to" : "vulnerable to"} ${m.value.damage_type}`;
+    case "max_hp": return `max HP ${signedN(m.value)}`;
   }
 };
 
@@ -70,7 +77,7 @@ function EffectRow({ e, state, send, disabled, open, toggle }: { e: Effect; stat
   ].filter(Boolean);
   // The whole spell: its source's concentration if it holds it, else every effect of that cast.
   const dismissSpell = () => {
-    if (source && fx.spell && source.concentration?.name === fx.spell.name) { send({ command: "end_concentration", id: source.id }); return; }
+    if (source && fx.spell && source.concentration?.name === e.name) { send({ command: "end_concentration", id: source.id }); return; }
     for (const o of state.effects.map(asSpellEffect).filter((o) => o.spell?.key === fx.spell?.key && o.source === e.source)) send({ command: "remove_effect", effect: o.id });
   };
   return (
@@ -85,16 +92,16 @@ function EffectRow({ e, state, send, disabled, open, toggle }: { e: Effect; stat
         <Button small disabled={disabled} onClick={() => send({ command: "remove_effect", effect: e.id })} aria-label={`End ${e.name}`}>End</Button>
         {e.charges != null && <Button small disabled={disabled || e.charges <= 0} onClick={() => send({ command: "use_charge", effect: e.id })}>Use 1</Button>}
         {e.repeat_save && <Button small aria-expanded={saving} disabled={disabled} onClick={() => setSaving(!saving)}>Repeat save</Button>}
-        {fx.zone && <Button small disabled={disabled} onClick={() => setZoning(true)}>Apply zone to…</Button>}
+        {fx.spell?.zone && <Button small disabled={disabled} onClick={() => setZoning(true)}>Apply zone to…</Button>}
         {fx.spell && !fx.dismiss_on_end && <Button small variant="ghost" disabled={disabled} onClick={dismissSpell}>Dismiss spell</Button>}
-        {fx.ends_on?.includes("attack") && <Button small variant="warning" disabled={disabled} onClick={() => send({ command: "remove_effect", effect: e.id })}>It attacked: end</Button>}
+        {fx.ends_on_attack && <Button small variant="warning" disabled={disabled} onClick={() => send({ command: "remove_effect", effect: e.id })}>It attacked: end</Button>}
       </div>
       {open && e.detail && <p className="cb-small cb-fx-detail">{e.detail}</p>}
       {e.repeat_save && saving && (
         <RollInput kind="d20" label={`${e.repeat_save.ability.toUpperCase()} save DC ${e.repeat_save.dc}`} disabled={disabled}
           onSubmit={(roll) => { setSaving(false); send({ command: "resolve_effect_save", effect: e.id, roll }); }} />
       )}
-      {zoning && fx.zone && <ZoneDialog state={state} e={fx} onDone={(targets) => { setZoning(false); if (targets?.length) { expectCast(e.source ?? e.target); send(asCommand({ command: "apply_zone", effect: e.id, targets })); } }} />}
+      {zoning && fx.spell?.zone && <ZoneDialog state={state} e={fx} onDone={(targets) => { setZoning(false); if (targets?.length) { expectCast(e.source ?? e.target); send(asCommand({ command: "apply_zone", effect: e.id, targets })); } }} />}
     </li>
   );
 }
@@ -102,12 +109,13 @@ function EffectRow({ e, state, send, disabled, open, toggle }: { e: Effect; stat
 /** "Apply zone to…": who is in the area this time (the DM taps; nothing is measured). */
 function ZoneDialog({ state, e, onDone }: { state: CombatState; e: SpellEffect; onDone: (targets: string[] | null) => void }) {
   const [targets, setTargets] = useState<string[]>([]);
-  const z = e.zone!;
+  const z = e.spell!.zone!;
+  const dice = z.damage ? evalFormula(z.damage, e.spell!.vars ?? {}) : null;
   const live = state.combatants.filter((c) => !c.removed && !isDefeated(c) && c.id !== e.source);
   return (
     <Dialog title={`${e.name}: who is in it?`} onClose={() => onDone(null)}
       footer={<><Button onClick={() => onDone(null)}>Cancel</Button><Button variant="primary" disabled={!targets.length} onClick={() => onDone(targets)}>Ask for saves</Button></>}>
-      <p className="cb-small muted">DC {z.dc} {z.ability.toUpperCase()} save{z.damage ? ` · ${z.damage.dice}${z.damage.type ? ` ${z.damage.type}` : ""}` : ""}{z.half ? ", half on a success" : ""}.</p>
+      <p className="cb-small muted">{z.save ? `DC ${e.spell!.dc ?? "?"} ${z.save.ability.toUpperCase()} save` : "No save"}{dice ? ` · ${dice}${z.damage_type ? ` ${z.damage_type}` : ""}` : ""}{z.save?.success === "half" ? ", half on a success" : ""}.</p>
       <div className="cb-chips" role="group" aria-label="In the area">
         {live.map((c) => {
           const on = targets.includes(c.id);

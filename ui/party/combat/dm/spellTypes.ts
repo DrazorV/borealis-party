@@ -1,180 +1,61 @@
 /**
- * Spells and mechanics in combat (0.3.2): the JSON the tracker reads and the commands it sends for casts, statblock
- * actions and the standard actions, as the UI expects them from the engine (party-combat `spell.rs`, `command.rs`).
- *
- * PROVISIONAL: written before the engine's contract commit (shared note feat-spell-ui-contract-asks.md). When the
- * engine's types.ts mirror lands, these become re-exports of it and the casts below go away. Everything here is read
- * through the helpers at the bottom, so the tracker keeps working on a 0.3.1 state that has none of these fields.
+ * Spells and mechanics in combat (0.3.2): the tracker's helpers over the engine's JSON (party-combat `spell.rs`,
+ * mirrored in ./types.ts). Everything is read through these, so the tracker keeps working on a 0.3.1 state that has
+ * none of the new fields.
  */
-import type { AbilityName, D20Input, D20Result, DamageType, DiceInput } from "./common";
-import type { Ability, Combatant, Command, CombatState, Effect, EffectSpec } from "./types";
+import type { AbilityName, DamageType } from "./common";
+import { evalFormula } from "./formula";
+import type {
+  Ability, CastSpec, Combatant, Command, CombatState, Effect, FormulaVars, PendingCast, Primitive, RowOutcome, SpellMech, SpellTag,
+} from "./types";
 
-export type CastTime = "action" | "bonus" | "reaction" | "minute";
+export type {
+  AmountRoll, CastRow, CastSpec, CastTime, Delivery, Formula, PendingCast, Primitive, RowInput, RowOutcome, RowRoll, SpellLink,
+  SpellMech, SpellTag, StandardActionKind as StandardAction, SummonInfo, TargetFilter, Targeting, Tier, ZoneSpec,
+} from "./types";
+
 /** How well the app knows a spell's mechanics (the Spells tab's badge). */
 export type Coverage = "auto" | "partial" | "ruling" | "unlinked" | "suggested";
-export type Tier = "auto" | "partial" | "utility" | "ruling" | "uncurated";
 
-/** A small grammar over dice: "8d6+(slot_above)d6", "1+slot_above", "mod". */
-export type Formula = string | number;
+/**
+ * Optional fields the UI reads when the engine sends them (asked of the engine, not in its contract yet): an effect
+ * that ends when its target attacks (the "It attacked: end" reminder).
+ */
+export type SpellEffect = Effect & { ends_on_attack?: boolean };
 
-export type TargetFilter =
-  | { kind: "any" } | { kind: "willing" } | { kind: "ally" } | { kind: "enemy" }
-  | { kind: "type"; types: string[] };
+/** The tracker's `send` takes the engine's Command; kept as a no-op so call sites read the same. */
+export const asCommand = (c: Command): Command => c;
 
-export type Targeting =
-  | { kind: "self" }
-  | { kind: "creatures"; max: Formula; filter?: TargetFilter; range_ft?: number }
-  | { kind: "area"; shape: string; size_ft: number };
+// --- abilities ---
 
-export type Delivery =
-  | { kind: "auto" }
-  | { kind: "attack"; attack_kind?: "melee" | "ranged"; rays?: Formula }
-  | { kind: "save"; ability: AbilityName; success: "half" | "none" };
+/** The compiled definition: a spell's, or a stat block attack or save's. */
+export const specOf = (a: Ability): CastSpec | undefined => a.mech;
+/** The spell mechanics, for a spell (not a stat block action). */
+export const mechOf = (a: Ability): SpellMech | undefined => (a.mech && a.mech.origin.kind !== "statblock" ? a.mech.mech : undefined);
+export const spellOf = (a: Ability) => a.spell;
+export const isStatblockMech = (a: Ability): boolean => a.mech?.origin.kind === "statblock";
+export const castingOf = (c: Combatant) => c.casting ?? [];
 
-export interface SummonOption { cr: number; count: number }
-
-export type Primitive =
-  | { kind: "damage"; dice: Formula; type?: DamageType; choice?: DamageType[] }
-  | { kind: "heal"; dice: Formula; add_mod?: boolean }
-  | { kind: "temp_hp"; dice: Formula }
-  | { kind: "condition"; condition: string; repeat_save?: { ability: AbilityName; at: "start" | "end" }; ends_on_damage?: boolean }
-  | { kind: "ac_base"; base: number; add_dex: boolean }
-  | { kind: "ac_bonus"; value: number }
-  | { kind: "ac_min"; value: number }
-  | { kind: "roll_dice"; on: "attack" | "save"; term: string; sign?: 1 | -1 }
-  | { kind: "roll_mode"; on: string; mode: "adv" | "dis" }
-  | { kind: "speed"; op: "add" | "mult" | "zero"; value?: number }
-  | { kind: "zone"; ability: AbilityName; damage?: { dice: Formula; type?: DamageType }; half?: boolean }
-  /** 0.3.2: no spawning (user decision); the tracker shows the options and opens Add creature. */
-  | { kind: "summon_info"; options: SummonOption[]; creature_type?: string; per_slot?: Record<string, number>; note?: string }
-  | { kind: "ruling"; question: string; buttons: string[] }
-  | { kind: "note"; key: string; text?: string };
-
-/** A spell's mechanics (the engine's SpellMech, compiled for this caster as the CastSpec template). */
-export interface SpellMech {
-  key: string;
-  name: string;
-  edition?: "2014" | "2024";
-  level: number;
-  concentration: boolean;
-  cast: CastTime;
-  targeting: Targeting;
-  delivery: Delivery;
-  on_land?: Primitive[];
-  on_resist?: Primitive[];
-  always?: Primitive[];
-  /** In the caster's turns; null = until removed. */
-  duration_turns?: number | null;
-  tier: Tier;
-  /** The 2014 bonus-action rule and others, as short words. */
-  notes?: string[];
-  /** It ends when its target attacks / takes damage (Invisibility, Sanctuary): the "It attacked: end" reminder. */
-  ends_on?: ("attack" | "damage" | "cast")[];
-  dc?: number;
-  attack?: number;
-  mod?: number;
-}
-
-export interface SpellLink {
-  key: string;
-  element_id?: string;
-  name: string;
-  level: number;
-  ruleset?: string;
-  status: "linked" | "ambiguous" | "unlinked";
-  coverage?: Coverage;
-  /** At will, N per day, or a slot (Overrides.spells frequency). */
-  frequency?: "at_will" | { per_day: number } | "slot";
-}
-
-/** A statblock action's numbers (Feature.attack / Feature.save), when the engine copies them onto the ability. */
-export interface StatAttack { to_hit: number; damage?: { dice: string; type?: DamageType }[]; reach?: number; range?: number }
-export interface StatSave { ability: AbilityName; dc: number; half_on_success?: boolean; damage?: { dice: string; type?: DamageType }[] }
-
-export type SpellAbility = Ability & { spell?: SpellLink; mech?: SpellMech; attack?: StatAttack; save?: StatSave };
-
-export interface Casting { ability?: AbilityName; dc?: number; attack?: number; caster_level?: number; cantrip_tier?: number }
-export type SpellCombatant = Combatant & {
-  stats?: { mods: number[]; saves: number[]; magic_resistance?: boolean };
-  casting?: Casting[];
-};
-
-export type RowOutcome = "failed" | "saved" | "hit" | "miss" | "crit";
-
-export interface CastRow {
-  target: string;
-  kind: "save" | "attack";
-  ability?: AbilityName;
-  outcome?: RowOutcome;
-  roll?: D20Result;
-  lr_used?: boolean;
-}
-
-/** A cast or statblock action waiting on rolls (the "1 pending" badge). */
-export interface PendingCast {
-  id: string;
-  caster: string;
-  ability?: string;
-  name: string;
-  slot?: number;
-  dc?: number;
-  attack?: number;
-  delivery: Delivery;
-  rows: CastRow[];
-  damage?: { dice: string; type?: DamageType; half_on_save: boolean };
-  heal?: { dice: string };
-  status: "open" | "applied" | "cancelled";
-}
-
-export type StandardAction = "dodge" | "dash" | "disengage" | "help";
-
-/** The new commands (`party_combat::Command`, tagged by `command`). */
-export type SpellCommand =
-  | { command: "cast_spell"; caster: string; ability?: string; adhoc?: SpellMech; slot?: number; targets: string[];
-      rolls?: { target: string; roll: D20Input }[]; damage?: DiceInput; choices?: { damage_type?: DamageType }; precast?: boolean }
-  | { command: "resolve_cast_row"; cast: string; target: string; roll?: D20Input; outcome?: RowOutcome; use_lr?: boolean }
-  | { command: "apply_cast"; cast: string; damage?: DiceInput }
-  | { command: "cancel_cast"; cast: string; refund?: boolean }
-  | { command: "apply_zone"; effect: number; targets: string[] }
-  | { command: "perform_statblock"; id: string; ability: string; targets: string[]; as_reaction?: boolean }
-  | { command: "standard_action"; id: string; action: StandardAction; target?: string };
-
-export type AnyCommand = Command | SpellCommand;
-
-/** The tracker's `send` takes the engine's Command; the new ones go through it until the mirror has them. */
-export const asCommand = (c: SpellCommand): Command => c as unknown as Command;
-
-/** The effect fields 0.3.2 adds (EffectSpec.spell, dismiss_on_end, ends_on, zone). */
-export type SpellEffect = Effect & {
-  spell?: { key: string; name: string; cast?: string };
-  dismiss_on_end?: boolean;
-  ends_on?: ("attack" | "damage" | "cast")[];
-  zone?: { ability: AbilityName; dc: number; damage?: { dice: string; type?: DamageType }; half?: boolean };
-};
-export type SpellEffectSpec = EffectSpec & Partial<Pick<SpellEffect, "spell" | "dismiss_on_end" | "ends_on" | "zone">>;
-
-// --- readers that tolerate a state without the new fields ---
-
-export const castsOf = (state: CombatState): PendingCast[] => ((state as CombatState & { casts?: PendingCast[] }).casts ?? []);
-export const openCasts = (state: CombatState): PendingCast[] => castsOf(state).filter((c) => c.status === "open");
-export const spellOf = (a: Ability): SpellLink | undefined => (a as SpellAbility).spell;
-export const mechOf = (a: Ability): SpellMech | undefined => (a as SpellAbility).mech;
-export const castingOf = (c: Combatant): Casting[] => (c as SpellCombatant).casting ?? [];
-export const asSpellEffect = (e: Effect): SpellEffect => e as SpellEffect;
-
-/** Whether an ability is a spell: linked, with mechanics, or named in the block's spell lists. */
+/** Whether an ability is a spell: linked, with spell mechanics, or named in the block's spell lists. */
 export const isSpellAbility = (a: Ability, listed: Set<string>): boolean =>
-  Boolean(spellOf(a) || mechOf(a)) || listed.has(a.name.toLowerCase());
+  Boolean(a.spell || mechOf(a)) || listed.has(a.name.toLowerCase());
 
-export function coverageOf(a: Ability): Coverage {
-  const link = spellOf(a);
-  if (link?.coverage) return link.coverage;
-  if (link?.status === "unlinked") return "unlinked";
-  const tier = mechOf(a)?.tier;
+/**
+ * The badge. The engine's origin says where the rules come from: the curated SRD table (its tier), the DM's own
+ * definition, or none (a ruling). A spell with no key in the DM's content is Unlinked. "Suggested" is the server's
+ * (a tag draft waits for the DM), passed in by the caller.
+ */
+export function coverageOf(a: Ability, suggested = false): Coverage {
+  const spec = a.mech;
+  if (!spec || spec.origin.kind === "statblock") {
+    if (a.spell && !a.spell.key) return "unlinked";
+    return suggested ? "suggested" : "ruling";
+  }
+  if (spec.origin.kind === "ruling") return suggested ? "suggested" : "ruling";
+  const tier = spec.mech.tier;
   if (tier === "auto") return "auto";
   if (tier === "partial" || tier === "utility") return "partial";
-  if (tier) return "ruling";
-  return link ? "ruling" : "unlinked";
+  return suggested ? "suggested" : "ruling";
 }
 
 export const COVERAGE_WORD: Record<Coverage, string> = {
@@ -188,5 +69,53 @@ export const COVERAGE_HELP: Record<Coverage, string> = {
   suggested: "Drafted from your own spell data's tags: check it once and confirm.",
 };
 
-export const castWord = (t: CastTime): string => (t === "bonus" ? "Bonus" : t === "reaction" ? "Reaction" : t === "minute" ? "1 min" : "Action");
-export const kindOfCast = (t: CastTime): Ability["kind"] => (t === "bonus" ? "bonus_action" : t === "reaction" ? "reaction" : "action");
+/** The server's spell list coverage words ("defined", "linked", or a tier) as a badge. */
+export function coverageWord(server: string): Coverage {
+  if (server === "auto" || server === "defined") return server === "auto" ? "auto" : "partial";
+  if (server === "partial" || server === "utility" || server === "linked") return "partial";
+  if (server === "suggested") return "suggested";
+  return "ruling";
+}
+
+export const kindOfCast = (t: SpellMech["cast"]): Ability["kind"] => (t === "bonus" ? "bonus_action" : t === "reaction" ? "reaction" : "action");
+
+// --- pending casts ---
+
+export const castsOf = (state: CombatState): PendingCast[] => state.casts ?? [];
+/** The casts waiting on rolls or amounts (applied and cancelled ones leave the list). */
+export const openCasts = (state: CombatState): PendingCast[] => castsOf(state);
+
+export const castName = (k: PendingCast): string => k.spec.mech.name;
+
+/** One amount the cast asks for (damage, healing, temp HP), in the definition's order. */
+export interface CastAmount { kind: "damage" | "heal" | "temp_hp"; dice: string; type?: DamageType }
+
+const AMOUNT_KINDS = new Set(["damage", "heal", "temp_hp"]);
+
+/** The vars a pending cast was compiled with (the engine sends them; else the slot it used). */
+export function castVars(k: PendingCast): FormulaVars {
+  if (k.vars) return k.vars;
+  const level = k.spec.mech.level;
+  const slot = k.slot ?? level;
+  return { slot, slot_above: Math.max(0, slot - level), mod: k.spec.mod ?? 0, cantrip_tier: k.spec.cantrip_tier ?? 1 };
+}
+
+/** The amounts a pending cast asks for, with its dice at its slot ("9d6 fire"). */
+export function castAmounts(k: PendingCast): CastAmount[] {
+  const vars = castVars(k);
+  return (k.spec.mech.on_land ?? []).filter((p) => AMOUNT_KINDS.has(p.kind)).map((p) => {
+    const q = p as Extract<Primitive, { kind: "damage" | "heal" | "temp_hp" }>;
+    const dice = evalFormula(q.dice, vars) + ("add_mod" in q && q.add_mod && vars.mod ? `+${vars.mod}` : "");
+    return { kind: q.kind, dice: dice.replace(/\+-/g, "-"), ...(q.kind === "damage" ? { type: k.choices?.damage_type ?? q.damage_type } : {}) };
+  });
+}
+
+export const halfOnSave = (k: PendingCast): boolean => k.spec.mech.delivery.kind === "save" && k.spec.mech.delivery.success === "half";
+export const rowKind = (k: PendingCast): "save" | "attack" | "auto" => k.spec.mech.delivery.kind;
+export const rowAbility = (k: PendingCast): AbilityName | undefined => (k.spec.mech.delivery.kind === "save" ? k.spec.mech.delivery.ability : undefined);
+export const landed = (o: RowOutcome | undefined): boolean => o === "failed" || o === "hit" || o === "crit" || o === "lands";
+
+// --- effects ---
+
+export const asSpellEffect = (e: Effect): SpellEffect => e as SpellEffect;
+export const tagOf = (e: Effect): SpellTag | undefined => e.spell;

@@ -159,28 +159,19 @@ export function mockCombatServer(seed?: MockCombat[], sharing?: MockSharing): Mo
           }
           const args = b.args ?? {};
           if (action === "undo") undo(m, undefined, Boolean(args.force));
-          else if (action === "add_creature" && typeof args.elementId === "string") {
-            // 0.3.2: from the DM's bestiary, controlled by a caster, optionally bound to its concentration.
+          else if (action === "summon" && typeof args.elementId === "string") {
+            // 0.3.2: a creature of the DM's bestiary under a caster's control (the server builds it from the element).
             const beast = MOCK_BEASTS.find((x) => x.id === args.elementId);
             if (!beast) throw fail("refused", "That creature isn't in your content.");
-            const owner = typeof args.owner === "string" ? m.view.state.combatants.find((c) => c.id === args.owner) : undefined;
-            for (let i = 0; i < Number(args.count ?? 1); i++) {
-              const n = m.view.state.combatants.filter((c) => c.label.startsWith(beast.name)).length + 1;
-              const id = `${beast.id.toLowerCase()}-${++made}`;
-              const c: Combatant = {
-                id, kind: "creature", label: `${beast.name} ${n}`, public_name: beast.name, visible: args.hidden === false, ever_revealed: false, removed: false,
-                initiative: null, initiative_bonus: 1, tiebreak: 0, absent: false, hp: { current: beast.hp ?? 10, max: beast.hp ?? 10, temp: 0 }, hp_authority: "engine",
-                zero_hp: "dies", life: { state: "alive" }, ac: beast.ac, speed: { walk: 40 }, economy: { action: false, bonus_action: false, reaction: false },
-                abilities: [{ key: "bite", name: "Bite", kind: "action", text: "A bite." }],
-                ...(owner ? { owner_id: owner.id, controller: { kind: "dm" as const }, initiative_mode: (args.initiativeMode as "own" | "after_owner" | undefined) ?? "after_owner" } : {}),
-              };
-              execute(m, { command: "add_combatant", combatant: c, roll_initiative: args.rollInitiative !== false && !owner });
-              m.view.statblocks[id] = { name: beast.name, data: { ac: [{ value: beast.ac ?? 10 }], hp: { average: beast.hp ?? 10 } } };
-              if (owner && args.bindToConcentration && owner.concentration) {
-                execute(m, { command: "add_effect", effect: { name: owner.concentration.name, source: owner.id, target: id, concentration: true, dismiss_on_end: true,
-                  detail: `Bound to ${owner.concentration.name}: it goes when the concentration ends.` } as never });
-              }
-            }
+            const n = m.view.state.combatants.filter((c) => c.label.startsWith(beast.name)).length + 1;
+            const id = `summon-${++made}`;
+            const { elementId: _e, ...rest } = args;
+            void _e;
+            execute(m, { command: "summon", ...rest, combatant: {
+              id, kind: "creature", label: `${beast.name} ${n}`, public_name: beast.name, visible: true, hp: { current: beast.hp ?? 10, max: beast.hp ?? 10, temp: 0 },
+              ac: beast.ac, initiative_bonus: 1, speed: { walk: 40 }, abilities: [{ key: "bite", name: "Bite", kind: "action", text: "A bite." }],
+            } } as Command);
+            m.view.statblocks[id] = { name: beast.name, data: { ac: [{ value: beast.ac ?? 10 }], hp: { average: beast.hp ?? 10 } } };
           } else if (action === "add_creature") {
             const from = m.view.state.combatants.find((c) => c.id === args.copyOf);
             if (!from) throw fail("refused", "No such creature.");

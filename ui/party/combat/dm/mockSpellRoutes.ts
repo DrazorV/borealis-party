@@ -1,31 +1,40 @@
 /**
- * The mock server's 0.3.2 routes (./spellApi.ts): an SRD-only spell index with one copy per spell per edition, the
- * account's effect definitions, a tag draft, encounter precasts and a small SRD bestiary for Add creature. In memory.
+ * The mock server's 0.3.2 routes, shaped like feat/spell-server's (./spellApi.ts): an SRD-only spell list with one
+ * copy per spell per edition, a spell's details with a tag draft, the account's effect definitions
+ * (`/api/spell-mechanics`) and a small SRD bestiary for Add creature. Precasts are the encounter's (not mocked here).
  */
 import type { MonsterSummary } from "../../api/bestiary";
-import type { MechDef, MechDraft, Precast, SpellEntry } from "./spellApi";
+import type { MechRow, SpellDetail, SpellEntry } from "./spellApi";
+import type { SpellMech } from "./types";
 
-const S = (key: string, name: string, level: number, concentration: boolean, coverage: SpellEntry["coverage"], ruleset = "2024", text = "", alsoIn?: string[]): SpellEntry =>
-  ({ key, elementId: `ID_SRD_SPELL_${key.toUpperCase()}`, name, level, ruleset, concentration, coverage, source: ruleset === "2014" ? "SRD 5.1" : "SRD 5.2.1", text, ...(alsoIn ? { alsoIn } : {}) });
+interface MockSpell extends SpellEntry { text: string; draft?: SpellMech; checks?: string[] }
 
-export const MOCK_SPELLS: SpellEntry[] = [
-  S("fire_bolt", "Fire Bolt", 0, false, "auto", "2024", "Ranged spell attack. On a hit, the target takes 1d10 fire damage."),
+const S = (key: string, name: string, level: number, concentration: boolean, coverage: string, ruleset = "dnd2024", text = "", alsoIn: string[] = []): MockSpell => ({
+  key: `ID_SRD_SPELL_${key.toUpperCase()}${ruleset === "dnd2014" ? "_2014" : ""}`, name, level, ruleset, concentration, coverage,
+  source: ruleset === "dnd2014" ? "SRD 5.1" : "SRD 5.2.1", alsoIn: alsoIn.map((source, i) => ({ key: `COPY_${key}_${i}`, source, packId: "copy" })), text,
+});
+
+export const MOCK_SPELLS: MockSpell[] = [
+  S("fire_bolt", "Fire Bolt", 0, false, "auto", "dnd2024", "Ranged spell attack. On a hit, the target takes 1d10 fire damage."),
   S("sacred_flame", "Sacred Flame", 0, false, "auto"),
-  S("mage_armor", "Mage Armor", 1, false, "auto", "2024", "The target's base AC becomes 13 + its Dexterity modifier."),
+  S("mage_armor", "Mage Armor", 1, false, "auto", "dnd2024", "The target's base AC becomes 13 + its Dexterity modifier."),
   S("shield", "Shield", 1, false, "auto"),
   S("bless", "Bless", 1, true, "auto"),
   S("cure_wounds", "Cure Wounds", 1, false, "auto"),
   S("hold_person", "Hold Person", 2, true, "auto"),
   S("misty_step", "Misty Step", 2, false, "ruling"),
-  S("fireball", "Fireball", 3, false, "auto", "2024", "Each creature in a 20-foot-radius sphere makes a Dexterity saving throw, taking 8d6 fire damage on a failed save or half as much on a successful one.", ["a 5etools copy (hidden)"]),
-  S("fireball", "Fireball", 3, false, "auto", "2014", "A 20-foot-radius sphere: Dexterity saving throw, 8d6 fire damage on a failed save, half on a success."),
+  S("fireball", "Fireball", 3, false, "auto", "dnd2024", "Each creature in a 20-foot-radius sphere makes a Dexterity saving throw, taking 8d6 fire damage on a failed save or half as much on a successful one.", ["a 5etools copy"]),
+  S("fireball", "Fireball", 3, false, "auto", "dnd2014", "A 20-foot-radius sphere: Dexterity saving throw, 8d6 fire damage on a failed save, half on a success."),
   S("counterspell", "Counterspell", 3, false, "ruling"),
   S("haste", "Haste", 3, true, "partial"),
-  S("conjure_animals", "Conjure Animals", 3, true, "partial", "2014"),
+  S("fly", "Fly", 3, true, "auto"),
+  S("conjure_animals", "Conjure Animals", 3, true, "partial", "dnd2014"),
   S("spirit_guardians", "Spirit Guardians", 3, true, "partial"),
   S("greater_invisibility", "Greater Invisibility", 4, true, "auto"),
-  S("cone_of_cold", "Cone of Cold", 5, false, "suggested", "2024", "Each creature in a 60-foot cone makes a Constitution saving throw, taking 8d8 cold damage on a failed save or half as much on a successful one."),
-  S("arcane_word", "Arcane Word", 1, false, "unlinked", "2024", "A made-up homebrew spell: one creature within 60 feet makes a Wisdom save or takes 2d6 psychic damage and is frightened until the end of its next turn."),
+  { ...S("cone_of_cold", "Cone of Cold", 5, false, "ruling", "dnd2024", "Each creature in a 60-foot cone makes a Constitution saving throw, taking 8d8 cold damage on a failed save or half as much on a successful one."),
+    draft: { v: 1, key: "ID_SRD_SPELL_CONE_OF_COLD", edition: "2024", name: "Cone of Cold", level: 5, cast: "action", tier: "partial", targeting: { kind: "area", shape: "cone", size_ft: 0 },
+      delivery: { kind: "save", ability: "con", success: "none" }, on_land: [{ kind: "damage", dice: "8d8+(slot_above)d8", damage_type: "cold" }] },
+    checks: ["area_size", "half_on_save"] },
 ];
 
 const M = (id: string, name: string, cr: string, crValue: number, hp: number, ac: number): MonsterSummary => ({
@@ -49,15 +58,12 @@ const crNumber = (s: string | undefined): number | null => {
   return Number(s);
 };
 
-export interface MockSpellStore {
-  mechanics: Map<string, MechDef>;
-  precasts: Map<string, Precast[]>;
-  made: number;
-}
+export interface MockSpellStore { rows: MechRow[] }
 
-export const newSpellStore = (): MockSpellStore => ({ mechanics: new Map(), precasts: new Map(), made: 0 });
+export const newSpellStore = (): MockSpellStore => ({ rows: [] });
 
 const fail = (code: string, message: string) => ({ code, message });
+const entry = ({ text: _t, draft: _d, checks: _c, ...e }: MockSpell): SpellEntry => { void _t; void _d; void _c; return e; };
 
 /** Answers a 0.3.2 route, or returns `undefined` when the path isn't one. */
 export function spellRoute(store: MockSpellStore, method: string, path: string, body: unknown): unknown {
@@ -72,55 +78,45 @@ export function spellRoute(store: MockSpellStore, method: string, path: string, 
     const items = MOCK_BEASTS.filter((m) => (!text || m.name.toLowerCase().includes(text)) && (max == null || (m.crValue ?? 0) <= max) && (!types.length || types.includes(m.type ?? "")));
     return { total: items.length, offset: 0, limit: 50, items };
   }
-  if (parts[2] === "encounters" && parts[4] === "casts") {
-    const enc = parts[3]!;
-    const list = store.precasts.get(enc) ?? [];
-    if (method === "GET") return { items: list };
-    if (method === "POST") {
-      const { requestId: _r, ...fields } = b;
-      void _r;
-      const made = { ...(fields as Omit<Precast, "id">), id: `pc-${++store.made}` };
-      store.precasts.set(enc, [...list, made]);
-      return made;
+  if (parts[2] === "spell-mechanics") {
+    if (parts[3] === "export" && method === "GET") return { format: "borealis-party-spell-rules", version: 1, rows: store.rows };
+    if (parts[3] === "import" && method === "POST") {
+      const file = b as { format?: string; rows?: MechRow[] };
+      if (!Array.isArray(file.rows)) throw fail("invalid", "That isn't a spell rules file.");
+      for (const r of file.rows) store.rows = [...store.rows.filter((x) => !(x.spellKey === r.spellKey && x.ruleset === r.ruleset && x.kind === r.kind)), { ...r, origin: "import" }];
+      return { rows: file.rows.length };
     }
-    const i = list.findIndex((x) => x.id === parts[5]);
-    if (i < 0) throw fail("not_found", "No such precast spell.");
-    if (method === "PATCH") { list[i] = { ...list[i]!, ...(b as Partial<Precast>) }; return list[i]; }
-    if (method === "DELETE") { list.splice(i, 1); return {}; }
+    if (!parts[3] && method === "GET") return { rows: store.rows };
+    if (!parts[3] && method === "PUT") {
+      const r = b as unknown as MechRow;
+      const old = store.rows.find((x) => x.spellKey === r.spellKey && x.ruleset === r.ruleset && x.kind === r.kind);
+      const row: MechRow = { ...r, rev: (old?.rev ?? 0) + 1, schemaV: 1 };
+      store.rows = [...store.rows.filter((x) => x !== old), row];
+      return { row };
+    }
+    if (!parts[3] && method === "DELETE") {
+      const r = b as unknown as MechRow;
+      store.rows = store.rows.filter((x) => !(x.spellKey === r.spellKey && x.ruleset === r.ruleset && x.kind === r.kind));
+      return {};
+    }
   }
   if (parts[2] !== "spells") return undefined;
-  if (parts[3] === "search" && method === "POST") {
-    const text = String(b.text ?? "").toLowerCase();
-    const items = MOCK_SPELLS.filter((s) => (!text || s.name.toLowerCase().includes(text)) && (b.ruleset == null || s.ruleset === b.ruleset) && (b.level == null || s.level === b.level))
-      .map((s) => (store.mechanics.has(`${s.key}:${s.ruleset}`) && (s.coverage === "unlinked" || s.coverage === "ruling" || s.coverage === "suggested") ? { ...s, coverage: "partial" as const } : s));
-    return { items: items.slice(0, Number(b.limit ?? 50)) };
+  if (!parts[3] && method === "GET") {
+    const text = (q.get("text") ?? "").toLowerCase();
+    const ruleset = q.get("ruleset");
+    const items = MOCK_SPELLS.filter((s) => (!text || s.name.toLowerCase().includes(text)) && (!ruleset || s.ruleset === ruleset))
+      .map((s) => (store.rows.some((r) => r.spellKey === s.key && r.kind === "def") ? { ...entry(s), coverage: "defined" } : entry(s)));
+    return { total: items.length, offset: 0, items: items.slice(0, Number(q.get("limit") ?? 50)) };
   }
-  if (parts[3] === "mechanics") {
-    if (parts[4] === "export" && method === "GET") return { format: "borealis-party-spell-effects", version: 1, items: [...store.mechanics.values()] };
-    if (parts[4] === "import" && method === "POST") {
-      const file = b.file as { format?: string; items?: MechDef[] } | undefined;
-      if (file?.format !== "borealis-party-spell-effects" || !Array.isArray(file.items)) throw fail("invalid", "That isn't an exported effects file.");
-      for (const d of file.items) store.mechanics.set(`${d.key}:${d.ruleset}`, { ...d, origin: "import" });
-      return { imported: file.items.length };
-    }
-    if (!parts[4] && method === "GET") return { items: [...store.mechanics.values()] };
-    const key = `${parts[4]}:${q.get("ruleset") ?? "2024"}`;
-    if (method === "PUT") {
-      const def = { key: parts[4]!, ruleset: q.get("ruleset") ?? "2024", def: b.def as MechDef["def"], rev: (store.mechanics.get(key)?.rev ?? 0) + 1, origin: "builder" as const };
-      store.mechanics.set(key, def);
-      return def;
-    }
-    if (method === "DELETE") { store.mechanics.delete(key); return {}; }
-  }
-  if (parts[4] === "draft" && method === "GET") {
+  if (parts[3] && !parts[4] && method === "GET") {
     const s = MOCK_SPELLS.find((x) => x.key === parts[3]);
-    if (!s || s.coverage !== "suggested") return null;
-    const draft: MechDraft = {
-      preset: "damage_save", text: s.text, checks: ["delivery", "on_land", "targeting"],
-      def: { name: s.name, level: s.level, concentration: s.concentration, cast: "action", targeting: { kind: "area", shape: "cone", size_ft: 60 },
-        delivery: { kind: "save", ability: "con", success: "half" }, on_land: [{ kind: "damage", dice: "8d8+(slot_above)d8", type: "cold" }] },
+    if (!s) throw fail("not_found", "No such spell.");
+    const defined = store.rows.some((r) => r.spellKey === s.key && r.kind === "def");
+    const detail: SpellDetail = {
+      spell: entry(s), element: { id: s.key, name: s.name, source: s.source, description: s.text }, rows: store.rows.filter((r) => r.spellKey === s.key),
+      mechanics: null, suggested: s.draft && !defined ? { mech: s.draft, checks: s.checks ?? [] } : null, sourceHash: "mockhash",
     };
-    return draft;
+    return detail;
   }
   return undefined;
 }
