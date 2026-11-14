@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 
+use party_combat::spell::{SpellFrequency, SpellLink};
 use party_combat::{
     Ability, AbilityKind, AbilityName, Combatant, CombatantId, Condition, DamageClause, EffectSpec,
     EncounterRule, Hp, Pool, Reset, Resource,
@@ -26,6 +27,9 @@ pub struct CreatureInput {
     pub overrides: Overrides,
     /// The DM's label ("Goblin 2").
     pub label: String,
+    /// The row's `automation_json` (the raw 5etools spellcasting kept with its copy, 0.3.2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub automation: Option<String>,
 }
 
 /// `{str: T, dex: T, ...}` as upstream writes it.
@@ -219,6 +223,8 @@ pub struct PcInput {
     pub spellcasting: PcSpellcasting,
     pub play: PcPlay,
     pub card_only: bool,
+    /// The character level (`{"total": n}` or a number), for cantrip scaling.
+    pub level: Value,
 }
 
 impl PcInput {
@@ -286,6 +292,17 @@ impl PcInput {
         }
         out.truncate(12);
         out
+    }
+
+    /// The character level, when the snapshot says it.
+    #[must_use]
+    pub fn level_total(&self) -> Option<u8> {
+        let n = self
+            .level
+            .get("total")
+            .and_then(Value::as_u64)
+            .or_else(|| self.level.as_u64())?;
+        u8::try_from(n).ok().filter(|n| *n > 0)
     }
 
     /// A short hash of what the simulation read (report fingerprints).
@@ -426,6 +443,9 @@ pub struct SimSetup {
     #[serde(default)]
     pub opts: SimOpts,
     pub seed: u32,
+    /// The account's spell mechanics for this edition (0.3.3): what the casts use, as in the tracker.
+    #[serde(default)]
+    pub spells: crate::spells::SpellDefs,
 }
 
 /// Which side a combatant is on.
@@ -538,6 +558,28 @@ pub fn pc_combatant(id: &str, pc: &PcInput, hp_mode: PcHp) -> (Combatant, Vec<St
         }
     }
     c.spell_slots = slots;
+    // The numbers saves and casts need (the engine's save_mod and the spell compile read them).
+    let mut stats = party_combat::CombatStats {
+        creature_type: Some("humanoid".into()),
+        ..party_combat::CombatStats::default()
+    };
+    for a in AbilityName::ALL.iter().copied() {
+        stats.mods[a.index()] = pc.abilities.modifier.get(a);
+        stats.saves[a.index()] = pc.abilities.save_bonus(a);
+    }
+    c.stats = Some(stats);
+    for cl in &pc.spellcasting.classes {
+        let casting = party_combat::Casting {
+            ability: casting_ability(&cl.class_name),
+            dc: u32::try_from(cl.save_dc).ok().filter(|d| *d > 0),
+            attack: Some(cl.attack_bonus),
+            caster_level: pc.level_total(),
+            cantrip_tier: pc.level_total().map(party_combat::spell::cantrip_tier),
+        };
+        if !c.casting.contains(&casting) {
+            c.casting.push(casting);
+        }
+    }
     let mut keys = Vec::new();
     for (i, a) in pc.attacks.iter().enumerate() {
         let key = format!("atk_{}", i + 1);
@@ -558,21 +600,15 @@ pub fn pc_combatant(id: &str, pc: &PcInput, hp_mode: PcHp) -> (Combatant, Vec<St
     }
     for (i, s) in pc.spells().into_iter().enumerate() {
         let key = format!("spl_{}", i + 1);
-        let kind = crate::sheet::known_heal(&s.name, party_combat::Edition::Srd521, 0)
-            .map_or(AbilityKind::Action, |(_, k)| k);
-        c.abilities.push(Ability {
-            key: key.clone(),
-            name: s.name.clone(),
-            kind,
-            text: String::new(),
-            legendary_cost: None,
-            recharge: None,
-            uses: None,
-            group_limit: None,
-            requires_effect: None,
-            spell: None,
-            mech: None,
+        let mut a = Ability::new(key.clone(), s.name.clone(), AbilityKind::Action);
+        a.spell = Some(SpellLink {
+            key: (!s.id.is_empty()).then(|| s.id.clone()),
+            level: u8::try_from(s.level).unwrap_or(0),
+            frequency: SpellFrequency::Slot,
+            fixed_slot: None,
+            baked_in: false,
         });
+        c.abilities.push(a);
         keys.push(key);
     }
     for r in &pc.play.resources {
@@ -607,6 +643,21 @@ pub fn pc_combatant(id: &str, pc: &PcInput, hp_mode: PcHp) -> (Combatant, Vec<St
         keys.push(key);
     }
     (c, keys)
+}
+
+/// The spellcasting ability of a class by its name (INT, WIS or CHA casters; CHA for anything else).
+fn casting_ability(class: &str) -> AbilityName {
+    let c = class.to_lowercase();
+    if ["wizard", "artificer"].iter().any(|w| c.contains(w)) {
+        AbilityName::Int
+    } else if ["cleric", "druid", "ranger", "monk"]
+        .iter()
+        .any(|w| c.contains(w))
+    {
+        AbilityName::Wis
+    } else {
+        AbilityName::Cha
+    }
 }
 
 /// A combatant id in the simulation: `c1`, `c2`, ... (PCs first, then creatures in encounter order).

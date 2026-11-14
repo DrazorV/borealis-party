@@ -47,6 +47,7 @@ mod settings;
 mod shares;
 mod simulate;
 mod simulate_tools;
+mod spell_tools;
 mod spells;
 mod sync;
 #[cfg(test)]

@@ -145,16 +145,40 @@ pub struct Step {
     pub count: u32,
 }
 
-/// A spell a sheet lists, adjudicated (its text is not in the snapshot).
+/// A spell: its cast spec compiled for this caster (the tracker's definition, 0.3.3). Tier `auto` and `partial`
+/// run through `CastSpell` as they are; the rest are adjudicated after the cast spends its slot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpellDef {
-    pub level: u8,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dc: Option<i32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attack: Option<i32>,
-    #[serde(default)]
-    pub concentration: bool,
+    pub spec: Box<party_combat::spell::CastSpec>,
+}
+
+impl SpellDef {
+    #[must_use]
+    pub fn level(&self) -> u8 {
+        self.spec.mech.level
+    }
+
+    #[must_use]
+    pub fn concentration(&self) -> bool {
+        self.spec.mech.concentration
+    }
+}
+
+/// The sheet action of a spell ability whose spec is compiled (`None` for any other ability).
+#[must_use]
+pub fn spell_action(a: &party_combat::Ability) -> Option<ActionDef> {
+    a.spell.as_ref()?;
+    let spec = a.mech.as_ref()?;
+    Some(ActionDef {
+        key: a.key.clone(),
+        name: a.name.clone(),
+        kind: a.kind,
+        coverage: crate::spells::coverage(spec),
+        def: Def::Spell(SpellDef { spec: spec.clone() }),
+        text: a.text.clone(),
+        slot: None,
+        resource: None,
+    })
 }
 
 /// What an action does.
@@ -760,6 +784,13 @@ pub fn creature_sheet(c: &Combatant, data: Option<&MonsterData>) -> SimSheet {
             a.coverage = Coverage::Automated;
         }
     }
+    // Spells (0.3.2 spellbooks): one action per listed spell, after the features.
+    for a in &c.abilities {
+        if let Some(d) = spell_action(a) {
+            sheet.caster = true;
+            defs.push(d);
+        }
+    }
     sheet.actions = defs;
     sheet
 }
@@ -836,7 +867,7 @@ fn attacks_per_action(features: &[String]) -> u32 {
 
 /// The sheet of a PC from its snapshot subset. `keys` are the engine ability keys the setup gave its rows.
 #[must_use]
-pub fn pc_sheet(pc: &PcInput, keys: &[String], edition: party_combat::Edition) -> SimSheet {
+pub fn pc_sheet(pc: &PcInput, c: &Combatant, keys: &[String]) -> SimSheet {
     let mut sheet = SimSheet {
         int: pc.abilities.score(AbilityName::Int).unwrap_or(10),
         creature_type: "humanoid".into(),
@@ -914,34 +945,11 @@ pub fn pc_sheet(pc: &PcInput, keys: &[String], edition: party_combat::Edition) -
             resource: None,
         });
     }
-    // Spells: adjudicated (the snapshot has no spell text), one option per known combat spell.
-    let dc = pc.spellcasting.classes.first().map(|c| c.save_dc);
-    let atk = pc.spellcasting.classes.first().map(|c| c.attack_bonus);
-    let modifier = dc.map_or(0, |d| d - 8 - pc.stats.proficiency_bonus.max(2));
-    for (spell, key) in pc.spells().into_iter().zip(k.by_ref()) {
-        let (def, kind, coverage) = match known_heal(&spell.name, edition, modifier) {
-            Some((dice, kind)) => (Def::Heal { dice }, kind, Coverage::Automated),
-            None => (
-                Def::Spell(SpellDef {
-                    level: u8::try_from(spell.level).unwrap_or(0),
-                    dc,
-                    attack: atk,
-                    concentration: spell.concentration,
-                }),
-                AbilityKind::Action,
-                Coverage::Adjudicable,
-            ),
-        };
-        sheet.actions.push(ActionDef {
-            key: key.clone(),
-            name: spell.name.clone(),
-            kind,
-            def,
-            coverage,
-            text: String::new(),
-            slot: (spell.level > 0).then(|| u8::try_from(spell.level).unwrap_or(1)),
-            resource: None,
-        });
+    // Spells: the tracker's definitions, compiled for this caster (setup.rs keys `spl_N`).
+    for key in k.by_ref().take(pc.spells().len()) {
+        if let Some(d) = c.ability(key).and_then(spell_action) {
+            sheet.actions.push(d);
+        }
     }
     for (res, key) in pc.play.resources.iter().zip(k) {
         sheet.actions.push(ActionDef {
@@ -956,27 +964,6 @@ pub fn pc_sheet(pc: &PcInput, keys: &[String], edition: party_combat::Edition) -
         });
     }
     sheet
-}
-
-/// The two SRD healing spells the simulation knows without text (slot level 1): dice and casting time.
-pub(crate) fn known_heal(
-    name: &str,
-    edition: party_combat::Edition,
-    modifier: i32,
-) -> Option<(String, AbilityKind)> {
-    let new = edition == party_combat::Edition::Srd521;
-    let m = modifier.max(0);
-    match name.to_lowercase().as_str() {
-        "cure wounds" => Some((
-            format!("{}d8+{m}", if new { 2 } else { 1 }),
-            AbilityKind::Action,
-        )),
-        "healing word" => Some((
-            format!("{}d4+{m}", if new { 2 } else { 1 }),
-            AbilityKind::BonusAction,
-        )),
-        _ => None,
-    }
 }
 
 /// "DC 13 DEX" written in an attack row's bonus column (cantrips such as Sacred Flame).

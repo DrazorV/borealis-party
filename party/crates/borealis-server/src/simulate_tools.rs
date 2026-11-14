@@ -1,5 +1,5 @@
-//! The `sim_*` tools in the shared tool registry (`party-tools`, 0.3.1 part B), for `/api/mcp` and the in-app
-//! assistant alike, under the scope `encounters:simulate`.
+//! The `sim_*` tools in the shared tool registry (`party-tools`, 0.3.1 part B), for `/api/mcp`, under the scope
+//! `encounters:simulate`.
 //!
 //! Wiring at merge (two lines in `tools_backend.rs`): `external_specs()` returns `simulate_tools::tools()` (plus
 //! the other modules' specs), and `external()` sends every `sim_*` call to `simulate_tools::call_tool`. The
@@ -37,7 +37,7 @@ pub fn tools() -> Vec<ToolSpec> {
 /// Run one sim tool.
 ///
 /// # Errors
-/// The registry's errors: not found (also for anything not the caller's), invalid arguments, busy, unavailable.
+/// The registry's errors: not found (also for anything not the caller's), invalid arguments, busy.
 pub async fn call_tool(
     state: &AppState,
     user: &User,
@@ -53,7 +53,6 @@ pub async fn call_tool(
                 code: "busy".into(),
                 message: m,
             },
-            SimError::Unavailable(m) => ToolError::Unavailable(m),
             SimError::Internal => ToolError::Internal,
         })
 }

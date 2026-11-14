@@ -38,6 +38,8 @@ pub enum OptKind {
     Multiattack,
     Save,
     Heal,
+    /// A spell cast through the engine's `CastSpell` (0.3.3).
+    Spell,
     Adjudicate,
     Dodge,
     Dash,
@@ -63,6 +65,12 @@ pub struct Opt {
     /// The sheet action behind it.
     #[serde(skip)]
     pub action: Option<usize>,
+    /// The slot level a spell option is cast with.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u8>,
+    /// A target may be listed more than once (one per ray).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub repeat_targets: bool,
 }
 
 fn cost_of(kind: AbilityKind) -> &'static str {
@@ -144,21 +152,12 @@ pub fn summary(sim: &Sim, a: &ActionDef) -> String {
             .collect::<Vec<_>>()
             .join(", "),
         Def::Spell(s) => {
-            let lvl = if s.level == 0 {
-                "cantrip".to_string()
+            let base = crate::spells::summary(&s.spec, None);
+            if a.coverage == Coverage::Adjudicable {
+                format!("spell, {base}: adjudicate the rest")
             } else {
-                format!("level {}", s.level)
-            };
-            let dc = s.dc.map_or_else(String::new, |d| format!(", DC {d}"));
-            let atk = s
-                .attack
-                .map_or_else(String::new, |d| format!(", {d:+} to hit"));
-            let c = if s.concentration {
-                ", concentration"
-            } else {
-                ""
-            };
-            format!("spell, {lvl}{dc}{atk}{c}: adjudicate")
+                base
+            }
         }
         Def::Heal { dice } => format!("heals {dice}"),
         Def::Text => "text only: adjudicate".into(),
@@ -209,6 +208,10 @@ impl Sim {
             let Some(ability) = c.ability(&a.key) else {
                 continue;
             };
+            if let Def::Spell(s) = &a.def {
+                self.spell_options(&mut out, actor, i, a, ability, &s.spec, &enemies, &allies);
+                continue;
+            }
             if derive::ability_status(&self.state, c, ability, a.slot).is_err() {
                 continue;
             }
@@ -289,6 +292,8 @@ impl Sim {
                 targets,
                 max_targets: max,
                 action: Some(i),
+                slot: a.slot,
+                repeat_targets: false,
             });
         }
         if legendary {
@@ -341,6 +346,133 @@ impl Sim {
             "end the turn (mv still applies)",
         ));
         out
+    }
+
+    /// The options of one spell: one per slot level it can be cast with now (`s3`, then `s3@4` for a higher slot),
+    /// with the targets its definition allows. A text-only spell is one adjudicated option at its own level.
+    #[allow(clippy::too_many_arguments)]
+    fn spell_options(
+        &self,
+        out: &mut Vec<Opt>,
+        actor: &CombatantId,
+        i: usize,
+        a: &ActionDef,
+        ability: &party_combat::Ability,
+        spec: &party_combat::spell::CastSpec,
+        enemies: &[CombatantId],
+        allies: &[CombatantId],
+    ) {
+        use party_combat::spell::{TargetFilter, Targeting};
+        let Some(c) = self.state.combatant(actor) else {
+            return;
+        };
+        if ability.kind == AbilityKind::Reaction {
+            return; // cast by the runner when it matters (Shield), never from a card
+        }
+        if let Some(key) = &ability.uses {
+            if c.resources.get(key).is_none_or(|r| r.pool.remaining == 0) {
+                return;
+            }
+        }
+        let slotless = ability
+            .spell
+            .as_ref()
+            .is_some_and(|l| l.frequency != party_combat::spell::SpellFrequency::Slot)
+            || ability.uses.is_some();
+        let mut levels = crate::spells::slots(c, ability, spec);
+        if a.coverage == Coverage::Adjudicable {
+            levels.truncate(1);
+        }
+        // Spells reach 60 feet (stated as an assumption): the bands near and far, plus this turn's movement.
+        let near = |t: &CombatantId| self.space.feet(actor, t) <= 60 + self.reach_bonus(actor);
+        let type_ok = |t: &CombatantId, types: &[String]| {
+            self.state
+                .combatant(t)
+                .and_then(|x| x.stats.as_ref())
+                .and_then(|s| s.creature_type.as_ref())
+                .is_none_or(|ty| {
+                    let ty = ty.to_lowercase();
+                    types.iter().any(|x| ty.contains(&x.to_lowercase()))
+                })
+        };
+        let within = |list: &[CombatantId]| -> Vec<CombatantId> {
+            list.iter().filter(|t| near(t)).cloned().collect()
+        };
+        for (n, slot) in levels.into_iter().enumerate() {
+            if derive::cast_status(&self.state, c, spec, slot, slotless, false).is_err() {
+                continue;
+            }
+            let (max, repeat) = crate::spells::max_targets(spec, slot);
+            let targets: Vec<CombatantId> = if a.coverage == Coverage::Adjudicable {
+                let mut t = enemies.to_vec();
+                t.extend(allies.iter().cloned());
+                t
+            } else {
+                match &spec.mech.targeting {
+                    Targeting::SelfOnly => vec![actor.clone()],
+                    Targeting::Area { .. } => within(enemies),
+                    Targeting::Creatures {
+                        filter,
+                        include_self,
+                        ..
+                    } => {
+                        let mut t = match filter {
+                            TargetFilter::Enemy => within(enemies),
+                            TargetFilter::Ally | TargetFilter::Willing => within(allies),
+                            TargetFilter::Type { types } => {
+                                let mut t = within(enemies);
+                                t.extend(within(allies));
+                                t.retain(|x| type_ok(x, types));
+                                t
+                            }
+                            TargetFilter::Any => {
+                                let mut t = within(enemies);
+                                t.extend(within(allies));
+                                t
+                            }
+                        };
+                        if !include_self {
+                            t.retain(|x| x != actor);
+                        } else if !t.contains(actor) && !matches!(filter, TargetFilter::Enemy) {
+                            t.push(actor.clone());
+                        }
+                        t
+                    }
+                }
+            };
+            if targets.is_empty() && a.coverage != Coverage::Adjudicable {
+                continue;
+            }
+            let o = match (n, slot) {
+                (0, _) | (_, None) => format!("s{}", i + 1),
+                (_, Some(l)) => format!("s{}@{l}", i + 1),
+            };
+            let adjudicate = a.coverage == Coverage::Adjudicable;
+            out.push(Opt {
+                o,
+                name: match slot {
+                    Some(l) if l > spec.mech.level => format!("{} (slot {l})", a.name),
+                    _ => a.name.clone(),
+                },
+                kind: if adjudicate {
+                    OptKind::Adjudicate
+                } else {
+                    OptKind::Spell
+                },
+                cost: cost_of(ability.kind),
+                summary: if adjudicate {
+                    summary(self, a)
+                } else {
+                    crate::spells::summary(spec, slot)
+                },
+                targets,
+                max_targets: if adjudicate { 6 } else { max },
+                mode_hint: None,
+                action: Some(i),
+                slot,
+                repeat_targets: repeat && !adjudicate,
+            });
+        }
     }
 
     /// Steps a legendary action that moves may take now (half its speed), else 0.
@@ -604,6 +736,8 @@ fn generic(o: &str, name: &str, kind: OptKind, cost: &'static str, summary: &str
         max_targets: 0,
         mode_hint: None,
         action: None,
+        slot: None,
+        repeat_targets: false,
     }
 }
 

@@ -73,14 +73,14 @@ pub fn extract(text: &str) -> Vec<Number> {
 pub fn numbers_of(_sim: &Sim, _actor: &CombatantId, a: &ActionDef) -> Vec<Number> {
     let mut out = extract(&a.text);
     if let Def::Spell(s) = &a.def {
-        if let Some(dc) = s.dc {
+        if let Some(dc) = s.spec.dc {
             out.push(Number {
                 i: out.len(),
                 raw: dc.to_string(),
                 kind: NumKind::Dc,
             });
         }
-        if let Some(atk) = s.attack {
+        if let Some(atk) = s.spec.attack {
             out.push(Number {
                 i: out.len(),
                 raw: format!("{atk:+}"),
@@ -315,6 +315,99 @@ pub fn resolve(adj: &Adj, numbers: &[Number]) -> Result<Resolved, String> {
             }
         }
     })
+}
+
+/// A builder draft from an adjudication of a spell (0.3.3): the spell's own definition with the adjudicated
+/// delivery and effects, tier `partial`, revision 0. It is only ever shown (the report's `drafts`); the DM opens it in
+/// the effect builder, checks it and saves it there. Nothing here writes it anywhere. `None` for `no_effect` or a
+/// number that no longer fits.
+#[must_use]
+pub fn draft(
+    adj: &Adj,
+    numbers: &[Number],
+    spec: &party_combat::spell::CastSpec,
+) -> Option<party_combat::spell::SpellMech> {
+    use party_combat::spell::{
+        AttackKind, Delivery, Formula, Primitive, SaveSuccess, SpellRepeatSave, Tier,
+    };
+    let formula = |i: &usize| -> Option<Formula> {
+        let n = numbers.get(*i).filter(|n| n.kind == NumKind::Dice)?;
+        Formula::parse(&n.raw).ok()
+    };
+    let damage: Vec<Primitive> = adj
+        .dice_refs
+        .iter()
+        .filter_map(formula)
+        .map(|dice| Primitive::Damage {
+            dice,
+            damage_type: adj.damage_type,
+            choice: vec![],
+        })
+        .collect();
+    let condition = adj.condition.map(|condition| Primitive::Condition {
+        condition,
+        repeat_save: adj.repeat.as_ref().map(|r| SpellRepeatSave {
+            ability: r.ability,
+            at: if r.at == "start" {
+                party_combat::Boundary::Start
+            } else {
+                party_combat::Boundary::End
+            },
+        }),
+        ends_on_damage: false,
+        ends_on_attack: false,
+    });
+    let mut m = spec.mech.clone();
+    m.rev = 0;
+    m.tier = Tier::Partial;
+    m.on_land = damage;
+    m.on_resist = vec![];
+    m.concentration |= adj.concentration;
+    match adj.kind {
+        AdjAs::NoEffect => return None,
+        AdjAs::Attack => {
+            m.delivery = Delivery::Attack {
+                attack: AttackKind::Ranged,
+                rays: Formula::constant(1),
+            };
+            m.on_land.extend(condition);
+        }
+        AdjAs::Save | AdjAs::Condition => {
+            m.delivery = match adj.ability {
+                Some(ability) => Delivery::Save {
+                    ability,
+                    success: if adj.half {
+                        SaveSuccess::Half
+                    } else {
+                        SaveSuccess::None
+                    },
+                },
+                None => Delivery::Auto,
+            };
+            m.on_land.extend(condition);
+        }
+        AdjAs::Heal | AdjAs::TempHp => {
+            m.delivery = Delivery::Auto;
+            let dice = adj.dice_refs.first().and_then(formula)?;
+            m.on_land = vec![if adj.kind == AdjAs::Heal {
+                Primitive::Heal {
+                    dice,
+                    add_mod: false,
+                }
+            } else {
+                Primitive::TempHp {
+                    dice,
+                    add_mod: false,
+                }
+            }];
+        }
+    }
+    if m.on_land.is_empty() {
+        return None;
+    }
+    m.notes
+        .push("Drafted from a simulation's adjudication: check every number before saving.".into());
+    Some(m)
 }
 
 #[cfg(test)]

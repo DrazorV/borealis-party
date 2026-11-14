@@ -17,6 +17,8 @@ use crate::AppState;
 
 const OGRE: &str = "ID_SRD521_MONSTER_OGRE";
 const GOBLIN: &str = "ID_SRD521_MONSTER_GOBLIN_WARRIOR";
+const MAGE: &str = "ID_SRD521_MONSTER_MAGE";
+const FIREBALL: &str = "ID_2024_SPELL_FIREBALL";
 
 /// The session store is one per process: these tests take turns.
 static SIM_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -80,6 +82,7 @@ struct World {
     dm: Client,
     player: Client,
     outsider: Client,
+    party: String,
     encounter: String,
     combat: String,
 }
@@ -165,6 +168,7 @@ async fn world(state: AppState) -> World {
         dm,
         player,
         outsider,
+        party,
         encounter,
         combat,
     }
@@ -468,9 +472,129 @@ async fn only_the_dm(w: &World) {
             .unwrap_err(),
         SimError::Busy(_)
     ));
-    // The assistant needs the account's own model.
+    // The server never calls a model (0.3.3): there is no assistant oracle.
     let e = call(w, &w.dm, "sim_auto", json!({ "simId": sim, "step": start["card"]["step"], "until": "end", "oracle": "assistant" })).await.unwrap_err();
-    assert!(matches!(e, SimError::Unavailable(_)), "{e:?}");
+    assert!(matches!(e, SimError::Invalid(_)), "{e:?}");
+    simulate::clear_sessions();
+}
+
+/// Spell casters cast with the DM's own mechanics (0.3.3): the SRD Mage's spellbook is automated, the definitions'
+/// revisions are in the fingerprints, a DM edit makes an old replay report the divergence, and none of it writes.
+async fn spell_casters(w: &World) {
+    simulate::clear_sessions();
+    let tower = ok(
+        &w.dm,
+        "POST",
+        &format!("/api/parties/{}/encounters", w.party),
+        json!({ "name": "Tower", "publicName": "Tower" }),
+    )
+    .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    ok(
+        &w.dm,
+        "POST",
+        &format!("/api/encounters/{tower}/creatures"),
+        json!({ "elementId": MAGE, "dmLabel": "Mage" }),
+    )
+    .await;
+    let ruleset: String = sqlx::query("SELECT ruleset FROM parties WHERE id = $1")
+        .bind(&w.party)
+        .fetch_one(w.state.db.pool())
+        .await
+        .unwrap()
+        .try_get(0)
+        .unwrap();
+    let before = census(&w.state.db, &w.combat).await;
+    let opts = json!({ "control": { "agent": "none" }, "maxRounds": 4 });
+    let start = call(
+        w,
+        &w.dm,
+        "sim_start",
+        json!({ "encounterId": tower, "seed": 3, "opts": opts }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        start["coverage"]["automated"]
+            .to_string()
+            .contains("Mage: Fireball"),
+        "{}",
+        start["coverage"]
+    );
+    let sim = start["simId"].as_str().unwrap().to_string();
+    let report = call(w, &w.dm, "sim_report", json!({ "simId": sim }))
+        .await
+        .unwrap();
+    let key = format!("spell:{FIREBALL}");
+    assert_eq!(
+        report["fingerprints"][&key], "srd:1",
+        "{}",
+        report["fingerprints"]
+    );
+    assert_eq!(
+        census(&w.state.db, &w.combat).await,
+        before,
+        "a simulation writes nothing"
+    );
+    let batch = call(
+        w,
+        &w.dm,
+        "sim_batch",
+        json!({ "encounterId": tower, "runs": 3, "seed": 1 }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(batch["outcomes"]["of"], 3, "{batch}");
+    assert_eq!(
+        census(&w.state.db, &w.combat).await,
+        before,
+        "a batch writes nothing"
+    );
+    // The DM's own Fireball: its revision is what the simulation fingerprints.
+    let mut def = serde_json::to_value(party_spells::data::curated(FIREBALL).unwrap()).unwrap();
+    def["name"] = json!("Fireball");
+    let saved = ok(
+        &w.dm,
+        "PUT",
+        "/api/spell-mechanics",
+        json!({ "kind": "def", "spellKey": FIREBALL, "ruleset": ruleset, "def": def }),
+    )
+    .await;
+    let rev = saved["row"]["rev"].as_i64().unwrap();
+    let replayed = call(
+        w,
+        &w.dm,
+        "sim_replay",
+        json!({ "encounterId": tower, "seed": 3, "opts": opts,
+                "transcript": report["transcript"], "fingerprints": report["fingerprints"] }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(replayed["identical"], false, "{replayed}");
+    assert!(
+        replayed["divergence"]["fingerprints"]
+            .to_string()
+            .contains(&key),
+        "{replayed}"
+    );
+    let again = call(
+        w,
+        &w.dm,
+        "sim_start",
+        json!({ "encounterId": tower, "seed": 3, "opts": opts }),
+    )
+    .await
+    .unwrap();
+    let sim = again["simId"].as_str().unwrap().to_string();
+    let report = call(w, &w.dm, "sim_report", json!({ "simId": sim }))
+        .await
+        .unwrap();
+    assert_eq!(
+        report["fingerprints"][&key],
+        format!("def:{FIREBALL}:{rev}")
+    );
     simulate::clear_sessions();
 }
 
@@ -527,6 +651,7 @@ async fn simulations_read_copies_only_and_only_for_the_dm() {
     .await;
     whole_run(&w).await;
     only_the_dm(&w).await;
+    spell_casters(&w).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -543,5 +668,6 @@ async fn simulations_on_postgres() {
     let w = world(state_in(dir.path(), db)).await;
     whole_run(&w).await;
     only_the_dm(&w).await;
+    spell_casters(&w).await;
     drop_all(&url).await;
 }
