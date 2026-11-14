@@ -60,7 +60,7 @@ concurrency:
 jobs:
   plan:
     if: github.repository == 'TeamBorealis/borealis'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       run: ${{ steps.plan.outputs.run }}
@@ -96,7 +96,7 @@ jobs:
   tick:
     needs: plan
     if: needs.plan.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: ${{ needs.plan.outputs.env == 'true' && 'release' || '' }}
     permissions:
