@@ -36,7 +36,7 @@ async fn a_fresh_server_is_ok_without_signing_in_and_tells_no_secrets() {
     assert_eq!(status, StatusCode::OK, "{out}");
     assert_eq!(cache.as_deref(), Some("no-store"));
     assert_eq!(out["status"], "ok", "{out}");
-    assert_eq!(out["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(out["version"], crate::release::version());
     assert_eq!(out["database"]["reachable"], true);
     assert_eq!(out["database"]["kind"], "sqlite");
     assert!(out["database"]["latencyMs"].is_u64());

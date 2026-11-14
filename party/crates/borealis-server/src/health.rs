@@ -253,7 +253,7 @@ async fn health(State(state): State<AppState>) -> Response {
     };
     let body = json!({
         "status": status,
-        "version": env!("CARGO_PKG_VERSION"),
+        "version": crate::release::version(),
         "uptimeSeconds": state.started.elapsed().as_secs(),
         "database": { "reachable": reachable, "kind": state.db.kind(), "latencyMs": latency },
         "migrations": migrations,

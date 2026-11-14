@@ -9,3 +9,21 @@ export function cargoVersion(toml: string): string {
   if (!version) throw new Error("party/Cargo.toml has no version line");
   return version;
 }
+
+/**
+ * The release the build shows: party/VERSION, checked against party/Cargo.toml as party/release-version.sh checks it.
+ * `X.Y.Z` is a full release (the apps too); `X.Y.Z.W` a server and web release, whose X.Y.Z is the Cargo version the
+ * apps keep. The apps are only built from full releases, so in an app the two are the same.
+ */
+export function releaseVersion(file: string, toml: string): string {
+  const apps = cargoVersion(toml);
+  const release = (file.split(/\r?\n/)[0] ?? "").trim();
+  if (release === apps) return release;
+  if (!release.startsWith(`${apps}.`)) {
+    throw new Error(`party/VERSION is ${release}, but party/Cargo.toml is ${apps}: VERSION must be ${apps} or ${apps}.N`);
+  }
+  if (!/^[1-9][0-9]*$/.test(release.slice(apps.length + 1))) {
+    throw new Error(`party/VERSION is ${release}: the 4th number must be 1 or more, without leading zeros`);
+  }
+  return release;
+}

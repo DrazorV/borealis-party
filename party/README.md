@@ -561,14 +561,29 @@ After Borealis releases:
    client), or list it in `party/commands-not-offered.txt` under the reason. Look over upstream's release notes for new
    menu rows or pages that need hiding on a server.
 3. Build and test (below), and try the web app and the Android app against a test server.
-4. Raise `version` in `party/Cargo.toml`, build once so `Cargo.lock` follows, commit, and push `main`. The push
-   builds the Docker image.
-5. `bash party/release.sh` tags `party-v<version>` with the Borealis release in its message. Push the tag, then make
-   the GitHub release from it with the APK and the server archive, starting the notes with "Based on Borealis X.Y.Z"
-   ([template](docs/release-notes-template.md)).
+4. Raise `version` in `party/Cargo.toml` and write the same version in `party/VERSION`, build once so `Cargo.lock`
+   follows, commit, and push `main`. The push builds the Docker image.
+5. `bash party/release.sh` tags `party-v<version>` with the Borealis release in its message. Make the GitHub release
+   from the tag as a draft with its notes, starting with "Based on Borealis X.Y.Z"
+   ([template](docs/release-notes-template.md)), then push the tag: the apps workflow attaches the files and publishes it.
 
 A party-only fix between Borealis releases is released the same way, skipping step 1. If `main` has to carry Borealis
 work newer than its last release, `release.sh --unreleased` allows it and says so in the tag.
+
+### Full releases and server releases
+
+`party/VERSION` says what a release ships (`party/release-version.sh` checks it against `party/Cargo.toml`):
+
+- `X.Y.Z`, the same as `party/Cargo.toml`: a **full release**. The Windows, Linux, Android and iOS apps, the desktop
+  update feed and the server image.
+- `X.Y.Z.W` (W = 1, 2, …): a **server and web release**. Only the server image (tagged `X.Y.Z.W` and `latest`) and a
+  GitHub release with notes and no files. The apps keep `X.Y.Z`; Cargo and Tauri versions stay 3-part. The release is
+  never marked latest, so the desktop update feed (`releases/latest`) stays at `X.Y.Z` and the apps are offered nothing.
+  The web app, `/api/server` and the admin page show `X.Y.Z.W`.
+
+For a server release, set `party/VERSION` to the next `X.Y.Z.W` on main and push (no `Cargo.lock` change), then
+`release.sh`, the draft release (`gh release create party-vX.Y.Z.W --draft --latest=false --notes-file …`) and the
+tag as above. Work that needs a change in the apps themselves waits for the next full release.
 
 Our code lives only in `party/` and `ui/party/`, folders upstream never touches, so merges don't conflict.
 `check-upstream.sh` fails if any of upstream's files changes.

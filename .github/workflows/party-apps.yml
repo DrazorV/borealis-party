@@ -63,7 +63,12 @@ jobs:
     if: github.repository == 'fortress-soft/borealis-connect'
     runs-on: ubuntu-latest
     outputs:
+      # The apps' version (party/Cargo.toml, 3-part semver), which every app job builds with.
       version: ${{ steps.version.outputs.version }}
+      # The release (party/VERSION): the same for a full release, X.Y.Z.W for a server and web release.
+      release_version: ${{ steps.version.outputs.release_version }}
+      # full: the apps, the feed and the release files. server: no apps; a release with notes only, never "latest".
+      kind: ${{ steps.version.outputs.kind }}
       release: ${{ steps.version.outputs.release }}
     steps:
       - uses: actions/checkout@v4
@@ -74,22 +79,31 @@ jobs:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
         run: |
-          version=$(sed -n 's/^version = "\(.*\)"/\1/p' party/Cargo.toml | head -n1)
-          test -n "$version"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          version=$(sh party/release-version.sh --apps)
+          release_version=$(sh party/release-version.sh)
+          kind=$(sh party/release-version.sh --kind)
+          {
+            echo "version=$version"
+            echo "release_version=$release_version"
+            echo "kind=$kind"
+          } >> "$GITHUB_OUTPUT"
           if [ "$REF_TYPE" = "tag" ]; then
-            if [ "$REF_NAME" != "party-v$version" ]; then
-              echo "::error::tag $REF_NAME does not match party/Cargo.toml (expected party-v$version)"
+            if [ "$REF_NAME" != "party-v$release_version" ]; then
+              echo "::error::tag $REF_NAME does not match party/VERSION (expected party-v$release_version)"
               exit 1
             fi
             echo "release=true" >> "$GITHUB_OUTPUT"
           else
             echo "release=false" >> "$GITHUB_OUTPUT"
           fi
+          if [ "$kind" = "server" ]; then
+            echo "::notice::$release_version is a server and web release: no apps are built, and the update feed stays at $version"
+          fi
 
   android:
     name: Android APK (${{ matrix.abi }})
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.only == 'all' || inputs.only == 'android' }}
+    # A server and web release (party/VERSION X.Y.Z.W) builds no apps; "Run workflow" can build just one kind.
+    if: ${{ needs.version.outputs.kind == 'full' && (github.event_name != 'workflow_dispatch' || inputs.only == 'all' || inputs.only == 'android') }}
     needs: version
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -206,7 +220,8 @@ jobs:
 
   ios:
     name: iOS app
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.only == 'all' || inputs.only == 'ios' }}
+    # A server and web release (party/VERSION X.Y.Z.W) builds no apps; "Run workflow" can build just one kind.
+    if: ${{ needs.version.outputs.kind == 'full' && (github.event_name != 'workflow_dispatch' || inputs.only == 'all' || inputs.only == 'ios') }}
     needs: version
     runs-on: macos-26
     timeout-minutes: 150
@@ -351,7 +366,8 @@ jobs:
   # With the updater key the Windows installer and the AppImages are signed for the party feed (.sig beside each).
   desktop:
     name: Desktop (${{ matrix.name }})
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.only == 'all' || inputs.only == 'desktop' }}
+    # A server and web release (party/VERSION X.Y.Z.W) builds no apps; "Run workflow" can build just one kind.
+    if: ${{ needs.version.outputs.kind == 'full' && (github.event_name != 'workflow_dispatch' || inputs.only == 'all' || inputs.only == 'desktop') }}
     needs: version
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
@@ -532,7 +548,7 @@ jobs:
     needs: [version, android, ios, desktop]
     # iOS is optional: macOS runners can be short, and without Apple secrets the IPA is only for sideloading. The
     # release goes out without it rather than not at all; Android and desktop must have built.
-    if: ${{ !cancelled() && needs.version.outputs.release == 'true' && needs.android.result == 'success' && needs.desktop.result == 'success' }}
+    if: ${{ !cancelled() && needs.version.outputs.kind == 'full' && needs.version.outputs.release == 'true' && needs.android.result == 'success' && needs.desktop.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -610,3 +626,50 @@ jobs:
           fi
           gh release upload "$TAG" assets/* --clobber
           gh release edit "$TAG" --draft=false --latest
+
+  # A server and web release (party/VERSION X.Y.Z.W): the server image comes from party-image.yml on main; this job
+  # only publishes the GitHub release with its notes and no files. It is never marked "latest": the desktop apps read
+  # their update feed from releases/latest/download/borealis-party-latest.json, so "latest" stays the newest full
+  # release, and the apps are offered nothing. Make the release with its notes as a draft first
+  # (gh release create --draft --latest=false); a missing one is created here. Run on a branch ("Run workflow" on
+  # next/*), it only shows what it would do.
+  server-release:
+    name: GitHub release (server and web)
+    needs: version
+    if: needs.version.outputs.kind == 'server'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      RELEASE: ${{ needs.version.outputs.release == 'true' }}
+      VERSION: ${{ needs.version.outputs.release_version }}
+      APPS: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Create or publish the release (notes only)
+        run: |
+          set -euo pipefail
+          latest=$(gh release view --json tagName --jq .tagName 2>/dev/null || echo none)
+          if [ "$RELEASE" != "true" ]; then
+            echo "dry run on $TAG: would publish party-v$VERSION with no files and --latest=false"
+            echo "the apps stay at $APPS, and releases/latest stays $latest"
+            exit 0
+          fi
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --draft --latest=false --title "Borealis Party $VERSION" \
+              --notes "Borealis Party $VERSION: the server and web app only (the image ghcr.io/fortress-soft/borealis-connect:$VERSION). The apps stay at $APPS; there is nothing to install on phones or computers."
+          fi
+          assets=$(gh release view "$TAG" --json assets --jq '.assets | length')
+          if [ "$assets" != "0" ]; then
+            echo "::error::$TAG has $assets files, but a server and web release has none"
+            exit 1
+          fi
+          gh release edit "$TAG" --draft=false --latest=false
+          now=$(gh release view --json tagName --jq .tagName)
+          echo "published $TAG; releases/latest is $now"
+          if [ "$now" = "$TAG" ]; then
+            echo "::error::$TAG became the latest release; the desktop update feed would answer 404"
+            exit 1
+          fi

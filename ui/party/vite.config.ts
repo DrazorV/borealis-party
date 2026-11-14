@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, mergeConfig, type Plugin } from "vite";
 import upstream from "../vite.config";
 import { applyBrand, BRAND_EDITS, brandedFile } from "./branding";
-import { cargoVersion } from "./version";
+import { releaseVersion } from "./version";
 
 const local = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
@@ -128,8 +128,14 @@ function partyPage(): Plugin {
   };
 }
 
-/** The party version (./version.ts), shown where upstream shows its own. The Docker build copies party/Cargo.toml for it. */
-export const PARTY_VERSION = cargoVersion(readFileSync(local("../../party/Cargo.toml"), "utf8"));
+/**
+ * The party release (./version.ts: party/VERSION, X.Y.Z or X.Y.Z.W), shown where upstream shows its own. The Docker
+ * build copies party/Cargo.toml and party/VERSION for it.
+ */
+export const PARTY_VERSION = releaseVersion(
+  readFileSync(local("../../party/VERSION"), "utf8"),
+  readFileSync(local("../../party/Cargo.toml"), "utf8"),
+);
 
 export default mergeConfig(upstream, defineConfig({
   plugins: [partyEntry(), partyPage(), partyBrand()],

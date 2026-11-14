@@ -42,6 +42,7 @@ mod net_guard;
 mod oauth;
 mod pack_removal;
 mod parties;
+mod release;
 #[cfg(test)]
 mod route_tests;
 mod rpc;
@@ -144,7 +145,7 @@ async fn server_info(
     let settings = admin::runtime_settings(&state).await?;
     Ok(Json(json!({
         "app": "borealis-party",
-        "version": env!("CARGO_PKG_VERSION"),
+        "version": release::version(),
         "openRegistration": settings.open_registration,
         "requireApproval": settings.require_approval,
         "email": state.mailer.is_some(),
@@ -341,14 +342,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let db = Db::connect(&location).await.map_err(|e| e.to_string())?;
     // Before any table changes: a failed backup stops here, with the database as it was.
-    backup::upgrade_with_backup(
-        &db,
-        &location,
-        &settings.backup,
-        dir,
-        env!("CARGO_PKG_VERSION"),
-    )
-    .await?;
+    backup::upgrade_with_backup(&db, &location, &settings.backup, dir, release::version()).await?;
     backup::set_dir(Settings::resolve(dir, &settings.backup.dir));
     health::set_config_dir(dir.clone());
     let sqlite_file = Settings::resolve(dir, &settings.sqlite.path);
