@@ -114,6 +114,15 @@ test.describe("Role screens: the DM's Combat tab and the player's Play tab (0.3.
       await init.getByLabel("Initiative: my table roll").fill("19");
       await init.getByRole("button", { name: "Send" }).tap();
       await expect(pane.getByLabel("Initiative 19")).toBeVisible();
+      // The phone shows its roll at once; start only once the server has it, or a slow run starts with the goblin
+      // first and the player still "Rolling initiative" (CI, 0.3.4).
+      await expect
+        .poll(async () => {
+          const view = await api<{ state: { combatants: { id: string; initiative?: unknown }[] } }>(
+            request, dm.token, "GET", `/api/combats/${started.id}`);
+          return view.state.combatants.find((c) => c.id === pc.id)?.initiative ?? null;
+        }, { message: "the player's initiative reached the server", timeout: 15_000 })
+        .not.toBeNull();
       await api(request, dm.token, "POST", `/api/combats/${started.id}/start`, { requestId: rid(), args: {} });
       await expect(pane.locator(".combat-now")).toContainText("Your turn", { timeout: 10_000 });
       // Rests on the tiles' row; nothing scrolls sideways at 384 px.
