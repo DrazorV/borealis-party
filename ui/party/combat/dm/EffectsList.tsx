@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Button, IconButton } from "../../../src/components/Button";
 import { Dialog } from "../../../src/components/controls/Dialog";
 import { conditionWord } from "./common";
-import { RollInput } from "./RollInput";
+import { passFail } from "../shared/outcomeInputs";
+import { OutcomeButtons } from "../shared/OutcomeButtons";
 import { byId, durationText, effectsOn, isDefeated } from "./derive";
 import { EffectDialog, draftSpecs, emptyDraft } from "./dialogs";
 import { expectCast } from "./castFocus";
@@ -102,8 +103,9 @@ function EffectRow({ e, state, send, disabled, open, toggle }: { e: Effect; stat
       </div>
       {open && e.detail && <p className="cb-small cb-fx-detail">{e.detail}</p>}
       {e.repeat_save && saving && (
-        <RollInput kind="d20" label={`${e.repeat_save.ability.toUpperCase()} save DC ${e.repeat_save.dc}`} disabled={disabled}
-          onSubmit={(roll) => { setSaving(false); send({ command: "resolve_effect_save", effect: e.id, roll }); }} />
+        <OutcomeButtons label={`${e.repeat_save.ability.toUpperCase()} save DC ${e.repeat_save.dc}`} disabled={disabled} outcomes={passFail(e.repeat_save.dc)}
+          onRoll={() => { setSaving(false); send({ command: "resolve_effect_save", effect: e.id, roll: { kind: "app", modifier: 0, mode: "normal" } }); }}
+          onPick={(roll) => { setSaving(false); send({ command: "resolve_effect_save", effect: e.id, roll }); }} />
       )}
       {zoning && fx.spell?.zone && <ZoneDialog state={state} e={fx} onDone={(targets) => { setZoning(false); if (targets?.length) { expectCast(e.source ?? e.target); send(asCommand({ command: "apply_zone", effect: e.id, targets })); } }} />}
     </li>

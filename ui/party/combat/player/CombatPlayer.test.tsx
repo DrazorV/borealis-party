@@ -212,6 +212,22 @@ describe("the Play tab's live combat section", () => {
     expect(screen.getByRole("tab", { name: "Play" }).getAttribute("aria-selected")).toBe("true");
   });
 
+  it("says You're next with one soft buzz when the turn before mine starts", async () => {
+    server.combats.set("p1", liveWith({ turn: { kind: "combatant", id: "ally1", round: 1 } }));
+    await start();
+    renderPlay();
+    await openCombatTab();
+    expect(screen.queryByTestId("combat-on-deck")).toBeNull();
+    act(() => server.change("p1", (c) => ({ ...c, turn: { kind: "combatant", id: "cr1", round: 2 } })));
+    expect((await screen.findByTestId("combat-on-deck")).textContent).toContain("You're next");
+    expect(buzz).toHaveBeenCalledTimes(1);
+    expect(buzz).toHaveBeenCalledWith(store.ON_DECK_BUZZ);
+    // My turn: the banner goes, the turn buzz comes.
+    act(() => server.change("p1", (c) => ({ ...c, turn: { kind: "combatant", id: "me1", round: 2 } })));
+    await waitFor(() => expect(screen.queryByTestId("combat-on-deck")).toBeNull());
+    expect(buzz).toHaveBeenLastCalledWith(store.YOUR_TURN_BUZZ);
+  });
+
   it("says Your turn, buzzes once and shows the banner on other pages", async () => {
     server.combats.set("p1", liveWith());
     await start();
@@ -322,10 +338,10 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     const saves = await screen.findByRole("group", { name: "Death saves" });
     expect(within(saves).getByRole("img", { name: "Successes: 1 of 3" })).toBeTruthy();
     expect(within(saves).getByRole("img", { name: "Failures: 2 of 3" })).toBeTruthy();
-    await user.type(within(saves).getByLabelText("Death save: my table roll"), "12");
-    await user.click(within(saves).getByRole("button", { name: "Send" }));
+    expect(within(saves).queryByLabelText("Death save: my table roll"), "0.3.5: outcome buttons, no number box").toBeNull();
+    await user.click(within(saves).getByRole("button", { name: "Success" }));
     await waitFor(() => expect(within(screen.getByRole("group", { name: "Death saves" })).getByRole("img", { name: "Successes: 2 of 3" })).toBeTruthy());
-    expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "typed", total: 12 } } });
+    expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "typed", total: 10 } } });
     await user.click(within(screen.getByRole("group", { name: "Death saves" })).getByRole("button", { name: /^Roll for me/ }));
     await waitFor(() => expect(screen.getByText("Stable")).toBeTruthy());
     expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "app", modifier: 0, mode: "normal" } } });
@@ -354,10 +370,9 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     renderPlay();
     await openCombatTab();
     const prompt = await screen.findByRole("alertdialog", { name: "Concentration save, DC 12" });
-    await user.type(within(prompt).getByLabelText("Concentration save: my table roll"), "15");
-    await user.click(within(prompt).getByRole("button", { name: "Send" }));
+    await user.click(within(prompt).getByRole("button", { name: "Kept it" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog", { name: /Concentration save/ })).toBeNull());
-    expect(server.calls.at(-1)).toEqual({ method: "POST", path: "/api/combats/c-p1/resolve_concentration", body: { requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "typed", total: 15 } } } });
+    expect(server.calls.at(-1)).toEqual({ method: "POST", path: "/api/combats/c-p1/resolve_concentration", body: { requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "typed", total: 12 } } } });
   });
 
   it("a spell's save waits for the player: the table roll is typed first (0.3.2)", async () => {
@@ -368,10 +383,9 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     await openCombatTab();
     const prompt = await screen.findByRole("alertdialog", { name: "DEX save DC 14 against Fireball" });
     expect(within(prompt).getByText("From Goblin")).toBeTruthy();
-    const box = within(prompt).getByLabelText("DEX save DC 14 against Fireball: my table roll");
-    await user.type(box, "17{Enter}");
+    await user.click(within(prompt).getByRole("button", { name: "Saved" }));
     await waitFor(() => expect(server.calls.some((c) => c.path === "/api/combats/c-p1/resolve_cast_row")).toBe(true));
-    expect(server.calls.find((c) => c.path === "/api/combats/c-p1/resolve_cast_row")).toEqual({ method: "POST", path: "/api/combats/c-p1/resolve_cast_row", body: { requestId: expect.stringMatching(/^req-/), args: { cast: "cast-1", target: "me1", roll: { kind: "typed", total: 17 } } } });
+    expect(server.calls.find((c) => c.path === "/api/combats/c-p1/resolve_cast_row")).toEqual({ method: "POST", path: "/api/combats/c-p1/resolve_cast_row", body: { requestId: expect.stringMatching(/^req-/), args: { cast: "cast-1", target: "me1", roll: { kind: "typed", total: 14 } } } });
   });
 
   it("a hidden caster's spell stays unnamed: only the save and its DC (0.3.2)", async () => {

@@ -4,7 +4,7 @@
  * open `#/combat/c1`).
  */
 import type { CombatDeps } from "../../api/overrides/combat";
-import { sampleCombat } from "./fixtures";
+import { character, sampleCombat } from "./fixtures";
 import { seededDie } from "../../../src/lib/dice";
 import { CombatRefusal, execute, exportCombat, importCombat, undo, type MockCombat } from "./mockEngine";
 import { MOCK_BEASTS, newSpellStore, spellRoute, type MockSpellStore } from "./mockSpellRoutes";
@@ -39,6 +39,14 @@ function offersFor(m: MockCombat): CompanionOffer[] {
   return [{ pc: pc.id, key: "wolf", name: "Wolf", hp: 11, ac: 13, initiative: 2 }];
 }
 
+/** 0.3.5 (A2): the sample party's member who joined after the fight began (the server lists party members not in it). */
+export const LATE_MEMBER = { characterId: "c_late", name: "Ilse", owner: "pl3" };
+
+function joinableOf(m: MockCombat): NonNullable<DmCombat["joinable"]> {
+  const fighting = (id: string) => m.view.state.combatants.some((c) => c.id === `pc-${id}` && !c.removed && !c.absent && c.initiative != null);
+  return fighting(LATE_MEMBER.characterId) ? [] : [{ characterId: LATE_MEMBER.characterId, name: LATE_MEMBER.name }];
+}
+
 /**
  * The damage and healing the DM sent players (D7 a), from the mock's player events, with how each stands (0.3.3,
  * party/docs/role-views.md): `delivered` until the player answers, then `accepted` or `declined`.
@@ -69,7 +77,7 @@ export function dmView(m: MockCombat): DmCombat {
   return {
     id: v.id, partyId: v.partyId, encounter: v.encounterId ? { id: v.encounterId, name: "Sample fight", publicName: "A fight" } : null,
     seq: v.seq, status: v.state.status, state: redactState(v.state), creatures, characters: {}, prompts: promptsOf(m), offers: offersFor(m),
-    undo: [...m.journal].reverse().map((j) => j.label),
+    joinable: joinableOf(m), undo: [...m.journal].reverse().map((j) => j.label),
   };
 }
 
@@ -195,6 +203,15 @@ export function mockCombatServer(seed?: MockCombat[], sharing?: MockSharing): Mo
               ac: beast.ac, initiative_bonus: 1, speed: { walk: 40 }, abilities: [{ key: "bite", name: "Bite", kind: "action", text: "A bite." }],
             } } as Command);
             m.view.statblocks[id] = { name: beast.name, data: { ac: [{ value: beast.ac ?? 10 }], hp: { average: beast.hp ?? 10 } } };
+          } else if (action === "add_member") {
+            // A2: the late member's PC joins with its initiative (typed, or the server rolls with the card's bonus).
+            if (args.characterId !== LATE_MEMBER.characterId || !joinableOf(m).length) throw fail("invalid_argument", "That character isn't in this party.");
+            const id = `pc-${LATE_MEMBER.characterId}`;
+            if (!m.view.state.combatants.some((c) => c.id === id)) {
+              execute(m, { command: "add_combatant", combatant: character(id, LATE_MEMBER.owner, LATE_MEMBER.name, 24, 15, 1, null) });
+            }
+            const init = args.initiative as { kind: "typed"; total: number } | { kind: "app" };
+            execute(m, { command: "set_initiative", id, roll: init.kind === "typed" ? init : { kind: "app", modifier: 1, mode: "normal" } });
           } else if (action === "add_creature") {
             const from = m.view.state.combatants.find((c) => c.id === args.copyOf);
             if (!from) throw fail("refused", "No such creature.");

@@ -40,6 +40,8 @@
 .combat-now-name { font-size: 1.25rem; overflow-wrap: anywhere; min-width: 0; }
 .combat-now.yours { border-left-color: var(--warning, #b8860b); background: color-mix(in srgb, var(--warning, #b8860b) 18%, var(--surface, transparent)); }
 .combat-now.yours .combat-now-name { font-size: 1.5rem; }
+.combat-ondeck { padding: var(--sp-2) var(--sp-3); border: var(--border-w) solid var(--border); border-left: 4px solid var(--info, #3a6ea5);
+  background: color-mix(in srgb, var(--info, #3a6ea5) 12%, var(--surface, transparent)); overflow-wrap: anywhere; }
 .combat-prompt { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 2px solid var(--warning, #b8860b); border-radius: var(--radius);
   background: var(--surface-2, var(--surface)); min-width: 0; }
 .combat-prompt-q { margin: 0; font-weight: 700; font-size: 1.125rem; overflow-wrap: anywhere; }

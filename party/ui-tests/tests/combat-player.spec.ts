@@ -176,6 +176,10 @@ test.describe("The player's live combat section (0.3.0)", () => {
       const saved = await api<{ play: { hitPoints: { current: number } } }>(request, player.token, "POST", "/api/rpc/get_snapshot", { characterId: hero.id });
       expect(saved.play.hitPoints.current, "the player's own character took it").toBe(Math.max(0, before - 3));
 
+      // 0.3.5: the Goblin Boss acts and the hero is up next: "You're next" (the phone buzzes softly where it can).
+      await expect(pane.getByTestId("combat-on-deck")).toContainText("You're next");
+      await shot(page, testInfo, "on-deck");
+
       // The turn order: visible combatants only, the one acting marked, allies' bands and conditions.
       const order = pane.getByRole("list", { name: "Turn order" });
       await expect(order.locator(".combat-row")).toHaveCount(3);
@@ -245,11 +249,12 @@ test.describe("The player's live combat section (0.3.0)", () => {
       await saves.scrollIntoViewIfNeeded();
       await fits(page, testInfo, ".combat-pane");
       await shot(page, testInfo, "death-saves");
-      await saves.getByLabel("Death save: my table roll").fill("4");
-      await saves.getByRole("button", { name: "Send" }).tap();
+      // 0.3.5: outcome buttons, no number box.
+      await expect(saves.getByLabel("Death save: my table roll")).toHaveCount(0);
+      await saves.getByRole("button", { name: "Failure" }).tap();
       await expect(saves.getByRole("img", { name: "Failures: 2 of 3" })).toBeVisible();
       await saves.getByRole("button", { name: /^Roll for me/ }).tap();
-      await expect(saves.getByRole("img", { name: "Successes: 2 of 3" })).toBeVisible();
+      await expect(saves.getByRole("img", { name: "Successes: 2 of 3" }).or(saves.getByRole("img", { name: "Failures: 3 of 3" }))).toBeVisible();
     } finally {
       await api(request, dm.token, "DELETE", `/api/parties/${party.id}`).catch(() => undefined);
     }

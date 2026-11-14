@@ -4,13 +4,15 @@ import { Button } from "../../../src/components/Button";
 import { Alert, Chip } from "../../../src/components/Card";
 import { useConnectivity } from "../../api/connectivity";
 import {
-  actingId, myCombatant,
+  actingId, myCombatant, onDeck,
   type CombatPrompt, type D20Input, type PlayerCombat, type PlayerCombatant,
 } from "./api";
 import { usePlayMutate } from "../../../src/pages/play/playQueue";
 import { ConditionChips } from "../shared/ConditionChips";
 import { HealthBand } from "../shared/HealthBand";
 import { RollOrType } from "../shared/RollOrType";
+import { DEATH_SAVE_OUTCOMES, passFail } from "../shared/outcomeInputs";
+import { OutcomeButtons } from "../shared/OutcomeButtons";
 import { Creatures } from "./Creatures";
 import { MyCasts } from "./MyCasts";
 import { TurnPanel } from "./TurnPanel";
@@ -20,6 +22,7 @@ import "../shared/combat.css";
 /** How many revealed events the log shows. */
 export const LOG_LINES = 8;
 
+const signedMod = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
 const errorText = (e: unknown) => (e as { message?: string } | null)?.message ?? "That didn't go through.";
 
 /** Who is acting, in words. */
@@ -122,7 +125,10 @@ function PromptCard({ combat, prompt, me, modifier, saveOf }: { combat: PlayerCo
       <section className="combat-prompt" role="alertdialog" aria-label={what}>
         <p className="combat-prompt-q">{what}</p>
         <p className="muted combat-prompt-from">{prompt.from ? `From ${prompt.from}` : "From an unseen creature"}</p>
-        <RollOrType label={what} modifier={saveOf?.(prompt.ability) ?? 0} busy={busy} onRoll={send} />
+        {prompt.dc != null
+          ? <OutcomeButtons label={what} disabled={busy} outcomes={passFail(prompt.dc)} onPick={send}
+            rollLabel={`Roll for me (${signedMod(saveOf?.(prompt.ability) ?? 0)})`} onRoll={() => send({ kind: "app", modifier: saveOf?.(prompt.ability) ?? 0, mode: "normal" })} />
+          : <RollOrType label={what} modifier={saveOf?.(prompt.ability) ?? 0} busy={busy} onRoll={send} />}
         {error && <Alert tone="danger">{error}</Alert>}
       </section>
     );
@@ -131,7 +137,8 @@ function PromptCard({ combat, prompt, me, modifier, saveOf }: { combat: PlayerCo
     return (
       <section className="combat-prompt" role="alertdialog" aria-label={`Concentration save, DC ${prompt.dc}`}>
         <p className="combat-prompt-q">Concentration save, DC {prompt.dc}</p>
-        <RollOrType label="Concentration save" modifier={modifier} busy={busy} onRoll={roll} />
+        <OutcomeButtons label="Concentration save" disabled={busy} outcomes={passFail(prompt.dc, "Kept it", "Lost it")} onPick={roll}
+          rollLabel={`Roll for me (${signedMod(modifier)})`} onRoll={() => roll({ kind: "app", modifier, mode: "normal" })} />
         {error && <Alert tone="danger">{error}</Alert>}
       </section>
     );
@@ -195,7 +202,8 @@ function Me({ combat, me, s }: { combat: PlayerCombat; me: PlayerCombatant; s: C
           </div>
           {me.life === "stable" && <p className="combat-death-state">Stable</p>}
           {me.life === "dead" && <p className="combat-death-state">Dead</p>}
-          {dying && <RollOrType label="Death save" busy={busy} onRoll={save} />}
+          {dying && <OutcomeButtons label="Death save" disabled={busy} outcomes={DEATH_SAVE_OUTCOMES} onPick={save}
+            onRoll={() => save({ kind: "app", modifier: 0, mode: "normal" })} />}
           {error && <Alert tone="danger">{error}</Alert>}
         </div>
       )}
@@ -288,6 +296,7 @@ export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSn
   const yours = acting != null && combat.combatants.some((x) => x.mine && x.id === acting);
   const round = combat.pointer.kind === "combatant" || combat.pointer.kind === "enemy_turn" || combat.pointer.kind === "waiting" ? combat.pointer.round : combat.round;
   const conSave = s.abilities.save.con?.bonus ?? 0;
+  const deck = onDeck(combat);
   return (
     <div className="combat-pane" data-testid="combat-pane">
       <div className="combat-head">
@@ -300,6 +309,12 @@ export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSn
         <span className="combat-now-label">{yours ? "" : "Now"}</span>
         <strong className="combat-now-name">{nowText(combat, me)}</strong>
       </div>
+      {deck && (
+        <div className="combat-ondeck" role="status" aria-live="polite" data-testid="combat-on-deck">
+          <strong>You're next</strong>{deck.kind === "creature" ? <span> · {deck.name}</span> : null}
+          <span className="muted"> · get your turn ready</span>
+        </div>
+      )}
       {me && <Initiative combat={combat} me={me} modifier={s.stats.initiative} />}
       {me && combat.prompts.filter((p) => p.combatant === me.id).map((p) => (
         <PromptCard key={p.id} combat={combat} prompt={p} me={me} modifier={conSave}

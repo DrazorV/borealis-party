@@ -1,8 +1,8 @@
 //! Commands: every change to a combat is one [`Command`], issued by an [`Actor`].
 
 use crate::model::{
-    CastId, Combatant, CombatantId, DamageType, EffectId, EffectSpec, EncounterRule, LegendaryPool,
-    Pool, RowOutcome, Settings,
+    AbilityName, CastId, Combatant, CombatantId, DamageType, EffectId, EffectSpec, EncounterRule,
+    LegendaryPool, Pool, RowOutcome, Settings,
 };
 use crate::spell::{CastChoices, CastSpec};
 use party_dice::{D20Input, DiceInput};
@@ -197,6 +197,27 @@ pub enum Command {
         /// A critical hit (two death-save failures at 0 HP).
         #[serde(default)]
         critical_hit: bool,
+    },
+    /// One damage roll on several targets (D13: the DM's plain keypad for a breath weapon, a trap, an area), each
+    /// with its own save when `save` is set: half (rounded down) on a success, or none when `half` is off. The
+    /// amount is rolled (or typed) once; each target's own defenses then apply. A PC gets a damage prompt (D7).
+    MultiDamage {
+        /// The targets, each with its save result when there is a save.
+        targets: Vec<MultiTarget>,
+        /// The one roll: typed (D43) or rolled.
+        amount: DiceInput,
+        /// The damage type; `None` for untyped damage.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        damage_type: Option<DamageType>,
+        /// The save, when there is one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        save: Option<MultiSave>,
+        /// From a magical source.
+        #[serde(default)]
+        magical: bool,
+        /// Apply clauses with other qualifier text (the DM has read them).
+        #[serde(default)]
+        apply_qualified: bool,
     },
     /// Healing, up to max HP. For a PC, a prompt to the player.
     Heal {
@@ -681,6 +702,33 @@ pub enum RowRoll {
     },
 }
 
+/// The save of a [`Command::MultiDamage`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MultiSave {
+    /// The ability.
+    pub ability: AbilityName,
+    /// The DC.
+    pub dc: u32,
+    /// Half damage on a success (else none).
+    #[serde(default = "yes")]
+    pub half: bool,
+}
+
+const fn yes() -> bool {
+    true
+}
+
+/// One target of a [`Command::MultiDamage`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MultiTarget {
+    /// Who.
+    pub id: CombatantId,
+    /// Its save: typed at the table, rolled in the app (creatures only), or the DM's verdict. Needed when the
+    /// command has a save.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub save: Option<RowRoll>,
+}
+
 /// A row's input inside a cast command.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RowInput {
@@ -819,6 +867,7 @@ impl Command {
             Command::Roll { .. } => "roll",
             Command::Attack { .. } => "attack",
             Command::RollHp { .. } => "roll HP",
+            Command::MultiDamage { .. } => "multi-target damage",
             Command::Summon { .. } => "summon",
             Command::Dismiss { .. } => "dismiss",
             Command::SetInitiativeMode { .. } => "initiative mode",

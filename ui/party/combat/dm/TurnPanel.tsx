@@ -5,7 +5,7 @@ import { EffectDialog, draftSpecs, emptyDraft } from "./dialogs";
 import { CastSheet, type CastDone } from "./CastSheet";
 import { asCommand, COVERAGE_HELP, COVERAGE_WORD, type SpellMech } from "./spellTypes";
 import { SummonPanel, summonOptions, type AddPreset } from "./SummonPanel";
-import { GROUP_WORD, reactionButtons, turnButtons, type TurnButton, type TurnGroup } from "./turn";
+import { GROUP_WORD, passiveLines, reactionButtons, turnButtons, type TurnButton, type TurnGroup } from "./turn";
 import type { Combatant, Command, CombatState, StatBlock } from "./types";
 
 const GROUPS: TurnGroup[] = ["action", "bonus_action", "reaction", "legendary", "free"];
@@ -99,6 +99,13 @@ export function TurnPanel({ state, c, block, blockOf, send, disabled, onAddCreat
           <span className="cb-overline">Reaction ready</span>
           {reactions.map((b) => <Button key={b.key} small disabled={disabled} onClick={() => press(b)}>{b.label}</Button>)}
         </div>
+      )}
+      {passiveLines(c, block).length > 0 && (
+        <ul className="cb-abilities cb-passive-lines" aria-label="Features">
+          {passiveLines(c, block).map((p) => (
+            <li key={p.key} className="cb-ability" data-feature={p.key}><span className="cb-ability-name">{p.name}</span>{p.text && <span className="cb-ability-text">: {p.text}</span>}</li>
+          ))}
+        </ul>
       )}
       {GROUPS.map((g) => {
         const list = buttons.filter((b) => b.group === g);

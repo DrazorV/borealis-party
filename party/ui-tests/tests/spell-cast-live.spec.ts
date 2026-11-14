@@ -201,21 +201,12 @@ test.describe("Casting spells against the real server (0.3.3)", () => {
 
       const res = page.getByRole("dialog", { name: "Fireball · Mage" });
       await expect(res).toBeVisible();
-      // A save row's typed field: "<name>: DEX save: typed result", or "<name> (ray N): ..." when the row has a ray.
-      const saveBox = (name: string) => res.getByLabel(new RegExp("^" + name + String.raw`( \(ray \d+\))?: DEX save: typed result$`));
-      const rayed = await res.getByLabel(/\(ray \d+\): DEX save/).count();
-      if (rayed) finding(testInfo, `Fireball resolution: ${rayed} save rows from the server are labelled "(ray N)" (a sphere has no rays), and the rows' keys change from the predicted cast to the server's, so a number typed before the answer is lost`);
-      const ogreSave = saveBox("Ogre");
-      await expect(ogreSave).toHaveAttribute("inputmode", "numeric");
-      await ogreSave.fill("4");
-      await ogreSave.press("Enter");
-      await expect(res.locator(`[data-target="${ogre.id}"]`)).toContainText("Failed");
-      const pcRow = res.locator(`[data-target="${pc.id}"]`);
+      // 0.3.5: a save is an outcome, pressed after the table roll (no number box).
+      await res.locator(`[data-target="${ogre.id}"]`).getByRole("button", { name: "Failed" }).first().click();
+      await expect(res.locator(`[data-target="${ogre.id}"]`).first()).toContainText("Failed");
+      const pcRow = res.locator(`[data-target="${pc.id}"]`).first();
       await expect(pcRow).toContainText(`Waiting for ${pc.label}'s player`);
-      await pcRow.getByRole("button", { name: "Type it" }).click();
-      const pcSave = saveBox(pc.label);
-      await pcSave.fill("19");
-      await pcSave.press("Enter");
+      await pcRow.getByRole("button", { name: "Saved" }).click();
       await expect(pcRow).toContainText("Saved");
       const damage = res.getByLabel("Fireball damage: typed total");
       await expect(damage).toBeEnabled();

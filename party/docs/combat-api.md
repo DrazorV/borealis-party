@@ -145,6 +145,7 @@ Every answer a player gets, every player event and every player error is built b
   "characters": { "<combatant id>": { "ownerId": "…", "characterId": "c_…", "member": true, "online": true } },
   "prompts": [{ "id", "combatantId", "kind": "damage" | "heal", "amount", "parts", "criticalHit", "at" }],
   "offers": [{ "pc": "<combatant id>", "key", "name", "hp", "ac", "initiative", "elementId" }],   // PCs' sheet companions
+  "joinable": [{ "characterId": "c_…", "name": "…" }],   // 0.3.5: party characters not fighting (joined late, absent, no initiative); names only
   "undo": ["damage", "next turn", …],      // newest first (the engine's labels)
   "startedAt", "endedAt"
 }
@@ -193,7 +194,9 @@ Every engine command by its tag (`set_initiative`, `damage`, `heal`, `set_hp`, `
 | `prev_turn` | – | `previous_turn` |
 | `condition_add` / `condition_remove` | as `add_condition` / `remove_condition` | aliases |
 | `remove_creature` | `{ id }` | `remove_combatant` (a tombstone; undo restores it) |
-| `add_creature` | `{ copyOf: "<combatant id>" }` or `{ encounterCreatureId }`, plus `count` (1–10, default 1), `rollInitiative` (default true), `hidden` (default: like the source) | C7: new copies with new random ids, the stat block copied, labels numbered |
+| `add_creature` | `{ copyOf: "<combatant id>" }` or `{ encounterCreatureId }`, plus `count` (1–10, default 1), `rollInitiative` (default true), `hidden` (default: like the source) | C7: new copies with new random ids, the stat block copied, labels numbered. 0.3.5 (A24): a copy keeps its source's abilities and spells (override spells too), spellcasting, stats and defenses, with full slots, resources, recharges and Legendary Resistance |
+| `add_member` | `{ characterId: "c_…", initiative: D20Input }` | 0.3.5 (A2): a party member's character not in the fight (`joinable`) joins: a new PC combatant from its roster card, or an absent one back; its initiative is typed, or `{ kind: "app" }` rolled with the card's own bonus. 400 when it's in the fight already |
+| `multi_damage` | `{ targets: [{ id, save?: RowRoll }], amount: DiceInput, damage_type?, save?: { ability, dc, half (default true) }, magical?, apply_qualified? }` | 0.3.5 (D13): the engine's `MultiDamage`: one roll for every target; each target's save typed, `outcome`, or `app` (creatures only); half (rounded down, before defenses) or none on a success; a PC gets a damage prompt. One undo step |
 | `undo` | `{ force?: bool }` | C8: revert the last write (50 steps). When it was a player's: 409 `{ "code": "undo_player" }` unless `force` |
 | `end` | – | ends the combat; the encounter becomes `ended`; the D6 health band switches off |
 | `export` | – | D45: answers `{ "format": "borealis-party-combat", "schema_version": 1, "state", "log", "server": { "creatures", "characters" } }` (no `requestId` needed; it writes nothing) |
@@ -207,9 +210,9 @@ The engine's newer commands work the same way: `roll`, `attack`, `roll_hp`, `dis
 
 | Field | The creature |
 |---|---|
-| `companion: "<key>"` | a companion on the owning PC's sheet (`offers`); offered once while it's in the fight |
+| `companion: "<key>"` | a companion on the owning PC's sheet (`offers`); offered once while it's in the fight. 0.3.5 (A24): the cards of members whose workspace is open are read again at combat start, and a card change with the same HP still rebuilds the views, so a companion added mid-fight is offered |
 | `elementId` | a typed Monster or an Aurora Companion element of the **caller's own** content |
-| `copyOf: "<combatant id>"` (DM) | a fresh copy of a creature in this fight |
+| `copyOf: "<combatant id>"` (DM) | a fresh copy of a creature in this fight (with its spells and full pools, as `add_creature`) |
 | `combatant` | an engine-shaped block the client typed: `{ "kind": "creature", "label", "public_name", "hp": { "current", "max" }, "ac"? }` |
 
 Optional `name` / `publicName` rename an `elementId` or `copyOf` summon. The server **always** mints the id (a random
@@ -231,7 +234,7 @@ and still a member of the party. Plus:
 
 - `summon` for their own PC (see [Summons](#summons-dm-and-players)); not `copyOf`.
 - Anything else, another player's PC or creature, a DM creature, a hidden or unknown id, a server action (`undo`,
-  `end`, `add_creature`, `remove_creature`, `export`), a malformed body: the one 404.
+  `end`, `add_creature`, `add_member`, `multi_damage`, `remove_creature`, `export`), a malformed body: the one 404.
 - A refusal about the player's own PC answers 409 with a fixed message: "Not making death saves.", "Dead: set HP to
   revive.", "No concentration check is waiting.", "The combat isn't running.", "The combat has ended.", or 400 "That
   roll isn't valid.". Nothing else ever reaches a player.

@@ -24,6 +24,16 @@ function clauses(list: { text?: string; types?: string[] }[] | undefined): strin
   return (list ?? []).map((c) => c.text ?? (c.types ?? []).join(", ")).filter(Boolean).join("; ");
 }
 
+/** Senses as printed: `Darkvision 60 ft., passive Perception 9` from `{ darkvision: 60, passive_perception: 9 }`. */
+function sensesText(senses: unknown): string {
+  if (typeof senses === "string") return senses;
+  if (!senses || typeof senses !== "object") return "";
+  return Object.entries(senses as Record<string, unknown>)
+    .filter(([, v]) => typeof v === "number" || typeof v === "string")
+    .map(([k, v]) => (k === "passive_perception" ? `passive Perception ${v}` : `${cap(k.replace(/_/g, " "))} ${v}${typeof v === "number" ? " ft." : ""}`))
+    .join(", ");
+}
+
 function Line({ label, children }: { label: string; children: ReactNode }) {
   if (children === "" || children == null) return null;
   return <p className="enc-sb-line"><strong>{label}</strong> {children}</p>;
@@ -75,6 +85,7 @@ function MonsterSheet({ block, hp }: { block: MonsterBlock; hp?: { current: numb
       <Line label="Vulnerabilities">{clauses(block.damage_vulnerabilities)}</Line>
       <Line label="Resistances">{clauses(block.damage_resistances)}</Line>
       <Line label="Immunities">{[clauses(block.damage_immunities), (block.condition_immunities ?? []).join(", ")].filter(Boolean).join("; ")}</Line>
+      <Line label="Senses">{sensesText((block as { senses?: unknown }).senses)}</Line>
       <Line label="Languages">{(block.languages ?? []).join(", ")}</Line>
       <Line label="Challenge">{block.cr ?? ""}</Line>
       <Features title="Traits" list={block.traits} />

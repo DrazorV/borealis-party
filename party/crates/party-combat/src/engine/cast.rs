@@ -718,7 +718,7 @@ impl Cx<'_> {
     }
 
     /// Rolls a d20 test in the app with `bonus`, `mode` and extra dice (Bless).
-    fn roll_test(
+    pub(super) fn roll_test(
         &mut self,
         bonus: i32,
         mode: party_dice::RollMode,

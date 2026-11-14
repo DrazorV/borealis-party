@@ -14,6 +14,8 @@ import { EffectBuilder } from "../combat/dm/EffectBuilder";
 import { fightOver, outKey } from "../combat/dm/fightOver";
 import { encounterPath } from "./EncountersPage";
 import { ResolutionSheet } from "../combat/dm/ResolutionSheet";
+import { MultiDamageSheet } from "../combat/dm/MultiDamageSheet";
+import { AddMemberDialog } from "../combat/dm/AddMemberDialog";
 import { addCreatureFromBestiary } from "../combat/dm/spellApi";
 import { castToShow, showCast } from "../combat/dm/castFocus";
 import { castName, mechOf, openCasts, spellOf } from "../combat/dm/spellTypes";
@@ -43,7 +45,9 @@ export function CombatTracker() {
   const nav = useNavigate();
   const phone = usePhone();
   const [selected, setSelected] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<"add" | "export" | "import" | null>(null);
+  const [dialog, setDialog] = useState<"add" | "member" | "export" | "import" | null>(null);
+  /** 0.3.5: the multi-target damage sheet, opened from this combatant's card. */
+  const [multiFrom, setMultiFrom] = useState<string | null>(null);
   const [exported, setExported] = useState("");
   const [logOpen, setLogOpen] = useState(false);
   /** Who was down when the DM chose "Keep going": the banner stays away until that changes. */
@@ -237,7 +241,8 @@ export function CombatTracker() {
       <div className="cb-layout">
         <div className="cb-left">
           <Roster state={state} selected={selected} onSelect={(x) => { setSelected(x); if (phone) requestAnimationFrame(() => cardRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" })); }}
-            send={send} disabled={disabled} onAdd={() => setDialog("add")} />
+            send={send} disabled={disabled} onAdd={() => setDialog("add")}
+            joinable={view.joinable?.length ?? 0} onAddMember={() => setDialog("member")} />
           <details className="cb-panel cb-tools" onToggle={(e) => setLogOpen((e.currentTarget as HTMLDetailsElement).open)}>
             <summary>Log, export and import</summary>
             <div className="cb-pad">
@@ -259,7 +264,8 @@ export function CombatTracker() {
         </div>
         <div className="cb-main" ref={cardRef}>
           {chosen ? <CombatantCard state={state} c={chosen} block={view.creatures?.[chosen.id]?.statBlock} blockName={view.creatures?.[chosen.id]?.name ?? undefined} send={send} disabled={disabled} prompts={view.prompts}
-            blockOf={blockOf} onDefine={(a) => setDefining({ a, ruleset: `dnd${mechOf(a)?.edition ?? state.edition}` })} onAddCreature={(p) => { setAddPreset(p); setDialog("add"); }} />
+            blockOf={blockOf} onDefine={(a) => setDefining({ a, ruleset: `dnd${mechOf(a)?.edition ?? state.edition}` })} onAddCreature={(p) => { setAddPreset(p); setDialog("add"); }}
+            onMultiDamage={setMultiFrom} />
             : <div className="cb-panel cb-pad muted">Pick a combatant.</div>}
         </div>
         <div className="cb-right" ref={resRef}>
@@ -279,6 +285,9 @@ export function CombatTracker() {
         onClose={() => { setDialog(null); setAddPreset(undefined); }}
         onCopy={(r) => { setDialog(null); setAddPreset(undefined); void add(r); }}
         onBestiary={(r) => { setDialog(null); setAddPreset(undefined); void addFromBestiary(r); }} />}
+      {multiFrom && <MultiDamageSheet state={state} first={multiFrom} blockOf={blockOf} send={send} onClose={() => setMultiFrom(null)} />}
+      {dialog === "member" && <AddMemberDialog joinable={view.joinable ?? []} onClose={() => setDialog(null)}
+        onAdd={(characterId, initiative) => { setDialog(null); send({ command: "add_member", characterId, initiative }); }} />}
       {resolvingCast && <ResolutionSheet state={state} cast={resolvingCast} blockOf={blockOf} send={send} onClose={() => setResolving(null)} />}
       {defining && <EffectBuilder spellKey={spellOf(defining.a)?.key ?? defining.a.key} spellName={defining.a.name} ruleset={defining.ruleset}
         level={spellOf(defining.a)?.level ?? 1} text={defining.a.text ?? ""} onClose={() => setDefining(null)} />}

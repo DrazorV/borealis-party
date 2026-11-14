@@ -95,22 +95,15 @@ test.describe("Spells and mechanics in combat (0.3.2)", () => {
 
     const res = page.getByRole("dialog", { name: "Fireball · Mage" });
     await expect(res).toBeVisible();
-    // The number field is the row's main control: a number pad on phones.
-    const knight = res.getByLabel("Knight: DEX save: typed result");
-    await expect(knight).toHaveAttribute("inputmode", "numeric");
-    await knight.fill("16");
-    await knight.press("Enter");
-    await expect(res.getByLabel("Cultist 1: DEX save: typed result")).toBeFocused();
-    await page.keyboard.type("7");
-    await page.keyboard.press("Enter");
-    await expect(res.getByLabel("Cultist 2: DEX save: typed result")).toBeFocused();
-    await expect(res.locator('[data-target="pc-aria"]')).toContainText("Waiting for Aria's player");
+    // 0.3.5: a save is an outcome: rolled at the table, the result pressed (no number box).
+    await expect(res.getByLabel("Knight: DEX save: typed result")).toHaveCount(0);
+    const row = (id: string) => res.locator(`[data-target="${id}"]`);
+    await row("knight").getByRole("button", { name: "Saved" }).click();
+    await row("cultist1").getByRole("button", { name: "Failed" }).click();
+    await expect(row("pc-aria")).toContainText("Waiting for Aria's player");
     await shot(page, testInfo, "resolution-typed");
-    await page.keyboard.type("15");
-    await page.keyboard.press("Enter");
-    await res.locator('[data-target="pc-aria"]').getByRole("button", { name: "Type it" }).click();
-    await res.getByLabel("Aria: DEX save: typed result").fill("9");
-    await res.getByLabel("Aria: DEX save: typed result").press("Enter");
+    await row("cultist2").getByRole("button", { name: "Saved" }).click();
+    await row("pc-aria").getByRole("button", { name: "Failed" }).click();
     const damage = res.getByLabel("Fireball damage: typed total");
     await expect(damage).toBeEnabled();
     await damage.fill("31");

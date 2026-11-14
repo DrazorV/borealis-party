@@ -1,0 +1,5 @@
+/* 0.3.5: pass/fail rolls as buttons, side by side and the same height. */
+.roll-outcomes { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.roll-outcomes-label { font-size: var(--fs-sm); font-weight: 600; }
+.roll-outcomes-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: stretch; }
+.roll-outcomes-row > .btn { flex: 1 1 0; min-width: 6.5em; }

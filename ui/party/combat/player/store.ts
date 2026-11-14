@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { holdReload } from "../../api/connectivity";
 import {
-  actingId, combatPlayerDeps, diffEvents, liveCombat, myCombatant, playerAction, watchCombats,
+  actingId, onDeck, combatPlayerDeps, diffEvents, liveCombat, myCombatant, playerAction, watchCombats,
   type CombatLogEntry, type OpenCharacter, type PlayerCombat, type WireContext,
 } from "./api";
 import { loadSession } from "../../api/session";
@@ -72,6 +72,8 @@ export const deviceDeps = {
 
 /** The buzz on "Your turn". */
 export const YOUR_TURN_BUZZ = [200, 100, 200];
+/** The soft buzz on "You're next" (on deck). */
+export const ON_DECK_BUZZ = [60];
 
 const isLive = (c: PlayerCombat) => c.status !== "ended" && c.pointer.kind !== "ended";
 const isNetwork = (e: unknown) => (e as { code?: string } | null)?.code === "network";
@@ -125,10 +127,13 @@ function put(partyId: string, combat: PlayerCombat | null): void {
   } else logs.delete(partyId);
   if (combat) lastSeq.set(partyId, combat.seq);
   else lastSeq.delete(partyId);
+  const seen = lastActing.has(partyId);
   const was = lastActing.get(partyId) ?? null;
   const now = keep[0] ? actingId(keep[0]) : null;
   lastActing.set(partyId, now);
   if (keep[0] && now && now !== was && keep[0].combatants.some((x) => x.mine && x.id === now)) deviceDeps.vibrate(YOUR_TURN_BUZZ);
+  // On deck: one soft buzz when the turn moves and one of mine is up next.
+  else if (seen && keep[0] && now && now !== was && onDeck(keep[0])) deviceDeps.vibrate(ON_DECK_BUZZ);
   publish({ combats: [...others, ...keep], offline: false, offlineSince: null, updatedAt: deviceDeps.now() });
 }
 

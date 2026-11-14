@@ -655,6 +655,8 @@ pub(crate) struct Snapshot {
     pub rolls: Vec<Prompt>,
     /// Companions on the PCs' sheets not yet in the fight: `{ pc, key, name, hp, ac, initiative, elementId }`.
     pub offers: Vec<Value>,
+    /// A2 (0.3.5): the party's characters the DM can add to the fight (not in it, or absent): `{ characterId, name }`.
+    pub joinable: Vec<Value>,
     pub encounter: Option<EncounterInfo>,
     /// The latest answered damage and heal prompts (0.3.3: the DM sees that a prompt was accepted or declined),
     /// newest first, with whether it was applied.
@@ -670,6 +672,7 @@ const DM_RECENT: usize = 30;
 async fn snapshot(conn: &mut AnyConnection, combat: Loaded, cards: &CardCache) -> Res<Snapshot> {
     let roster = roster(conn, &combat.id).await?;
     let offers = offers_of(&combat.state, &roster, cards);
+    let joinable = joinable_of(conn, &combat, &roster, cards).await?;
     let prompts = open_prompts(conn, &combat.id).await?;
     let rolls = recent_rolls(conn, &combat.id).await?;
     let encounter = encounter_info(conn, combat.encounter.as_deref()).await?;
@@ -683,10 +686,41 @@ async fn snapshot(conn: &mut AnyConnection, combat: Loaded, cards: &CardCache) -
         prompts,
         rolls,
         offers,
+        joinable,
         encounter,
         answered,
         feed,
     })
+}
+
+/// The party's characters that aren't fighting in this combat (A2): a member who joined after the start, or a PC
+/// set absent or without initiative. Only their names (from the cards), never their numbers.
+async fn joinable_of(
+    conn: &mut AnyConnection,
+    combat: &Loaded,
+    roster: &BTreeMap<String, Member>,
+    cards: &CardCache,
+) -> Res<Vec<Value>> {
+    let members = members_of(conn, &combat.party).await?;
+    let fighting: BTreeSet<&str> = roster
+        .iter()
+        .filter(|(id, m)| {
+            m.kind == "character"
+                && combat
+                    .state
+                    .combatant(&CombatantId::new((*id).clone()))
+                    .is_some_and(|x| !x.removed && !x.absent && x.initiative.is_some())
+        })
+        .filter_map(|(_, m)| m.character.as_deref())
+        .collect();
+    Ok(members
+        .iter()
+        .filter(|(_, ch)| !fighting.contains(ch.as_str()))
+        .map(|(owner, ch)| {
+            let name = cards.get(owner, ch).and_then(|c| c.name);
+            json!({ "characterId": ch, "name": name.unwrap_or_else(|| "Character".into()) })
+        })
+        .collect())
 }
 
 async fn answered_prompts(conn: &mut AnyConnection, combat: &str) -> Res<Vec<(Prompt, bool)>> {
@@ -1054,6 +1088,7 @@ fn dm_view(
         "prompts": prompts,
         // A sheet's companions, without the sheet's numbers.
         "offers": snap.offers.iter().map(|o| json!({ "pc": o["pc"], "key": o["key"], "name": o["name"], "ac": o["ac"], "elementId": o["elementId"] })).collect::<Vec<_>>(),
+        "joinable": snap.joinable,
         "feed": snap.feed,
         "undo": undo,
         "startedAt": snap.combat.started_at,
@@ -1307,6 +1342,13 @@ enum Op {
     },
     /// A PC's roster card changed: its HP comes into the combat.
     Sync { id: String, hp: Hp },
+    /// A2 (0.3.5): a party member's character not in the fight joins it with this initiative (a late arrival).
+    Join {
+        character: String,
+        initiative: party_dice::D20Input,
+        /// Its roster card, read before the transaction (no blocking file reads inside it).
+        card: Box<Card>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -1734,6 +1776,7 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
                     );
                     t.ac = x.ac;
                     t.initiative_bonus = x.initiative_bonus;
+                    carry_from(&mut t, x);
                     t.visible = x.visible;
                     t.owner_id.clone_from(&x.owner_id);
                     t.controller = x.controller.clone();
@@ -1984,6 +2027,92 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
                 }
             }
         }
+        Op::Join {
+            character,
+            initiative,
+            card,
+        } => {
+            let owner = members_of(&mut tx, &party)
+                .await?
+                .into_iter()
+                .find(|(_, ch)| ch == character)
+                .map(|(o, _)| o)
+                .ok_or_else(|| ApiError::Invalid("That character isn't in this party.".into()))?;
+            let here = roster_now
+                .iter()
+                .filter(|(_, m)| {
+                    m.kind == "character" && m.character.as_deref() == Some(character.as_str())
+                })
+                .filter_map(|(id, _)| c.state.combatant(&CombatantId::new(id.clone())))
+                .find(|x| !x.removed)
+                .map(|x| (x.id.clone(), x.absent, x.initiative));
+            let mut st = c.state.clone();
+            let mut die = c.die;
+            let mut run = |st: &mut CombatState, cmd: Command, out: &mut Applied| -> Res<()> {
+                let o = apply(st, &actor, &cmd, &mut die).map_err(|e| refusal(w.writer, &e))?;
+                *st = o.state;
+                out.dm.extend(o.events.dm);
+                out.players.extend(o.events.players);
+                Ok(())
+            };
+            let id = match here {
+                Some((_, false, Some(_))) => {
+                    return Err(
+                        ApiError::Invalid("That character is in the fight already.".into()).into(),
+                    )
+                }
+                Some((id, absent, _)) => {
+                    if absent {
+                        run(
+                            &mut st,
+                            Command::SetAbsent {
+                                id: id.clone(),
+                                absent: false,
+                            },
+                            &mut out,
+                        )?;
+                    }
+                    id
+                }
+                None => {
+                    let id = new_id();
+                    let x = pc_combatant(&id, &owner, card);
+                    run(
+                        &mut st,
+                        Command::AddCombatant {
+                            combatant: Box::new(x),
+                            roll_initiative: false,
+                        },
+                        &mut out,
+                    )?;
+                    out.new_members.push((
+                        id.clone(),
+                        Member {
+                            kind: "character".into(),
+                            owner: Some(owner.clone()),
+                            character: Some(character.clone()),
+                            ..Member::default()
+                        },
+                    ));
+                    CombatantId::new(id)
+                }
+            };
+            // "Roll for me": with the PC's own initiative bonus (its card's), which the DM needn't know.
+            let roll = match initiative {
+                party_dice::D20Input::App {
+                    mode, crit_range, ..
+                } => party_dice::D20Input::App {
+                    modifier: st.combatant(&id).map_or(0, |x| x.initiative_bonus),
+                    mode: *mode,
+                    crit_range: *crit_range,
+                },
+                typed => typed.clone(),
+            };
+            run(&mut st, Command::SetInitiative { id, roll }, &mut out)?;
+            out.state = st;
+            out.die = die;
+            out.journal = Some("add party member");
+        }
         Op::Sync { id, hp } => {
             let cid = CombatantId::new(id.clone());
             let Some(x) = c.state.combatant(&cid) else {
@@ -1993,27 +2122,25 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
                     ..Done::default()
                 });
             };
-            if x.hp == *hp {
-                return Ok(Done {
-                    party,
-                    nothing: true,
-                    ..Done::default()
-                });
+            // A24 (0.3.5): when the card changed but not its HP (a companion added on the sheet) nothing is applied,
+            // but the views are built again (each compared by its hash), so the companions offered reach the player
+            // and the DM.
+            if x.hp != *hp {
+                let cmd = Command::SyncPlayerHp {
+                    id: cid,
+                    current: hp.current,
+                    max: hp.max,
+                    temp: hp.temp,
+                    damage: None,
+                };
+                let mut die = c.die;
+                let o = apply(&c.state, &Actor::System, &cmd, &mut die)
+                    .map_err(|e| Fail::Refused(e.to_string()))?;
+                out.state = o.state;
+                out.die = die;
+                out.dm = o.events.dm;
+                out.players = o.events.players;
             }
-            let cmd = Command::SyncPlayerHp {
-                id: cid,
-                current: hp.current,
-                max: hp.max,
-                temp: hp.temp,
-                damage: None,
-            };
-            let mut die = c.die;
-            let o = apply(&c.state, &Actor::System, &cmd, &mut die)
-                .map_err(|e| Fail::Refused(e.to_string()))?;
-            out.state = o.state;
-            out.die = die;
-            out.dm = o.events.dm;
-            out.players = o.events.players;
         }
     }
     // A legendary creature added mid-fight (a copy, an encounter creature, an element, a summon) gets its own pool.
@@ -2296,6 +2423,53 @@ pub(crate) async fn card_changed(state: &AppState, party: &str, owner: &str, cha
     }
 }
 
+/// A party member's PC as a combatant, from its roster card (no initiative yet: C1).
+fn pc_combatant(id: &str, owner: &str, card: &Card) -> Combatant {
+    let hp = card_hp(card).unwrap_or_default();
+    let stats = card.stats.clone().unwrap_or_default();
+    let mut c = Combatant::character(
+        id,
+        owner,
+        card.name.clone().unwrap_or_else(|| "Character".into()),
+        hp,
+        stats.armor_class,
+        stats.initiative,
+    );
+    if hp.max == 0 {
+        // HP not known yet: the first card refresh brings it.
+        c.life = Life::Alive;
+    }
+    c.speed.walk = u32::try_from(stats.speed).unwrap_or(30);
+    c
+}
+
+/// The roster card of a party member's character joining a running fight (A2), read off the async threads; an
+/// empty card when none was read yet (the first refresh brings its numbers). Membership is checked again in the
+/// write's transaction.
+async fn joining_card(state: &AppState, combat: &str, character: &str) -> Res<Card> {
+    let owner: Option<String> = sqlx::query(
+        "SELECT m.owner_id FROM party_members m JOIN combats c ON c.party_id = m.party_id
+         WHERE c.id = $1 AND m.character_id = $2",
+    )
+    .bind(combat)
+    .bind(character)
+    .fetch_optional(state.db.pool())
+    .await?
+    .map(|r| r.try_get(0))
+    .transpose()?;
+    let Some(owner) = owner else {
+        return Err(ApiError::Invalid("That character isn't in this party.".into()).into());
+    };
+    let hub = Arc::clone(&state.hub);
+    let ch = character.to_string();
+    Ok(
+        tokio::task::spawn_blocking(move || hub.cards.get(&owner, &ch))
+            .await
+            .map_err(internal)?
+            .unwrap_or_default(),
+    )
+}
+
 fn card_hp(card: &Card) -> Option<Hp> {
     let s = card.stats.as_ref()?;
     Some(Hp {
@@ -2316,6 +2490,45 @@ fn without_xp(mut block: Value) -> Value {
         }
     }
     block
+}
+
+/// A copy of a creature in this fight (C7 `add_creature {copyOf}`, `summon {copyOf}`) fights with what its source
+/// fights with (A24): the abilities and spells its overrides gave it (a stat block alone would drop them), its
+/// spellcasting, stats, defenses and speeds; its slots, resources, recharges and Legendary Resistance full, as a new
+/// creature's are.
+fn carry_from(t: &mut Combatant, x: &Combatant) {
+    t.abilities = x
+        .abilities
+        .iter()
+        .cloned()
+        .map(|mut a| {
+            if let Some(r) = a.recharge.as_mut() {
+                r.ready = true;
+            }
+            a
+        })
+        .collect();
+    t.casting.clone_from(&x.casting);
+    t.stats.clone_from(&x.stats);
+    t.defenses.clone_from(&x.defenses);
+    t.speed = x.speed;
+    t.spell_slots = x
+        .spell_slots
+        .iter()
+        .map(|(level, p)| (*level, party_combat::Pool::full(p.max)))
+        .collect();
+    t.resources = x
+        .resources
+        .iter()
+        .map(|(key, r)| {
+            let mut r = r.clone();
+            r.pool = party_combat::Pool::full(r.pool.max);
+            (key.clone(), r)
+        })
+        .collect();
+    t.legendary_resistance = x
+        .legendary_resistance
+        .map(|p| party_combat::Pool::full(p.max));
 }
 
 /// The fighter of an encounter creature's copy (`statblock_json`) with its overrides (`party_encounter::combatant`).
@@ -2496,6 +2709,10 @@ async fn start_inner(state: &AppState, user: &User, encounter: &str, body: &[u8]
     let _job = job(&user.id).await?;
     // The DM's spells and spell rules (0.3.2), read before the one connection below is taken.
     let spells = crate::spells::library(state, &user.id).await?;
+    // A24 (0.3.5): the members' cards read again from the sheets open now, so the companions offered at setup are
+    // the sheets' own (a card read before a companion was added would offer none). Closed workspaces keep the card
+    // last read; their owner's next play brings it in.
+    refresh_open_cards(state, &party).await?;
     // One connection for the reads (a single-connection pool must never wait on a second one).
     let mut conn = state.db.pool().acquire().await?;
     let mut die = SeededDie::new(seed());
@@ -2592,22 +2809,8 @@ async fn start_inner(state: &AppState, user: &User, encounter: &str, body: &[u8]
             .await
             .map_err(internal)?
             .unwrap_or_default();
-        let hp = card_hp(&card).unwrap_or_default();
-        let stats = card.stats.clone().unwrap_or_default();
         let id = new_id();
-        let mut c = Combatant::character(
-            &id,
-            &owner,
-            card.name.clone().unwrap_or_else(|| "Character".into()),
-            hp,
-            stats.armor_class,
-            stats.initiative,
-        );
-        if hp.max == 0 {
-            // HP not known yet: the first card refresh brings it.
-            c.life = Life::Alive;
-        }
-        c.speed.walk = u32::try_from(stats.speed).unwrap_or(30);
+        let c = pc_combatant(&id, &owner, &card);
         let cmd = Command::AddCombatant {
             combatant: Box::new(c),
             roll_initiative: false,
@@ -2789,6 +2992,20 @@ async fn start_inner(state: &AppState, user: &User, encounter: &str, body: &[u8]
     }
 }
 
+/// The roster cards of a party's members whose workspace is open, read again (A24).
+async fn refresh_open_cards(state: &AppState, party: &str) -> Res<()> {
+    let members: Vec<(String, String)> = {
+        let mut conn = state.db.pool().acquire().await?;
+        members_of(&mut conn, party).await?.into_iter().collect()
+    };
+    for (owner, character) in members {
+        if let Some(workspace) = state.workspaces.loaded_now(&owner) {
+            crate::parties::refresh_card(state, &owner, &character, &workspace, party).await;
+        }
+    }
+    Ok(())
+}
+
 /// One slot of `level` spent by `caster` before the fight. A caster without slots of that level (a stat block whose
 /// slots weren't seeded) spends nothing; the log says why.
 fn spend_slot(
@@ -2932,8 +3149,9 @@ pub async fn log(
 const NOT_OFFERED: [&str; 2] = ["add_combatant", "sync_player_hp"];
 /// The server's own actions only the DM may take. What else a player may do is the engine's call (their PC and the
 /// creatures it controls), checked again by the server for membership.
-const DM_ACTIONS: [&str; 8] = [
+const DM_ACTIONS: [&str; 9] = [
     "undo",
+    "add_member",
     "end",
     "add_creature",
     "remove_creature",
@@ -3055,6 +3273,28 @@ async fn act_inner(
             None,
         ),
         "end" => (Op::End, None),
+        "add_member" => {
+            let character = args
+                .get("characterId")
+                .and_then(Value::as_str)
+                .filter(|c| crate::parties::valid_character_id(c))
+                .ok_or_else(|| bad("Send the characterId."))?
+                .to_string();
+            let initiative: party_dice::D20Input = args
+                .get("initiative")
+                .cloned()
+                .and_then(|v| serde_json::from_value(v).ok())
+                .ok_or_else(|| bad("Send the initiative: typed or rolled."))?;
+            let card = joining_card(state, combat, &character).await?;
+            (
+                Op::Join {
+                    character,
+                    initiative,
+                    card: Box::new(card),
+                },
+                None,
+            )
+        }
         "add_creature" => {
             let source = match (
                 args.get("copyOf").and_then(Value::as_str),
@@ -3154,22 +3394,39 @@ async fn act_inner(
             let mut cmd = args.clone();
             cmd.insert("command".into(), json!(tag));
             // A summoned creature is built by the server, with a random id, whatever the client sent.
+            let mut built = None;
             if tag == "summon" {
                 let (combatant, member) =
                     summon_combatant(state, user, combat, &args, player).await?;
-                cmd.insert("combatant".into(), combatant);
+                // Read on its own: inside the tagged command, its slots (keyed by level) wouldn't read back.
+                let whole: Combatant = serde_json::from_value(combatant.clone()).map_err(|e| {
+                    if player {
+                        Fail::Api(not_found())
+                    } else {
+                        Fail::Api(ApiError::Invalid(format!("Not a valid summon: {e}")))
+                    }
+                })?;
+                let mut bare = combatant;
+                if let Some(o) = bare.as_object_mut() {
+                    o.remove("spell_slots");
+                }
+                built = Some(whole);
+                cmd.insert("combatant".into(), bare);
                 for key in ["companion", "elementId", "copyOf", "name", "publicName"] {
                     cmd.remove(key);
                 }
                 summoned = Some(member);
             }
-            let command: Command = serde_json::from_value(Value::Object(cmd)).map_err(|e| {
+            let mut command: Command = serde_json::from_value(Value::Object(cmd)).map_err(|e| {
                 if player {
                     Fail::Api(not_found())
                 } else {
                     Fail::Api(ApiError::Invalid(format!("Not a valid {action}: {e}")))
                 }
             })?;
+            if let (Command::Summon { combatant, .. }, Some(whole)) = (&mut command, built) {
+                **combatant = whole;
+            }
             (Op::Engine(Box::new(command)), None)
         }
     };
@@ -3709,6 +3966,7 @@ async fn summon_combatant(
         let mut y = creature_of(&id, &label, &x.public_name, &f, x.hp.max.max(1));
         y.ac = x.ac;
         y.initiative_bonus = x.initiative_bonus;
+        carry_from(&mut y, x);
         let mut member = m.clone();
         member.origin = Some("copy".into());
         return Ok((serde_json::to_value(y).map_err(internal)?, member));

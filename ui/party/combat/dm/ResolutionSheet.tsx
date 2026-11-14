@@ -138,7 +138,6 @@ function ResRow({ row, kind, ability, target, pc, mod, ac, inputRef, onResolve }
   onResolve: (args: RowArgs) => void;
 }) {
   const [text, setText] = useState("");
-  const [override, setOverride] = useState(false);
   const save = kind === "save";
   const n = text.trim() !== "" && /^-?\d+$/.test(text.trim()) ? Number(text.trim()) : null;
   const submit = () => { if (n !== null) { onResolve({ roll: { kind: "typed", total: n } }); setText(""); } };
@@ -156,19 +155,19 @@ function ResRow({ row, kind, ability, target, pc, mod, ac, inputRef, onResolve }
       </li>
     );
   }
-  const waitingForPlayer = pc && save && !override;
+  const waitingForPlayer = pc && save;
   return (
     <li className="cb-res-row" data-target={target.id}>
       <span className="cb-res-name">{target.label}{!save && ac != null ? <span className="muted cb-small"> · AC {ac}</span> : null}</span>
       {waitingForPlayer ? (
         <span className="cb-res-wait">
-          <span className="cb-small" role="status">Waiting for {target.label}'s player</span>
-          <Button small variant="ghost" onClick={() => setOverride(true)}>Type it</Button>
+          <span className="cb-small" role="status">Waiting for {target.label}'s player (or press their result)</span>
         </span>
       ) : (
         <span className="cb-res-entry">
-          <input ref={inputRef} className="input cb-roll-box" inputMode="numeric" enterKeyHint="next" placeholder="Table roll" aria-label={`${label}: typed result`}
-            value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} />
+          {/* 0.3.5: a save is pass or fail: roll at the table and press Failed or Saved; a number box only for attack totals (vs AC). */}
+          {!save && <input ref={inputRef} className="input cb-roll-box" inputMode="numeric" enterKeyHint="next" placeholder="Table roll" aria-label={`${label}: typed result`}
+            value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} />}
           <Button small icon="dice" variant="ghost" title={`Roll d20${signed(mod)} in the app`} onClick={() => onResolve({ roll: { kind: "app" } })}>Roll for me</Button>
         </span>
       )}

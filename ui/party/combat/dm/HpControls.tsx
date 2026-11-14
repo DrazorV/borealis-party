@@ -15,7 +15,11 @@ const clauseText = (list: DamageClause[] | undefined) =>
  * quick −10/−5/+5, damage type chips, magical and critical, Set exact and temporary HP. For a PC, Damage and Heal
  * send the player a prompt instead (D7): the PC's HP stays the player's.
  */
-export function HpControls({ c, send, disabled }: { c: Combatant; send: (cmd: Command) => void; disabled: boolean }) {
+export function HpControls({ c, send, disabled, onMulti }: {
+  c: Combatant; send: (cmd: Command) => void; disabled: boolean;
+  /** 0.3.5 (D13): opens the multi-target damage sheet with this combatant picked. */
+  onMulti?: () => void;
+}) {
   const [amount, setAmount] = useState("");
   const [type, setType] = useState<DamageType | null>(null);
   const [magical, setMagical] = useState(false);
@@ -75,6 +79,7 @@ export function HpControls({ c, send, disabled }: { c: Combatant; send: (cmd: Co
         <label className="cb-check"><input type="checkbox" checked={magical} onChange={(e) => setMagical(e.target.checked)} />Magical</label>
         <label className="cb-check"><input type="checkbox" checked={crit} onChange={(e) => setCrit(e.target.checked)} />Critical hit</label>
         {qualifiers.length > 0 && <label className="cb-check"><input type="checkbox" checked={qualified} onChange={(e) => setQualified(e.target.checked)} />Qualified clauses apply</label>}
+        {onMulti && <Button small variant="ghost" disabled={disabled} onClick={onMulti} title="One roll on several targets, each with its own save">Several targets…</Button>}
         {!pc && <Button small variant="ghost" disabled={disabled} onClick={() => setDialog("set")}>Set exact</Button>}
         {!pc && <Button small variant="ghost" disabled={disabled || dead} onClick={() => setDialog("temp")}>Temp HP</Button>}
       </div>
