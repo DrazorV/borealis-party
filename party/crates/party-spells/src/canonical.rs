@@ -313,6 +313,21 @@ impl Catalog {
             .collect()
     }
 
+    /// Every hidden copy with the chosen copy that answers for it where content names the hidden
+    /// copy by id (an `<extend>` of a class list, a select of named spells).
+    #[must_use]
+    pub fn stand_ins(&self) -> BTreeMap<String, String> {
+        self.groups
+            .values()
+            .flat_map(|g| {
+                g.members
+                    .iter()
+                    .skip(1)
+                    .map(|(id, _)| (id.clone(), g.canonical.clone()))
+            })
+            .collect()
+    }
+
     /// The other sources of the spell `id` ("also in: ...").
     #[must_use]
     pub fn also_in(&self, id: &str) -> Vec<String> {

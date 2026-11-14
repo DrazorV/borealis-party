@@ -1162,7 +1162,7 @@ async fn a_5etools_bestiary_import_is_covered() {
 // ---------------------------------------------------------------------------------------------------------------
 
 /// The Aurora Legacy indexes the user subscribes to.
-const AURORA_INDEXES: [&str; 4] = [
+pub(super) const AURORA_INDEXES: [&str; 4] = [
     "https://raw.githubusercontent.com/AuroraLegacy/elements/master/core.index",
     "https://raw.githubusercontent.com/AuroraLegacy/elements/master/supplements.index",
     "https://raw.githubusercontent.com/AuroraLegacy/elements/master/unearthed-arcana.index",
@@ -1170,7 +1170,7 @@ const AURORA_INDEXES: [&str; 4] = [
 ];
 
 /// Downloads through a folder: a URL fetched once is read from there afterwards.
-struct Cached(PathBuf);
+pub(super) struct Cached(pub(super) PathBuf);
 
 impl Cached {
     fn file(&self, url: &str) -> PathBuf {

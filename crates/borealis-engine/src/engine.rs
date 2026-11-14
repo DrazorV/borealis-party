@@ -58,7 +58,7 @@ impl Engine {
         });
         if !settings.hidden_elements.is_empty() {
             for u in &mut universes {
-                u.hide(&settings.hidden_elements);
+                u.hide(&settings.hidden_elements, &settings.hidden_stand_ins);
             }
         }
         Self {

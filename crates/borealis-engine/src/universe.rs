@@ -213,6 +213,12 @@ pub struct UElem {
     pub superseded: bool,
     /// Listed in [`crate::EngineSettings::hidden_elements`]: never offered for new picks.
     pub hidden: bool,
+    /// The other ids of this element's copy group under [`crate::EngineSettings::hidden_stand_ins`]:
+    /// a visible stand-in lists the hidden copies it answers for, a hidden copy lists its stand-in
+    /// and the other copies hidden behind it. An id list or `ID_` supports term naming one of them
+    /// matches this element, so content naming any copy offers the visible one, and a choice made
+    /// through a stand-in still replays after the app swaps which copy is visible.
+    pub copy_ids: Vec<String>,
     /// IM16: the tags of the 2014 elements this native 2024 element replaces (`maps_to` kind
     /// `equivalent`, 2024 universe only). A supports expression the element's own tags do not
     /// match is matched against these too ([`crate::eval::supports_match`]).
@@ -271,6 +277,7 @@ impl UElem {
             repeatable,
             superseded: false,
             hidden: false,
+            copy_ids: Vec::new(),
             replaced_supports: Vec::new(),
             replaced_ids: Vec::new(),
             toggle_effects,
@@ -796,10 +803,52 @@ impl Universe {
         &self.creation_roots
     }
 
-    /// Mark the elements of `ids` as hidden from new picks ([`crate::EngineSettings::hidden_elements`]).
-    pub(crate) fn hide(&mut self, ids: &std::collections::BTreeSet<String>) {
+    /// Mark the elements of `ids` as hidden from new picks ([`crate::EngineSettings::hidden_elements`]),
+    /// and group each hidden element with the visible element that stands in for it
+    /// ([`crate::EngineSettings::hidden_stand_ins`], [`UElem::copy_ids`]). A stand-in that is
+    /// hidden itself passes on to its own stand-in (a chain); an entry that ends at nothing loaded,
+    /// loops, or changes type is ignored.
+    pub(crate) fn hide(
+        &mut self,
+        ids: &std::collections::BTreeSet<String>,
+        stand_ins: &std::collections::BTreeMap<String, String>,
+    ) {
         for u in &mut self.elems {
             u.hidden = ids.contains(&u.el.id);
+            u.copy_ids.clear();
+        }
+        let mut groups: std::collections::BTreeMap<usize, Vec<usize>> =
+            std::collections::BTreeMap::new();
+        for hidden in stand_ins.keys().filter(|h| ids.contains(*h)) {
+            let Some(&h) = self.by_id.get(hidden.as_str()) else {
+                continue;
+            };
+            let mut at = hidden;
+            let mut visible = None;
+            for _ in 0..=stand_ins.len() {
+                let Some(next) = stand_ins.get(at) else {
+                    break;
+                };
+                if !ids.contains(next) {
+                    visible = self.by_id.get(next.as_str()).copied();
+                    break;
+                }
+                at = next;
+            }
+            if let Some(v) = visible.filter(|&v| self.elems[v].el.ty == self.elems[h].el.ty) {
+                groups.entry(v).or_default().push(h);
+            }
+        }
+        for (v, hidden) in groups {
+            let members: Vec<usize> = std::iter::once(v).chain(hidden).collect();
+            for &m in &members {
+                let others = members
+                    .iter()
+                    .filter(|&&o| o != m)
+                    .map(|&o| self.elems[o].el.id.clone())
+                    .collect();
+                self.elems[m].copy_ids = others;
+            }
         }
     }
 

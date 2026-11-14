@@ -22,6 +22,11 @@ pub struct EngineSettings {
     /// Element ids never offered for new picks (an app's own choice, for example one copy of a spell
     /// printed in several installed sources). A stored choice of one still replays.
     pub hidden_elements: std::collections::BTreeSet<String>,
+    /// For a hidden element, the visible element that answers for it (hidden id -> visible id): a
+    /// spell list or supports expression that names the hidden id by id offers the visible one.
+    /// Content names one copy of a spell by id (`<extend>ID_..</extend>`), and the app may have
+    /// hidden exactly that copy. Ignored for an id that is not hidden or a stand-in that is.
+    pub hidden_stand_ins: std::collections::BTreeMap<String, String>,
 }
 
 impl Default for EngineSettings {
@@ -35,6 +40,7 @@ impl Default for EngineSettings {
             default_average_hp: true,
             include_options: true,
             hidden_elements: std::collections::BTreeSet::new(),
+            hidden_stand_ins: std::collections::BTreeMap::new(),
         }
     }
 }
