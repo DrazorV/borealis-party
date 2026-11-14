@@ -8,7 +8,7 @@ import { useToast } from "../../src/components/Toast";
 import { useApi } from "../../src/state/ApiContext";
 import { errorMessage } from "../../src/state/useAsync";
 import {
-  acceptInvite, addOwnCharacter, BAND_LABEL, cancelInvite, classLine, CONFLICT, charactersInParties, createParty,
+  acceptInvite, addOwnCharacter, BAND_LABEL, cancelInvite, classLine, concentrationText, CONFLICT, charactersInParties, createParty,
   declineInvite, deleteParty, EDITION_LABEL, editionToSwitchTo, keepJoinCode, keptJoinCode, listMyInvites, loadParties,
   loadParty, MAX_PARTIES, newestEdition, onPartiesChanged, redeemJoinCode, removeMember, renameParty, watchParties,
   type CardStats, type HealthBand, type MyInvite, type Party, type PartyMember,
@@ -46,21 +46,23 @@ const BAND_TONE: Record<HealthBand, "success" | "warning" | "danger"> = { unhurt
 
 /** The band the DM's numbers put a character in, so the DM's card reads like the players' at a glance. */
 export function bandOf(stats: CardStats): HealthBand | null {
-  if (stats.hpMax === 0) return null;
+  if (stats.hp == null || !stats.hpMax) return null;
   if (stats.hp === 0) return "down";
   return stats.hp * 2 <= stats.hpMax ? "bloodied" : "unhurt";
 }
 
 /** The numbers a DM needs at the table: hit points first, then AC, initiative, passive Perception, spell DCs. */
-function StatLine({ stats }: { stats: CardStats }) {
+export function StatLine({ stats }: { stats: CardStats }) {
   const band = bandOf(stats);
   const dcs = stats.spellDcs.map((d) => d.dc);
   return (
     <div className="party-stats" role="list" aria-label="Numbers">
-        <span role="listitem" className={`party-stat party-stat-hp ${band ?? ""}`} aria-label={`Hit points ${stats.hp} of ${stats.hpMax}${stats.tempHp ? `, ${stats.tempHp} temporary` : ""}`}>
-          <span className="party-stat-label">HP</span>
-          <span className="party-stat-value">{stats.hp}<span className="muted">/{stats.hpMax}</span>{stats.tempHp > 0 && <span className="party-stat-temp"> +{stats.tempHp}</span>}</span>
-        </span>
+        {stats.hp != null && (
+          <span role="listitem" className={`party-stat party-stat-hp ${band ?? ""}`} aria-label={`Hit points ${stats.hp} of ${stats.hpMax ?? "?"}${stats.tempHp ? `, ${stats.tempHp} temporary` : ""}`}>
+            <span className="party-stat-label">HP</span>
+            <span className="party-stat-value">{stats.hp}<span className="muted">/{stats.hpMax ?? "?"}</span>{(stats.tempHp ?? 0) > 0 && <span className="party-stat-temp"> +{stats.tempHp}</span>}</span>
+          </span>
+        )}
         <span role="listitem" className="party-stat" aria-label={`Armor class ${stats.armorClass}`}><span className="party-stat-label">AC</span><span className="party-stat-value">{stats.armorClass}</span></span>
         <span role="listitem" className="party-stat" aria-label={`Initiative ${signed(stats.initiative)}`}><span className="party-stat-label">Init</span><span className="party-stat-value">{signed(stats.initiative)}</span></span>
         <span role="listitem" className="party-stat" aria-label={`Passive Perception ${stats.passivePerception}`}><span className="party-stat-label">PP</span><span className="party-stat-value">{stats.passivePerception}</span></span>
@@ -72,11 +74,11 @@ function StatLine({ stats }: { stats: CardStats }) {
 }
 
 /** Concentration, exhaustion and inspiration, under the numbers. */
-function Conditions({ stats }: { stats: CardStats }) {
+export function Conditions({ stats }: { stats: CardStats }) {
   if (!stats.concentration && !(stats.exhaustion > 0) && !stats.inspiration) return null;
   return (
     <div className="party-conditions">
-      {stats.concentration && <Chip tone="info">Concentrating: {stats.concentration}</Chip>}
+      {stats.concentration && <Chip tone="info">{concentrationText(stats.concentration)}</Chip>}
       {stats.exhaustion > 0 && <Chip tone="warning">Exhaustion {stats.exhaustion}</Chip>}
       {stats.inspiration && <Chip tone="gold">Inspiration</Chip>}
     </div>
