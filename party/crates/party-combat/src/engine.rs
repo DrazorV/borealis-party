@@ -12,7 +12,7 @@ use crate::event::{DmEvent, DmEventKind as K, Events, PlayerEvent, PromptPart, R
 use crate::model::{
     AbilityKind, Boundary, CombatState, CombatantId, Concentration, ConcentrationCheck, Condition,
     Controller, Duration, Edition, Effect, EffectId, EffectOrigin, EffectSpec, HpAuthority,
-    InitiativeMode, Life, Reset, Status, VisibleMark, ZeroHpRule,
+    InitiativeMode, Life, Modifier, Reset, Status, VisibleMark, ZeroHpRule,
 };
 use crate::visibility::PlayerSummary;
 use party_dice::{
@@ -138,6 +138,23 @@ pub fn player_may(state: &CombatState, account: &str, cmd: &Command) -> bool {
         }
         Command::RemoveEffect { effect, .. } | Command::UseCharge { effect } => {
             effect_target(effect).is_some_and(|t| my_creature(&t))
+        }
+        // A player answers their own PC's save row (typed or in the app), never sets an outcome.
+        Command::ResolveCastRow {
+            cast,
+            target,
+            roll,
+            use_lr,
+            ..
+        } => {
+            mine(target)
+                && !use_lr
+                && !matches!(roll, crate::command::RowRoll::Outcome { .. })
+                && state.casts.iter().any(|c| {
+                    &c.id == cast
+                        && matches!(c.spec.mech.delivery, crate::spell::Delivery::Save { .. })
+                        && c.rows.iter().any(|r| &r.target == target)
+                })
         }
         _ => false,
     }
@@ -1363,13 +1380,14 @@ impl Cx<'_> {
             return Err(invalid("No damage to apply."));
         }
         let mut results = Vec::new();
+        let defenses = crate::derive::effective_defenses(&self.s, &self.s.combatants[i]);
         for part in parts {
             let roll = resolve_dice(&part.amount, self.die)?;
             if roll.total < 0 {
                 return Err(invalid("Damage can't be negative."));
             }
             let t = type_damage(
-                &self.s.combatants[i].defenses,
+                &defenses,
                 part.damage_type,
                 roll.total,
                 magical,
@@ -1466,6 +1484,21 @@ impl Cx<'_> {
         c.hp.current = (before - rest).max(0);
         let overflow = rest - before;
         self.after_hp_loss(i, before, rest, overflow, amount, critical_hit, &id);
+        self.end_on_damage(&id);
+    }
+
+    /// Ends the effects on `id` that end when it takes damage (Sleep-like conditions).
+    fn end_on_damage(&mut self, id: &CombatantId) {
+        let hit: Vec<EffectId> = self
+            .s
+            .effects
+            .iter()
+            .filter(|e| &e.spec.target == id && e.spec.ends_on_damage)
+            .map(|e| e.id)
+            .collect();
+        for e in hit {
+            self.end_effect(e, "took damage", true);
+        }
     }
 
     /// The consequences of losing HP: dropping to 0, damage at 0 HP, massive damage and concentration checks.
@@ -2106,8 +2139,39 @@ impl Cx<'_> {
             },
             text,
         );
-        // The last effect held by a concentration ends that concentration.
-        if e.spec.concentration {
+        // Max HP it raised comes off again.
+        let raised: i32 = e
+            .spec
+            .modifiers
+            .iter()
+            .map(|m| if let Modifier::MaxHp(n) = m { *n } else { 0 })
+            .sum();
+        if raised != 0 {
+            if let Some(c) = self
+                .s
+                .combatant_mut(&target)
+                .filter(|c| c.hp_authority == HpAuthority::Engine)
+            {
+                c.hp.max = (c.hp.max - raised).max(0);
+                c.hp.current = c.hp.current.min(c.hp.max);
+            }
+        }
+        // A creature bound to the effect (a conjured beast on its caster's concentration) is dismissed.
+        if e.spec.dismiss_on_end
+            && reason != "target removed"
+            && self.s.combatant(&target).is_some_and(|c| !c.removed)
+        {
+            let n = self.name(&target);
+            self.ev(
+                Some(&target),
+                K::Dismissed,
+                format!("{n} is dismissed ({} ended)", e.spec.name),
+            );
+            let _ = self.remove(&target);
+        }
+        // The last effect held by a concentration ends that concentration (not a bound creature's binding: a
+        // conjured beast going down doesn't end the spell).
+        if e.spec.concentration && !e.spec.dismiss_on_end {
             if let Some(src) = &e.spec.source {
                 let still = self.s.effects.iter().any(|o| {
                     o.spec.concentration
