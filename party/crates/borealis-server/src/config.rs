@@ -16,7 +16,7 @@ pub const ENV_PREFIX: &str = "BOREALIS__";
 
 /// Where the apps come from unless `server.app_download` says otherwise: the fork's latest release.
 pub const DEFAULT_APP_DOWNLOAD: &str =
-    "https://github.com/fortress-soft/meadhall/releases/latest/download";
+    "https://github.com/fortress-soft/borealis-connect/releases/latest/download";
 
 /// The file written on first start. Keep it in step with the defaults below (a test checks).
 pub const DEFAULT_FILE: &str = r#"# Borealis Party settings.
@@ -46,7 +46,7 @@ max_upload_mb = 512
 public_upload_mb = 95
 # Where visitors of the website are offered the app for their system: a folder URL that holds the release files
 # (borealis-party-arm64.apk, borealis-party-windows-x64-setup.exe, ...). By default the latest release on GitHub; "off" offers no download.
-# app_download = "https://github.com/fortress-soft/meadhall/releases/latest/download"
+# app_download = "https://github.com/fortress-soft/borealis-connect/releases/latest/download"
 # The reverse proxies in front of the server, as addresses or ranges ("172.20.20.100", "172.18.0.0/16"). Only a
 # request from one of these may say who the client is (CF-Connecting-IP, else the right-most X-Forwarded-For entry
 # that is not one of these). Sign-up and sign-in limits count per client, so behind a proxy list it here, or every
