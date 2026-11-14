@@ -518,7 +518,8 @@ const MARKERS: &[(usize, &str)] = &[
     (6, "combats"),
     (7, "api_tokens"),
     (8, "ai_providers"),
-    (9, "spell_mechanics"),
+    // Its table that refers to step 5's: a database that lost (or never had) those gets step 9 again too.
+    (9, "encounter_casts"),
 ];
 
 /// A table only the versions with groups had. A database that still has it opens like any other: the table is left

@@ -1809,14 +1809,23 @@ struct CastForm {
     choices: Option<Value>,
 }
 
+/// An encounter's precast spells. None while the database has no `encounter_casts` yet (a binary newer than its
+/// schema, as the upgrade tests seed older schemas through these routes); start-up adds the table.
 async fn casts(state: &AppState, encounter: &str) -> ApiResult<Vec<Value>> {
-    let rows = sqlx::query(
+    let rows = match sqlx::query(
         "SELECT id, caster_creature_id, sort, spell_key, name, slot_level, targets_json, choices_json
          FROM encounter_casts WHERE encounter_id = $1 ORDER BY sort, id",
     )
     .bind(encounter)
     .fetch_all(state.db.pool())
-    .await?;
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!("encounters: precast spells not read: {e}");
+            return Ok(Vec::new());
+        }
+    };
     rows.iter()
         .map(|r| {
             let targets: String = r.try_get(6)?;

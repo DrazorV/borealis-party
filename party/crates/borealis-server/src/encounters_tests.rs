@@ -1639,7 +1639,7 @@ async fn check_upgraded(location: &Location, data: &Path) {
     assert_eq!(seen["creatures"].as_array().unwrap().len(), 4);
     drop(Db::open(location).await.unwrap());
     // A database that says the step ran but has no encounters table (another numbering) gets it again. The
-    // precast spells (step 9) refer to its creatures, so they go first.
+    // precast spells (step 9) refer to its creatures, so they go too, and step 9 runs again with it.
     for table in [
         "encounter_casts",
         "encounter_rules",

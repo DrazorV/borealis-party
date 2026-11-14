@@ -2923,30 +2923,10 @@ fn spellcasting(
     spells: Option<&crate::spells::Library>,
     ruleset: &str,
 ) {
-    use party_encounter::spellbook;
-    let has_spells = c.abilities.iter().any(|a| a.spell.is_some());
-    let raw = automation
-        .filter(|_| !has_spells)
-        .and_then(|a| serde_json::from_str::<Value>(a).ok())
-        .and_then(|a| a.pointer("/fivetools/spellcasting").cloned());
-    let o = serde_json::from_str::<party_encounter::overrides::Overrides>(overrides).ok();
-    let added = o
-        .as_ref()
-        .and_then(|o| o.spells.as_ref())
-        .filter(|s| !s.is_empty());
-    match f.data.as_ref() {
-        // One list of books (printed, then 5etools, then the DM's), so each spell keeps its place and key.
-        Some(d) if raw.is_some() || added.is_some() => {
-            let books = spellbook::of_monster(d, raw.as_ref(), added);
-            spellbook::equip(c, &books, spellbook::edition_of(d));
-        }
-        None => {
-            if let Some(o) = &o {
-                spellbook::seed_overrides(c, None, o);
-            }
-        }
-        Some(_) => {}
-    }
+    // The 5etools books and the DM's override spells, once (`party-encounter`).
+    let o = serde_json::from_str::<party_encounter::overrides::Overrides>(overrides)
+        .unwrap_or_default();
+    party_encounter::spellbook::equip_start(c, f.data.as_ref(), automation, &o);
     if let Some(lib) = spells {
         for a in &mut c.abilities {
             let Some(link) = a.spell.as_mut().filter(|l| l.key.is_none()) else {
@@ -3052,13 +3032,17 @@ async fn precast(
     st: CombatState,
     die: &mut SeededDie,
 ) -> Res<CombatState> {
-    let rows = sqlx::query(
+    // Like the starting effects: a database without the table yet has no precasts.
+    let Ok(rows) = sqlx::query(
         "SELECT caster_creature_id, spell_key, slot_level, targets_json, choices_json
          FROM encounter_casts WHERE encounter_id = $1 ORDER BY sort, id",
     )
     .bind(encounter)
     .fetch_all(&mut *conn)
-    .await?;
+    .await
+    else {
+        return Ok(st);
+    };
     let mut st = st;
     for row in rows {
         let Some(caster_id) = row
