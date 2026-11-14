@@ -1,0 +1,34 @@
+/*
+ * The user's general rule (2026-11-14): "when boxes side by side always same height". One rule for every row of
+ * panels or cards in the party UI: on a wide screen, the boxes of a row stretch to the row's tallest (a grid's
+ * align-items: stretch), each a column so that its head stays on top and anything pushed down with
+ * `.bp-panel-foot` (or margin-top: auto) lines up at the bottom across the row. Phones stack at natural height.
+ *
+ * A new row of panels takes the class `bp-panel-row`; the existing ones are listed here so their own files stay as
+ * they are. A list that should stay ragged on purpose gets `data-natural-height` (the rig skips it too:
+ * party/ui-tests/tests/fixtures.ts unevenRows).
+ */
+html:not(.phone) :is(
+  .bp-panel-row,
+  .enc-panels,
+  .enc-builder.has-tool .enc-col-side,
+  .party-import-sources,
+  .v4-content .party-import > .body
+):not([data-natural-height]) {
+  align-items: stretch;
+}
+
+html:not(.phone) :is(
+  .bp-panel-row,
+  .enc-panels,
+  .enc-builder.has-tool .enc-col-side,
+  .party-import-sources,
+  .v4-content .party-import > .body
+):not([data-natural-height]) > :is(.card, section) {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+html:not(.phone) .bp-panel-row > :is(.card, section) > .bp-panel-foot { margin-top: auto; }
