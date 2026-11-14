@@ -1,6 +1,6 @@
 //! The server side of `party-tools`: every tool calls the HTTP API's own handler with the caller's [`User`], so the
 //! account, DM/player and party checks, the one 404 and the player projection are exactly what the app gets.
-//! Used by the MCP server (`mcp.rs`) and by the in-app assistant (part C), never anything else.
+//! Used by the MCP server (`mcp.rs`), never anything else.
 
 use axum::body::Bytes;
 use axum::extract::{Path, State};
@@ -20,8 +20,8 @@ use crate::AppState;
 pub struct ServerTools {
     pub state: AppState,
     pub user: User,
-    /// The token or app the calls came through, as the activity log names it (`TokenClient::label`); none for the
-    /// in-app assistant.
+    /// The token or app the calls came through, as the activity log names it (`TokenClient::label`); none when
+    /// unknown.
     pub client: Option<String>,
 }
 

@@ -419,9 +419,8 @@ const MIGRATIONS: &[&[&str]] = &[
     // 8 (M-ai-providers, 0.3.1), after M-ai-auth. Bring your own AI (ai_providers.rs): one provider per account, its key encrypted with the
     // server's `[ai] secret_key` (never stored in the clear, never in the account's folder, so never in a bundle or a
     // share), and each account's tokens per day for the budget. Both go with the account.
-    // UNUSED since 0.3.3, which removed the in-app assistant: nothing reads or writes them, the sealed keys stay unread.
-    // They stay (no destructive migration on a production database), as do their MARKERS entry and migrate.rs lists,
-    // so upgrades and the SQLite → PostgreSQL copy work as before (docs/ai-assistant.md).
+    // 0.3.3 removed the in-app assistant, and step 10 drops both tables again. This step keeps its place so the
+    // numbering stays, and has no marker (MARKERS): a missing ai_providers must not make it run again.
     &[
         "CREATE TABLE IF NOT EXISTS ai_providers (
             user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -502,6 +501,14 @@ const MIGRATIONS: &[&[&str]] = &[
         )",
         "CREATE INDEX IF NOT EXISTS spell_meta_pack ON spell_meta (owner_id, pack_id)",
     ],
+    // 10 (M-drop-ai, 0.3.3), after M-spells. The in-app assistant is gone (Borealis Party never calls an AI service;
+    // AI apps connect over MCP), so step 8's tables go: each account's saved provider and its sealed key, and the
+    // usage counts. The user approved dropping them (2026-11-14). `IF EXISTS`, so it can run twice; the backup before
+    // an upgrade (backup.rs) still has them. Nothing else of step 8 exists (no columns elsewhere).
+    &[
+        "DROP TABLE IF EXISTS ai_usage",
+        "DROP TABLE IF EXISTS ai_providers",
+    ],
 ];
 
 /// How many steps [`MIGRATIONS`] has: the schema version a database is at after [`Db::open`].
@@ -511,8 +518,8 @@ pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
 /// The table each step from 2 on creates, by step number (1-based). A database whose `schema_version` says a step ran
 /// but that lacks its table runs the step again at start-up: the removed groups versions also counted 1 to 3, so a
 /// database they left at version 3 would otherwise skip these steps. Every such step must be idempotent (`CREATE ...
-/// IF NOT EXISTS`). Step 1 has none: every database has its tables. A new step adds its own line here, with its
-/// main table.
+/// IF NOT EXISTS`). Step 1 has none: every database has its tables; nor have the steps in `UNMARKED`. A new step adds
+/// its own line here, with its main table.
 const MARKERS: &[(usize, &str)] = &[
     (2, "shares"),
     (3, "parties"),
@@ -520,10 +527,15 @@ const MARKERS: &[(usize, &str)] = &[
     (5, "encounters"),
     (6, "combats"),
     (7, "api_tokens"),
-    (8, "ai_providers"),
+    // No 8: step 10 drops its tables, and a marker would bring them back.
     // Its table that refers to step 5's: a database that lost (or never had) those gets step 9 again too.
     (9, "encounter_casts"),
+    // No 10: it only drops tables, so there is nothing to look for; the recorded version is trusted.
 ];
+
+/// The steps from 2 on with no marker: their tables are dropped by a later step, or they create none.
+#[cfg(test)]
+const UNMARKED: [usize; 2] = [8, 10];
 
 /// A table only the versions with groups had. A database that still has it opens like any other: the table is left
 /// alone and a warning is logged, so an instance that ran those versions (or rolls back to one) still boots.
@@ -1397,13 +1409,31 @@ impl Db {
 
 #[cfg(test)]
 mod marker_tests {
-    use super::{MARKERS, MIGRATIONS};
+    use super::{MARKERS, MIGRATIONS, UNMARKED};
 
     #[test]
     fn every_step_from_2_has_a_marker_it_creates_and_can_run_twice() {
         let steps: Vec<usize> = MARKERS.iter().map(|(step, _)| *step).collect();
-        let want: Vec<usize> = (2..=MIGRATIONS.len()).collect();
+        let want: Vec<usize> = (2..=MIGRATIONS.len())
+            .filter(|s| !UNMARKED.contains(s))
+            .collect();
         assert_eq!(steps, want, "one marker per step from 2 on, in order");
+        // A step with no marker can still run twice: it creates with IF NOT EXISTS and drops with IF EXISTS.
+        for step in UNMARKED {
+            for statement in MIGRATIONS[step - 1] {
+                assert!(
+                    statement.starts_with("CREATE TABLE IF NOT EXISTS ")
+                        || statement.starts_with("CREATE INDEX IF NOT EXISTS ")
+                        || statement.starts_with("DROP TABLE IF EXISTS "),
+                    "step {step} has a statement that can't run twice: {statement}"
+                );
+            }
+        }
+        // Step 10 drops step 8's tables, and step 8 has no marker that would make it create them again.
+        assert!(MIGRATIONS[9].contains(&"DROP TABLE IF EXISTS ai_providers"));
+        assert!(!MARKERS
+            .iter()
+            .any(|(_, t)| *t == "ai_providers" || *t == "ai_usage"));
         for (step, table) in MARKERS {
             let sql = MIGRATIONS[step - 1];
             let creates = format!("CREATE TABLE IF NOT EXISTS {table} (");

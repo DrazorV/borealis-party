@@ -1,5 +1,5 @@
-//! The one tool registry for every AI client of Borealis Party: the MCP server (`/api/mcp`) and the in-app
-//! bring-your-own-AI assistant. See `party/docs/party-tools.md`.
+//! The one tool registry for the AI apps that connect to Borealis Party over MCP (`/api/mcp`). See
+//! `party/docs/party-tools.md`.
 //!
 //! * A tool is a [`ToolSpec`]: a name, a JSON schema and one [`Scope`].
 //! * [`Registry::call`] checks the scope, parses the arguments ([`args`]), applies the [`Limits`] (per-token rate,
@@ -34,10 +34,8 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 /// Which surface the call came through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Via {
-    /// `/api/mcp`, with a token or an OAuth grant.
+    /// `/api/mcp`, with a token or an OAuth grant (the only surface since 0.3.3 removed the in-app assistant).
     Mcp,
-    /// The in-app assistant on the user's own model.
-    Assistant,
 }
 
 impl Via {
@@ -46,7 +44,6 @@ impl Via {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Mcp => "mcp",
-            Self::Assistant => "assistant",
         }
     }
 }
@@ -56,7 +53,7 @@ impl Via {
 pub struct Caller {
     /// The account the tool acts as.
     pub account: String,
-    /// The token or OAuth grant id; `None` for the in-app assistant.
+    /// The token or OAuth grant id; `None` for a call made without one (tests).
     pub token: Option<String>,
     /// What the token was granted.
     pub scopes: BTreeSet<Scope>,

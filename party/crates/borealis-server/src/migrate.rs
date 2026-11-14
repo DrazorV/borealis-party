@@ -419,32 +419,6 @@ const TABLES: &[(&str, &[(&str, Column)])] = &[
         ],
     ),
     (
-        "ai_providers",
-        &[
-            ("user_id", Column::Text),
-            ("provider", Column::Text),
-            ("mode", Column::Text),
-            ("base_url", Column::Text),
-            ("model", Column::Text),
-            ("key_sealed", Column::Text),
-            ("key_last4", Column::Text),
-            ("key_ring", Column::Text),
-            ("auto_apply", Column::Int),
-            ("profile", Column::Text),
-            ("consented_at", Column::Int),
-            ("updated_at", Column::Int),
-        ],
-    ),
-    (
-        "ai_usage",
-        &[
-            ("user_id", Column::Text),
-            ("day", Column::Int),
-            ("requests", Column::Int),
-            ("tokens", Column::Int),
-        ],
-    ),
-    (
         "spell_mechanics",
         &[
             ("account_id", Column::Text),

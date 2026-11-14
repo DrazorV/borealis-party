@@ -11,7 +11,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 /// The registry's limits.
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
-    /// Calls a minute per token (the in-app assistant: per account).
+    /// Calls a minute per token.
     pub calls_per_minute: usize,
     /// Heavy calls at a time per account.
     pub heavy_per_account: usize,
