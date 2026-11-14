@@ -49,11 +49,18 @@ pub async fn command(
         return Err(ApiError::Invalid("Choose a name for the copy.".into()));
     }
     let workspace = state.workspaces.get(&user.id).await?;
+    // One spell per edition: the other copies are hidden from new picks before any picker runs.
+    crate::spells::sync_hidden_if_stale(&state, &user.id).await;
     // Which party cards the command may change, read before it runs (it consumes its arguments).
     let target = parties::card_target(&command, &args);
     let mut result = match command.as_str() {
         "restore_default_settings" => {
-            settings::restore_defaults(&workspace, &state.workspaces.dir(&user.id)).await?
+            let out =
+                settings::restore_defaults(&workspace, &state.workspaces.dir(&user.id)).await?;
+            // The defaults hide nothing: hide the copies again.
+            crate::spells::mark_stale(&user.id);
+            crate::spells::sync_hidden_if_stale(&state, &user.id).await;
+            out
         }
         "save_settings" => {
             if let Some(patch) = args.get_mut("patch") {

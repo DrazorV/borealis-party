@@ -13,7 +13,7 @@
 //! * **Who:** every route is the caller's own account. Nothing here reaches a player: a combat's player projection
 //!   never carries mechanics, links or casting (combat.rs, `view_for`).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 
 use axum::extract::{Path as UrlPath, Query, State};
@@ -377,6 +377,88 @@ pub async fn book(state: &AppState, owner: &str) -> ApiResult<Book> {
     let prefs = preferences(state, owner, &index).await?;
     let catalog = Catalog::build(&index.candidates, &prefs);
     Ok(Book { index, catalog })
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Hidden copies (one spell per edition in the pickers)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Most ids upstream's `hiddenElements` takes.
+const MAX_HIDDEN: usize = 20_000;
+
+/// Accounts whose hidden copies are up to date in this process.
+fn synced() -> &'static Mutex<HashSet<String>> {
+    static SYNCED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    SYNCED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// The account's spells may have changed (content, a DM's pick): [`sync_hidden_if_stale`] works them out again.
+pub fn mark_stale(account: &str) {
+    synced()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .remove(account);
+}
+
+/// Push the copies the canonical resolver hides (every copy of a spell but the chosen one, per name, edition and
+/// level) into the account's engine settings (`hiddenElements`), so builder and spell pickers offer one copy. Only
+/// when the set changed: every change rebuilds the account's engine. A character that chose a hidden copy keeps it
+/// (upstream replays stored choices). Answers whether it changed.
+///
+/// # Errors
+/// The workspace's and the database's.
+pub async fn sync_hidden(state: &AppState, account: &str) -> ApiResult<bool> {
+    let hidden: BTreeSet<String> = book(state, account)
+        .await?
+        .catalog
+        .hidden()
+        .into_iter()
+        .filter(|id| id.len() <= MAX_KEY)
+        .take(MAX_HIDDEN)
+        .collect();
+    let workspace = state.workspaces.get(account).await?;
+    let changed = workspace
+        .blocking(move |handle| {
+            let backend = handle.state::<Backend>();
+            let current = backend.settings().map_err(|e| upstream(&e))?;
+            if current.hidden_elements == hidden {
+                return Ok(false);
+            }
+            backend
+                .save_settings(&json!({ "hiddenElements": hidden }))
+                .map_err(|e| upstream(&e))?;
+            Ok(true)
+        })
+        .await?;
+    if changed {
+        // Another hub: the index is built again on its next use.
+        cache()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(account);
+    }
+    Ok(changed)
+}
+
+/// [`sync_hidden`] once per change: the first command of an account in this process, and after its content or its
+/// DM's picks changed. A failure is logged and tried again on the next command; the command itself goes on.
+pub async fn sync_hidden_if_stale(state: &AppState, account: &str) {
+    if synced()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .contains(account)
+    {
+        return;
+    }
+    match sync_hidden(state, account).await {
+        Ok(_) => {
+            synced()
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(account.to_string());
+        }
+        Err(e) => tracing::warn!("spells: hidden copies not updated: {e:?}"),
+    }
 }
 
 /// The spell of a canonical group.
@@ -943,6 +1025,8 @@ pub async fn save(state: &AppState, owner: &str, mut row: MechRow) -> ApiResult<
     tx.commit().await?;
     if row.kind == KIND_ALIAS {
         row.def = Value::Null;
+        // A pick changes which copy is hidden (the route pushes it once it is done).
+        mark_stale(owner);
     }
     Ok(row)
 }
@@ -975,6 +1059,9 @@ pub async fn remove(
     .bind(alias)
     .execute(state.db.pool())
     .await?;
+    if kind == KIND_ALIAS && done.rows_affected() > 0 {
+        mark_stale(owner);
+    }
     Ok(done.rows_affected() > 0)
 }
 
@@ -1497,6 +1584,7 @@ pub async fn import(
             .bind(owner)
             .execute(state.db.pool())
             .await?;
+        mark_stale(owner);
     }
     let mut saved = 0;
     for row in checked {
@@ -1563,6 +1651,7 @@ async fn choose_route(
         },
     )
     .await?;
+    sync_hidden_if_stale(&state, &user.id).await;
     Ok(Json(
         json!({ "spell": canonical(&state, &user.id, &key).await? }),
     ))
@@ -1589,6 +1678,8 @@ async fn unchoose_route(
         .execute(state.db.pool())
         .await?;
     }
+    mark_stale(&user.id);
+    sync_hidden_if_stale(&state, &user.id).await;
     Ok(Json(
         json!({ "spell": canonical(&state, &user.id, &key).await? }),
     ))
@@ -1605,7 +1696,9 @@ async fn save_route(
 ) -> ApiResult<Json<Value>> {
     let row: MechRow = serde_json::from_slice(&body)
         .map_err(|e| invalid(format!("The request doesn't fit: {e}")))?;
-    Ok(Json(json!({ "row": save(&state, &user.id, row).await? })))
+    let row = save(&state, &user.id, row).await?;
+    sync_hidden_if_stale(&state, &user.id).await;
+    Ok(Json(json!({ "row": row })))
 }
 
 /// `DELETE /api/spell-mechanics`.
@@ -1635,6 +1728,7 @@ async fn remove_route(
         &b.alias_name,
     )
     .await?;
+    sync_hidden_if_stale(&state, &user.id).await;
     Ok(Json(json!({ "removed": removed })))
 }
 
@@ -1663,7 +1757,9 @@ async fn import_route(
     Query(q): Query<ImportQuery>,
     body: axum::body::Bytes,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(import(&state, &user.id, &body, q.mode).await?))
+    let out = import(&state, &user.id, &body, q.mode).await?;
+    sync_hidden_if_stale(&state, &user.id).await;
+    Ok(Json(out))
 }
 
 /// The spell routes, while parties are on in the server config (spells in combat are a party feature).
