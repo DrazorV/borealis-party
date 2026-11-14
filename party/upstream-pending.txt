@@ -49,20 +49,23 @@ src-tauri/src/settings.rs branch:feat/hidden-elements
 # and the refusal reaches the Indexes tab in words. The party server checks before fetching (net_guard.rs) and relies
 # on the container's egress firewall for the rest. No file is changed for it yet, so no line names one.
 
-# Sources page: Source elements found by name (playtest flag works), "Restrict playtest / third-party content"
-# toggles kept in settings.
-src-tauri/src/content_dto.rs https://github.com/TeamBorealis/borealis/pull/48
-src-tauri/src/content_packs.rs https://github.com/TeamBorealis/borealis/pull/48
-src-tauri/src/settings.rs https://github.com/TeamBorealis/borealis/pull/48
-src-tauri/tests/source_flags.rs https://github.com/TeamBorealis/borealis/pull/48
-ui/src/api/generated/contract.json https://github.com/TeamBorealis/borealis/pull/48
-ui/src/api/mock/content-service.ts https://github.com/TeamBorealis/borealis/pull/48
-ui/src/api/mock/default-settings.ts https://github.com/TeamBorealis/borealis/pull/48
-ui/src/api/types/content.ts https://github.com/TeamBorealis/borealis/pull/48
-ui/src/api/types/settings.ts https://github.com/TeamBorealis/borealis/pull/48
-ui/src/pages/content/SourcesPage.tsx https://github.com/TeamBorealis/borealis/pull/48
-ui/src/pages/content/applySources.ts https://github.com/TeamBorealis/borealis/pull/48
-ui/src/pages/content/content.css https://github.com/TeamBorealis/borealis/pull/48
-ui/src/pages/content/sourceFilters.ts https://github.com/TeamBorealis/borealis/pull/48
-ui/src/test/fx5-content-sheet.test.tsx https://github.com/TeamBorealis/borealis/pull/48
-ui/src/test/source-restrict-toggles.test.tsx https://github.com/TeamBorealis/borealis/pull/48
+# Sources page: Source elements found by name, so the playtest flag and book descriptions work: the content_packs.rs
+# and tests/source_flags.rs part is upstream PR https://github.com/TeamBorealis/borealis/pull/48 (fix only, as
+# upstream asked). The "Restrict playtest / third-party content" toggles, their settings and the thirdParty flag
+# are fork-only (upstream holds them: beyond Aurora). The fork carries both, so every file maps to the local
+# branch with the full patch; rebase it onto upstream/main once #48 merges.
+src-tauri/src/content_dto.rs branch:feat/source-toggles
+src-tauri/src/content_packs.rs branch:feat/source-toggles
+src-tauri/src/settings.rs branch:feat/source-toggles
+src-tauri/tests/source_flags.rs branch:feat/source-toggles
+ui/src/api/generated/contract.json branch:feat/source-toggles
+ui/src/api/mock/content-service.ts branch:feat/source-toggles
+ui/src/api/mock/default-settings.ts branch:feat/source-toggles
+ui/src/api/types/content.ts branch:feat/source-toggles
+ui/src/api/types/settings.ts branch:feat/source-toggles
+ui/src/pages/content/SourcesPage.tsx branch:feat/source-toggles
+ui/src/pages/content/applySources.ts branch:feat/source-toggles
+ui/src/pages/content/content.css branch:feat/source-toggles
+ui/src/pages/content/sourceFilters.ts branch:feat/source-toggles
+ui/src/test/fx5-content-sheet.test.tsx branch:feat/source-toggles
+ui/src/test/source-restrict-toggles.test.tsx branch:feat/source-toggles
