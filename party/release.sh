@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Tags a Borealis Connect release on main: party-v<version from party/Cargo.toml>, with the Borealis release it is built on
-# in the tag message. Checks first; pushes nothing.
+# Tags a Borealis Connect release on main: party-v<party/VERSION>, with the Borealis release it is built on in the tag
+# message. Checks first; pushes nothing. party/VERSION (party/release-version.sh) says which kind:
+#   X.Y.Z    a full release, the apps too; it must be party/Cargo.toml's version.
+#   X.Y.Z.W  a server and web release: the server image and release notes, no apps (party-apps.yml skips them).
 # Usage: bash party/release.sh [--unreleased]
 #   --unreleased  allow Borealis commits that are newer than its last release (say why in the release notes)
 set -euo pipefail
@@ -43,17 +45,22 @@ fi
 sh party/check-upstream.sh >/dev/null || fail "party/check-upstream.sh fails; run it to see why"
 bash party/check-commands.sh >/dev/null || fail "party/check-commands.sh fails; run it to see why"
 
-version=$(sed -n 's/^version = "\(.*\)"/\1/p' party/Cargo.toml | head -n 1 | tr -d '\r')
-[ -n "$version" ] || fail "no version in party/Cargo.toml"
+version=$(sh party/release-version.sh) || fail "party/VERSION does not fit party/Cargo.toml (see above)"
+kind=$(sh party/release-version.sh --kind)
 tag="party-v$version"
 if git rev-parse -q --verify "refs/tags/$tag" >/dev/null || git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
-    fail "$tag exists already; raise the version in party/Cargo.toml (and build once so Cargo.lock follows)"
+    if [ "$kind" = full ]; then
+        fail "$tag exists already; for a server and web release set party/VERSION to $version.1, or for a full release raise the version in party/Cargo.toml and party/VERSION (and build once so Cargo.lock follows)"
+    fi
+    fail "$tag exists already; raise the 4th number in party/VERSION"
 fi
 
 based="Based on Borealis ${base#v}."
 if [ "$ahead" -gt 0 ]; then
     based="Based on Borealis ${base#v}, plus $ahead newer Borealis commits up to $(git merge-base HEAD upstream/main | cut -c1-7)."
 fi
-git tag -a "$tag" -m "Borealis Connect $version" -m "$based"
-echo "tagged $tag: $based"
+title="Borealis Connect $version"
+[ "$kind" = full ] || title="$title (server and web only)"
+git tag -a "$tag" -m "$title" -m "$based"
+echo "tagged $tag ($kind release): $based"
 echo "push it with: git push origin $tag"

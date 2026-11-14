@@ -413,7 +413,7 @@ pub async fn stats(State(state): State<AppState>, _: Admin) -> ApiResult<Json<Va
         "contentPacks": disk.packs,
         "activeSessions": counts.sessions,
         "diskBytes": disk.bytes,
-        "version": env!("CARGO_PKG_VERSION"),
+        "version": crate::release::version(),
         "database": state.db.kind(),
         "uptimeSeconds": state.started.elapsed().as_secs(),
         "email": state.mailer.is_some(),

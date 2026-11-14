@@ -1,7 +1,8 @@
 name: Party image
 
 # Builds the Borealis Connect server image from main and pushes it to ghcr.io/fortress-soft/borealis-connect.
-# Tags: latest, sha-<short commit>, and the version in party/Cargo.toml.
+# Tags: latest, sha-<short commit>, and the release in party/VERSION (party/release-version.sh): X.Y.Z for a full
+# release, X.Y.Z.W for a server and web release, which ships only this image (party-apps.yml builds no apps for it).
 # This file belongs to the fork (party/check-upstream.sh accepts .github/workflows/party-*.yml).
 on:
   push:
@@ -18,7 +19,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: party-image
+  # Per ref: a dry run on a branch never cancels main's image build.
+  group: party-image-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -36,16 +38,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read the party version
+      - name: Read the party release
         id: version
         run: |
-          version=$(sed -n 's/^version = "\(.*\)"/\1/p' party/Cargo.toml | head -n1)
-          test -n "$version"
+          version=$(sh party/release-version.sh)
+          kind=$(sh party/release-version.sh --kind)
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "::notice::image tags latest, sha-${GITHUB_SHA::7} and $version ($kind release)"
 
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
+        if: github.ref == 'refs/heads/main'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -69,7 +73,9 @@ jobs:
           context: .
           file: party/docker/Dockerfile
           platforms: linux/amd64
-          push: true
+          # Only main publishes. "Run workflow" on another branch (a next/* dry run) builds the image and shows its
+          # tags without pushing anything.
+          push: ${{ github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=party-image
