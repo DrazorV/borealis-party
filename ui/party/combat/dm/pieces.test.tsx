@@ -11,7 +11,7 @@ describe("shared combat pieces", () => {
     render(<RollInput kind="d20" label="Initiative" modifier={2} onSubmit={(i) => got.push(i)} />);
     fireEvent.change(screen.getByLabelText("Initiative: typed result"), { target: { value: "17" } });
     fireEvent.click(screen.getByRole("button", { name: "Enter" }));
-    fireEvent.click(screen.getByRole("button", { name: "Roll in app" }));
+    fireEvent.click(screen.getByRole("button", { name: "Roll for me" }));
     expect(got).toEqual([{ kind: "typed", total: 17 }, { kind: "app", modifier: 2, mode: "normal" }]);
   });
 
@@ -25,7 +25,7 @@ describe("shared combat pieces", () => {
     expect(box.getAttribute("aria-invalid")).toBe("true");
     fireEvent.change(box, { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: "Enter" }));
-    fireEvent.click(screen.getByRole("button", { name: "Roll in app" }));
+    fireEvent.click(screen.getByRole("button", { name: "Roll for me" }));
     expect(got).toEqual([{ kind: "typed", total: 5 }, { kind: "app", notation: "1d6" }]);
   });
 

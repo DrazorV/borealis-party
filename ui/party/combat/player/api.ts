@@ -74,6 +74,8 @@ export interface WireMine {
   kind?: "character" | "creature";
   /** C1: not in this fight. */
   absent?: boolean;
+  /** 0.3.3 (role-views.md): this PC is in the combat's initiative; false = the fight goes on without it. */
+  inInitiative?: boolean;
   /** My PC's companions the server offers to summon (from the character), by `key`. */
   offers?: { key: string; name: string; hp?: number | null; ac?: number | null; initiative?: number | null }[];
   /** My latest roll results, newest first (D21). */
@@ -102,6 +104,22 @@ export interface WireCastRow {
   from?: string;
 }
 
+/**
+ * One of the player's own open casts (party/docs/role-views.md `myCasts`): the attack rows are theirs to roll
+ * (`resolve_cast_row`), the DM's creatures' save rows wait for the DM (outcome null), and once every row has an
+ * outcome the amounts are theirs to roll and apply (`apply_cast`, in this order). Rows on hidden combatants are left out.
+ */
+export interface MyCast {
+  cast: string;
+  caster: string;
+  spell: string;
+  slot: number | null;
+  delivery: "auto" | "attack" | "save";
+  rows: { target: string; ray?: number | null; outcome: null | "lands" | "hit" | "crit" | "miss" | "saved" | "failed" }[];
+  amounts: { kind: "damage" | "heal" | "temp_hp"; dice: string; damage_type?: string | null; choice?: string[]; add_mod?: boolean }[];
+  needs_apply: boolean;
+}
+
 export interface WireProjection {
   id: string;
   partyId: string;
@@ -113,6 +131,8 @@ export interface WireProjection {
   order: WireCombatant[];
   me: WireMine[];
   casts?: WireCastRow[];
+  /** 0.3.3 (role-views.md): the player's own open casts (their PC's and its creatures'). */
+  myCasts?: MyCast[];
 }
 
 // ---- the view model -------------------------------------------------------------------------------------------------
@@ -145,9 +165,7 @@ export interface PlayerCombatant {
   /** Own PCs only. */
   deathSaves?: { successes: number; failures: number } | null;
   concentration?: string | null;
-  /** Revealed creatures only (D20 b). */
-  statBlock?: StatBlock | null;
-  /** Revealed creatures, and my own controlled creatures (theirs lives in the combat). */
+  /** My own controlled creatures (theirs lives in the combat); never a monster's. */
   hp?: { current: number; max: number; temp?: number } | null;
   ac?: number | null;
   /** A controlled creature's owner (a combatant id): it acts right after it unless it has its own initiative. */
@@ -156,6 +174,8 @@ export interface PlayerCombatant {
   inOrder: boolean;
   /** My own: the latest roll, as words. */
   lastRoll?: string | null;
+  /** My PC: false when the server says it isn't in this fight's initiative (no live combat section for it). */
+  inInitiative?: boolean;
   /** My PC: the companions the server offers to summon (`summon {owner, companion: key}`). */
   offers?: { key: string; name: string; hp?: number | null; ac?: number | null }[] | null;
 }
@@ -194,6 +214,8 @@ export interface PlayerCombat {
   combatants: PlayerCombatant[];
   prompts: CombatPrompt[];
   log: CombatLogEntry[];
+  /** The player's own open casts. */
+  myCasts: MyCast[];
 }
 
 /** What `fromWire` knows besides the projection: the party's own characters of this account. */
@@ -241,11 +263,9 @@ export function fromWire(w: WireProjection, ctx: WireContext = {}): PlayerCombat
       ...life(m?.life ?? o.life),
       concentration: m?.concentration ?? o.concentration ?? null,
       ownerId: o.view?.owner_id ?? o.ownerId ?? null,
-      ...(o.kind === "creature" ? {
-        statBlock: o.statBlock ?? null,
-        hp: m?.hp ?? o.view?.hp ?? o.hp ?? null,
-        ac: o.view?.ac ?? o.ac ?? null,
-      } : {}),
+      // A monster is its name and band only (user, 2026-11-14); my own creatures keep their HP, which I play.
+      ...(o.kind === "creature" && mine ? { hp: m?.hp ?? o.view?.hp ?? o.hp ?? null, ac: o.view?.ac ?? o.ac ?? null } : {}),
+      ...(m?.inInitiative === false ? { inInitiative: false } : {}),
       ...(m?.offers ? { offers: m.offers.map((k) => ({ key: k.key, name: k.name, hp: k.hp ?? null, ac: k.ac ?? null })) } : {}),
       ...(roll ? { lastRoll: `${roll.name} ${roll.total}${roll.breakdown ? ` (${roll.breakdown})` : ""}` } : {}),
     };
@@ -278,7 +298,7 @@ export function fromWire(w: WireProjection, ctx: WireContext = {}): PlayerCombat
   return {
     id: w.id, partyId: w.partyId, partyName: ctx.partyName, title: w.encounter?.publicName ?? null,
     seq: w.pseq ?? 0, status: w.status, round: roundOf(w.turn), pointer: w.turn ?? { kind: "not_started" },
-    combatants, prompts, log: [],
+    combatants, prompts, log: [], myCasts: w.myCasts ?? [],
   };
 }
 
@@ -350,6 +370,44 @@ export const resolveConcentration = (combat: string, combatant: string, roll: D2
 export const resolvePrompt = (combat: string, promptId: string, applied: boolean, hp?: { current: number; max: number; temp: number }, ctx?: WireContext) =>
   act(combat, "resolve_prompt", { promptId, applied, ...(hp ? { hp } : {}) }, ctx);
 
+/**
+ * 0.3.3: the player casts a spell from their own sheet in the live combat (party/docs/role-views.md). The server
+ * compiles its effect from the spell's mechanics and the caster's sheet numbers; what it applies (Bless on allies,
+ * a save the DM's creatures make) reaches the DM, never the player's slots: the player spends the slot on their
+ * own sheet.
+ */
+export interface PlayerCast {
+  /** My PC's combatant id. */
+  caster: string;
+  /** The spell element's id on the sheet. */
+  spellKey: string;
+  name: string;
+  level: number;
+  /** The slot level spent (none for a cantrip, a ritual or a free cast). */
+  slot?: number;
+  targets: string[];
+  /** How it's cast: action, bonus or reaction (it spends that). */
+  economy?: "action" | "bonus" | "reaction";
+  /** The caster's numbers from the sheet, for a save DC or a spell attack. */
+  saveDc?: number;
+  attackBonus?: number;
+  /** The spellcasting ability's modifier, and the cantrip damage tier by character level (1–4). */
+  mod?: number;
+  cantripTier?: number;
+  concentration?: boolean;
+}
+
+/**
+ * The `cast_spell` args a player sends (party/docs/role-views.md): the server compiles the definition from `spellKey`
+ * with the sheet's numbers (`dc`, `attack`, `mod`, `cantripTier`); the slot level is the one the app spends on the
+ * sheet. The rest of {@link PlayerCast} is what this device uses (the economy).
+ */
+export const castArgs = (c: PlayerCast): Record<string, unknown> => ({
+  caster: c.caster, spellKey: c.spellKey, targets: c.targets, slot: c.slot ?? null,
+  ...(c.saveDc != null ? { dc: c.saveDc } : {}), ...(c.attackBonus != null ? { attack: c.attackBonus } : {}),
+  ...(c.mod != null ? { mod: c.mod } : {}), ...(c.cantripTier != null ? { cantripTier: c.cantripTier } : {}),
+});
+
 const COMBAT_EVENT = "party://combat";
 const PARTY_EVENT = "party://party";
 const RESYNC_EVENT = "party://resync";
@@ -413,7 +471,10 @@ export function diffEvents(before: PlayerCombat | null, after: PlayerCombat, at:
   for (const c of after.combatants) {
     const was = old.get(c.id);
     if (!was) { out.push(line(c.kind === "creature" ? `${c.name} appears.` : `${c.name} joins the fight.`)); continue; }
-    if (c.band && was.band && c.band !== was.band) out.push(line(`${c.name} is ${BAND_WORD[c.band]}.`));
+    // A monster: only its name and whether it's bloodied or down (user, 2026-11-14).
+    const monster = c.kind === "creature" && !c.mine;
+    if (c.band && was.band && c.band !== was.band && !(monster && c.band === "unhurt")) out.push(line(`${c.name} is ${BAND_WORD[c.band]}.`));
+    if (monster) continue;
     if (c.life !== was.life && c.life && c.life !== "alive") out.push(line(`${c.name} is ${c.life}.`));
     const had = new Set(was.conditions.map((x) => x.name));
     const has = new Set(c.conditions.map((x) => x.name));

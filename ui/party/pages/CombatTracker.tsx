@@ -22,7 +22,8 @@ import { EventLog } from "../combat/dm/EventLog";
 import { upNext } from "../combat/dm/mockEngine";
 import { ResourcePanel, RuleBanners } from "../combat/dm/ResourcePanel";
 import { Roster } from "../combat/dm/Roster";
-import type { Ability, Combatant, Command, CombatState } from "../combat/dm/types";
+import { playerSide } from "../combat/dm/privacy";
+import type { Ability, Combatant, Command, CombatState, DmEvent } from "../combat/dm/types";
 import { useCombat } from "../combat/dm/useCombat";
 import "../combat/dm/tracker.css";
 
@@ -58,6 +59,7 @@ export function CombatTracker() {
   const resRef = useRef<HTMLDivElement>(null);
   const lastTurn = useRef<string | undefined>(undefined);
   const state = view?.state;
+  usePlayerCastNotes(state, (view as { feed?: FeedEntry[] } | null)?.feed, toast.push);
 
   // C4/C26: a new turn selects its combatant; on a phone the card scrolls into view.
   useEffect(() => {
@@ -136,7 +138,11 @@ export function CombatTracker() {
   const blockOf = (cid: string) => view.creatures?.[cid]?.statBlock;
   const pending = openCasts(state);
   // A cast this device started opens its resolution sheet (../combat/dm/castFocus.ts); others show as "N pending".
-  const resolving = castToShow(pending);
+  // A player's cast that needs the DM's creatures' saves opens by itself too (0.3.3: what players cast reaches the DM).
+  const resolving = castToShow(pending, Date.now(), (k) => {
+    const by = byId(state, k.caster);
+    return Boolean(by && playerSide(by) && k.rows.some((r) => !r.outcome && !playerSide(byId(state, r.target) ?? by)));
+  });
   const setResolving = (id: string | null) => { showCast(id); setFocusTick((n) => n + 1); };
   const resolvingCast = pending.find((k) => k.id === resolving);
   const addFromBestiary = async (r: { elementId: string; count: number; owner?: string; bind: boolean; hidden: boolean; initiativeMode: "after_owner" | "own" }) => {
@@ -252,7 +258,7 @@ export function CombatTracker() {
           </details>
         </div>
         <div className="cb-main" ref={cardRef}>
-          {chosen ? <CombatantCard state={state} c={chosen} block={view.creatures?.[chosen.id]?.statBlock} blockName={view.creatures?.[chosen.id]?.name ?? undefined} send={send} disabled={disabled}
+          {chosen ? <CombatantCard state={state} c={chosen} block={view.creatures?.[chosen.id]?.statBlock} blockName={view.creatures?.[chosen.id]?.name ?? undefined} send={send} disabled={disabled} prompts={view.prompts}
             blockOf={blockOf} onDefine={(a) => setDefining({ a, ruleset: `dnd${mechOf(a)?.edition ?? state.edition}` })} onAddCreature={(p) => { setAddPreset(p); setDialog("add"); }} />
             : <div className="cb-panel cb-pad muted">Pick a combatant.</div>}
         </div>
@@ -287,6 +293,51 @@ export function CombatTracker() {
       }} />}
     </div>
   );
+}
+
+/**
+ * What players cast reaches the DM (user, 2026-11-14: "when players cast spell it should be shown to dm if it applies
+ * an effect"): a new effect a player's combatant put on anyone, or a new cast of theirs, says so once in a toast. It
+ * shows in the log and as the effect chips on the targets too. Nothing of the player's HP or slots is in it.
+ */
+/** An entry of the DM view's `feed` (party/docs/role-views.md): the last log entries the DM may see. */
+interface FeedEntry { seq: number; at?: number; author?: string; event: DmEvent }
+
+function usePlayerCastNotes(state: CombatState | undefined, feed: FeedEntry[] | undefined, push: (m: string) => void) {
+  const seen = useRef<Set<string> | null>(null);
+  const lastSeq = useRef<number | null>(null);
+  // The server's feed, when it sends one: each new entry a player wrote (a cast, an attack, an effect) says so once.
+  useEffect(() => {
+    if (!feed) return;
+    const top = feed.reduce((m, e) => Math.max(m, e.seq), 0);
+    if (lastSeq.current === null) { lastSeq.current = top; return; }
+    const fresh = feed.filter((e) => e.seq > lastSeq.current! && e.author === "player" && e.event?.text).sort((a, b) => a.seq - b.seq);
+    lastSeq.current = Math.max(lastSeq.current, top);
+    for (const e of fresh) push(e.event.text);
+  }, [feed, push]);
+  useEffect(() => {
+    if (!state || feed) return;
+    const keys = [...state.effects.map((e) => `e${e.id}`), ...(state.casts ?? []).map((k) => `k${k.id}`)];
+    if (seen.current === null) { seen.current = new Set(keys); return; }
+    const known = seen.current;
+    const notes = new Map<string, Set<string>>();
+    for (const e of state.effects) {
+      if (known.has(`e${e.id}`)) continue;
+      const by = byId(state, e.source);
+      if (!by || !playerSide(by)) continue;
+      const key = `${by.label} cast ${e.name}`;
+      notes.set(key, (notes.get(key) ?? new Set()).add(byId(state, e.target)?.label ?? "someone"));
+    }
+    for (const k of state.casts ?? []) {
+      if (known.has(`k${k.id}`)) continue;
+      const by = byId(state, k.caster);
+      if (!by || !playerSide(by)) continue;
+      const key = `${by.label} cast ${castName(k)}`;
+      if (!notes.has(key)) notes.set(key, new Set(k.rows.map((r) => byId(state, r.target)?.label ?? "someone")));
+    }
+    keys.forEach((x) => known.add(x));
+    for (const [what, on] of notes) push(on.size ? `${what}: ${[...on].join(", ")}.` : `${what}.`);
+  }, [state, feed, push]);
 }
 
 /** Phones: the header's More menu, so End combat is one tap away without crowding the header row. */

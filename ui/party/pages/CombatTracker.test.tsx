@@ -5,7 +5,7 @@ import { combatDeps, resetCombatDeps } from "../api/overrides/combat";
 import { saveSession } from "../api/session";
 import { byId } from "../combat/dm/derive";
 import { execute } from "../combat/dm/mockEngine";
-import { mockCombatServer, type MockServer } from "../combat/dm/mockServer";
+import { answerPrompt, mockCombatServer, type MockServer } from "../combat/dm/mockServer";
 import { resetCastFocus } from "../combat/dm/castFocus";
 import { memoryStorage } from "../test/memoryStorage";
 
@@ -124,10 +124,18 @@ describe("CombatTracker", () => {
     page();
     await loaded();
     fireEvent.click(await within(row("pc-aria")).findByRole("button", { name: /^Aria/ }));
-    fireEvent.change(within(card()).getByLabelText(/Damage or healing/), { target: { value: "7" } });
-    fireEvent.click(within(card()).getByRole("button", { name: "Ask to take" }));
+    fireEvent.change(within(card()).getByLabelText(/Amount for Aria/), { target: { value: "7" } });
+    fireEvent.change(within(card()).getByLabelText("Damage type"), { target: { value: "slashing" } });
+    fireEvent.click(within(card()).getByRole("button", { name: "Send damage" }));
     await waitFor(() => expect(combat().playerEvents.at(-1)).toMatchObject({ event: "damage_prompt", id: "pc-aria", amount: 7 }));
     expect(byId(state(), "pc-aria")!.hp.current).toBe(28);
+    // Delivered, then accepted once the player takes it; never their HP.
+    const sent = await within(card()).findByRole("list", { name: "Sent to Aria" });
+    await within(sent).findByText(/Delivered/);
+    answerPrompt(combat(), "prompt-" + (combat().playerEvents.length - 1), true);
+    server.notify("c1");
+    await within(card()).findByText("Accepted");
+    expect(card().textContent).not.toMatch(/28/);
   });
 
   it("ending concentration ends every effect it held (the cascade, C11/C12)", async () => {
@@ -269,7 +277,7 @@ describe("CombatTracker", () => {
     const breath = c.querySelector<HTMLElement>('[data-turn-button="fire_breath"]')!.closest("li")!;
     expect(breath.textContent).toMatch(/Fire Breath 5–6/);
     expect(within(breath).getByText("Needs recharge")).toBeTruthy();
-    fireEvent.click(within(c).getByRole("button", { name: "Roll in app" }));
+    fireEvent.click(within(c).getByRole("button", { name: "Roll for me" }));
     await waitFor(() => expect(combat().view.log.at(-1)!.event).toBe("recharge"));
     expect((combat().view.log.at(-1)!.roll as { source: string }).source).toBe("app");
   });

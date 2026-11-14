@@ -11,24 +11,32 @@ import { TextDialog } from "./dialogs";
 import { byId, conditionsOf, effectiveAc, effectiveInitiative, effectiveSpeed, isCharacter, isDefeated, linkActive, sameSpeeds, speedText } from "./derive";
 import { EffectsList } from "./EffectsList";
 import { HpControls } from "./HpControls";
+import { BandChip } from "./BandChip";
+import { playerName, playerSide } from "./privacy";
+import { SendDamage } from "./SendDamage";
 import { initiativeText, quickRef, saveBonus } from "./statRef";
 import type { AddPreset } from "./SummonPanel";
-import type { Ability, Combatant, Command, CombatState, StatBlock } from "./types";
+import type { Ability, Combatant, Command, CombatState, DmCombat, StatBlock } from "./types";
 
 const signed = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
 
 /**
  * The selected combatant (C6–C19): title with reveal/hide, AC and speed with effect-derived values, the quick
  * reference from its stat block, HP, concentration with the pending CON save, conditions, effects and its abilities.
+ * A player's combatant (a PC, or a creature its player controls) shows only AC, initiative, concentration, conditions
+ * and effects, with "Send damage to …" in place of HP: the DM never sees players' HP or resources (./privacy.ts).
  */
-export function CombatantCard({ state, c, block, blockName, blockOf, send, disabled, onDefine, onAddCreature }: {
+export function CombatantCard({ state, c, block, blockName, blockOf, send, disabled, onDefine, onAddCreature, prompts }: {
   state: CombatState; c: Combatant; block: StatBlock | undefined; blockName?: string; send: (cmd: Command) => void; disabled: boolean;
+  /** The damage and healing prompts sent to players (the DM view's `prompts`). */
+  prompts?: DmCombat["prompts"];
   blockOf: (id: string) => StatBlock | undefined; onDefine: (a: Ability) => void; onAddCreature?: (p: AddPreset) => void;
 }) {
   const confirm = useConfirm();
   const phone = usePhone();
   const [dialog, setDialog] = useState<"rename" | "public" | "conc" | null>(null);
   const pc = isCharacter(c);
+  const mine = playerSide(c);
   const ac = effectiveAc(state, c);
   const speed = effectiveSpeed(state, c);
   const base = c.speed ?? { walk: 30 };
@@ -86,9 +94,10 @@ export function CombatantCard({ state, c, block, blockName, blockOf, send, disab
           <span className={`cb-ac${ac.text ? " changed" : ""}`} data-ac={ac.total ?? ""} title={ac.text || undefined}>
             <b>AC {ac.total ?? "—"}</b>{ac.text ? <span className="cb-ac-why"> {ac.text.replace(/^\d+ /, "")}</span> : null}
           </span>
-          <span><b>{c.hp.current}/{c.hp.max} HP</b>{c.hp.temp ? ` +${c.hp.temp}` : ""}</span>
+          {!mine && <span><b>{c.hp.current}/{c.hp.max} HP</b>{c.hp.temp ? ` +${c.hp.temp}` : ""}</span>}
+          {mine && <BandChip c={c} />}
           <span>Init {effectiveInitiative(state, c) ?? "–"}{!pc && <span className="muted"> ({initiativeText(block, c.initiative_bonus)})</span>}</span>
-          <span className={`cb-speed${sameSpeeds(speed, base) ? "" : " changed"}`} title={sameSpeeds(speed, base) ? undefined : `Base ${speedText(base)}`}>Speed {speedText(speed)}</span>
+          {!mine && <span className={`cb-speed${sameSpeeds(speed, base) ? "" : " changed"}`} title={sameSpeeds(speed, base) ? undefined : `Base ${speedText(base)}`}>Speed {speedText(speed)}</span>}
         </div>
         {owner && (
           <div className="cb-owner">
@@ -116,7 +125,7 @@ export function CombatantCard({ state, c, block, blockName, blockOf, send, disab
             </select>
           </label>
         )}
-        {block && (
+        {block && !mine && (
           <div className="cb-quickref" aria-label="Quick reference">
             <div className="cb-qr-grid">
               <div><div className="cb-overline">Attack bonus</div><b>{ref.attacks.join(" · ") || "—"}</b></div>
@@ -128,9 +137,11 @@ export function CombatantCard({ state, c, block, blockName, blockOf, send, disab
             )}
           </div>
         )}
-        <HpBar current={c.hp.current} max={c.hp.max} temp={c.hp.temp} label={`${c.label} hit points`} />
-        <HpControls c={c} send={send} disabled={disabled} />
-        {life.state === "dying" && (
+        {mine
+          ? <SendDamage view={{ prompts }} state={state} c={c} send={send} disabled={disabled} />
+          : <><HpBar current={c.hp.current} max={c.hp.max} temp={c.hp.temp} label={`${c.label} hit points`} />
+            <HpControls c={c} send={send} disabled={disabled} /></>}
+        {!mine && life.state === "dying" && (
           <div className="cb-death">
             <span>Death saves: {life.successes} ✓ · {life.failures} ✗</span>
             {!pc && <RollInput kind="d20" label="Death save" modifier={0} disabled={disabled} onSubmit={(roll) => send({ command: "death_save", id: c.id, roll })} />}
@@ -146,7 +157,7 @@ export function CombatantCard({ state, c, block, blockName, blockOf, send, disab
               <Button small variant="danger" disabled={disabled} onClick={() => send({ command: "end_concentration", id: c.id })}>End</Button></>
             : <><span className="muted cb-small">None</span><Button small variant="ghost" disabled={disabled || dead} onClick={() => setDialog("conc")}>Set</Button></>}
         </div>
-        {(c.pending_concentration ?? []).map((check, i) => (
+        {!mine && (c.pending_concentration ?? []).map((check, i) => (
           <div key={i} className="cb-conc-check" role="alert">
             <b>Concentration check: CON save DC {check.dc}</b> <span className="muted cb-small">({check.damage} damage)</span>
             {i === 0 && !pc && <RollInput kind="d20" label="CON save" modifier={saveBonus(block, "con")} disabled={disabled} onSubmit={(roll) => send({ command: "resolve_concentration", id: c.id, roll })} />}
@@ -154,7 +165,7 @@ export function CombatantCard({ state, c, block, blockName, blockOf, send, disab
           </div>
         ))}
         <ConditionChips active={conds} onToggle={toggleCondition} disabled={disabled} immune={c.defenses?.condition_immunities} compact={phone} />
-        {(c.legendary_resistance) && (
+        {!mine && c.legendary_resistance && (
           <div className="cb-lr">
             <span>Legendary Resistance <b>{c.legendary_resistance.remaining}/{c.legendary_resistance.max}</b></span>
             <Button small variant="danger" disabled={disabled || c.legendary_resistance.remaining <= 0 || dead} onClick={() => send({ command: "adjust_legendary_resistance", id: c.id, delta: -1 })}>Use</Button>
@@ -164,8 +175,9 @@ export function CombatantCard({ state, c, block, blockName, blockOf, send, disab
         <EffectsList state={state} c={c} send={send} disabled={disabled} />
       </div>
       {pc
-        ? <div className="cb-tab-body"><p className="cb-small muted">The player's character: HP, AC and speed come from their Play tab. Effects, conditions and concentration are tracked here.</p>
+        ? <div className="cb-tab-body"><p className="cb-small muted">The player's character: its HP, slots and resources stay on their Play tab. You see its AC, initiative, conditions, effects and concentration, and what it casts.</p>
           {c.initiative == null && <RollInput kind="d20" label="Initiative (if the player can't)" modifier={c.initiative_bonus ?? 0} disabled={disabled} onSubmit={(roll) => send({ command: "set_initiative", id: c.id, roll })} />}</div>
+        : mine ? <div className="cb-tab-body"><p className="cb-small muted">{playerName(state, c)}'s player plays {c.label}: its HP and abilities stay on their screen.</p></div>
         : <AbilityTabs state={state} c={c} block={block} blockOf={blockOf} send={send} disabled={disabled} onDefine={onDefine} onAddCreature={onAddCreature} />}
       {dialog === "rename" && <TextDialog title={`Rename ${c.label}`} label="Your label (players don't see it)" initial={c.label} confirm="Rename"
         onDone={(v) => { setDialog(null); if (v && v !== c.label) send({ command: "rename", id: c.id, label: v }); }} />}

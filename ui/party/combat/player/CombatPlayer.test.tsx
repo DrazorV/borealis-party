@@ -1,3 +1,4 @@
+import { createElement, type ComponentType, type ReactNode } from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router";
@@ -16,11 +17,23 @@ import { combatPlayerDeps, diffEvents, fromWire, resetCombatPlayer, type WireMin
  * party/docs/combat-api.md.
  */
 
-// The party build points PlayPage's "../../components" at playTabs.tsx; vitest runs upstream's config, so do it here.
+// The party build points PlayPage's "../../components" at playTabs.tsx and its "./RestBar" at play/PlayTop.tsx;
+// vitest runs upstream's config, so do it here.
+// The party's stat row and Play-tab top import upstream files that import the components index themselves, so they
+// load after the mock is in place (not awaited here) and are used from the first render on.
 vi.mock("../../../src/components", async (importOriginal) => {
   const original = await importOriginal<Record<string, unknown>>();
   const party = await import("./playTabsCore");
-  return { ...original, Tabs: party.Tabs, TabPanel: party.TabPanel };
+  let row: ComponentType<{ children: ReactNode }> | null = null;
+  void import("../../play/StatRowWithRests").then((m) => { row = m.StatRow; });
+  const Upstream = original.StatRow as ComponentType<{ children: ReactNode }>;
+  return { ...original, Tabs: party.Tabs, TabPanel: party.TabPanel, StatRow: (p: { children: ReactNode }) => createElement(row ?? Upstream, p) };
+});
+vi.mock("../../../src/pages/play/RestBar", async (importOriginal) => {
+  const original = await importOriginal<Record<string, unknown>>();
+  let top: ComponentType<{ hp: unknown }> | null = null;
+  void import("../../play/PlayTop").then((m) => { top = m.RestBar as ComponentType<{ hp: unknown }>; });
+  return { ...original, RestBar: (p: { hp: unknown }) => (top ? createElement(top, p) : null) };
 });
 
 const holds: string[] = [];
@@ -81,12 +94,13 @@ async function start() {
   });
 }
 
+/** The live combat section at the top of the Play sub-tab (0.3.3: no Combat sub-tab of its own). */
 async function openCombatTab() {
-  await userEvent.setup().click(await screen.findByRole("tab", { name: "Combat" }));
   return screen.findByTestId("combat-pane");
 }
 
 const tab = (name: string) => screen.queryByRole("tab", { name });
+const section = () => screen.queryByTestId("combat-pane");
 const logLines = () => within(screen.getByRole("region", { name: "What happened" })).getAllByRole("listitem").map((li) => li.textContent);
 
 beforeEach(async () => {
@@ -118,13 +132,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("the Play tab's Combat sub-tab", () => {
+describe("the Play tab's live combat section", () => {
   it("is not there without a live combat, and there is no Live chip", async () => {
     server.combats.set("p1", null);
     await start();
     renderPlay();
     expect(await screen.findByRole("tab", { name: "Abilities" })).toBeTruthy();
-    expect(tab("Combat")).toBeNull();
+    expect(section()).toBeNull();
     expect(screen.queryByRole("button", { name: /Live/ })).toBeNull();
     expect(holds).toEqual([]);
   });
@@ -134,7 +148,8 @@ describe("the Play tab's Combat sub-tab", () => {
     server.combats.set("p1", liveWith());
     await start();
     renderPlay();
-    expect(await screen.findByRole("tab", { name: "Combat" })).toBeTruthy();
+    expect(await screen.findByTestId("combat-pane")).toBeTruthy();
+    expect(tab("Combat")).toBeNull();
     expect(holds).toEqual(["combat"]);
     await waitFor(() => expect(locks.taken).toBe(1));
     const pane = await openCombatTab();
@@ -149,26 +164,26 @@ describe("the Play tab's Combat sub-tab", () => {
     expect(within(rows[2]!).getByLabelText("Health: Bloodied")).toBeTruthy();
     expect(within(rows[2]!).getByText(/Poisoned/)).toBeTruthy();
     expect(within(rows[2]!).getByLabelText("Initiative 9")).toBeTruthy();
-    expect(within(rows[0]!).getByText("Prone")).toBeTruthy();
+    // A monster: name and band only, never its conditions (user, 2026-11-14).
+    expect(within(rows[0]!).queryByText("Prone")).toBeNull();
+    expect(within(rows[0]!).getByLabelText("Health: Bloodied")).toBeTruthy();
     // The player's own HP comes from their own character (D7 a), not the combat.
     const own = (await api.getSnapshot({ characterId: hero })).play.hitPoints;
     expect(within(pane).getByRole("status", { name: new RegExp(`^Hit points: ${own.current} of ${own.max}`) })).toBeTruthy();
     // Another sub-tab, then back.
     await user.click(screen.getByRole("tab", { name: "Abilities" }));
     expect(screen.queryByTestId("combat-pane")).toBeNull();
-    await user.click(screen.getByRole("tab", { name: "Combat" }));
+    await user.click(screen.getByRole("tab", { name: "Play" }));
     expect(await screen.findByTestId("combat-pane")).toBeTruthy();
     // The DM ends it: the sub-tab goes, and so do the reload hold and the wake lock.
     act(() => server.change("p1", (c) => ({ ...c, status: "ended", turn: { kind: "ended" } })));
-    await waitFor(() => expect(tab("Combat")).toBeNull());
-    expect(screen.queryByTestId("combat-pane")).toBeNull();
+    await waitFor(() => expect(section()).toBeNull());
     expect(holds).toEqual([]);
     expect(locks.released).toBe(1);
-    // The next combat opens on the Play page's own sub-tab until the Combat tab is chosen.
+    // The next combat shows on the Play sub-tab again.
     server.combats.set("p1", liveWith({ id: "c-p1-2" }));
     act(() => server.emit("party://party", { party: "p1", pseq: 5, kind: "combat", id: "c-p1-2" }));
-    expect(await screen.findByRole("tab", { name: "Combat" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Combat" }).getAttribute("aria-selected")).toBe("false");
+    expect(await screen.findByTestId("combat-pane")).toBeTruthy();
   });
 
   it("a party event about a combat starting shows the sub-tab without a reload", async () => {
@@ -176,10 +191,10 @@ describe("the Play tab's Combat sub-tab", () => {
     await start();
     renderPlay();
     await screen.findByRole("tab", { name: "Abilities" });
-    expect(tab("Combat")).toBeNull();
+    expect(section()).toBeNull();
     server.combats.set("p1", liveWith({ status: "setup", turn: { kind: "not_started" } }, {}, null));
     act(() => server.emit("party://party", { party: "p1", pseq: 3, kind: "combat", id: "c-p1" }));
-    expect(await screen.findByRole("tab", { name: "Combat" })).toBeTruthy();
+    expect(await screen.findByTestId("combat-pane")).toBeTruthy();
     // A combat event no newer than what's shown asks nothing.
     const asked = server.calls.length;
     act(() => server.emit("party://combat", { party: "p1", combat: "c-p1", pseq: 1 }));
@@ -194,7 +209,7 @@ describe("the Play tab's Combat sub-tab", () => {
     renderPlay("/equipment");
     await user.click(await screen.findByRole("button", { name: /Live/ }));
     expect(await screen.findByTestId("combat-pane")).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Combat" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Play" }).getAttribute("aria-selected")).toBe("true");
   });
 
   it("says Your turn, buzzes once and shows the banner on other pages", async () => {
@@ -274,8 +289,7 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     const pane = await openCombatTab();
     expect(within(pane).getByText("Setup")).toBeTruthy();
     const prompt = await screen.findByRole("alertdialog", { name: "Roll initiative" });
-    await user.click(within(prompt).getByRole("button", { name: "Type my table roll" }));
-    const field = within(prompt).getByLabelText("Initiative total");
+    const field = within(prompt).getByLabelText("Initiative: my table roll");
     expect(within(prompt).getByRole("button", { name: "Send" }).hasAttribute("disabled")).toBe(true);
     await user.type(field, "17");
     await user.click(within(prompt).getByRole("button", { name: "Send" }));
@@ -292,7 +306,7 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     await openCombatTab();
     const init = (await api.getSnapshot({ characterId: hero })).stats.initiative;
     const prompt = await screen.findByRole("alertdialog", { name: "Roll initiative" });
-    await user.click(within(prompt).getByRole("button", { name: "Roll in app" }));
+    await user.click(within(prompt).getByRole("button", { name: /^Roll for me/ }));
     await waitFor(() => expect(screen.queryByRole("alertdialog", { name: "Roll initiative" })).toBeNull());
     expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "app", modifier: init, mode: "normal" } } });
   });
@@ -308,15 +322,14 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     const saves = await screen.findByRole("group", { name: "Death saves" });
     expect(within(saves).getByRole("img", { name: "Successes: 1 of 3" })).toBeTruthy();
     expect(within(saves).getByRole("img", { name: "Failures: 2 of 3" })).toBeTruthy();
-    await user.click(within(saves).getByRole("button", { name: "Type my table roll" }));
-    await user.type(within(saves).getByLabelText("Death save total"), "12");
+    await user.type(within(saves).getByLabelText("Death save: my table roll"), "12");
     await user.click(within(saves).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(within(screen.getByRole("group", { name: "Death saves" })).getByRole("img", { name: "Successes: 2 of 3" })).toBeTruthy());
     expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "typed", total: 12 } } });
-    await user.click(within(screen.getByRole("group", { name: "Death saves" })).getByRole("button", { name: "Roll in app" }));
+    await user.click(within(screen.getByRole("group", { name: "Death saves" })).getByRole("button", { name: /^Roll for me/ }));
     await waitFor(() => expect(screen.getByText("Stable")).toBeTruthy());
     expect(server.calls.at(-1)?.body).toEqual({ requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "app", modifier: 0, mode: "normal" } } });
-    expect(within(screen.getByRole("group", { name: "Death saves" })).queryByRole("button", { name: "Roll in app" })).toBeNull();
+    expect(within(screen.getByRole("group", { name: "Death saves" })).queryByRole("button", { name: /^Roll for me/ })).toBeNull();
   });
 
   it("a refused save is taken back to what the server says (no stale state)", async () => {
@@ -328,7 +341,7 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     await openCombatTab();
     // The server already took the PC out of dying (the DM healed it): its 409 reaches the player as it is.
     server.combats.get("p1")!.me[0]!.life = { state: "alive" };
-    await user.click(within(await screen.findByRole("group", { name: "Death saves" })).getByRole("button", { name: "Roll in app" }));
+    await user.click(within(await screen.findByRole("group", { name: "Death saves" })).getByRole("button", { name: /^Roll for me/ }));
     // The refusal (409) refetches the projection: the PC isn't dying, so the saves go.
     await waitFor(() => expect(screen.queryByRole("group", { name: "Death saves" })).toBeNull());
     expect(server.calls.at(-1)?.path).toBe("/api/combats/c-p1");
@@ -341,8 +354,7 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     renderPlay();
     await openCombatTab();
     const prompt = await screen.findByRole("alertdialog", { name: "Concentration save, DC 12" });
-    await user.click(within(prompt).getByRole("button", { name: "Type my table roll" }));
-    await user.type(within(prompt).getByLabelText("Concentration save total"), "15");
+    await user.type(within(prompt).getByLabelText("Concentration save: my table roll"), "15");
     await user.click(within(prompt).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog", { name: /Concentration save/ })).toBeNull());
     expect(server.calls.at(-1)).toEqual({ method: "POST", path: "/api/combats/c-p1/resolve_concentration", body: { requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "typed", total: 15 } } } });
@@ -373,19 +385,17 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
   });
 });
 
-describe("what else the sub-tab shows", () => {
-  it("a revealed creature's stat block opens as a sheet, with its HP and AC (D20 b)", async () => {
-    const user = userEvent.setup();
+describe("what else the section shows", () => {
+  it("a monster shows only its name and a Bloodied or Down chip: no conditions, stats, AC or HP (user, 2026-11-14)", async () => {
     server.combats.set("p1", liveWith());
     await start();
     renderPlay();
-    await openCombatTab();
-    await user.click(await screen.findByRole("button", { name: "Goblin stat block" }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText("HP 3 / 7")).toBeTruthy();
-    expect(within(dialog).getByText("Armor Class")).toBeTruthy();
-    expect(within(dialog).getByText("15 (leather armor, shield)")).toBeTruthy();
-    expect(within(dialog).getByText("Scimitar.")).toBeTruthy();
+    const pane = await openCombatTab();
+    const goblin = within(within(pane).getByRole("list", { name: "Turn order" })).getAllByRole("listitem").find((li) => li.textContent?.includes("Goblin"))!;
+    expect(within(goblin).getByLabelText("Health: Bloodied")).toBeTruthy();
+    expect(within(goblin).queryByText("Prone")).toBeNull();
+    expect(within(goblin).queryByRole("button")).toBeNull();
+    expect(pane.textContent).not.toMatch(/Scimitar|leather armor|3 \/ 7/);
   });
 
   it("the revealed-events log: built from what the player saw change, newest first", async () => {
@@ -401,11 +411,10 @@ describe("what else the sub-tab shows", () => {
         creature("cr2", "Wolf")],
     })));
     await waitFor(() => expect(logLines()[0]).toBe("R3 Wolf appears."));
-    expect(logLines()).toEqual(["R3 Wolf appears.", "R3 Bram is down.", "R3 Goblin: no longer Prone.", "R3 Round 3.", "R2 The combat is on."]);
+    expect(logLines()).toEqual(["R3 Wolf appears.", "R3 Bram is down.", "R3 Round 3.", "R2 The combat is on."]);
     // Hidden again: it leaves the order, and the log says so (what players saw stays, plan 4.4 "Hide after reveal").
     act(() => server.change("p1", (c) => ({ ...c, order: c.order.filter((o) => o.id !== "cr2") })));
     await waitFor(() => expect(logLines()[0]).toBe("R3 Wolf is gone."));
-    expect(screen.queryByRole("button", { name: "Wolf stat block" })).toBeNull();
   });
 
   it("the log shows the newest few lines only", async () => {
@@ -430,14 +439,16 @@ describe("what else the sub-tab shows", () => {
     delete w.me[0]!.characterId;
     expect(fromWire(w, { myCharacters: [hero] }).combatants[1]).toMatchObject({ mine: true, characterId: hero });
     expect(fromWire(w, { myCharacters: [hero, "other"] }).combatants[1]?.characterId).toBeNull();
-    // Life, conditions and exhaustion; creatures' HP and AC (D20 b); a prompt with two damage types.
+    // Life, conditions and exhaustion; a monster has no HP, AC or stat block here; a prompt with two damage types.
     const d = liveWith({}, { life: { dying: { successes: 2, failures: 1 } }, /* an earlier draft's shape, still read */
       prompts: [{ id: "p", kind: "damage", amount: 9, parts: [{ amount: 5, damage_type: "fire" }, { amount: 4, damage_type: "cold" }], criticalHit: true }] });
     d.order[2]!.exhaustion = 2;
     const v = fromWire(d);
     expect(v.combatants[1]).toMatchObject({ life: "dying", deathSaves: { successes: 2, failures: 1 } });
     expect(v.combatants[2]!.conditions.map((c) => c.name)).toEqual(["poisoned", "exhaustion 2"]);
-    expect(v.combatants[0]).toMatchObject({ hp: { current: 3, max: 7 }, ac: 15, initiative: null });
+    expect(v.combatants[0]).toMatchObject({ initiative: null, band: "bloodied" });
+    expect(v.combatants[0]).not.toHaveProperty("hp");
+    expect(v.combatants[0]).not.toHaveProperty("statBlock");
     expect(v.prompts).toEqual([{ id: "p", kind: "damage", combatant: "me1", amount: 9, damageType: "fire and cold", critical: true }]);
     expect(v.round).toBe(2);
     expect(v.title).toBe("Road ambush");
@@ -452,7 +463,7 @@ describe("what else the sub-tab shows", () => {
     act(() => server.change("p1", (c) => ({ ...c, turn: { kind: "combatant", id: "ally1", round: 3 } })));
     expect(await screen.findByText("Reconnecting…")).toBeTruthy();
     expect(within(pane).getByText("Round 2")).toBeTruthy();
-    expect(tab("Combat")).toBeTruthy();
+    expect(section()).toBeTruthy();
     expect(holds).toEqual(["combat"]);
     server.down = false;
     await act(async () => { server.reopen(); });
@@ -547,8 +558,7 @@ describe("no stale states: order, gaps, waking, and the player's own writes", ()
     };
     server.refuseNext = { code: "conflict", message: "The combat isn't running." };
     const prompt = await screen.findByRole("alertdialog", { name: "Roll initiative" });
-    await user.click(within(prompt).getByRole("button", { name: "Type my table roll" }));
-    await user.type(within(prompt).getByLabelText("Initiative total"), "19");
+    await user.type(within(prompt).getByLabelText("Initiative: my table roll"), "19");
     await user.click(within(prompt).getByRole("button", { name: "Send" }));
     // Optimistic: shown before the server answers.
     expect(await screen.findByLabelText("Initiative 19")).toBeTruthy();
@@ -570,8 +580,7 @@ describe("no stale states: order, gaps, waking, and the player's own writes", ()
     server.down = true;
     store.writeDeps.sleep = async () => { server.down = false; };
     const prompt = await screen.findByRole("alertdialog", { name: "Roll initiative" });
-    await user.click(within(prompt).getByRole("button", { name: "Type my table roll" }));
-    await user.type(within(prompt).getByLabelText("Initiative total"), "11");
+    await user.type(within(prompt).getByLabelText("Initiative: my table roll"), "11");
     await user.click(within(prompt).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog", { name: "Roll initiative" })).toBeNull());
     const writes = server.calls.filter((c) => c.method === "POST").map((c) => (c.body as { requestId: string }).requestId);
@@ -619,6 +628,20 @@ describe("summons and pets (controlled creatures)", () => {
     w.me.push(wolf.mine);
     return w;
   }
+
+  it("the DM's damage on my creature is a prompt I answer: Apply sends resolve_prompt for it (role-views.md)", async () => {
+    const user = userEvent.setup();
+    const w = withPets();
+    w.me.find((m) => m.id === "wolf1")!.prompts = [{ id: "pw", kind: "damage", amount: 4, parts: [{ amount: 4, damage_type: "piercing" }] }];
+    server.combats.set("p1", w);
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    const prompt = within(pane).getByRole("alertdialog", { name: "Wolf: take 4 piercing damage?" });
+    await user.click(within(prompt).getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(within(pane).queryByRole("alertdialog", { name: /Wolf: take/ })).toBeNull());
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/resolve_prompt", body: { args: { promptId: "pw", applied: true } } });
+  });
 
   it("follow their owner in the turn order; other players' are there but not mine to play", async () => {
     server.combats.set("p1", withPets());
@@ -687,8 +710,7 @@ describe("summons and pets (controlled creatures)", () => {
     await user.click(within(region).getByRole("button", { name: "Remove prone" }));
     await waitFor(() => expect(chips()).toBeNull());
     expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/remove_condition", body: { args: { target: "wolf1", condition: "prone" } } });
-    await user.click(within(region).getByRole("button", { name: "Type my table roll" }));
-    await user.type(within(region).getByLabelText("Wolf d20 total"), "13");
+    await user.type(within(region).getByLabelText("Wolf d20: my table roll"), "13");
     await user.click(within(region).getByRole("button", { name: "Send" }));
     expect(await within(region).findByText("Last roll: d20 13 (13)")).toBeTruthy();
     expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/roll", body: { args: { id: "wolf1", label: "d20", roll: { d20: { kind: "typed", total: 13 } } } } });
@@ -699,44 +721,6 @@ describe("summons and pets (controlled creatures)", () => {
     expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/dismiss", body: { args: { id: "wolf1" } } });
   });
 
-  it("Summon: a quick stat block, linked to the player's PC, right after it", async () => {
-    const user = userEvent.setup();
-    server.combats.set("p1", liveWith());
-    await start();
-    renderPlay();
-    const pane = await openCombatTab();
-    await user.click(within(pane).getByRole("button", { name: "Summon…" }));
-    const dialog = await screen.findByRole("dialog", { name: "Summon" });
-    expect(within(dialog).getByRole("button", { name: "Summon" }).hasAttribute("disabled")).toBe(true);
-    await user.type(within(dialog).getByLabelText("Name"), "Spirit Bear");
-    await user.type(within(dialog).getByLabelText("Hit points"), "15");
-    await user.type(within(dialog).getByLabelText("Armor class"), "13");
-    await user.click(within(dialog).getByRole("button", { name: "Summon" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Summon" })).toBeNull());
-    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/summon", body: { args: {
-      owner: "me1", combatant: { kind: "creature", label: "Spirit Bear", public_name: "Spirit Bear", hp: { current: 15, max: 15, temp: 0 }, ac: 13 } } } });
-    const names = within(within(pane).getByRole("list", { name: "Turn order" })).getAllByRole("listitem")
-      .filter((li) => li.classList.contains("combat-row")).map((r) => r.querySelector(".combat-row-name")!.textContent);
-    expect(names.indexOf("Spirit Bear (yours)")).toBe(names.indexOf("Seraphine (you)") + 1);
-  });
-
-  it("Summon with its own initiative, typed from the table", async () => {
-    const user = userEvent.setup();
-    server.combats.set("p1", liveWith());
-    await start();
-    renderPlay();
-    const pane = await openCombatTab();
-    await user.click(within(pane).getByRole("button", { name: "Summon…" }));
-    const dialog = await screen.findByRole("dialog", { name: "Summon" });
-    await user.type(within(dialog).getByLabelText("Name"), "Imp");
-    await user.type(within(dialog).getByLabelText("Hit points"), "10");
-    await user.click(within(dialog).getByRole("checkbox", { name: /Its own initiative/ }));
-    await user.click(within(dialog).getByRole("button", { name: "Summon, type its roll" }));
-    await user.type(within(dialog).getByLabelText("Its initiative total"), "18");
-    await user.click(within(dialog).getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Summon" })).toBeNull());
-    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/summon", body: { args: { owner: "me1", initiative: { kind: "typed", total: 18 } } } });
-  });
 });
 
 describe("the character's companions at the start of a fight", () => {
@@ -810,3 +794,110 @@ describe("the server's companion offers", () => {
   });
 });
 
+
+describe("the player screen (0.3.3): the Play tab with the live combat on top", () => {
+  it("shows the turn panel with the sheet's spells and slot pips; a cast goes to the combat and spends the sheet's slot", async () => {
+    const user = userEvent.setup();
+    server.combats.set("p1", liveWith({ turn: { kind: "combatant", id: "me1", round: 2 } }));
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    const panel = within(pane).getByRole("region", { name: "Your turn panel" });
+    expect(within(panel).getByRole("heading", { name: "Your actions" })).toBeTruthy();
+    const before = (await api.getSnapshot({ characterId: hero })).play.spellSlots.find((x) => x.level === 1)!;
+    expect(within(panel).getByLabelText(new RegExp(`^Level 1: ${before.max - before.used} of ${before.max} left`))).toBeTruthy();
+    const spell = within(panel).getAllByRole("button").find((b) => / L1 · \d+ slots?$/.test(b.textContent ?? "") && !b.hasAttribute("disabled"))!;
+    expect(spell, "a level 1 spell of the sheet").toBeTruthy();
+    const name = spell.textContent!.replace(/ L1 · .*$/, "");
+    await user.click(spell);
+    const sheet = await screen.findByRole("dialog", { name: `Cast ${name}` });
+    await user.click(within(sheet).getByRole("button", { name: "Goblin" }));
+    await user.click(within(sheet).getByRole("button", { name: `Cast ${name}` }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: `Cast ${name}` })).toBeNull());
+    expect(server.calls.find((x) => x.path === "/api/combats/c-p1/cast_spell")).toMatchObject({ body: { args: {
+      caster: "me1", targets: ["cr1"], slot: 1, dc: expect.any(Number), attack: expect.any(Number), mod: expect.any(Number), cantripTier: 1 } } });
+    await waitFor(async () => expect((await api.getSnapshot({ characterId: hero })).play.spellSlots.find((x) => x.level === 1)!.used).toBe(before.used + 1));
+  });
+
+  it("an attack: a target, the attack roll typed first, then the damage, all to the DM's log", async () => {
+    const user = userEvent.setup();
+    server.combats.set("p1", liveWith({ turn: { kind: "combatant", id: "me1", round: 2 } }));
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    const snap = await api.getSnapshot({ characterId: hero });
+    const attack = snap.attacks.find((a) => a.showInCombat !== false);
+    if (!attack) return;
+    const panel = within(pane).getByRole("region", { name: "Your turn panel" });
+    await user.click(within(panel).getAllByRole("button").find((b) => (b.textContent ?? "").startsWith(attack.name))!);
+    const sheet = await screen.findByRole("dialog", { name: attack.name });
+    await user.click(within(sheet).getByRole("button", { name: "Goblin" }));
+    await user.type(within(sheet).getByLabelText(`${attack.name} attack roll: my table roll`), "17");
+    await user.click(within(sheet).getByRole("button", { name: "Send" }));
+    await within(sheet).findByText(/if it hit/);
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/attack", body: { args: { attacker: "me1", target: "cr1", roll: { kind: "typed", total: 17 } } } });
+    await user.type(within(sheet).getByLabelText(`${attack.name} damage: my table roll`), "6");
+    await user.click(within(sheet).getByRole("button", { name: "Send" }));
+    await within(sheet).findByText(/Sent to the DM/);
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/roll", body: { args: { id: "me1", roll: { dice: { kind: "typed", total: 6 } } } } });
+  });
+
+  it("a PC the server says isn't in the initiative gets no live combat section (inInitiative: false)", async () => {
+    server.combats.set("p1", liveWith({}, { inInitiative: false }));
+    await start();
+    renderPlay();
+    await screen.findByRole("tab", { name: "Abilities" });
+    await act(async () => { await Promise.resolve(); });
+    expect(section()).toBeNull();
+  });
+
+  it("my own cast: the attack roll typed first, then the damage typed and applied (myCasts, role-views.md)", async () => {
+    const user = userEvent.setup();
+    server.combats.set("p1", liveWith({ turn: { kind: "combatant", id: "me1", round: 2 }, myCasts: [{
+      cast: "k1", caster: "me1", spell: "Fire Bolt", slot: null, delivery: "attack",
+      rows: [{ target: "cr1", ray: 0, outcome: null }], amounts: [{ kind: "damage", dice: "1d10", damage_type: "fire" }], needs_apply: false,
+    }] }));
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    const card = within(pane).getByRole("article", { name: "Fire Bolt" });
+    await user.type(within(card).getByLabelText("Fire Bolt attack on Goblin: my table roll"), "18");
+    await user.click(within(card).getByRole("button", { name: "Send" }));
+    await within(card).findByText("Hit");
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/resolve_cast_row", body: { args: { cast: "k1", target: "cr1", roll: { kind: "typed", total: 18 } } } });
+    await user.type(within(card).getByLabelText("Damage 1d10: my table roll"), "7");
+    await user.click(within(card).getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(within(pane).queryByRole("article", { name: "Fire Bolt" })).toBeNull());
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/apply_cast", body: { args: { cast: "k1", amounts: [{ kind: "typed", total: 7 }] } } });
+  });
+
+  it("a DM creature's save on my spell waits for the DM; Cancel drops my cast", async () => {
+    const user = userEvent.setup();
+    server.combats.set("p1", liveWith({ myCasts: [{
+      cast: "k2", caster: "me1", spell: "Sacred Flame", slot: null, delivery: "save",
+      rows: [{ target: "cr1", ray: 0, outcome: null }], amounts: [{ kind: "damage", dice: "1d8", damage_type: "radiant" }], needs_apply: false,
+    }] }));
+    await start();
+    renderPlay();
+    const pane = await openCombatTab();
+    const card = within(pane).getByRole("article", { name: "Sacred Flame" });
+    expect(within(card).getByText("Waiting for the DM's roll")).toBeTruthy();
+    expect(within(card).queryByRole("button", { name: "Apply" })).toBeNull();
+    await user.click(within(card).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(within(pane).queryByRole("article", { name: "Sacred Flame" })).toBeNull());
+    expect(server.calls.at(-1)).toMatchObject({ path: "/api/combats/c-p1/cancel_cast", body: { args: { cast: "k2" } } });
+  });
+
+  it("Short Rest and Long Rest sit on the stat tiles' row of the Play sub-tab, not on Traits", async () => {
+    const user = userEvent.setup();
+    server.combats.set("p1", null);
+    await start();
+    renderPlay();
+    const rests = await screen.findByRole("group", { name: "Rests" });
+    expect(rests.closest(".stat-row")).toBeTruthy();
+    expect(rests.closest(".stat-row")!.textContent).toMatch(/AC.*Initiative.*Speed.*Max HP.*Proficiency.*Short Rest.*Long Rest/s);
+    expect(screen.getAllByRole("group", { name: "Rests" })).toHaveLength(1);
+    await user.click(screen.getByRole("tab", { name: "Traits" }));
+    await waitFor(() => expect(screen.queryByRole("group", { name: "Rests" })).toBeNull());
+  });
+});

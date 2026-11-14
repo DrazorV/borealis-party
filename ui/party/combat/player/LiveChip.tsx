@@ -4,11 +4,11 @@ import { Button } from "../../../src/components/Button";
 import { useCharacter } from "../../../src/state/CharacterContext";
 import { actingId, myCombatant, type PlayerCombat } from "./api";
 import { contextFor, dmCombatPath, myTurn, useCombatStore } from "./store";
-import { selectCombatTab, useCombatTabSelected } from "./tabState";
+import { selectCombatTab } from "./tabState";
 
 export const PLAY_ROUTE = "/play";
 
-/** Open the Play tab's Combat sub-tab for the player's character in `combat` (opening that character if need be). */
+/** Open the Play tab's live combat section for the player's character in `combat` (opening that character if need be). */
 export function useOpenCombat(): (combat: PlayerCombat, characterId?: string | null) => Promise<void> {
   const nav = useNavigate();
   const { snapshot, open } = useCharacter();
@@ -24,8 +24,8 @@ export function useOpenCombat(): (combat: PlayerCombat, characterId?: string | n
 
 /**
  * The Live chip in the top chrome (plan D10, 4.4): shown while one of the player's parties has a live combat, from
- * any page, and it leads to the Combat sub-tab. On the player's turn it reads "Your turn", and away from the Combat
- * sub-tab (which says it in its own header) a "Your turn" banner leads there too.
+ * any page, and it leads to the live combat section on the Play tab. On the player's turn it reads "Your turn", and
+ * away from the Play page (whose section says it in its own header) a "Your turn" banner leads there too.
  * - `auto` (the desktop account bar): the chip, widened into the banner on the player's turn;
  * - `chip` (a phone's title bar, which has no row to spare): the chip only;
  * - `banner` (a phone's account bar): the banner only, on the player's turn (hidden on a phone held sideways, party.css).
@@ -35,7 +35,8 @@ export function LiveChip({ mode = "auto" }: { mode?: "auto" | "chip" | "banner" 
   const openCombat = useOpenCombat();
   const nav = useNavigate();
   const { pathname } = useLocation();
-  const onCombat = useCombatTabSelected() && pathname === PLAY_ROUTE;
+  // 0.3.3: the live combat is the top of the Play page's Play sub-tab; the banner isn't needed there.
+  const onCombat = pathname === PLAY_ROUTE;
   const first = store.combats[0];
   const dm = store.dmCombats[0];
   // The DM's own live combat (registered by the DM tracker) leads to the tracker.

@@ -3,10 +3,10 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { APIRequestContext, Page, Route, TestInfo } from "@playwright/test";
 import { ACCOUNTS, type AccountName } from "./accounts";
-import { expect, measureOverflow, minTap, open, settled, signedInShell, smallTargets, test } from "./fixtures";
+import { expect, measureOverflow, minTap, open, signedInShell, smallTargets, test } from "./fixtures";
 
 /**
- * The player's Combat sub-tab (0.3.0 part F) on the three phones (384x832, 832x384, 390x844). The party and the
+ * The player's live combat section (0.3.0 part F) on the three phones (384x832, 832x384, 390x844). The party and the
  * player's character are real (this run's server); the combat is the server's PLAYER projection, answered here at
  * `/api/parties/{p}/combat` and `/api/combats/{c}/{action}` so the layout and the player's own writes are checked
  * whether or not the server under test has combat. Applying the DM's damage is the player's own `take_damage` on
@@ -48,7 +48,7 @@ async function shot(page: Page, testInfo: TestInfo, name: string) {
 }
 
 /**
- * "Your turn" away from the Combat sub-tab: the banner under the title bar, or, on a phone held sideways (no row to
+ * "Your turn" away from the live combat section: the banner under the title bar, or, on a phone held sideways (no row to
  * spare), the title bar's chip.
  */
 function yourTurn(page: Page) {
@@ -120,8 +120,8 @@ async function serveCombat(page: Page, state: { combat: Combat | null }) {
   });
 }
 
-test.describe("The player's Combat sub-tab (0.3.0)", () => {
-  test("initiative, the damage prompt, your turn and a stat block, on a phone", async ({ page, signIn, request }, testInfo) => {
+test.describe("The player's live combat section (0.3.0)", () => {
+  test("initiative, the damage prompt, your turn, and a monster as its name and band, on a phone", async ({ page, signIn, request }, testInfo) => {
     test.setTimeout(180_000);
     const dm = await login(request, "admin");
     const player = await login(request, "player");
@@ -134,23 +134,24 @@ test.describe("The player's Combat sub-tab (0.3.0)", () => {
     await serveCombat(page, state);
     try {
       await signIn("player");
-      // The Live chip shows on the Start page and opens the hero's Combat sub-tab.
+      // The Live chip shows on the Start page and opens the hero's live combat section.
       await open(page, "/characters");
       const live = page.getByRole("button", { name: /^Live$/ });
       await expect(live).toBeVisible({ timeout: 15_000 });
       await live.tap();
       const pane = page.getByTestId("combat-pane");
       await expect(pane).toBeVisible();
-      await expect(page.getByRole("tab", { name: "Combat" })).toHaveAttribute("aria-selected", "true");
+      // 0.3.3: the live combat is a section of the Play sub-tab, not a sub-tab of its own.
+      await expect(page.getByRole("tab", { name: "Play" })).toHaveAttribute("aria-selected", "true");
+      await expect(page.getByRole("tab", { name: "Combat" })).toHaveCount(0);
       await expect(pane.getByText("Setup")).toBeVisible();
 
       // Initiative: both ways to roll, then typed from the table.
       const init = pane.getByRole("alertdialog", { name: "Roll initiative" });
-      await expect(init.getByRole("button", { name: "Roll in app" })).toBeVisible();
+      await expect(init.getByRole("button", { name: /^Roll for me/ })).toBeVisible();
       await fits(page, testInfo, ".combat-pane");
       await shot(page, testInfo, "initiative");
-      await init.getByRole("button", { name: "Type my table roll" }).tap();
-      await init.getByLabel("Initiative total").fill("14");
+      await init.getByLabel("Initiative: my table roll").fill("14");
       await init.getByRole("button", { name: "Send" }).tap();
       await expect(init).toHaveCount(0);
       await expect(pane.getByLabel("Initiative 14")).toBeVisible();
@@ -181,17 +182,12 @@ test.describe("The player's Combat sub-tab (0.3.0)", () => {
       await expect(order.locator('.combat-row[aria-current="true"]')).toContainText("Goblin Boss");
       await expect(order.locator(".combat-row").nth(2).getByLabel("Health: Bloodied")).toBeVisible();
 
-      // The revealed creature's stat block, as a sheet.
-      await pane.getByRole("button", { name: "Goblin Boss stat block" }).tap();
-      const sheet = page.getByRole("dialog");
-      await settled(sheet);
-      await expect(sheet.getByText("Armor Class")).toBeVisible();
-      await expect(sheet.getByText("Nimble Escape.")).toBeVisible();
+      // A monster is its name and band only (user, 2026-11-14): no stat block, no Summon button.
+      await expect(pane.getByRole("button", { name: /stat block/ })).toHaveCount(0);
+      await expect(order.locator(".combat-row").first().getByRole("button")).toHaveCount(0);
+      await expect(pane.getByRole("button", { name: "Summon…" })).toHaveCount(0);
       const o = await measureOverflow(page);
       expect(o.page, "the page scrolls sideways").toBeLessThanOrEqual(0);
-      await shot(page, testInfo, "stat-block");
-      await page.keyboard.press("Escape");
-      await expect(sheet).toHaveCount(0);
 
       // Your turn: the banner on another page, and the Live chip says it too.
       state.combat = { ...state.combat!, turn: { kind: "combatant", id: "me", round: 1 } };
@@ -215,9 +211,9 @@ test.describe("The player's Combat sub-tab (0.3.0)", () => {
       await asked;
       await expect(page.locator("html.phone")).toHaveCount(1);
       await signedInShell(page);
-      // The browser may or may not open the character again after a reload; either way there is no Combat sub-tab.
+      // The browser may or may not open the character again after a reload; either way there is no live combat section.
       await expect(page.getByText("No character open").or(page.getByRole("tab", { name: "Abilities" }))).toBeVisible({ timeout: 15_000 });
-      await expect(page.getByRole("tab", { name: "Combat" })).toHaveCount(0);
+      await expect(page.getByTestId("combat-pane")).toHaveCount(0);
       await expect(page.getByRole("button", { name: /^Live$/ })).toHaveCount(0);
     } finally {
       await api(request, dm.token, "DELETE", `/api/parties/${party.id}`).catch(() => undefined);
@@ -249,58 +245,14 @@ test.describe("The player's Combat sub-tab (0.3.0)", () => {
       await saves.scrollIntoViewIfNeeded();
       await fits(page, testInfo, ".combat-pane");
       await shot(page, testInfo, "death-saves");
-      await saves.getByRole("button", { name: "Type my table roll" }).tap();
-      await saves.getByLabel("Death save total").fill("4");
+      await saves.getByLabel("Death save: my table roll").fill("4");
       await saves.getByRole("button", { name: "Send" }).tap();
       await expect(saves.getByRole("img", { name: "Failures: 2 of 3" })).toBeVisible();
-      await saves.getByRole("button", { name: "Roll in app" }).tap();
+      await saves.getByRole("button", { name: /^Roll for me/ }).tap();
       await expect(saves.getByRole("img", { name: "Successes: 2 of 3" })).toBeVisible();
     } finally {
       await api(request, dm.token, "DELETE", `/api/parties/${party.id}`).catch(() => undefined);
     }
   });
 
-  test("summon: a quick stat block follows the PC in the turn order, and the player hurts it", async ({ page, signIn, request }, testInfo) => {
-    const dm = await login(request, "admin");
-    const player = await login(request, "player");
-    await api(request, dm.token, "POST", "/api/me/roles/dm", {});
-    const party = await api<{ id: string }>(request, dm.token, "POST", "/api/parties", { name: `Summons ${Math.random().toString(36).slice(2, 8)}` });
-    const made = await api<{ code: string }>(request, dm.token, "POST", `/api/parties/${party.id}/invites`, { kind: "code", uses: 1 });
-    const hero = await newCharacter(request, player.token);
-    await api(request, player.token, "POST", "/api/join", { code: made.code, characterId: hero.id });
-    const combat = projection(party.id, hero);
-    combat.status = "active";
-    combat.turn = { kind: "combatant", id: "cr1", round: 2 };
-    combat.order[1]!.initiative = 12;
-    const state = { combat: combat as Combat | null };
-    await serveCombat(page, state);
-    try {
-      await signIn("player");
-      await open(page, "/characters");
-      await page.getByRole("button", { name: /^Live$/ }).tap({ timeout: 15_000 });
-      const pane = page.getByTestId("combat-pane");
-      await pane.getByRole("button", { name: "Summon…" }).tap();
-      const dialog = page.getByRole("dialog", { name: "Summon" });
-      await settled(dialog);
-      await dialog.getByLabel("Name").fill("Spirit Bear");
-      await dialog.getByLabel("Hit points").fill("15");
-      await dialog.getByLabel("Armor class").fill("13");
-      const o1 = await measureOverflow(page);
-      expect(o1.page, "the page scrolls sideways").toBeLessThanOrEqual(0);
-      await shot(page, testInfo, "summon-dialog");
-      await dialog.getByRole("button", { name: "Summon", exact: true }).tap();
-      await expect(dialog).toHaveCount(0);
-      const rows = pane.getByRole("list", { name: "Turn order" }).locator(".combat-row .combat-row-name");
-      await expect(rows).toHaveText([/^Goblin Boss/, `${hero.name} (you)`, "Spirit Bear (yours)", "Bram the Steadfast"]);
-      const card = pane.getByRole("region", { name: "Your creatures" }).getByRole("listitem", { name: "Spirit Bear" });
-      await card.getByLabel("Spirit Bear amount").fill("4");
-      await card.getByRole("button", { name: "Damage Spirit Bear" }).tap();
-      await expect(card.getByRole("status", { name: "Spirit Bear hit points: 11 of 15" })).toBeVisible();
-      await card.scrollIntoViewIfNeeded();
-      await fits(page, testInfo, ".combat-pane");
-      await shot(page, testInfo, "summon-card");
-    } finally {
-      await api(request, dm.token, "DELETE", `/api/parties/${party.id}`).catch(() => undefined);
-    }
-  });
 });

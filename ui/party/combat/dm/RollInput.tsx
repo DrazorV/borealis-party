@@ -19,7 +19,7 @@ export function RollInput(props: {
 } | {
   kind: "dice";
   label: string;
-  /** What "Roll in app" rolls ("1d6" for a recharge). */
+  /** What "Roll for me" rolls ("1d6" for a recharge). */
   notation: string;
   /** Typed totals are checked against this range. */
   min?: number;
@@ -62,8 +62,8 @@ export function RollInput(props: {
         placeholder={props.kind === "d20" ? "Table roll" : `Total${props.kind === "dice" && !props.notation.includes("d6") ? " or dice" : ""}`}
         aria-label={`${props.label}: typed result`} aria-invalid={bad || undefined} disabled={props.disabled}
         onChange={(e) => { setText(e.target.value); setBad(false); }} />
-      <Button small type="submit" disabled={props.disabled || !text.trim()}>{props.submitLabel ?? "Enter"}</Button>
-      <Button small icon="dice" onClick={roll} disabled={props.disabled} title={`Roll in app${mod}`}>Roll in app</Button>
+      <Button small type="submit" variant="primary" disabled={props.disabled || !text.trim()}>{props.submitLabel ?? "Enter"}</Button>
+      <Button small icon="dice" onClick={roll} disabled={props.disabled} title={`Roll for me${mod}`}>Roll for me</Button>
     </form>
   );
 }

@@ -8,6 +8,7 @@ import { sampleCombat } from "./fixtures";
 import { seededDie } from "../../../src/lib/dice";
 import { CombatRefusal, execute, exportCombat, importCombat, undo, type MockCombat } from "./mockEngine";
 import { MOCK_BEASTS, newSpellStore, spellRoute, type MockSpellStore } from "./mockSpellRoutes";
+import { redactState } from "./privacy";
 import type { Combatant, Command, CompanionOffer, DmCombat } from "./types";
 
 export interface MockServer {
@@ -38,14 +39,36 @@ function offersFor(m: MockCombat): CompanionOffer[] {
   return [{ pc: pc.id, key: "wolf", name: "Wolf", hp: 11, ac: 13, initiative: 2 }];
 }
 
-/** The DM view of a mock combat, as the server sends it. */
+/**
+ * The damage and healing the DM sent players (D7 a), from the mock's player events, with how each stands (0.3.3,
+ * party/docs/role-views.md): `delivered` until the player answers, then `accepted` or `declined`.
+ */
+function promptsOf(m: MockCombat): NonNullable<DmCombat["prompts"]> {
+  return m.playerEvents.flatMap((e, i) => {
+    if (e.event !== "damage_prompt" && e.event !== "heal_prompt") return [];
+    const status = (e.status as string | undefined) ?? "delivered";
+    return [{ id: `prompt-${i}`, combatantId: String(e.id), kind: e.event === "heal_prompt" ? "heal" as const : "damage" as const, amount: Number(e.amount),
+      criticalHit: Boolean(e.critical_hit), at: i + 1, status }];
+  });
+}
+
+/** The player answers a prompt the DM sent (the rig and tests): accepted or declined. */
+export function answerPrompt(m: MockCombat, promptId: string, accepted: boolean): void {
+  const e = m.playerEvents[Number(promptId.replace(/^prompt-/, ""))];
+  if (!e) return;
+  e.status = accepted ? "accepted" : "declined";
+  // The server's resolve_prompt is a write: the DM's seq moves on.
+  m.view.seq += 1;
+}
+
+/** The DM view of a mock combat, as the server sends it: no player's HP or resources (./privacy.ts). */
 export function dmView(m: MockCombat): DmCombat {
   const v = m.view;
   const creatures: DmCombat["creatures"] = {};
   for (const [id, b] of Object.entries(v.statblocks)) creatures[id] = { encounterCreatureId: null, statBlock: b.data, name: b.name };
   return {
     id: v.id, partyId: v.partyId, encounter: v.encounterId ? { id: v.encounterId, name: "Sample fight", publicName: "A fight" } : null,
-    seq: v.seq, status: v.state.status, state: v.state, creatures, characters: {}, prompts: [], offers: offersFor(m),
+    seq: v.seq, status: v.state.status, state: redactState(v.state), creatures, characters: {}, prompts: promptsOf(m), offers: offersFor(m),
     undo: [...m.journal].reverse().map((j) => j.label),
   };
 }

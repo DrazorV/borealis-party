@@ -1,25 +1,21 @@
-import type { ComponentProps } from "react";
+import { useEffect, type ComponentProps } from "react";
 import { TabPanel as UpstreamTabPanel, Tabs as UpstreamTabs } from "../../../src/components/Tabs";
-import { useCharacter } from "../../../src/state/CharacterContext";
-import { CombatPane } from "./CombatPane";
-import { useCombatFor } from "./store";
-import { leaveCombatTab, selectCombatTab, useCombatTabSelected } from "./tabState";
+import { PlaySubTab } from "../../play/subTab";
+import { useCombatTabSelected } from "./tabState";
 
 /**
- * The Play page's sub-tab strip and panel with the Combat sub-tab added while the open character is in a live combat
- * of its party (plan 4.4, 0.3.0 part F). Only the Play page's own strip (`idPrefix="play"`) changes. It imports
- * upstream's Tabs file itself, never the components index, which playTabs.tsx stands in for.
+ * The Play page's sub-tab strip and panel (0.3.3, user 2026-11-14: the Play tab is the player's screen). The separate
+ * Combat sub-tab of 0.3.0 is retired: a live combat shows as a section at the top of the Play sub-tab
+ * (../../play/PlayTop.tsx). What stays here:
+ * - a combat link (the Live chip, the "Your turn" banner) opens the Play sub-tab, wherever the page was;
+ * - the panel tells the party's pieces inside it which sub-tab is open (the rests sit on the Play sub-tab's stat row).
+ * Only the Play page's own strip (`idPrefix="play"`) changes. It imports upstream's Tabs file itself, never the
+ * components index, which playTabs.tsx stands in for.
  */
 
-export const COMBAT_TAB = "combat";
+/** The Play sub-tab's id on upstream's Play page. */
+export const PLAY_SUB_TAB = "play";
 const PLAY = "play";
-
-function useLive() {
-  const { snapshot } = useCharacter();
-  const combat = useCombatFor(snapshot ? { id: snapshot.id, name: snapshot.name } : null);
-  const selected = useCombatTabSelected();
-  return { snapshot, combat, showing: Boolean(combat && selected) };
-}
 
 export function Tabs(props: ComponentProps<typeof UpstreamTabs>) {
   if (props.idPrefix !== PLAY) return <UpstreamTabs {...props} />;
@@ -27,24 +23,14 @@ export function Tabs(props: ComponentProps<typeof UpstreamTabs>) {
 }
 
 function PlayTabs(props: ComponentProps<typeof UpstreamTabs>) {
-  const { combat, showing } = useLive();
-  if (!combat) return <UpstreamTabs {...props} />;
-  const tabs = [{ id: COMBAT_TAB, label: "Combat" }, ...props.tabs];
-  const onChange = (id: string) => {
-    if (id === COMBAT_TAB) { selectCombatTab(); return; }
-    leaveCombatTab();
-    props.onChange(id);
-  };
-  return <UpstreamTabs {...props} tabs={tabs} active={showing ? COMBAT_TAB : props.active} onChange={onChange} />;
+  const asked = useCombatTabSelected();
+  const { active, onChange } = props;
+  // A combat link: the live combat section is on the Play sub-tab.
+  useEffect(() => { if (asked && active !== PLAY_SUB_TAB) onChange(PLAY_SUB_TAB); }, [asked, active, onChange]);
+  return <UpstreamTabs {...props} />;
 }
 
 export function TabPanel(props: ComponentProps<typeof UpstreamTabPanel>) {
   if (props.idPrefix !== PLAY) return <UpstreamTabPanel {...props} />;
-  return <PlayPanel {...props} />;
-}
-
-function PlayPanel(props: ComponentProps<typeof UpstreamTabPanel>) {
-  const { snapshot, combat, showing } = useLive();
-  if (!combat || !snapshot || !showing) return <UpstreamTabPanel {...props} />;
-  return <UpstreamTabPanel active={COMBAT_TAB} idPrefix={PLAY}><CombatPane combat={combat} s={snapshot} /></UpstreamTabPanel>;
+  return <PlaySubTab.Provider value={props.active}><UpstreamTabPanel {...props} /></PlaySubTab.Provider>;
 }

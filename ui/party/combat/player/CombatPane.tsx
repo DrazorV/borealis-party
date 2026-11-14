@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import type { CharacterSnapshot } from "../../../src/api/contract";
 import { Button } from "../../../src/components/Button";
 import { Alert, Chip } from "../../../src/components/Card";
-import { Modal } from "../../../src/components/Modal";
 import { useConnectivity } from "../../api/connectivity";
 import {
   actingId, myCombatant,
@@ -12,8 +11,9 @@ import { usePlayMutate } from "../../../src/pages/play/playQueue";
 import { ConditionChips } from "../shared/ConditionChips";
 import { HealthBand } from "../shared/HealthBand";
 import { RollOrType } from "../shared/RollOrType";
-import { StatBlockView } from "../shared/StatBlockView";
 import { Creatures } from "./Creatures";
+import { MyCasts } from "./MyCasts";
+import { TurnPanel } from "./TurnPanel";
 import { deviceDeps, playerWrite, useCombatStore } from "./store";
 import "../shared/combat.css";
 
@@ -122,7 +122,7 @@ function PromptCard({ combat, prompt, me, modifier, saveOf }: { combat: PlayerCo
       <section className="combat-prompt" role="alertdialog" aria-label={what}>
         <p className="combat-prompt-q">{what}</p>
         <p className="muted combat-prompt-from">{prompt.from ? `From ${prompt.from}` : "From an unseen creature"}</p>
-        <TableRoll label={what} modifier={saveOf?.(prompt.ability) ?? 0} busy={busy} onRoll={send} />
+        <RollOrType label={what} modifier={saveOf?.(prompt.ability) ?? 0} busy={busy} onRoll={send} />
         {error && <Alert tone="danger">{error}</Alert>}
       </section>
     );
@@ -137,23 +137,6 @@ function PromptCard({ combat, prompt, me, modifier, saveOf }: { combat: PlayerCo
     );
   }
   return null;
-}
-
-/**
- * A roll at the table first (0.3.2, the user's "promote actual rolls on table"): the typed total is the main action;
- * "Roll for me" is for players without dice.
- */
-function TableRoll({ label, modifier, busy, onRoll }: { label: string; modifier: number; busy: boolean; onRoll: (input: D20Input) => void }) {
-  const [text, setText] = useState("");
-  const total = /^-?\d+$/.test(text.trim()) ? Number(text.trim()) : null;
-  return (
-    <form className="combat-table-roll" onSubmit={(e) => { e.preventDefault(); if (total !== null) onRoll({ kind: "typed", total }); }}>
-      <input className="input" inputMode="numeric" enterKeyHint="send" autoFocus placeholder="Your roll" aria-label={`${label}: my table roll`}
-        value={text} onChange={(e) => setText(e.target.value)} disabled={busy} />
-      <Button type="submit" variant="primary" disabled={busy || total === null}>Send</Button>
-      <Button variant="ghost" icon="dice" disabled={busy} onClick={() => onRoll({ kind: "app", modifier })}>Roll for me ({modifier >= 0 ? `+${modifier}` : modifier})</Button>
-    </form>
-  );
 }
 
 function Pips({ label, filled, tone }: { label: string; filled: number; tone: "success" | "danger" }) {
@@ -241,7 +224,12 @@ function Initiative({ combat, me, modifier }: { combat: PlayerCombat; me: Player
   );
 }
 
-function Order({ combat, onStatBlock }: { combat: PlayerCombat; onStatBlock: (c: PlayerCombatant) => void }) {
+/**
+ * The turn order. A monster (a creature not mine) shows only its name and, when it applies, a Bloodied or Down chip
+ * (user, 2026-11-14: "players do not need to know much about monsters in their tab only the name and if bloodied"):
+ * no conditions, no concentration, no stat block, AC or abilities.
+ */
+function Order({ combat }: { combat: PlayerCombat }) {
   const acting = actingId(combat);
   const names = new Map(combat.combatants.map((c) => [c.id, c.name || "you"]));
   return (
@@ -249,6 +237,7 @@ function Order({ combat, onStatBlock }: { combat: PlayerCombat; onStatBlock: (c:
       {combat.combatants.filter((c) => c.inOrder).map((c) => {
         const now = c.id === acting;
         const follows = c.ownerId && names.has(c.ownerId) && c.initiative == null;
+        const monster = c.kind === "creature" && !c.mine;
         return (
           <li key={c.id} className={`combat-row${now ? " acting" : ""}${c.mine ? " mine" : ""}${c.life === "dead" ? " dead" : ""}${follows ? " follows" : ""}`}
             aria-current={now ? "true" : undefined}>
@@ -258,17 +247,14 @@ function Order({ combat, onStatBlock }: { combat: PlayerCombat; onStatBlock: (c:
             <span className="combat-row-main">
               <span className="combat-row-name">
                 {c.name}{c.mine && <span className="muted">{c.kind === "character" ? " (you)" : " (yours)"}</span>}
-                {c.concentration && !c.mine && <span className="muted combat-row-owner"> · concentrating</span>}
+                {c.concentration && !c.mine && !monster && <span className="muted combat-row-owner"> · concentrating</span>}
                 {now && <span className="sr-only"> is acting now</span>}
               </span>
               {c.ownerId && names.has(c.ownerId) && <span className="muted combat-row-owner">with {names.get(c.ownerId)}</span>}
-              <ConditionChips conditions={c.conditions} label={`${c.name} conditions`} />
+              {!monster && <ConditionChips conditions={c.conditions} label={`${c.name} conditions`} />}
             </span>
             <span className="combat-row-side">
-              {c.band && <HealthBand band={c.band} />}
-              {c.kind === "creature" && c.statBlock && (
-                <Button small onClick={() => onStatBlock(c)} aria-label={`${c.name} stat block`}>Stats</Button>
-              )}
+              {c.band && (!monster || c.band !== "unhurt") && <HealthBand band={c.band} />}
             </span>
           </li>
         );
@@ -290,10 +276,14 @@ function Log({ combat }: { combat: PlayerCombat }) {
   );
 }
 
-/** The Play tab's Combat sub-tab (plan 4.4 "Player combat view"): phone first, the player's projection only. */
+/**
+ * The player's live combat section (plan 4.4 "Player combat view"; 0.3.3: at the top of the Play tab's Play sub-tab,
+ * ../../play/PlayTop.tsx, which retired the separate Combat sub-tab). Phone first, the player's projection only:
+ * whose turn it is and the order, prompts to answer (typed rolls first), their own turn panel, their own HP and death
+ * saves, and their summons and pets.
+ */
 export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSnapshot }) {
   const me = myCombatant(combat, { id: s.id, name: s.name });
-  const [sheet, setSheet] = useState<PlayerCombatant | null>(null);
   const acting = actingId(combat);
   const yours = acting != null && combat.combatants.some((x) => x.mine && x.id === acting);
   const round = combat.pointer.kind === "combatant" || combat.pointer.kind === "enemy_turn" || combat.pointer.kind === "waiting" ? combat.pointer.round : combat.round;
@@ -315,23 +305,15 @@ export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSn
         <PromptCard key={p.id} combat={combat} prompt={p} me={me} modifier={conSave}
           saveOf={(a) => (s.abilities.save as Record<string, { bonus?: number } | undefined>)[a]?.bonus ?? 0} />
       ))}
+      <MyCasts combat={combat} />
+      {me && <TurnPanel combat={combat} me={me} s={s} />}
       {me && <Me combat={combat} me={me} s={s} />}
       {me && <Creatures combat={combat} me={me} s={s} />}
       <section className="card combat-order-card" aria-label="Initiative">
         <h2 className="combat-h">Turn order</h2>
-        <Order combat={combat} onStatBlock={setSheet} />
+        <Order combat={combat} />
       </section>
       <Log combat={combat} />
-      {sheet?.statBlock && (
-        <Modal title={sheet.name} onClose={() => setSheet(null)}>
-          {(sheet.hp || sheet.ac != null) && (
-            <p className="combat-sb-now">
-              {sheet.hp && <Chip tone="info">HP {sheet.hp.current} / {sheet.hp.max}</Chip>} {sheet.ac != null && <Chip>AC {sheet.ac}</Chip>}
-            </p>
-          )}
-          <StatBlockView name={sheet.name} block={sheet.statBlock} />
-        </Modal>
-      )}
     </div>
   );
 }

@@ -27,8 +27,10 @@ const REPLACED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     "../../state/status": local("./shell/status.ts"),
   },
   "src/components/shell/MobileChrome.tsx": { "react-router": local("./entry/shellRouter.tsx"), "./sections": local("./entry/partySections.ts") },
-  // The Play tab gains its Combat sub-tab while the open character's party has a live combat (combat/player/playTabs.tsx).
-  "src/pages/play/PlayPage.tsx": { "../../components": local("./combat/player/playTabs.tsx") },
+  // The Play tab is the player's screen (0.3.3): its Play sub-tab starts with the live combat section while the open
+  // character's party has a live combat (play/PlayTop.tsx, in place of the rest bar), and Short Rest and Long Rest sit
+  // on the stat tiles' row (play/StatRowWithRests.tsx, through combat/player/playTabs.tsx).
+  "src/pages/play/PlayPage.tsx": { "../../components": local("./combat/player/playTabs.tsx"), "./RestBar": local("./play/PlayTop.tsx") },
   // Additional Content is the one import page: the Import section above upstream's packs (content/WithImport.tsx).
   // Index files with "Packs without their index" above them, each with Add its index (content/WithUnfollowed.tsx).
   "src/pages/content/ContentPage.tsx": {

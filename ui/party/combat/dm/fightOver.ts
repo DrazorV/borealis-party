@@ -3,6 +3,7 @@
  * the "All enemies are down" banner; the DM ends a combat, never the app.
  */
 import { byId, isCharacter, isDead } from "./derive";
+import { playerSide } from "./privacy";
 import type { Combatant, CombatState } from "./types";
 
 /** The PC at the top of a creature's owner chain, if any (a PC's pet or summon fights for the party). */
@@ -19,9 +20,13 @@ function partyOwner(state: CombatState, c: Combatant): Combatant | undefined {
 export const isHostile = (state: CombatState, c: Combatant): boolean =>
   !isCharacter(c) && c.controller?.kind !== "player" && !partyOwner(state, c);
 
-/** Out of the fight: removed, withdrawn, dead, or at 0 HP (dying or stable). */
+/**
+ * Out of the fight: removed, withdrawn, dead, or at 0 HP (dying or stable). A player's combatant only when removed or
+ * withdrawn: the DM screen doesn't know its HP (./privacy.ts), so "Every player character is down" is the table's call.
+ */
 export const isOut = (c: Combatant): boolean =>
-  Boolean(c.removed) || Boolean(c.absent) || isDead(c) || (c.life?.state ?? "alive") !== "alive" || c.hp.current <= 0;
+  Boolean(c.removed) || Boolean(c.absent) ||
+  (!playerSide(c) && (isDead(c) || (c.life?.state ?? "alive") !== "alive" || c.hp.current <= 0));
 
 export type FightOver = "enemies" | "party";
 

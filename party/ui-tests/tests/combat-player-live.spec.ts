@@ -6,7 +6,7 @@ import { ACCOUNTS, type AccountName } from "./accounts";
 import { expect, measureOverflow, test } from "./fixtures";
 
 /**
- * The player's Combat sub-tab against the REAL combat server (0.3.0, party/docs/combat-api.md), with two accounts:
+ * The player's live combat section against the REAL combat server (0.3.0, party/docs/combat-api.md), with two accounts:
  * `admin` is the DM and runs the fight through the API, `player` plays on a phone. The player sees a reveal within
  * about two seconds, and a hidden creature is never in the page or in any answer the player's phone gets (plan 3.5,
  * D5). Skipped on a server without the combat routes (any build before feat/combat-server is merged).
@@ -50,7 +50,7 @@ async function phone(browser: Browser, testInfo: TestInfo, baseURL: string, sess
 
 interface DmView { id: string; seq: number; state: { combatants: { id: string; visible: boolean; kind: string; owner?: string }[] } }
 
-test.describe("The player's Combat sub-tab with the combat server (0.3.0)", () => {
+test.describe("The player's live combat section with the combat server (0.3.0)", () => {
   test("a reveal reaches the player within 2 s; a hidden creature never reaches the player's phone", async ({ request, browser, baseURL }, testInfo) => {
     test.skip(testInfo.project.name !== "android-portrait", "two accounts at 384x832 only");
     test.setTimeout(180_000);
@@ -95,8 +95,7 @@ test.describe("The player's Combat sub-tab with the combat server (0.3.0)", () =
         await expect(pane).toBeVisible();
         // Initiative typed from the table.
         const init = pane.getByRole("alertdialog", { name: "Roll initiative" });
-        await init.getByRole("button", { name: "Type my table roll" }).tap();
-        await init.getByLabel("Initiative total").fill("15");
+        await init.getByLabel("Initiative: my table roll").fill("15");
         await init.getByRole("button", { name: "Send" }).tap();
         await expect(pane.getByLabel("Initiative 15")).toBeVisible();
         await api(request, dm.token, "POST", `/api/combats/${started.id}/roll_initiative`, { requestId: rid(), args: { ids: [], only_missing: true } });
@@ -127,18 +126,16 @@ test.describe("The player's Combat sub-tab with the combat server (0.3.0)", () =
         // A DM change the player can see: on the phone within a second, with no reload.
         const loads = (await page.evaluate(() => performance.getEntriesByType("navigation").length));
         const t1 = Date.now();
-        await api(request, dm.token, "POST", `/api/combats/${started.id}/add_condition`, { requestId: rid(), args: { effect: { name: "Prone", target: hidden.id, conditions: ["prone"] } } });
-        await expect(order.locator(".combat-row").filter({ hasText: HIDDEN_PUBLIC }).getByText("Prone")).toBeVisible({ timeout: QUICK_MS });
-        testInfo.annotations.push({ type: "live", description: `DM condition shown in ${Date.now() - t1} ms` });
+        // A monster shows only its name and band (user, 2026-11-14): the DM bloodies it.
+        await api(request, dm.token, "POST", `/api/combats/${started.id}/set_hp`, { requestId: rid(), args: { id: hidden.id, current: 1 } });
+        await expect(order.locator(".combat-row").filter({ hasText: HIDDEN_PUBLIC }).getByLabel("Health: Bloodied")).toBeVisible({ timeout: QUICK_MS });
+        testInfo.annotations.push({ type: "live", description: `DM change shown in ${Date.now() - t1} ms` });
         expect(await page.evaluate(() => performance.getEntriesByType("navigation").length), "no reload").toBe(loads);
 
-        // The player summons a creature; it follows the PC, and the DM sees it in the combat.
-        await pane.getByRole("button", { name: "Summon…" }).tap();
-        const dialog = page.getByRole("dialog", { name: "Summon" });
-        await dialog.getByLabel("Name").fill("Spirit Wolf");
-        await dialog.getByLabel("Hit points").fill("11");
-        await dialog.getByRole("button", { name: "Summon", exact: true }).tap();
-        await expect(dialog).toHaveCount(0);
+        // No generic Summon button (user, 2026-11-14): the DM adds the PC's summon; it follows the PC as the player's.
+        await expect(pane.getByRole("button", { name: "Summon…" })).toHaveCount(0);
+        await api(request, dm.token, "POST", `/api/combats/${started.id}/summon`, { requestId: rid(), args: { owner: me.id,
+          combatant: { kind: "creature", label: "Spirit Wolf", public_name: "Spirit Wolf", hp: { current: 11, max: 11 } } } });
         const names = order.locator(".combat-row .combat-row-name");
         await expect(names.filter({ hasText: "Spirit Wolf (yours)" })).toHaveCount(1);
         const all = await names.allTextContents();
@@ -161,7 +158,7 @@ test.describe("The player's Combat sub-tab with the combat server (0.3.0)", () =
 
         // The DM ends it: the sub-tab goes.
         await api(request, dm.token, "POST", `/api/combats/${started.id}/end`, { requestId: rid(), args: {} });
-        await expect(page.getByRole("tab", { name: "Combat" })).toHaveCount(0, { timeout: LIVE_MS });
+        await expect(page.getByTestId("combat-pane")).toHaveCount(0, { timeout: LIVE_MS });
         // The Live chip is the account's: the rig's seeded player may be in another spec's live combat meanwhile
         // (the tracker's real-server spec runs in parallel), so it must go only when none is live anywhere.
         const parties = (await api<{ parties: { id: string }[] }>(request, player.token, "GET", "/api/parties")).parties;
