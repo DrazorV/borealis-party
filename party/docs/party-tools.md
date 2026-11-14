@@ -1,8 +1,8 @@
 # Party tools (`party/crates/party-tools`)
 
-Borealis Party has ONE tool registry for every AI client of the server:
-- the MCP server at `/api/mcp` (`borealis-server/src/mcp.rs`, [mcp.md](mcp.md));
-- the bring-your-own-AI assistant (part C).
+Borealis Party has ONE tool registry for every AI client of the server: the MCP server at `/api/mcp`
+(`borealis-server/src/mcp.rs`, [mcp.md](mcp.md)). ChatGPT, Claude and developer tools connect to it; the server
+never calls a model vendor itself (the in-app assistant was removed in 0.3.3).
 
 A tool has a name, a JSON schema, one required scope and a handler. The built-in handlers
 (`borealis-server/src/tools_backend.rs`) call the HTTP API's own axum handlers with the caller's `User`. So the
@@ -28,9 +28,9 @@ let registry: &Registry = crate::mcp::registry();
 // Who is calling. Build it from the auth result for THIS request (the account is re-read from the DB every time).
 let caller = Caller {
     account: user.id.clone(),
-    token: None,                       // the token/OAuth grant id for MCP; None for the in-app assistant
-    scopes: Scope::parse_list("bestiary:read encounters:write")?, // what the token / the user's opt-in grants
-    via: Via::Assistant,               // or Via::Mcp
+    token: Some(auth.client.id().into()), // the personal token id or the OAuth grant id
+    scopes: Scope::parse_list("bestiary:read encounters:write")?, // what the token grants
+    via: Via::Mcp,
 };
 
 // What the model may call: tools the scopes allow, in a fixed order. `spec.input_schema` is a JSON schema
@@ -47,7 +47,6 @@ let out: Result<ToolOutput, ToolError> = registry.call(&backend, &caller, "encou
 
 - `ToolOutput { value, replayed }`. `value` is DATA.
   - The MCP surface sends `{untrusted: true, note: DATA_NOTE, replayed, data}`.
-  - The assistant sends it as a tool-result message, never as the system prompt or as instructions.
 - `ToolError`:
   - the cases: `UnknownTool`, `MissingScope(Scope)`, `InvalidArgs(String)`, `NotFound`, `RateLimited`, `Busy`,
     `Unavailable(String)`, `Refused { code, message }`, `Internal`;
@@ -74,7 +73,7 @@ let out: Result<ToolOutput, ToolError> = registry.call(&backend, &caller, "encou
 ## Built-in tools
 
 **Request ids.** Every write takes a `requestId`: 8 to 64 characters from `[A-Za-z0-9_-]`.
-- The same id from the same token (or the same account, for the assistant) on the same tool, within 24 h, returns
+- The same id from the same token on the same tool, within 24 h, returns
   the first answer with `replayed: true` and changes nothing.
 - The same id sent with other arguments is refused.
 
@@ -129,13 +128,12 @@ async fn external(state, user, tool, args) -> Result<Value, ToolError> {
   - `sim_start`, `sim_card`, `sim_act`, `sim_auto`, `sim_state`, `sim_report`, `sim_batch`, `sim_replay`
     (encounters:simulate; `sim_start`, `sim_auto`, `sim_batch` and `sim_replay` are heavy).
 - The simulator's design is `plans/borealis-party-sim-design-2026-11-13.md`.
-  - Its server-side Assistant oracle (one chat completion per decision card, no tools) is part C's to call.
-  - It runs in-process. It is not a tool call through this registry, so it publishes its own interface with the
-    simulator.
+  - Decisions come from the connected agent (decision cards through `sim_*`) or the Basic policy; the server-side
+    Assistant oracle was removed in 0.3.3.
 
 ## Limits (`Limits::default()`)
 
-- 60 calls a minute per token. For the in-app assistant the limit counts per account.
+- 60 calls a minute per token (per personal token or per connected app).
 - 2 heavy calls at a time per account. A third answers `Busy`; it never waits.
 - Results over 256 KiB are refused ("narrow the request"). A write's oversized result becomes `{done: true}`.
 
@@ -144,5 +142,3 @@ async fn external(state, user, tool, args) -> Result<Value, ToolError> {
 `BOREALIS__FEATURES__AI=false` (`[features] ai`, server config only, D40):
 - `/api/mcp` and its metadata answer 404;
 - every backend call answers `Unavailable`.
-
-The assistant (part C) reads the same flag, `crate::config::features().ai`.

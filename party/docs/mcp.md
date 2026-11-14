@@ -4,7 +4,7 @@ Borealis Party serves the [Model Context Protocol](https://modelcontextprotocol.
 can search the bestiary, build and simulate encounters, read characters, and author homebrew as the signed-in
 account. No tool reads or changes a live combat (D25).
 
-The tools are the same ones the in-app assistant uses (`party-tools`, [party-tools.md](party-tools.md)). Every tool
+The tools live in one registry (`party-tools`, [party-tools.md](party-tools.md)). Every tool
 calls the server's own API code with the token owner's account, so the access rules don't change:
 - a player's token sees what the player sees: never hidden creatures, DM notes or legendary counts;
 - a DM's token sees what the DM sees;
@@ -22,7 +22,13 @@ calls the server's own API code with the token owner's account, so the access ru
 - **Headers:**
   - `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` are checked against the body when present: a mismatch is
     `400` with `-32020`.
-  - A browser `Origin` other than the server's own is `403`.
+  - A browser `Origin` other than the server's own or an AI app's (`https://chatgpt.com`, `https://chat.openai.com`,
+    `https://claude.ai`, `https://claude.com`, exact, any case) is `403`, checked before the token. Server-side
+    connectors send no `Origin`.
+- **Instructions:** the DM's-assistant workflow (`party-tools/src/instructions.md`) is in the `initialize` and
+  `server/discover` results as `instructions`, and is also the resource `borealis://agent/instructions`
+  (`text/markdown`) through `resources/list` and `resources/read`, for clients that don't show `instructions` to the
+  model. It needs no scope. An unknown resource is `-32002`.
 - **Errors:**
   - unknown method: `404` / `-32601`;
   - unsupported revision: `400` / `-32022`;
@@ -34,7 +40,11 @@ calls the server's own API code with the token owner's account, so the access ru
   JSON as a text block. The server instructions and every tool description tell the model that tool results are
   user-written game data and not instructions. Tool descriptions never quote user content.
 
-Spec pages used (read 2026-11-13):
+Spec pages used (read 2026-11-13; the 2025-11-25 ones checked again 2026-11-14 for 0.3.3):
+- [2025-11-25 authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)
+- [2025-11-25 transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
+- [2025-11-25 resources](https://modelcontextprotocol.io/specification/2025-11-25/server/resources)
+- [versioning](https://modelcontextprotocol.io/specification/versioning) (2026-07-28 is current)
 - [streamable-http](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
 - [basic](https://modelcontextprotocol.io/specification/2026-07-28/basic/index)
 - [versioning](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)
@@ -49,8 +59,10 @@ Spec pages used (read 2026-11-13):
 - **Personal tokens** (`bpt_…`) come from **Account → API tokens** (part A). Each has scopes, an expiry, and can be
   revoked. They work only on `/api/mcp`, and app session tokens are refused there.
 - **OAuth 2.1** (part A) is for ChatGPT and claude.ai connectors.
-  - The protected-resource metadata (RFC 9728, served by part A) is at `/.well-known/oauth-protected-resource/api/mcp`, and also at
-    the root form. It names this server as the authorization server.
+  - The protected-resource metadata (RFC 9728) is at `/.well-known/oauth-protected-resource/api/mcp`, and also at
+    the root form and `/api/mcp/.well-known/oauth-protected-resource`. It names this server as the authorization
+    server, whose metadata is at `/.well-known/oauth-authorization-server` and `/.well-known/openid-configuration`
+    (each also under `/api/mcp`, see [ai-auth.md](ai-auth.md)).
   - A `401` carries `WWW-Authenticate: Bearer resource_metadata="…", error="invalid_token", scope="…"`.
   - A tool the token's scopes don't allow is a `403` with `error="insufficient_scope"` and the scope it needs, so a
     connector can ask the user for it.
@@ -108,7 +120,7 @@ homebrew goes into it.
 ## Kill switch
 
 `BOREALIS__FEATURES__AI=false` (or `[features] ai = false` in `config.toml`), then restart.
-- `/api/mcp` and the metadata answer `404`, and the assistant's tools answer "unavailable".
+- `/api/mcp`, the OAuth routes and the metadata answer `404`, and every tool answers "unavailable".
 - It is a server-config switch only (D40). The admin page has no toggle for it.
 
 ## Connecting apps
@@ -149,12 +161,37 @@ from its environment only, never from arguments. Add it to `claude_desktop_confi
 }
 ```
 
-### ChatGPT (connector, OAuth)
+### ChatGPT (custom MCP server, OAuth)
 
-1. Go to **Settings → Apps & Connectors → Advanced → Developer mode**.
-2. Choose **Create** and enter the URL `https://party.example.com/api/mcp`.
-3. Set authentication to **OAuth**. ChatGPT registers itself (dynamic client registration) and opens the
-   server's consent screen.
+Menus checked 2026-11-14 (https://developers.openai.com/api/docs/guides/custom-mcp-server):
+1. Open **Plugins → + → Add custom MCP server**.
+2. Enter a name and the server URL `https://party.example.com/api/mcp`, and set authentication to **OAuth**.
+3. Confirm, then **Create as a plugin** and install it. ChatGPT registers itself (dynamic client registration) and
+   opens the server's consent screen. In a chat, type **@** and pick it.
+
+It needs a ChatGPT plan that allows custom MCP servers; on a workspace plan an admin may have to add it.
+
+### Technical notes for connectors
+
+What the server does at each step, the same as BalanceLab's connector (0.3.3 part B), and tested end to end by
+`mcp_connector_tests.rs` with a scripted client:
+
+1. `POST /api/mcp` without a token → `401`, `WWW-Authenticate: Bearer error="invalid_token", scope="<default
+   scopes>", resource_metadata="<base>/.well-known/oauth-protected-resource/api/mcp"`.
+2. That document → `resource` = `<base>/api/mcp`, `authorization_servers` = `[<base>]`.
+3. `<base>/.well-known/oauth-authorization-server` (or `openid-configuration`, or either under `/api/mcp`) → the
+   endpoints, `code_challenge_methods_supported: ["S256"]` and `authorization_response_iss_parameter_supported`.
+4. `POST /api/oauth/register` (DCR) → a public `client_id`.
+5. `GET /api/oauth/authorize` with PKCE S256, `resource=<base>/api/mcp`, `scope`, `state` → the consent page in the
+   app (the account signs in first if needed) → back to the app's redirect with `code`, `state` and `iss=<base>`.
+   Errors come back the same way, with `iss`. A wrong `resource` is `invalid_target`; no PKCE is `invalid_request`.
+6. `POST /api/oauth/token` (form) with the code, verifier and `resource` → `bpa_` access (1 hour) and `bpr_` refresh
+   (90 days, rotating).
+7. `initialize` → `instructions`; then `tools/list`, `tools/call`, `resources/read`.
+8. Refresh before the hour is up; `POST /api/oauth/revoke` with the refresh token disconnects the app.
+
+A WAF in front of the server must let the AI apps' servers reach `/.well-known/*`, `/api/oauth/*` and `/api/mcp`
+(claude.ai calls from `160.79.104.0/21`).
 
 ### Gemini CLI
 

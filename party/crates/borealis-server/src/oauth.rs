@@ -1,15 +1,16 @@
 //! The OAuth 2.1 authorization server for remote MCP clients such as ChatGPT connectors and claude.ai custom
 //! connectors (plan 4.5a part A, D24). It follows the MCP authorization spec (2025-11-25):
 //!
-//! - authorization-server metadata (RFC 8414) at `/.well-known/oauth-authorization-server`, and protected-resource
-//!   metadata (RFC 9728) for `/api/mcp` at `/.well-known/oauth-protected-resource/api/mcp`;
+//! - authorization-server metadata (RFC 8414) at `/.well-known/oauth-authorization-server` and
+//!   `/.well-known/openid-configuration` (each also under the MCP path), and protected-resource metadata (RFC 9728)
+//!   for `/api/mcp` at `/.well-known/oauth-protected-resource/api/mcp` (and at the root);
 //! - dynamic client registration (RFC 7591) at `/api/oauth/register`;
 //! - the authorization-code grant with PKCE S256 required, the `iss` response parameter (RFC 9207), resource
 //!   indicators (RFC 8707: tokens are for `<public_url>/api/mcp` only), and exact redirect-URI matching (loopback
 //!   redirects may use any port, RFC 8252);
 //! - a consent screen in the party app (`#/oauth/consent/<id>`), approved with the account's session (a header, never
 //!   a cookie: no other site can approve for the user);
-//! - access tokens for an hour and refresh tokens that rotate on every use; a reused refresh token or code revokes
+//! - access tokens for an hour and refresh tokens for 90 days that rotate on every use; a reused refresh token or code revokes
 //!   the whole grant;
 //! - revocation (RFC 7009) and the Account page's list of connected apps.
 //!
@@ -41,7 +42,7 @@ use crate::AppState;
 /// Seconds an access token lasts.
 pub const ACCESS_SECONDS: i64 = 60 * 60;
 /// Seconds a refresh token lasts; each refresh brings a new one, so a connection in use stays.
-pub const REFRESH_SECONDS: i64 = 30 * 24 * 60 * 60;
+pub const REFRESH_SECONDS: i64 = 90 * 24 * 60 * 60;
 /// Seconds an authorization code lasts.
 pub const CODE_SECONDS: i64 = 5 * 60;
 /// Seconds the consent screen waits for an answer.
@@ -100,8 +101,28 @@ pub(crate) fn routes_if(on: bool) -> axum::Router<AppState> {
         .route("/api/oauth/requests/{request}/deny", post(deny))
         .layer(DefaultBodyLimit::max(SMALL_BODY));
     axum::Router::new()
+        // Every place a client may look (MCP authorization 2025-11-25 "Authorization Server Metadata Discovery",
+        // RFC 8414 3.1, RFC 9728 3.1, OIDC Discovery 4): the root forms, the path-inserted forms for the MCP endpoint
+        // and the older suffix forms some clients still try. The same two documents everywhere.
         .route(
             "/.well-known/oauth-authorization-server",
+            get(server_metadata),
+        )
+        .route(
+            "/.well-known/oauth-authorization-server/api/mcp",
+            get(server_metadata),
+        )
+        .route(
+            "/api/mcp/.well-known/oauth-authorization-server",
+            get(server_metadata),
+        )
+        .route("/.well-known/openid-configuration", get(server_metadata))
+        .route(
+            "/.well-known/openid-configuration/api/mcp",
+            get(server_metadata),
+        )
+        .route(
+            "/api/mcp/.well-known/openid-configuration",
             get(server_metadata),
         )
         .route(
@@ -110,6 +131,10 @@ pub(crate) fn routes_if(on: bool) -> axum::Router<AppState> {
         )
         .route(
             "/.well-known/oauth-protected-resource/api/mcp",
+            get(resource_metadata),
+        )
+        .route(
+            "/api/mcp/.well-known/oauth-protected-resource",
             get(resource_metadata),
         )
         .route("/api/oauth/authorize", get(authorize))
@@ -132,7 +157,10 @@ fn issuer(state: &AppState) -> ApiResult<&str> {
 
 // Metadata.
 
-/// `GET /.well-known/oauth-authorization-server` (RFC 8414).
+/// `GET /.well-known/oauth-authorization-server` (RFC 8414), also served as `/.well-known/openid-configuration`.
+///
+/// The OIDC form is the same OAuth document: no ID tokens are issued (there is no `openid` scope), but a client that
+/// tries OIDC discovery finds the endpoints and `code_challenge_methods_supported`, which the MCP spec requires there.
 pub async fn server_metadata(State(state): State<AppState>) -> ApiResult<Json<Value>> {
     let base = issuer(&state)?;
     Ok(Json(json!({
@@ -150,6 +178,7 @@ pub async fn server_metadata(State(state): State<AppState>) -> ApiResult<Json<Va
         "scopes_supported": Scopes::all().names(),
         "authorization_response_iss_parameter_supported": true,
         "client_id_metadata_document_supported": false,
+        "subject_types_supported": ["public"],
     })))
 }
 

@@ -6,7 +6,9 @@
 //!   on every request, so a disabled account or a revoked token counts at once, and a lost DM role does too, because
 //!   the tools call the API's own role checks. Its refusal is answered as it is: a 401 with the RFC 9728 challenge
 //!   claude.ai and ChatGPT start OAuth from.
-//! * **Origin:** a browser request from another site is refused (403); server-side connectors send no Origin.
+//! * **Origin:** a browser request from another site is refused (403), except from this server's own pages and the
+//!   AI apps in [`ALLOWED_ORIGINS`] (chatgpt.com, chat.openai.com, claude.ai, claude.com); server-side connectors send
+//!   no Origin.
 //! * **What tools can do** is the API's: [`crate::tools_backend::ServerTools`] calls the API's handlers. No tool reads
 //!   or changes a live combat (D25).
 //! * **Metadata:** the protected-resource and authorization-server documents are part A's routes (`tokens.rs`,
@@ -119,12 +121,30 @@ fn rpc_error(status: StatusCode, code: i64, message: &str) -> Response {
         .into_response()
 }
 
-/// An Origin other than the server's own: a web page trying to drive the endpoint from a browser.
+/// The AI apps whose web pages may call the endpoint from a browser (their connectors mostly call from their
+/// servers, which send no Origin). Exact origins: https only, no subdomains, no ports.
+pub const ALLOWED_ORIGINS: [&str; 4] = [
+    "https://chatgpt.com",
+    "https://chat.openai.com",
+    "https://claude.ai",
+    "https://claude.com",
+];
+
+/// An Origin other than the server's own or an allowed AI app's: a web page trying to drive the endpoint from a
+/// browser (DNS rebinding, a malicious site). The MCP transport spec answers that with 403.
 fn foreign_origin(base: &str, headers: &HeaderMap) -> bool {
-    let Some(origin) = headers.get(header::ORIGIN).and_then(|o| o.to_str().ok()) else {
+    let Some(origin) = headers.get(header::ORIGIN) else {
         return false;
     };
-    origin.trim_end_matches('/') != base.trim_end_matches('/')
+    // An Origin that isn't text (or is "null", from a sandboxed frame or a file) is foreign too.
+    let Ok(origin) = origin.to_str() else {
+        return true;
+    };
+    let origin = origin.trim_end_matches('/');
+    origin != base.trim_end_matches('/')
+        && !ALLOWED_ORIGINS
+            .iter()
+            .any(|allowed| origin.eq_ignore_ascii_case(allowed))
 }
 
 fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {

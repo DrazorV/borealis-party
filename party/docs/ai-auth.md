@@ -111,12 +111,12 @@ personal tokens work.
 
 | Endpoint | |
 | --- | --- |
-| `GET /.well-known/oauth-authorization-server` | RFC 8414 metadata |
-| `GET /.well-known/oauth-protected-resource/api/mcp` (and without the path) | RFC 9728: `resource` = `<issuer>/api/mcp`, `authorization_servers` = `[<issuer>]` |
+| `GET /.well-known/oauth-authorization-server` | RFC 8414 metadata. The same document is at `/.well-known/openid-configuration` (OIDC discovery form; no ID tokens, no `openid` scope), and at `/.well-known/oauth-authorization-server/api/mcp`, `/.well-known/openid-configuration/api/mcp`, `/api/mcp/.well-known/oauth-authorization-server` and `/api/mcp/.well-known/openid-configuration`, every place an MCP client may look. |
+| `GET /.well-known/oauth-protected-resource/api/mcp` (and at the root, and `/api/mcp/.well-known/oauth-protected-resource`) | RFC 9728: `resource` = `<issuer>/api/mcp`, `authorization_servers` = `[<issuer>]` |
 | `POST /api/oauth/register` | Dynamic client registration (RFC 7591), JSON. Auth methods `none`, `client_secret_post`, `client_secret_basic` (RFC default). 20 per client address per hour. Clients never used are removed after 30 days. |
 | `GET /api/oauth/authorize` | Code flow. **PKCE S256 required.** Exact redirect match (loopback http may change port, RFC 8252). `resource` must be `<issuer>/api/mcp` or absent. Unknown scopes → `invalid_scope`; `offline_access` is ignored. Repeated parameters are refused. Then 303 to the app's consent screen `#/oauth/consent/<id>` (10 minutes). |
 | `GET /api/oauth/requests/{id}`, `POST …/approve {scopes}`, `POST …/deny` | The consent screen (session auth in a header, so no other site can approve). The account may untick scopes. The answer is the redirect with `code`, `state` and `iss` (RFC 9207), or `error=access_denied`. |
-| `POST /api/oauth/token` | Form-encoded. `authorization_code` (code once, 5 minutes, verifier checked, redirect and resource must match) or `refresh_token` (rotates; may narrow `scope`). Access 1 hour, refresh 30 days. 60 per client address per minute. |
+| `POST /api/oauth/token` | Form-encoded. `authorization_code` (code once, 5 minutes, verifier checked, redirect and resource must match) or `refresh_token` (rotates; may narrow `scope`). Access 1 hour, refresh 90 days (30 days before 0.3.3; refresh tokens issued then keep their 30 days, and the next refresh gets 90). 60 per client address per minute. |
 | `POST /api/oauth/revoke` | RFC 7009. A refresh token ends the whole grant; an access token only itself. Always 200. |
 | `GET /api/me/ai/apps`, `DELETE /api/me/ai/apps/{grant}` | Connected apps on the Account page; disconnect revokes every token of the grant at once. |
 
@@ -142,6 +142,27 @@ Redirect URIs: https anywhere; http only on `127.0.0.1`, `localhost` or `[::1]`;
   Both are just registered redirect URIs here.
   Docs: https://developers.openai.com/apps-sdk/build/auth
 - **MCP authorization spec 2025-11-25**: https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization
+
+### Parity with BalanceLab (0.3.3 part B, 2026-11-14)
+
+The user's other app, BalanceLab, has the connector that works smoothly with ChatGPT and Claude. Audit of this server
+against it and the MCP spec (2025-11-25 authorization and transports, read 2026-11-14):
+
+| BalanceLab point | Before 0.3.3 | Now |
+| --- | --- | --- |
+| Streamable HTTP, one JSON reply per POST, no SSE or session, GET/DELETE 405 | had it | same |
+| Revisions 2025-11-25, 2025-06-18, 2025-03-26 | had them (plus 2026-07-28) | same |
+| DCR | had it (`/api/oauth/register`) | same |
+| Authorize: S256 required, RFC 8707 `resource` | had them | tested end to end |
+| Token: code + refresh grants, access 1 h, refresh 90 d | refresh 30 d | **refresh 90 d** |
+| RFC 9207 `iss` on every authorization answer | had it (also on errors) | tested, plus a two-issuer mix-up test |
+| Protected-resource metadata, root and under the MCP path | had both | **also `/api/mcp/.well-known/…`** |
+| AS metadata, also under the MCP path, plus `openid-configuration` | root only | **all five more forms** |
+| 401 `WWW-Authenticate: Bearer resource_metadata, scope` | had it | tested |
+| Consent page after sign-in | had it | same |
+| Instructions in `initialize` and as an MCP resource | `initialize` only | **`borealis://agent/instructions` resource** |
+| Personal keys for developer tools | had `bpt_` | same |
+| Browser origins chatgpt.com, chat.openai.com, claude.ai, claude.com | own origin only | **allowed** |
 
 Not done in 0.3.1: Client ID Metadata Documents (`client_id_metadata_document_supported: false`). Both big clients
 fall back to DCR. Adding CIMD needs an SSRF-guarded fetch (`net_guard.rs`).
