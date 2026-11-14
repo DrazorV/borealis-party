@@ -87,6 +87,21 @@ export interface WireMine {
   prompts?: WirePrompt[];
 }
 
+/**
+ * 0.3.2: a save one of my PCs is asked for against a pending cast (party-combat `visibility::player_casts`). `spell`
+ * and `from` (the caster's id) are left out while the caster is hidden ("from an unseen creature").
+ */
+export interface WireCastRow {
+  cast: string;
+  target: string;
+  ray?: number | null;
+  ability: string;
+  dc?: number | null;
+  resolved: boolean;
+  spell?: string;
+  from?: string;
+}
+
 export interface WireProjection {
   id: string;
   partyId: string;
@@ -97,6 +112,7 @@ export interface WireProjection {
   showEnemyTurn?: boolean;
   order: WireCombatant[];
   me: WireMine[];
+  casts?: WireCastRow[];
 }
 
 // ---- the view model -------------------------------------------------------------------------------------------------
@@ -150,7 +166,9 @@ export type CombatPrompt =
   | { id: string; kind: "damage"; combatant: string; amount: number; damageType?: string | null; critical?: boolean }
   | { id: string; kind: "heal"; combatant: string; amount: number }
   /** The PC took damage while concentrating: a save is waiting. */
-  | { id: string; kind: "concentration"; combatant: string; dc: number };
+  | { id: string; kind: "concentration"; combatant: string; dc: number }
+  /** 0.3.2: a spell's (or a breath weapon's) save: the player rolls at the table and types it, or the app rolls. */
+  | { id: string; kind: "cast_save"; combatant: string; cast: string; ray: number | null; spell: string | null; ability: string; dc: number | null; from: string | null };
 
 /** A line of the revealed-events log, built on this device from what the player saw change (D32: revealed only). */
 export interface CombatLogEntry {
@@ -248,6 +266,15 @@ export function fromWire(w: WireProjection, ctx: WireContext = {}): PlayerCombat
     }),
     ...(m.concentrationChecks ?? []).slice(0, 1).map((c): CombatPrompt => ({ id: `concentration-${m.id}`, kind: "concentration", combatant: m.id, dc: c.dc })),
   ]);
+  // Saves against pending casts, typed from the table first (0.3.2); a hidden caster stays unnamed.
+  const nameOf = (id: string | undefined) => (id ? (w.order ?? []).find((o) => o.id === id)?.name ?? null : null);
+  for (const r of w.casts ?? []) {
+    if (r.resolved) continue;
+    prompts.push({
+      id: `cast-${r.cast}-${r.target}-${r.ray ?? 0}`, kind: "cast_save", combatant: r.target, cast: r.cast, ray: r.ray ?? null,
+      spell: r.spell ?? null, ability: r.ability.toLowerCase(), dc: r.dc ?? null, from: nameOf(r.from),
+    });
+  }
   return {
     id: w.id, partyId: w.partyId, partyName: ctx.partyName, title: w.encounter?.publicName ?? null,
     seq: w.pseq ?? 0, status: w.status, round: roundOf(w.turn), pointer: w.turn ?? { kind: "not_started" },

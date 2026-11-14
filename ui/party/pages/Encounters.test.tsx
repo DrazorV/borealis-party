@@ -368,11 +368,11 @@ describe("encounter builder (DM)", () => {
     expect(server.calls.at(-1)!.body).toEqual({ choices: { hp: "keep" } });
   });
 
-  it("adds a starting effect and an encounter rule, shown as a banner", async () => {
+  it("adds a custom starting effect and an encounter rule, shown as a banner", async () => {
     await makeEncounter();
     await addFromPicker([["Goblin Warrior", 2]]);
-    fireEvent.click(within(screen.getByRole("region", { name: "Starting effects" })).getByRole("button", { name: /Add/ }));
-    let d = await screen.findByRole("dialog", { name: "Starting effect" });
+    fireEvent.click(within(screen.getByRole("region", { name: "Before the fight" })).getByRole("button", { name: "Custom effect" }));
+    let d = await screen.findByRole("dialog", { name: "Custom starting effect" });
     fireEvent.change(within(d).getByLabelText("Effect"), { target: { value: "Mage Armor" } });
     fireEvent.change(within(d).getByLabelText("Spell slot spent"), { target: { value: "1" } });
     fireEvent.click(within(d).getByRole("button", { name: "Save" }));

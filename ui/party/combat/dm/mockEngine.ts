@@ -6,6 +6,7 @@
 import { parseNotation, rollExpr, seededDie, rollD20, type DieRoller } from "../../../src/lib/dice";
 import { INCAPACITATING, type D20Input, type D20Result, type DiceInput, type DiceResult } from "./common";
 import { abilityStatus, byId, concentrationDc, conditionsOf, effectiveInitiative, isAlive, poolOf, poolResetOwner, takesTurn, turnOrder } from "./derive";
+import { runSpell, SPELL_COMMANDS, type SpellHost } from "./mockSpells";
 import type { Combatant, CombatState, Command, DamageClause, DamageResult, DmEvent, Effect, EffectSpec, StatBlockSnapshot } from "./types";
 
 /** The mock's own record of a combat: the state, its log and stat blocks (the mock server turns it into the DM view). */
@@ -90,8 +91,20 @@ class Run {
     this.m.playerEvents.push(event);
   }
 
+  /** 0.3.2's commands (./mockSpells.ts). */
+  spellHost(): SpellHost {
+    return {
+      s: this.s, statblocks: this.m.view.statblocks,
+      ev: (a, b, c, d) => this.ev(a, b, c, d), c: (id) => this.c(id),
+      d20: (roll) => d20(roll, this.m.die), dice: (input) => dice(input, this.m.die),
+      damage: (cmd) => this.damage(cmd), addEffect: (spec) => this.addEffect(spec),
+      startConcentration: (c, name) => this.startConcentration(c, name), refuse,
+    };
+  }
+
   run(cmd: Command) {
     const s = this.s;
+    if (SPELL_COMMANDS.has(cmd.command)) { runSpell(this.spellHost(), cmd as Parameters<typeof runSpell>[1]); return; }
     switch (cmd.command) {
       case "add_combatant": {
         if (byId(s, cmd.combatant.id)) refuse(`Combatant ${cmd.combatant.id} already exists.`);
@@ -593,6 +606,11 @@ class Run {
         src.pending_concentration = [];
         this.ev(src.id, "concentration_ended", `${src.label} stops concentrating on ${e.name}`, { name: e.name });
       }
+    }
+    // 0.3.2: an anchor effect (a creature added for a summon spell) takes its target with it.
+    if ((e as Effect & { dismiss_on_end?: boolean }).dismiss_on_end) {
+      const t = byId(s, e.target);
+      if (t && !t.removed) { t.removed = true; this.ev(t.id, "dismissed", `${t.label} is gone (${e.name} ended)`); }
     }
     if (followUp && e.follow_up && byId(s, e.follow_up.target) && !byId(s, e.follow_up.target)!.removed) this.addEffect(e.follow_up);
   }

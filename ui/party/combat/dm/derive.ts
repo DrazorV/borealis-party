@@ -122,20 +122,52 @@ export interface AcBreakdown {
   cover: number;
   /** Null with an unknown base: effects can't make a number out of nothing. */
   total: number | null;
+  /** A spell that sets the base (Mage Armor: 13 + DEX) and beats the printed AC (0.3.2). */
+  setBy?: { name: string; base: number; dex: number };
+  /** "15 = Mage Armor 13 + DEX 2", for the AC chip; empty when nothing changes the printed AC. */
+  text: string;
 }
 
-/** AC from the stat block, effects and the best cover (C13). */
+/** The DEX modifier the engine knows (`stats.mods`), for "13 + DEX". */
+export function dexMod(c: Combatant): number {
+  return c.stats?.mods?.[1] ?? 0;
+}
+
+/**
+ * AC from the stat block, effects and the best cover (C13), as the engine derives it (0.3.2): the best of the printed
+ * AC and any base a spell sets (Mage Armor's 13 + DEX), plus every AC bonus (Shield +5), then at least any minimum
+ * (Barkskin 16), plus cover.
+ */
 export function effectiveAc(state: CombatState, c: Combatant): AcBreakdown {
   let effects = 0;
   let cover = 0;
+  let setBy: AcBreakdown["setBy"];
+  let min: { name: string; value: number } | undefined;
+  const bonuses: string[] = [];
   for (const e of effectsOn(state, c.id)) {
     for (const m of e.modifiers ?? []) {
-      if (m.kind === "ac") effects += m.value;
+      if (m.kind === "ac") { effects += m.value; bonuses.push(`${e.name} ${m.value < 0 ? `−${-m.value}` : m.value}`); }
       if (m.kind === "cover") cover = Math.max(cover, m.value === "half" ? 2 : 5);
+      if (m.kind === "ac_base") {
+        const dex = m.value.add_dex ? dexMod(c) : 0;
+        if (!setBy || m.value.base + dex > setBy.base + setBy.dex) setBy = { name: e.name, base: m.value.base, dex };
+      }
+      if (m.kind === "ac_min" && (!min || m.value > min.value)) min = { name: e.name, value: m.value };
     }
   }
-  const base = c.ac ?? null;
-  return { base, effects, cover, total: base === null ? null : base + effects + cover };
+  const printed = c.ac ?? null;
+  const spellBase = setBy ? setBy.base + setBy.dex : null;
+  const useSpell = spellBase !== null && (printed === null || spellBase > printed);
+  const base = useSpell ? spellBase : printed;
+  let total = base === null ? null : base + effects;
+  const parts: string[] = [];
+  if (useSpell && setBy) parts.push(`${setBy.name} ${setBy.base}${setBy.dex ? ` + DEX ${setBy.dex < 0 ? `−${-setBy.dex}` : setBy.dex}` : ""}`);
+  else if (printed !== null && (bonuses.length || cover || min)) parts.push(`printed ${printed}`);
+  parts.push(...bonuses);
+  if (min && total !== null && total < min.value) { total = min.value; parts.splice(0, parts.length, `${min.name} (at least ${min.value})`); }
+  if (cover && total !== null) { total += cover; parts.push(`cover ${cover}`); }
+  const text = parts.length && total !== null && (useSpell || bonuses.length || cover || min) ? `${total} = ${parts.join(" + ")}` : "";
+  return { base: printed, effects, cover, total: total === null ? null : total, ...(setBy ? { setBy } : {}), text };
 }
 
 /** Speeds with effect modifiers, conditions and exhaustion applied (C13). */

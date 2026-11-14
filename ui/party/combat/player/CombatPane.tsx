@@ -71,7 +71,7 @@ function Offline() {
 }
 
 /** "Take 7 slashing? Apply" (D7 a): applied to the player's OWN character, by the player's own command. */
-function PromptCard({ combat, prompt, me, modifier }: { combat: PlayerCombat; prompt: CombatPrompt; me: PlayerCombatant; modifier: number }) {
+function PromptCard({ combat, prompt, me, modifier, saveOf }: { combat: PlayerCombat; prompt: CombatPrompt; me: PlayerCombatant; modifier: number; saveOf?: (ability: string) => number }) {
   const run = usePlayMutate();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -113,6 +113,20 @@ function PromptCard({ combat, prompt, me, modifier }: { combat: PlayerCombat; pr
       </section>
     );
   }
+  if (prompt.kind === "cast_save") {
+    const what = `${prompt.ability.toUpperCase()} save${prompt.dc != null ? ` DC ${prompt.dc}` : ""}${prompt.spell ? ` against ${prompt.spell}` : ""}`;
+    const send = (input: D20Input) => go(() => playerWrite(combat, "resolve_cast_row", { cast: prompt.cast, target: prompt.combatant, ...(prompt.ray != null ? { ray: prompt.ray } : {}),
+      roll: input.kind === "typed" ? { kind: "typed", total: input.total } : { kind: "app" } },
+      (c) => ({ ...c, prompts: c.prompts.filter((p) => p.id !== prompt.id) })));
+    return (
+      <section className="combat-prompt" role="alertdialog" aria-label={what}>
+        <p className="combat-prompt-q">{what}</p>
+        <p className="muted combat-prompt-from">{prompt.from ? `From ${prompt.from}` : "From an unseen creature"}</p>
+        <TableRoll label={what} modifier={saveOf?.(prompt.ability) ?? 0} busy={busy} onRoll={send} />
+        {error && <Alert tone="danger">{error}</Alert>}
+      </section>
+    );
+  }
   if (prompt.kind === "concentration") {
     return (
       <section className="combat-prompt" role="alertdialog" aria-label={`Concentration save, DC ${prompt.dc}`}>
@@ -123,6 +137,23 @@ function PromptCard({ combat, prompt, me, modifier }: { combat: PlayerCombat; pr
     );
   }
   return null;
+}
+
+/**
+ * A roll at the table first (0.3.2, the user's "promote actual rolls on table"): the typed total is the main action;
+ * "Roll for me" is for players without dice.
+ */
+function TableRoll({ label, modifier, busy, onRoll }: { label: string; modifier: number; busy: boolean; onRoll: (input: D20Input) => void }) {
+  const [text, setText] = useState("");
+  const total = /^-?\d+$/.test(text.trim()) ? Number(text.trim()) : null;
+  return (
+    <form className="combat-table-roll" onSubmit={(e) => { e.preventDefault(); if (total !== null) onRoll({ kind: "typed", total }); }}>
+      <input className="input" inputMode="numeric" enterKeyHint="send" autoFocus placeholder="Your roll" aria-label={`${label}: my table roll`}
+        value={text} onChange={(e) => setText(e.target.value)} disabled={busy} />
+      <Button type="submit" variant="primary" disabled={busy || total === null}>Send</Button>
+      <Button variant="ghost" icon="dice" disabled={busy} onClick={() => onRoll({ kind: "app", modifier })}>Roll for me ({modifier >= 0 ? `+${modifier}` : modifier})</Button>
+    </form>
+  );
 }
 
 function Pips({ label, filled, tone }: { label: string; filled: number; tone: "success" | "danger" }) {
@@ -281,7 +312,8 @@ export function CombatPane({ combat, s }: { combat: PlayerCombat; s: CharacterSn
       </div>
       {me && <Initiative combat={combat} me={me} modifier={s.stats.initiative} />}
       {me && combat.prompts.filter((p) => p.combatant === me.id).map((p) => (
-        <PromptCard key={p.id} combat={combat} prompt={p} me={me} modifier={conSave} />
+        <PromptCard key={p.id} combat={combat} prompt={p} me={me} modifier={conSave}
+          saveOf={(a) => (s.abilities.save as Record<string, { bonus?: number } | undefined>)[a]?.bonus ?? 0} />
       ))}
       {me && <Me combat={combat} me={me} s={s} />}
       {me && <Creatures combat={combat} me={me} s={s} />}

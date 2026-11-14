@@ -347,6 +347,30 @@ describe("rolls: in the app or typed from the table (D21, D43)", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog", { name: /Concentration save/ })).toBeNull());
     expect(server.calls.at(-1)).toEqual({ method: "POST", path: "/api/combats/c-p1/resolve_concentration", body: { requestId: expect.stringMatching(/^req-/), args: { id: "me1", roll: { kind: "typed", total: 15 } } } });
   });
+
+  it("a spell's save waits for the player: the table roll is typed first (0.3.2)", async () => {
+    const user = userEvent.setup();
+    server.combats.set("p1", liveWith({ casts: [{ cast: "cast-1", target: "me1", ability: "dex", dc: 14, resolved: false, spell: "Fireball", from: "cr1" }] }));
+    await start();
+    renderPlay();
+    await openCombatTab();
+    const prompt = await screen.findByRole("alertdialog", { name: "DEX save DC 14 against Fireball" });
+    expect(within(prompt).getByText("From Goblin")).toBeTruthy();
+    const box = within(prompt).getByLabelText("DEX save DC 14 against Fireball: my table roll");
+    await user.type(box, "17{Enter}");
+    await waitFor(() => expect(server.calls.some((c) => c.path === "/api/combats/c-p1/resolve_cast_row")).toBe(true));
+    expect(server.calls.find((c) => c.path === "/api/combats/c-p1/resolve_cast_row")).toEqual({ method: "POST", path: "/api/combats/c-p1/resolve_cast_row", body: { requestId: expect.stringMatching(/^req-/), args: { cast: "cast-1", target: "me1", roll: { kind: "typed", total: 17 } } } });
+  });
+
+  it("a hidden caster's spell stays unnamed: only the save and its DC (0.3.2)", async () => {
+    server.combats.set("p1", liveWith({ casts: [{ cast: "cast-2", target: "me1", ability: "wis", dc: 13, resolved: false }, { cast: "cast-3", target: "me1", ability: "con", dc: 12, resolved: true }] }));
+    await start();
+    renderPlay();
+    await openCombatTab();
+    const prompt = await screen.findByRole("alertdialog", { name: "WIS save DC 13" });
+    expect(within(prompt).getByText("From an unseen creature")).toBeTruthy();
+    expect(screen.queryByRole("alertdialog", { name: /CON save/ })).toBeNull();
+  });
 });
 
 describe("what else the sub-tab shows", () => {

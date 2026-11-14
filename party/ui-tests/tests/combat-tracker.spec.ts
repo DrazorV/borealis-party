@@ -110,9 +110,14 @@ test.describe("The DM's combat tracker (0.3.0)", () => {
     await expect(card.getByText(/^\d+\/40 HP$/)).not.toHaveText("40/40 HP");
     await card.getByRole("button", { name: "Reveal to players" }).click();
     await expect(card.getByRole("button", { name: "Hide from players" })).toBeVisible();
-    const dagger = card.locator(".cb-ability", { hasText: "Dagger" });
-    await dagger.getByRole("button", { name: "Use" }).click();
-    await expect(dagger.getByText("Action spent")).toBeVisible();
+    // 0.3.2: every action is a turn button; an attack asks for its target, then waits for the table roll.
+    await card.locator('[data-turn-button="dagger"]').click();
+    const sheet = page.getByRole("dialog", { name: "Mage: Dagger" });
+    await sheet.getByRole("button", { name: "Knight" }).click();
+    await sheet.getByRole("button", { name: "Attack" }).click();
+    await page.getByRole("dialog", { name: "Dagger · Mage" }).getByRole("button", { name: "Later" }).click();
+    await expect(card.locator('[data-turn-button="dagger"]')).toBeDisabled();
+    await expect(card.locator(".cb-tb-item", { has: page.locator('[data-turn-button="dagger"]') }).getByText("Action spent")).toBeVisible();
     await shot(page, testInfo, "card");
   });
 });

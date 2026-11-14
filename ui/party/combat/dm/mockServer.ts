@@ -7,6 +7,7 @@ import type { CombatDeps } from "../../api/overrides/combat";
 import { sampleCombat } from "./fixtures";
 import { seededDie } from "../../../src/lib/dice";
 import { CombatRefusal, execute, exportCombat, importCombat, undo, type MockCombat } from "./mockEngine";
+import { MOCK_BEASTS, newSpellStore, spellRoute, type MockSpellStore } from "./mockSpellRoutes";
 import type { Combatant, Command, CompanionOffer, DmCombat } from "./types";
 
 export interface MockServer {
@@ -22,6 +23,8 @@ export interface MockServer {
   playerWrite: (combat: string, command: Command) => void;
   /** Another DM tab's write: done on the server, announced on the stream. */
   otherWrite: (combat: string, command: Command) => void;
+  /** 0.3.2: spells, effect definitions, precasts and the bestiary (./mockSpellRoutes.ts). */
+  spells: MockSpellStore;
   /** The stream: a ping, a drop, a reopen (events may have been missed). */
   stream: { beat: () => void; drop: () => void; reopen: () => void };
 }
@@ -92,6 +95,7 @@ export function mockCombatServer(seed?: MockCombat[], sharing?: MockSharing): Mo
   let made = 0;
   const server: MockServer = {
     combats,
+    spells: newSpellStore(),
     offline: false,
     requests: [],
     notify: (combat) => {
@@ -136,6 +140,8 @@ export function mockCombatServer(seed?: MockCombat[], sharing?: MockSharing): Mo
             combats.set(m.view.id, m);
             return dmView(m);
           }
+          const spellAnswer = spellRoute(server.spells, method, path, body);
+          if (spellAnswer !== undefined) return spellAnswer;
           if (parts[2] !== "combats") throw fail("not_found", "The server does not offer that.");
           const m = combats.get(parts[3] ?? "");
           if (!m) throw fail("not_found", "There is no such combat here.");
@@ -153,7 +159,20 @@ export function mockCombatServer(seed?: MockCombat[], sharing?: MockSharing): Mo
           }
           const args = b.args ?? {};
           if (action === "undo") undo(m, undefined, Boolean(args.force));
-          else if (action === "add_creature") {
+          else if (action === "summon" && typeof args.elementId === "string") {
+            // 0.3.2: a creature of the DM's bestiary under a caster's control (the server builds it from the element).
+            const beast = MOCK_BEASTS.find((x) => x.id === args.elementId);
+            if (!beast) throw fail("refused", "That creature isn't in your content.");
+            const n = m.view.state.combatants.filter((c) => c.label.startsWith(beast.name)).length + 1;
+            const id = `summon-${++made}`;
+            const { elementId: _e, ...rest } = args;
+            void _e;
+            execute(m, { command: "summon", ...rest, combatant: {
+              id, kind: "creature", label: `${beast.name} ${n}`, public_name: beast.name, visible: true, hp: { current: beast.hp ?? 10, max: beast.hp ?? 10, temp: 0 },
+              ac: beast.ac, initiative_bonus: 1, speed: { walk: 40 }, abilities: [{ key: "bite", name: "Bite", kind: "action", text: "A bite." }],
+            } } as Command);
+            m.view.statblocks[id] = { name: beast.name, data: { ac: [{ value: beast.ac ?? 10 }], hp: { average: beast.hp ?? 10 } } };
+          } else if (action === "add_creature") {
             const from = m.view.state.combatants.find((c) => c.id === args.copyOf);
             if (!from) throw fail("refused", "No such creature.");
             const count = Number(args.count ?? 1);

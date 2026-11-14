@@ -85,6 +85,30 @@ export interface HpValue { average: number; formula?: string }
 export interface AcValue { value: number; source?: string }
 export interface Changed<T> { value: T; base: T | null }
 
+/** How often a creature casts a spell it was given (0.3.2, party-encounter `spellbook::Frequency`). */
+export type SpellFrequency =
+  | { kind: "atWill" }
+  | { kind: "perDay"; uses: number; each: boolean }
+  | { kind: "slots"; level: number; slots: number };
+
+/** A real spell from the DM's content on a creature (0.3.2): the installed element's id and name, and how often. */
+export interface OverrideSpell {
+  id: string;
+  name: string;
+  frequency: SpellFrequency;
+}
+
+/** The override dialog's Spells section (party-encounter `SpellsOverride`). */
+export interface SpellsOverride {
+  spells?: OverrideSpell[];
+  /** Slots by spell level ("1" → 4), replacing the printed ones for the levels given. */
+  slots?: Record<string, number>;
+  /** Spellcasting ability, short ("int"). */
+  ability?: string;
+  saveDc?: number;
+  attackBonus?: number;
+}
+
 /** What an encounter changes on one creature's block (D41). `base` is the source value, recorded by the server. */
 export interface Overrides {
   hp?: Changed<HpValue>;
@@ -92,6 +116,8 @@ export interface Overrides {
   saves?: Partial<Record<Ability, Changed<number>>>;
   traits?: { name: string; text: string }[];
   notes?: string;
+  /** 0.3.2: spells, slots per level, and the casting numbers. */
+  spells?: SpellsOverride;
 }
 
 /** What the app sends to change overrides: absent = leave, null = drop. */
@@ -101,6 +127,7 @@ export interface OverridesForm {
   saves?: Partial<Record<Ability, number | null>>;
   traits?: { name: string; text: string }[];
   notes?: string | null;
+  spells?: SpellsOverride | null;
 }
 
 /** A creature as the DM sees it. */
@@ -195,6 +222,32 @@ export interface Encounter {
   effects: Effect[];
   rules: Rule[];
   warnings: Warning[];
+  /** 0.3.2: spells cast before the fight (DM only). */
+  casts?: Precast[];
+  /** The server's note after a precast write ("two concentration spells: only the last one lasts"). */
+  castWarning?: string;
+}
+
+/** A spell cast before the fight (replaces "Starting effect"); its slot is spent when combat starts. */
+export interface Precast {
+  id: string;
+  casterId: string;
+  sort: number;
+  /** The spell's element id. */
+  spellKey: string;
+  name: string;
+  slotLevel: number | null;
+  /** Creature ids of the encounter, or "self". */
+  targets: string[];
+  choices: { damage_type?: string };
+}
+
+export interface PrecastFields {
+  casterId: string;
+  spellKey: string;
+  slotLevel: number | null;
+  targets: string[];
+  choices?: { damage_type?: string };
 }
 
 /** One row of the DM's list. */
@@ -395,6 +448,12 @@ export const addEffect = (id: string, fields: EffectFields) => call<Encounter>("
 export const updateEffect = (id: string, eid: string, fields: EffectFields) =>
   call<Encounter>("PATCH", `/api/encounters/${seg(id)}/effects/${seg(eid)}`, fields).then(encounter);
 export const removeEffect = (id: string, eid: string) => call<Encounter>("DELETE", `/api/encounters/${seg(id)}/effects/${seg(eid)}`).then(encounter);
+
+/** Precast spells (0.3.2): each write answers the encounter (with `casts` and, maybe, `castWarning`). */
+export const addPrecast = (id: string, fields: PrecastFields) => call<Encounter>("POST", `/api/encounters/${seg(id)}/casts`, fields).then(encounter);
+export const updatePrecast = (id: string, cid: string, fields: Partial<PrecastFields>) =>
+  call<Encounter>("PATCH", `/api/encounters/${seg(id)}/casts/${seg(cid)}`, fields).then(encounter);
+export const removePrecast = (id: string, cid: string) => call<Encounter>("DELETE", `/api/encounters/${seg(id)}/casts/${seg(cid)}`).then(encounter);
 
 export type RuleFields = Partial<Omit<Rule, "id" | "sort">>;
 export const addRule = (id: string, fields: RuleFields) => call<Encounter>("POST", `/api/encounters/${seg(id)}/rules`, fields).then(encounter);

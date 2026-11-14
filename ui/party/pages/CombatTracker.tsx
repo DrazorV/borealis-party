@@ -10,12 +10,17 @@ import { errorMessage } from "../../src/state/useAsync";
 import { addCreature, combatPath, exportCombat, importCombat } from "../api/overrides/combat";
 import { CombatantCard } from "../combat/dm/CombatantCard";
 import { byId, isCharacter, ownerDefeated, rosterOrder, takesTurn, turnOrder } from "../combat/dm/derive";
-import { AddCreatureDialog } from "../combat/dm/dialogs";
+import { EffectBuilder } from "../combat/dm/EffectBuilder";
+import { ResolutionSheet } from "../combat/dm/ResolutionSheet";
+import { addCreatureFromBestiary } from "../combat/dm/spellApi";
+import { castToShow, showCast } from "../combat/dm/castFocus";
+import { castName, mechOf, openCasts, spellOf } from "../combat/dm/spellTypes";
+import { AddCreatureSheet, type AddPreset } from "../combat/dm/SummonPanel";
 import { EventLog } from "../combat/dm/EventLog";
 import { upNext } from "../combat/dm/mockEngine";
 import { ResourcePanel, RuleBanners } from "../combat/dm/ResourcePanel";
 import { Roster } from "../combat/dm/Roster";
-import type { Combatant, Command, CombatState } from "../combat/dm/types";
+import type { Ability, Combatant, Command, CombatState } from "../combat/dm/types";
 import { useCombat } from "../combat/dm/useCombat";
 import "../combat/dm/tracker.css";
 
@@ -38,6 +43,10 @@ export function CombatTracker() {
   const [dialog, setDialog] = useState<"add" | "export" | "import" | null>(null);
   const [exported, setExported] = useState("");
   const [logOpen, setLogOpen] = useState(false);
+  /** 0.3.2: the open resolution sheet (a pending cast's id), Add creature's summon preset, the effect builder. */
+  const [, setFocusTick] = useState(0);
+  const [addPreset, setAddPreset] = useState<AddPreset | undefined>(undefined);
+  const [defining, setDefining] = useState<{ a: Ability; ruleset: string } | null>(null);
   /** Controlled creatures the DM chose to keep after a defeated owner (asked once each). */
   const [kept, setKept] = useState<Set<string>>(() => new Set());
   const cardRef = useRef<HTMLDivElement>(null);
@@ -104,6 +113,20 @@ export function CombatTracker() {
       setDialog("export");
     } catch (e) { toast.push(errorMessage(e), "error"); }
   };
+  const blockOf = (cid: string) => view.creatures?.[cid]?.statBlock;
+  const pending = openCasts(state);
+  // A cast this device started opens its resolution sheet (../combat/dm/castFocus.ts); others show as "N pending".
+  const resolving = castToShow(pending);
+  const setResolving = (id: string | null) => { showCast(id); setFocusTick((n) => n + 1); };
+  const resolvingCast = pending.find((k) => k.id === resolving);
+  const addFromBestiary = async (r: { elementId: string; count: number; owner?: string; bind: boolean; hidden: boolean; initiativeMode: "after_owner" | "own" }) => {
+    if (!r.owner) return;
+    try {
+      const out = await addCreatureFromBestiary(view.id, state.combatants.map((c) => c.id), { elementId: r.elementId, count: r.count, owner: r.owner, bindToConcentration: r.bind, hidden: r.hidden, initiativeMode: r.initiativeMode });
+      combat.client.adopt(out.view);
+      toast.push(`Added ${out.added.length === 1 ? "the creature" : `${out.added.length} creatures`}.`);
+    } catch (e) { toast.push(errorMessage(e), "error"); }
+  };
   const add = async (r: { from: Combatant; label: string; initiative: string; hidden: boolean }) => {
     const before = new Set(state.combatants.map((c) => c.id));
     const typed = r.initiative !== "" && Number.isInteger(Number(r.initiative));
@@ -128,6 +151,10 @@ export function CombatTracker() {
         </div>
         <div className="cb-top-actions">
           {streamDown && connection === "live" && <span className="chip warning cb-reconnecting" role="status">Reconnecting…</span>}
+          {pending.length > 0 && (
+            <Button small variant="warning" className="cb-pending" onClick={() => setResolving(pending[pending.length - 1]!.id)}
+              title={pending.map((k) => castName(k)).join(", ")}>{pending.length} pending</Button>
+          )}
           {combat.queue.length > 0 && connection === "sending" && <span className="chip cb-saving" role="status" aria-label="Saving">Saving…</span>}
           <span className="cb-round" aria-label={`Round ${state.round}`}>ROUND {state.round || "–"}</span>
           {state.status !== "ended" && <Button variant="primary" className="cb-next" disabled={disabled || ordered.length === 0} onClick={step}>
@@ -189,7 +216,8 @@ export function CombatTracker() {
           </details>
         </div>
         <div className="cb-main" ref={cardRef}>
-          {chosen ? <CombatantCard state={state} c={chosen} block={view.creatures?.[chosen.id]?.statBlock} blockName={view.creatures?.[chosen.id]?.name ?? undefined} send={send} disabled={disabled} />
+          {chosen ? <CombatantCard state={state} c={chosen} block={view.creatures?.[chosen.id]?.statBlock} blockName={view.creatures?.[chosen.id]?.name ?? undefined} send={send} disabled={disabled}
+            blockOf={blockOf} onDefine={(a) => setDefining({ a, ruleset: `dnd${mechOf(a)?.edition ?? state.edition}` })} onAddCreature={(p) => { setAddPreset(p); setDialog("add"); }} />
             : <div className="cb-panel cb-pad muted">Pick a combatant.</div>}
         </div>
         <div className="cb-right">
@@ -205,7 +233,13 @@ export function CombatTracker() {
         </div>
       )}
 
-      {dialog === "add" && <AddCreatureDialog creatures={state.combatants.filter((c) => !isCharacter(c) && !c.removed)} onDone={(r) => { setDialog(null); if (r) void add(r); }} />}
+      {dialog === "add" && <AddCreatureSheet state={state} preset={addPreset}
+        onClose={() => { setDialog(null); setAddPreset(undefined); }}
+        onCopy={(r) => { setDialog(null); setAddPreset(undefined); void add(r); }}
+        onBestiary={(r) => { setDialog(null); setAddPreset(undefined); void addFromBestiary(r); }} />}
+      {resolvingCast && <ResolutionSheet state={state} cast={resolvingCast} blockOf={blockOf} send={send} onClose={() => setResolving(null)} />}
+      {defining && <EffectBuilder spellKey={spellOf(defining.a)?.key ?? defining.a.key} spellName={defining.a.name} ruleset={defining.ruleset}
+        level={spellOf(defining.a)?.level ?? 1} text={defining.a.text ?? ""} onClose={() => setDefining(null)} />}
       {dialog === "export" && <ExportDialog text={exported} round={state.round} onClose={() => setDialog(null)} />}
       {dialog === "import" && <ImportDialog onClose={() => setDialog(null)} onImport={async (text) => {
         try {

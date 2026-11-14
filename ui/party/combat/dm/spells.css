@@ -1,0 +1,118 @@
+/*
+ * Spells and mechanics in combat (0.3.2): the turn panel, the cast and resolution sheets, the summon panel, Add
+ * creature, effect chips and the effect builder. Aurora's tokens, extended like the rest of the tracker
+ * (tracker.css): surfaces, borders, gold section heads, pill chips. Desktop-first for DMs; usable at 384x832.
+ */
+
+/* ---- turn panel ---- */
+.cb-turn { display: flex; flex-direction: column; gap: var(--sp-2); }
+.cb-turn-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2); border: var(--border-w) solid var(--border); border-radius: var(--radius); background: linear-gradient(180deg, var(--gold-soft), transparent 80%); }
+.cb-turn-head > .cb-overline { flex-basis: 100%; }
+.cb-pips { display: flex; gap: 4px; flex-wrap: wrap; }
+.cb-pip { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 700; padding: 4px 10px; border-radius: 999px; min-height: 30px;
+  border: var(--border-w) solid var(--success); background: var(--success-soft); color: var(--success); cursor: pointer; }
+.cb-pip i { width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+.cb-pip.spent { border-color: var(--border); background: transparent; color: inherit; opacity: 0.55; }
+.cb-pip.spent i { background: transparent; border: 1.5px solid currentColor; box-sizing: border-box; }
+.cb-conc-chip { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 700; color: var(--gold); border: var(--border-w) solid var(--gold); border-radius: 999px; padding: 2px 4px 2px 10px; background: var(--gold-soft); }
+.cb-slotpips { display: flex; flex-wrap: wrap; gap: 8px; font-size: var(--fs-xs); }
+.cb-slotpip { display: inline-flex; align-items: center; gap: 2px; }
+.cb-slotpip b { margin-right: 3px; }
+.cb-slotpip i { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--info); box-sizing: border-box; }
+.cb-slotpip i.on { background: var(--info); }
+
+.cb-tb-group { min-width: 0; }
+.cb-tb-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 6px; }
+.cb-tb-item { display: flex; flex-direction: column; min-width: 0; }
+.cb-tb { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; width: 100%; min-height: 44px; padding: 6px 10px;
+  border: var(--border-w) solid var(--border); border-left: 3px solid var(--accent-base); border-radius: var(--radius); background: var(--surface-2, var(--bg)); color: inherit; cursor: pointer; font: inherit; }
+.cb-tb:hover:not(:disabled) { border-color: var(--accent-base); background: var(--accent-soft, var(--gold-soft)); }
+.cb-tb:disabled { opacity: 0.5; cursor: not-allowed; border-left-color: var(--border); }
+.cb-tb-spell { border-left-color: var(--info); }
+.cb-tb-save { border-left-color: var(--warning); }
+.cb-tb-standard { border-left-color: var(--border); }
+.cb-tb-name { font-weight: 700; font-size: var(--fs-sm); }
+.cb-tb-detail { font-size: var(--fs-xs); opacity: 0.8; font-variant-numeric: tabular-nums; }
+.cb-tb-why { font-size: 11px; color: var(--danger); padding: 2px 4px 0; }
+.cb-react-strip { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px var(--sp-2);
+  border: var(--border-w) solid var(--info); border-radius: var(--radius); background: var(--info-soft); }
+.cb-react-strip .cb-overline { color: var(--info); opacity: 1; }
+
+/* coverage badges */
+.cb-cov { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; border: 1px solid currentColor; }
+.cb-cov-auto { color: var(--success); }
+.cb-cov-partial { color: var(--info); }
+.cb-cov-ruling { color: var(--warning); }
+.cb-cov-unlinked { color: var(--danger); }
+.cb-cov-suggested { color: var(--gold); background: var(--gold-soft); }
+
+/* Spells tab rows */
+.cb-spell-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.cb-spell-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px var(--sp-2); padding: 6px 8px; border: var(--border-w) solid var(--border); border-radius: var(--radius); }
+.cb-spell-name { font-weight: 700; flex: 1 1 8em; min-width: 0; }
+
+/* ---- AC chip ---- */
+.cb-ac.changed b { color: var(--info); }
+.cb-ac-why { font-size: var(--fs-xs); opacity: 0.85; }
+
+/* ---- sheets: a side sheet on a desktop, full screen on a phone ---- */
+@media (min-width: 721px) {
+  .overlay:has(> .dialog.cb-side) { justify-content: flex-end; padding: 0; align-items: stretch; }
+  .dialog.cb-side { width: min(100%, 480px); height: 100dvh; max-height: none; border-radius: 0; border-top: 0; border-bottom: 0; border-right: 0; }
+  .dialog.cb-side .dialog-body { flex: 1; overflow-y: auto; }
+}
+.cb-cast, .cb-res { display: flex; flex-direction: column; gap: var(--sp-2); }
+.cb-cast-meta { margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 600; }
+.cb-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cb-chip { font: inherit; font-size: var(--fs-sm); padding: 6px 12px; min-height: 36px; border-radius: 999px; border: var(--border-w) solid var(--border); background: transparent; color: inherit; cursor: pointer; }
+.cb-chip.on { border-color: var(--accent-base); background: var(--accent-base); color: #fff; }
+.cb-chip.on .muted { color: #fff; opacity: 0.85; }
+.cb-chip.pc { border-style: dashed; }
+.cb-chip:disabled { opacity: 0.45; cursor: not-allowed; }
+.cb-numchip { font-variant-numeric: tabular-nums; font-size: var(--fs-xs); min-height: 30px; padding: 3px 10px; }
+.cb-preview { margin: 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius); background: var(--info-soft); border: var(--border-w) solid var(--info); font-weight: 700; }
+.cb-warn { margin: 0; padding: var(--sp-2); border-radius: var(--radius); background: var(--warning-soft); border: var(--border-w) solid var(--warning); font-size: var(--fs-sm); }
+.cb-notes { margin: 0; padding-left: 1.2em; font-size: var(--fs-xs); }
+
+/* resolution rows */
+.cb-res-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cb-res-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name set" "entry entry" "mod mod"; gap: 4px var(--sp-2); padding: 8px; border: var(--border-w) solid var(--border); border-radius: var(--radius); align-items: center; }
+.cb-res-row.done { grid-template-areas: none; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; opacity: 0.9; }
+.cb-res-name { grid-area: name; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cb-res-set { grid-area: set; display: flex; gap: 4px; }
+.cb-res-entry, .cb-res-wait { grid-area: entry; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cb-res-entry input.cb-roll-box { width: 7em; flex: 0 0 7em; font-size: var(--fs-md); font-weight: 700; text-align: center; }
+.cb-res-mod { grid-area: mod; }
+.cb-res-damage { border-top: var(--border-w) solid var(--border); padding-top: var(--sp-2); }
+.cb-res-damage input.cb-roll-box { font-size: var(--fs-md); font-weight: 700; text-align: center; }
+.cb-pending { font-weight: 700; }
+
+/* summon panel and Add creature */
+.cb-summon { border: var(--border-w) solid var(--gold); border-radius: var(--radius); background: var(--gold-soft); padding: var(--sp-2) var(--sp-3); display: flex; flex-direction: column; gap: 6px; }
+.cb-summon-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.cb-summon p { margin: 0; }
+.cb-pick-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow-y: auto; }
+.cb-pick { width: 100%; text-align: left; font: inherit; padding: 8px 10px; min-height: 44px; border-radius: var(--radius); border: var(--border-w) solid var(--border); background: transparent; color: inherit; cursor: pointer; }
+.cb-pick.on { border-color: var(--accent-base); background: var(--gold-soft); }
+.cb-stepper { display: inline-flex; align-items: center; gap: 8px; }
+.cb-stepper-field { flex: 0 0 auto; }
+.cb-stepper b { min-width: 2ch; text-align: center; font-size: var(--fs-md); }
+
+/* effect rows */
+.cb-fx-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+
+/* effect builder */
+.cb-presets { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: var(--sp-2); }
+.cb-preset { width: 100%; min-height: 72px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: var(--sp-2) var(--sp-3); text-align: left; font: inherit;
+  border: var(--border-w) solid var(--border); border-top: 3px solid var(--gold); border-radius: var(--radius); background: var(--surface-2, var(--bg)); color: inherit; cursor: pointer; }
+.cb-preset:hover { border-color: var(--gold); }
+.cb-builder-group legend { font-weight: 700; color: var(--gold); }
+.cb-check-mark { font-size: 10px; font-weight: 800; text-transform: uppercase; color: var(--warning); border: 1px solid var(--warning); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+
+/* phones: full-size targets inside the sheets too (they render outside .cb-page) */
+html.phone :is(.cb-sheet, .cb-builder) :is(.btn, .cb-chip, select, input.input, .cb-pick) { min-height: var(--ph-hit, 44px); }
+html.phone .cb-page :is(.cb-tb, .cb-pip) { min-height: var(--ph-hit, 44px); }
+@media (max-width: 720px) {
+  .cb-tb-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cb-res-row { grid-template-columns: minmax(0, 1fr); grid-template-areas: "name" "entry" "set" "mod"; }
+}

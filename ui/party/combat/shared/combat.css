@@ -44,6 +44,10 @@
   background: var(--surface-2, var(--surface)); min-width: 0; }
 .combat-prompt-q { margin: 0; font-weight: 700; font-size: 1.125rem; overflow-wrap: anywhere; }
 .combat-prompt-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.combat-table-roll { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.combat-table-roll .input { width: 7em; flex: 0 0 7em; font-size: var(--fs-md); font-weight: 700; text-align: center; }
+.combat-prompt-from { margin: 0 0 var(--sp-2); font-size: var(--fs-xs); }
+html.phone .combat-table-roll > :is(.btn, .input) { min-height: var(--ph-hit, 44px); }
 .combat-me-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
 .combat-me-name { overflow-wrap: anywhere; min-width: 0; }
 .combat-me-hp { display: inline-flex; align-items: baseline; gap: 0.2em; font-variant-numeric: tabular-nums; }
