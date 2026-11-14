@@ -29,6 +29,10 @@ use crate::sheet::Coverage;
 pub struct SpellDefn {
     pub mech: SpellMech,
     pub origin: MechOrigin,
+    /// A draft from the DM's own installed data (the 5etools drafter), not reviewed: the simulation casts with it
+    /// (combat would ask for a ruling) and says so in coverage and fingerprints.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub drafted: bool,
 }
 
 /// The mechanics a run casts with.
@@ -50,6 +54,7 @@ fn curated(key: &str, edition: Edition) -> Option<SpellDefn> {
             key: m.key.clone(),
             rev: m.rev,
         },
+        drafted: false,
     })
 }
 
@@ -62,11 +67,7 @@ pub fn compile(
     ability: &Ability,
 ) -> Option<CastSpec> {
     let link = ability.spell.as_ref()?;
-    let key = link.key.clone().or_else(|| {
-        defs.names
-            .get(&party_spells::canonical::normalize(&ability.name))
-            .cloned()
-    });
+    let key = link_key(defs, ability);
     let casting = caster.casting.first();
     let modifier = match (casting, caster.stats.as_ref()) {
         (Some(c), Some(stats)) => stats.modifier(c.ability),
@@ -136,7 +137,9 @@ pub fn equip(
             CastTime::Reaction => AbilityKind::Reaction,
             CastTime::Action | CastTime::Minute => AbilityKind::Action,
         };
+        let drafted = is_drafted(defs, a);
         let print = match &spec.origin {
+            _ if drafted => format!("draft:{}", draft_hash(&spec.mech)),
             MechOrigin::Srd { rev, .. } => format!("srd:{rev}"),
             MechOrigin::Def { id, rev } => format!("def:{id}:{rev}"),
             MechOrigin::Statblock => "statblock".into(),
@@ -150,6 +153,32 @@ pub fn equip(
         }
         a.mech = Some(Box::new(spec));
     }
+}
+
+/// The spell key of a spell ability: its link, else the DM's chosen copy of its printed name.
+fn link_key(defs: &SpellDefs, a: &Ability) -> Option<String> {
+    a.spell.as_ref()?.key.clone().or_else(|| {
+        defs.names
+            .get(&party_spells::canonical::normalize(&a.name))
+            .cloned()
+    })
+}
+
+/// A short hash of a drafted definition (drafts have no revision; their content is the fingerprint).
+fn draft_hash(m: &SpellMech) -> String {
+    use sha2::{Digest, Sha256};
+    let text = serde_json::to_string(m).unwrap_or_default();
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .take(6)
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// The ability's definition is an unreviewed draft.
+#[must_use]
+pub fn is_drafted(defs: &SpellDefs, a: &Ability) -> bool {
+    link_key(defs, a).is_some_and(|k| defs.defs.get(&k).is_some_and(|d| d.drafted))
 }
 
 /// Every primitive of a definition.

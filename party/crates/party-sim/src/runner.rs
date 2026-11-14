@@ -275,7 +275,12 @@ impl Sim {
             crate::spells::equip(&setup.spells, setup.edition, &mut c, &mut fingerprints);
             let sheet = sheet::pc_sheet(pc, &c, &keys);
             for a in &sheet.actions {
-                let label = coverage_label(&pc.name, a);
+                let mut label = coverage_label(&pc.name, a);
+                if c.ability(&a.key)
+                    .is_some_and(|x| crate::spells::is_drafted(&setup.spells, x))
+                {
+                    label.push_str(" (a draft from your own content, unreviewed)");
+                }
                 match a.coverage {
                     sheet::Coverage::Automated => coverage.automated.push(label),
                     sheet::Coverage::Adjudicable => coverage.adjudicable.push(label),
@@ -322,7 +327,12 @@ impl Sim {
             crate::spells::equip(&setup.spells, setup.edition, &mut c, &mut fingerprints);
             let sheet = sheet::creature_sheet(&c, f.data.as_ref());
             for a in &sheet.actions {
-                let label = coverage_label(&cr.label, a);
+                let mut label = coverage_label(&cr.label, a);
+                if c.ability(&a.key)
+                    .is_some_and(|x| crate::spells::is_drafted(&setup.spells, x))
+                {
+                    label.push_str(" (a draft from your own content, unreviewed)");
+                }
                 match a.coverage {
                     sheet::Coverage::Automated => coverage.automated.push(label),
                     sheet::Coverage::Adjudicable => coverage.adjudicable.push(label),

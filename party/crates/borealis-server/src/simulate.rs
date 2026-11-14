@@ -609,7 +609,9 @@ async fn load(
 /// The DM's spell mechanics for the spells this setup can cast: every spell of the creatures' spellbooks (the
 /// printed block, the kept 5etools spellcasting, the DM's added spells) and of the PCs' sheets, resolved like a
 /// combat start (`spells::Library`: the account's definition or link, then the curated SRD row; unlinked stat block
-/// names go to the DM's chosen copy). When the account's content can't be read now, the curated SRD rows still
+/// names go to the DM's chosen copy). A spell with none of those uses the suggested draft from the DM's own installed
+/// data (the 5etools drafter, as the spell detail shows it), marked as an unreviewed draft: the dry run casts it where
+/// combat would ask for a ruling, and nothing is saved. When the account's content can't be read now, the curated SRD rows still
 /// apply (party-sim's own fallback) and the run says nothing different.
 async fn spell_defs(
     state: &AppState,
@@ -667,6 +669,9 @@ async fn spell_defs(
     keys.dedup();
     for key in keys {
         let Some(r) = lib.mechanics(ruleset, &key) else {
+            if let Some(d) = drafted(state, user, &key).await {
+                out.defs.insert(key, d);
+            }
             continue;
         };
         let Ok(mech) = serde_json::from_value::<party_combat::spell::SpellMech>(r.def) else {
@@ -687,9 +692,31 @@ async fn spell_defs(
                 rev,
             }
         };
-        out.defs.insert(key, SpellDefn { mech, origin });
+        out.defs.insert(
+            key,
+            SpellDefn {
+                mech,
+                origin,
+                drafted: false,
+            },
+        );
     }
     out
+}
+
+/// The suggested draft of a spell with no definition, from the DM's own installed data (`spells::detail`).
+async fn drafted(state: &AppState, user: &User, key: &str) -> Option<SpellDefn> {
+    let d = crate::spells::detail(state, &user.id, key).await.ok()?;
+    let mech: party_combat::spell::SpellMech =
+        serde_json::from_value(d.get("suggested")?.get("mech")?.clone()).ok()?;
+    Some(SpellDefn {
+        mech,
+        origin: party_combat::spell::MechOrigin::Def {
+            id: key.to_string(),
+            rev: 0,
+        },
+        drafted: true,
+    })
 }
 
 /// The party's characters: each member's sheet read like the DM's sheet view (no roster card written), or its
