@@ -488,7 +488,8 @@ jobs:
       # the desktop entry. .dnd5e stays desktop Borealis's.
       - name: Check the .borealis file type (Windows)
         if: runner.os == 'Windows'
-        shell: pwsh
+        # Windows PowerShell 5.1, as tried by hand: PowerShell 7 hands the MSI's COM calls arguments it refuses.
+        shell: powershell
         env:
           NAME: ${{ matrix.name }}
         run: |

@@ -64,11 +64,17 @@ if ($Msi) {
     $installer = New-Object -ComObject WindowsInstaller.Installer
     $db = $installer.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $installer, @((Resolve-Path $Msi).Path, 0))
     function Rows([string] $sql, [int] $columns) {
-        $view = $db.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $db, @($sql))
+        # An MSI without the table (no file types at all) refuses the query: no rows.
+        try { $view = $db.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $db, @($sql)) }
+        catch { Write-Host "MSI: no rows for $sql"; return , @() }
         $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null) | Out-Null
         $rows = @()
         while ($rec = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)) {
-            $rows += , (1..$columns | ForEach-Object { $rec.GetType().InvokeMember("StringData", "GetProperty", $null, $rec, @($_)) })
+            # A plain Int32 per column: a pipeline's $_ reaches COM wrapped and fails with DISP_E_TYPEMISMATCH.
+            $row = for ([int] $i = 1; $i -le $columns; $i++) {
+                $rec.GetType().InvokeMember("StringData", "GetProperty", $null, $rec, [object[]] @([int] $i))
+            }
+            $rows += , @($row)
         }
         $view.GetType().InvokeMember("Close", "InvokeMethod", $null, $view, $null) | Out-Null
         , $rows
