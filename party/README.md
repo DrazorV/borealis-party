@@ -42,7 +42,7 @@ to `/config/backups` and stops without migrating if that fails; copying the back
 [Deploying and updating](docs/deploy.md).
 
 Every push to `main` that touches the server or web app builds the image and publishes it as `latest`, `sha-<commit>`
-and the version in `party/Cargo.toml` (`.github/workflows/party-image.yml`; start it by hand under Actions > Party
+and the version in `party/Cargo.toml` (`.github/workflows/connect-image.yml`; start it by hand under Actions > Connect
 image). To build the image yourself, from the repository root:
 
 ```sh
@@ -441,7 +441,7 @@ A player shares characters and content packs with another player from any device
   to the front and asks. Uninstalling removes the type. `.dnd5e` stays desktop Borealis's: the party apps don't claim
   it. If Windows still opens `.borealis` with something else, the user picked that once in "Open with" (right-click >
   Open with > Choose another app > Borealis Connect > Always). `party/desktop/check-file-type.ps1` checks the installers'
-  registry entries (run by party-apps.yml; it installs and uninstalls the app, so not on a PC that uses it).
+  registry entries (run by connect-apps.yml; it installs and uninstalls the app, so not on a PC that uses it).
 - Offline, an opened file stays on the device and the app says it will import it when it is connected; the online
   app takes it when it starts. (On Android a file opened while the app was closed is taken on the next online start.)
 - Web links: the apps open Borealis's own pages as before, and any other web page (this server's pages, the app
@@ -540,7 +540,7 @@ by agreement with the Borealis team: features that need the user's own device st
 coordinated so web-relevant work moves over here safely. Fixes that belong in Borealis itself go to them as pull
 requests.
 
-On the fork, `.github/workflows/party-ci.yml` checks every push and pull request: no upstream file changed, every
+On the fork, `.github/workflows/connect-ci.yml` checks every push and pull request: no upstream file changed, every
 upstream command has a decision, the party web app, and the server on SQLite and PostgreSQL. Upstream's own CI
 (`ci.yml`) is turned off here (Actions > CI > Disable workflow): upstream runs it on the same, unchanged upstream code,
 and on the fork it rebuilt everything from scratch for about an hour. Turn it back on there if it is ever needed.
@@ -625,7 +625,7 @@ Set `BOREALIS_TEST_POSTGRES_URL` to a database the tests may wipe to run them on
 ## Download the apps
 
 Every `party-v<version>` tag builds the phone and desktop apps and attaches them to that GitHub release
-(`.github/workflows/party-apps.yml`). The names carry no version, so these links always fetch the newest release
+(`.github/workflows/connect-apps.yml`). The names carry no version, so these links always fetch the newest release
 (each one is `https://github.com/fortress-soft/borealis-connect/releases/latest/download/` followed by the asset name):
 
 | App | Asset |
@@ -661,7 +661,7 @@ git tag party-v0.1.0
 git push origin party-v0.1.0
 ```
 
-The tag must be `party-v` plus that version, or the workflow stops. Actions > Party apps > Run workflow on `main`
+The tag must be `party-v` plus that version, or the workflow stops. Actions > Connect apps > Run workflow on `main`
 builds the same files as workflow artifacts without a release, to try the build first.
 
 Repository secrets (Settings > Secrets and variables > Actions):
@@ -801,7 +801,7 @@ table rolls, then the Ogre's HP, the Mage's slots and the player's damage prompt
 
 Controls smaller than a comfortable tap target (44 px on iOS, 48 px on Android) and content cut off at the screen's
 edge are reported, not failed, in `party/ui-tests/findings.md`, with the tests marked `test.fail` for fixes that are
-planned. CI runs the suite as the "phone UI" job of `party-ci.yml` and adds `findings.md` to the run's summary.
+planned. CI runs the suite as the "phone UI" job of `connect-ci.yml` and adds `findings.md` to the run's summary.
 
 ## Measurements
 

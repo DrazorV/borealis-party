@@ -1,4 +1,4 @@
-name: Party apps
+name: Connect apps
 
 # Builds the Borealis Connect phone and desktop apps and, for a party-v<version> tag, attaches them to that GitHub
 # release, so https://github.com/fortress-soft/borealis-connect/releases/latest/download/<asset> always points at the newest
@@ -30,7 +30,7 @@ name: Party apps
 # (optional, all four or none); PARTY_UPDATER_KEY, PARTY_UPDATER_KEY_PASSWORD (optional, both or none: without them
 # the desktop apps are released without an update feed). Repository variable PARTY_IOS_EXPORT_METHOD: release-testing (default, ad hoc),
 # debugging or app-store-connect; it must match the provisioning profile.
-# This file belongs to the fork (party/check-upstream.sh accepts .github/workflows/party-*.yml).
+# This file belongs to the fork (party/check-upstream.sh accepts .github/workflows/connect-*.yml).
 on:
   push:
     tags: ["party-v*"]
@@ -43,7 +43,7 @@ on:
         options: [all, ios, android, desktop]
 
 concurrency:
-  group: party-apps-${{ github.ref }}
+  group: connect-apps-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -54,7 +54,7 @@ env:
   CARGO_INCREMENTAL: 0
   # The toolchain every job installs (dtolnay/rust-toolchain@stable, with the Android and iOS targets). Upstream's
   # rust-toolchain.toml pins its own version, which would otherwise win and has none of those targets installed;
-  # Party CI and the image (party/docker/Dockerfile) choose stable the same way.
+  # Connect CI and the image (party/docker/Dockerfile) choose stable the same way.
   RUSTUP_TOOLCHAIN: stable
   NDK_VERSION: 27.2.12479018
 

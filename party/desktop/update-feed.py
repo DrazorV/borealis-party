@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-# The updater's platform keys (<os>-<arch>) for the asset names party-apps.yml gives.
+# The updater's platform keys (<os>-<arch>) for the asset names connect-apps.yml gives.
 PLATFORMS = {
     "windows-x86_64": "borealis-party-windows-x64-setup.exe",
     "linux-x86_64": "borealis-party-linux-x86_64.AppImage",
