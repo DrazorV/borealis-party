@@ -84,13 +84,13 @@ crates/borealis-engine/src/proxy.rs branch:fix/proxy-source-aliases
 crates/borealis-engine/tests/proxy_source_aliases.rs branch:fix/proxy-source-aliases
 crates/borealis-engine/tests/corpus_proxy_sources.rs branch:fix/proxy-source-aliases
 
-# Sheet page frame: a page that grows stretched only its sides, not its top and bottom rules (not sent upstream yet).
-crates/borealis-sheet/src/html_sheet.rs branch:fix/sheet-frame-stretch
-crates/borealis-sheet/src/html_sheet_css.rs branch:fix/sheet-frame-stretch
-crates/borealis-sheet/src/html_sheet_tests.rs branch:fix/sheet-frame-stretch
-e2e/fixtures/sheet-preview/2014-a4-story.html branch:fix/sheet-frame-stretch
-e2e/fixtures/sheet-preview/2014-a4.html branch:fix/sheet-frame-stretch
-e2e/fixtures/sheet-preview/2014-letter-long.html branch:fix/sheet-frame-stretch
-e2e/fixtures/sheet-preview/2014-letter.html branch:fix/sheet-frame-stretch
-e2e/fixtures/sheet-preview/2024-a4-long.html branch:fix/sheet-frame-stretch
-e2e/fixtures/sheet-preview/2024-a4-story.html branch:fix/sheet-frame-stretch
+# Sheet page frame: a page that grows stretched only its sides, not its top and bottom rules (upstream PR 54).
+crates/borealis-sheet/src/html_sheet.rs https://github.com/TeamBorealis/borealis/pull/54
+crates/borealis-sheet/src/html_sheet_css.rs https://github.com/TeamBorealis/borealis/pull/54
+crates/borealis-sheet/src/html_sheet_tests.rs https://github.com/TeamBorealis/borealis/pull/54
+e2e/fixtures/sheet-preview/2014-a4-story.html https://github.com/TeamBorealis/borealis/pull/54
+e2e/fixtures/sheet-preview/2014-a4.html https://github.com/TeamBorealis/borealis/pull/54
+e2e/fixtures/sheet-preview/2014-letter-long.html https://github.com/TeamBorealis/borealis/pull/54
+e2e/fixtures/sheet-preview/2014-letter.html https://github.com/TeamBorealis/borealis/pull/54
+e2e/fixtures/sheet-preview/2024-a4-long.html https://github.com/TeamBorealis/borealis/pull/54
+e2e/fixtures/sheet-preview/2024-a4-story.html https://github.com/TeamBorealis/borealis/pull/54
