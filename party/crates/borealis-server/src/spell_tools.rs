@@ -166,7 +166,11 @@ async fn spell_get(state: &AppState, user: &User, key: &str) -> Result<Value, To
         })?;
     let mechanics = d.get("mechanics").cloned().unwrap_or(Value::Null);
     let coverage = if mechanics.is_null() {
-        json!({ "tier": "ruling", "from": null, "note": "No rules yet: a cast spends the slot and the DM rules." })
+        json!({
+            "tier": "ruling", "from": null,
+            "suggestedTier": d["suggested"]["mech"]["tier"],
+            "note": "No rules yet: in combat a cast spends the slot and the DM rules; the simulator casts the suggested draft (unreviewed).",
+        })
     } else {
         json!({
             "tier": tier_of(&mechanics["def"]),
@@ -290,6 +294,14 @@ async fn describe(
             Some(r) => (tier_of(&r.def), Some(r.origin), Some(r.rev)),
             None => ("ruling".to_string(), None, None),
         };
+        // No definition: what the drafter suggests from the caller's own data (the simulator casts with it).
+        let suggested = match (&resolved, link.key.as_deref()) {
+            (None, Some(k)) => crate::spells::detail(state, &user.id, k)
+                .await
+                .ok()
+                .and_then(|d| d["suggested"]["mech"]["tier"].as_str().map(str::to_string)),
+            _ => None,
+        };
         let uses = a
             .uses
             .as_ref()
@@ -304,7 +316,7 @@ async fn describe(
             "includedInAc": link.baked_in,
             "spellKey": link.key,
             "link": if link.key.is_some() { "linked" } else { "unlinked" },
-            "coverage": { "tier": tier, "from": from, "rev": rev },
+            "coverage": { "tier": tier, "from": from, "rev": rev, "suggestedTier": suggested },
         }));
     }
     let slots: Map<String, Value> = c

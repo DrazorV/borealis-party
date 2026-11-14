@@ -346,6 +346,7 @@ fn the_accounts_definition_and_its_revision_are_used_and_fingerprinted() {
                 id: "ID_PHB_SPELL_FIREBALL".into(),
                 rev: 7,
             },
+            drafted: false,
         },
     );
     let a = Sim::new(&s).unwrap();
