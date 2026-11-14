@@ -6,6 +6,7 @@ import { useToast } from "../../src/components/Toast";
 import { errorMessage } from "../../src/state/useAsync";
 import { serverFetch } from "../api/http";
 import { loadSession } from "../api/session";
+import { AssistantInstructions, ConnectGuides } from "./AiAppsGuides";
 import "./AiApps.css";
 
 // The Account page's "AI apps & API tokens" (0.3.1, plan 4.5a part A; server: tokens.rs and oauth.rs).
@@ -22,6 +23,8 @@ export interface AiOverview {
   maxDays: number;
   maxTokens: number;
   callsPerMinute: number;
+  /** What connected apps are told (the MCP instructions); absent from older servers. */
+  instructions?: string;
 }
 
 export interface ApiToken {
@@ -219,6 +222,9 @@ export function AiAppsCard() {
   const copyUrl = async (url: string) => {
     toast.push((await copy(url)) ? "Copied." : "Copying isn't allowed here: select the address and copy it.", "info");
   };
+  const copyText = async (text: string) => {
+    toast.push((await copy(text)) ? "Copied." : "Copying isn't allowed here: select the text and copy it.", "info");
+  };
   return (
     <Card title="AI apps & API tokens" className="ai-apps">
       <p className="muted">
@@ -235,11 +241,12 @@ export function AiAppsCard() {
           </div>
           <span className="party-note muted">
             {info.oauth
-              ? "In ChatGPT or claude.ai, add a custom connector with this address; you approve it here. CLI and desktop clients can use a token instead."
-              : "Use it with an API token."}
+              ? "Add it to your AI app as a custom connector (the steps are below); you approve it here."
+              : "Use it with a key for developer tools."}
           </span>
         </div>
       )}
+      {info?.mcpUrl && <ConnectGuides url={info.mcpUrl} oauth={info.oauth} />}
 
       <h3 className="ai-head">Connected apps</h3>
       {apps.length === 0 ? <p className="muted">No apps are connected.</p> : (
@@ -257,7 +264,9 @@ export function AiAppsCard() {
         </ul>
       )}
 
-      <h3 className="ai-head">API tokens</h3>
+      <details className="ai-keys">
+      <summary className="ai-head">Keys for developer tools</summary>
+      <p className="muted">For Cursor, Gemini CLI and other tools that don't sign in: a key (an API token) that acts as you within its scopes.</p>
       {tokens.length === 0 ? <p className="muted">You have no tokens.</p> : (
         <ul className="party-list">
           {tokens.map((t) => (
@@ -275,6 +284,9 @@ export function AiAppsCard() {
       <div className="party-inline">
         <Button variant="primary" disabled={!info || (info && tokens.length >= info.maxTokens)} onClick={() => setMaking(true)}>New token</Button>
       </div>
+      </details>
+
+      {info?.instructions && <AssistantInstructions text={info.instructions} onCopy={(t) => void copyText(t)} />}
 
       {making && info && (
         <NewTokenDialog info={info} onClose={() => setMaking(false)}

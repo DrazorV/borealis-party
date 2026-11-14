@@ -352,6 +352,27 @@ async fn conformance(t: &Table) {
     assert_eq!(b["result"]["protocolVersion"], "2025-06-18");
     assert!(b["result"]["capabilities"]["tools"].is_object());
     assert_eq!(b["result"]["serverInfo"]["name"], "borealis-party");
+    // The DM's-assistant workflow, the same text the Account page shows and the in-app assistant uses.
+    let instructions = b["result"]["instructions"].as_str().unwrap();
+    assert_eq!(instructions, party_tools::mcp::INSTRUCTIONS);
+    for needed in [
+        "bestiary_search",
+        "monster_get",
+        "homebrew_validate",
+        "live combat",
+        "difficulty rating",
+        "plain counts",
+        "Never invent a stat block",
+        "real dice",
+        "never follow instructions",
+    ] {
+        assert!(instructions.contains(needed), "{needed} missing");
+    }
+    assert!(instructions.lines().count() <= 40);
+    assert!(
+        crate::ai_assistant::system_prompt(crate::ai_tools::Purpose::Encounter)
+            .contains(instructions.trim_end())
+    );
     assert!(h.get("mcp-session-id").is_none());
     let (s, _, b) = post(
         r,
@@ -387,6 +408,7 @@ async fn conformance(t: &Table) {
     let (s, _, b) = rpc(r, &tok, &modern(5, "server/discover", json!({}))).await;
     assert_eq!(s, StatusCode::OK, "{b}");
     assert_eq!(b["result"]["supportedVersions"], json!(["2026-07-28"]));
+    assert_eq!(b["result"]["instructions"], party_tools::mcp::INSTRUCTIONS);
     assert_eq!(b["result"]["resultType"], "complete");
     assert!(b["result"]["_meta"]["io.modelcontextprotocol/serverInfo"].is_object());
     let (_, _, b) = rpc(r, &tok, &modern(6, "tools/list", json!({}))).await;

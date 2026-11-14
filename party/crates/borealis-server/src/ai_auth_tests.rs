@@ -352,6 +352,7 @@ async fn personal_tokens(router: &Router, db: &Db) {
     let me = sign_up(router, "token-owner").await;
     let info = ok(&me, "GET", "/api/me/ai", Value::Null).await;
     assert_eq!(info["mcpUrl"], MCP);
+    assert_eq!(info["instructions"], party_tools::mcp::INSTRUCTIONS);
     assert_eq!(info["scopes"].as_array().unwrap().len(), 7);
 
     // Defaults: every scope (there is none for live combat or publishing: D25, D47); 90 days.

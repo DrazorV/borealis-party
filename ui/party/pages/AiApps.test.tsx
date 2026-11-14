@@ -129,7 +129,7 @@ it("lists tokens and apps, shows a new token once, and asks before revoking", as
   render(<AiAppsCard />);
   await settle();
   expect(screen.getByText("Laptop")).toBeTruthy();
-  expect(screen.getByText("ChatGPT")).toBeTruthy();
+  expect(screen.getByText("ChatGPT", { selector: "strong" })).toBeTruthy();
   expect(screen.queryByText(/bpt_SECRET/)).toBeNull();
 
   fireEvent.click(screen.getByText("New token"));
@@ -157,4 +157,52 @@ it("hides itself when the server has AI apps switched off", async () => {
   const { container } = render(<AiAppsCard />);
   await settle();
   expect(container.textContent).toBe("");
+});
+
+it("guides each app in tabs, copies the address and the instructions, and keeps keys in their own section", async () => {
+  signIn();
+  const writes: string[] = [];
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: async (t: string) => { writes.push(t); } } });
+  const INSTRUCTIONS = "You are a Dungeon Master's assistant for Borealis Party.\nNever invent a stat block.";
+  answers["GET /api/me/ai"] = {
+    status: 200,
+    body: { mcpUrl: `${BASE}/api/mcp`, oauth: true, scopes: SCOPES, defaultDays: 90, maxDays: 365, maxTokens: 25, callsPerMinute: 60, instructions: INSTRUCTIONS },
+  };
+  answers["GET /api/me/ai/tokens"] = { status: 200, body: { tokens: [] } };
+  answers["GET /api/me/ai/apps"] = { status: 200, body: { apps: [] } };
+  render(<AiAppsCard />);
+  await settle();
+
+  // ChatGPT first: numbered steps and example prompts.
+  const tabs = screen.getAllByRole("tab").map((t) => t.textContent);
+  expect(tabs).toEqual(["ChatGPT", "Claude", "Developer tools"]);
+  const panel = () => screen.getByRole("tabpanel");
+  expect(panel().textContent).toContain("Add custom MCP server");
+  expect(panel().textContent).toContain("OAuth");
+  expect(panel().querySelectorAll("ol li").length).toBeGreaterThanOrEqual(4);
+  expect(panel().textContent).toContain("Build a forest ambush for my level 5 party from my bestiary.");
+  expect(screen.getByText(/Menu names change/)).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("tab", { name: "Claude" }));
+  expect(panel().textContent).toContain("Add custom connector");
+  expect(panel().textContent).toContain("Connectors");
+
+  fireEvent.click(screen.getByRole("tab", { name: "Developer tools" }));
+  expect(panel().textContent).toContain(`claude mcp add --transport http borealis-party ${BASE}/api/mcp`);
+  expect(panel().textContent).toContain("codex mcp login borealis-party");
+
+  // Keys live in a collapsible section.
+  const keys = screen.getByText("Keys for developer tools", { selector: "summary" }).closest("details")!;
+  expect(keys.textContent).toContain("New token");
+  expect(keys.open).toBe(false);
+
+  // The address and the instructions copy.
+  fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+  const box = screen.getByLabelText("Instructions for the assistant") as HTMLTextAreaElement;
+  expect(box.readOnly).toBe(true);
+  expect(box.value).toBe(INSTRUCTIONS);
+  expect(screen.getByText(/Connected apps get these automatically; for ChatGPT, also paste them into a Project's instructions/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Copy instructions" }));
+  await settle();
+  expect(writes).toEqual([`${BASE}/api/mcp`, INSTRUCTIONS]);
 });

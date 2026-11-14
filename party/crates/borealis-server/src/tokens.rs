@@ -759,6 +759,8 @@ pub async fn overview(State(state): State<AppState>, _user: User) -> Json<Value>
         "maxDays": MAX_DAYS,
         "maxTokens": MAX_TOKENS,
         "callsPerMinute": CALLS_PER_MINUTE,
+        // The instructions connected apps get with the MCP handshake, to show and copy (ChatGPT projects).
+        "instructions": party_tools::mcp::INSTRUCTIONS,
     }))
 }
 

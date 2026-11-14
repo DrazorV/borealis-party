@@ -20,3 +20,16 @@ html.phone .ai-scope input { width: 22px; height: 22px; margin-top: 0; }
 html.phone .ai-apps .party-line > .btn, html.phone .ai-apps .party-inline > .btn,
 html.phone .ai-consent-actions > .btn { min-height: var(--ph-hit); flex: 1 1 auto; justify-content: center; }
 html.phone .ai-apps .input, html.phone .ai-consent .input { font-size: 16px; }
+
+/* Connection guides and the assistant's instructions (0.3.2, AiAppsGuides.tsx). */
+.ai-guides .tab-panel { padding-top: var(--sp-2); }
+.ai-guide-steps { margin: 0 0 var(--sp-2); padding-left: 1.5em; display: flex; flex-direction: column; gap: var(--sp-1); }
+.ai-guide-steps li, .ai-guide-prompts li { overflow-wrap: anywhere; }
+.ai-guide-code { font-family: var(--font-mono, monospace); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.ai-guide-sub { margin: var(--sp-2) 0 var(--sp-1); font-weight: 600; }
+.ai-guide-prompts { margin: 0; padding-left: 1.2em; }
+.ai-guide-note { margin: var(--sp-1) 0; font-size: var(--fs-sm); }
+.ai-keys { margin-top: var(--sp-3); }
+.ai-keys > summary { cursor: pointer; }
+.ai-instructions-text { white-space: pre-wrap; overflow-x: hidden; }
+html.phone .ai-keys > summary { min-height: var(--ph-hit); display: flex; align-items: center; }
