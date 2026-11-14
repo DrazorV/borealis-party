@@ -1389,6 +1389,13 @@ pub struct ListQuery {
     /// Page start.
     #[serde(default)]
     pub offset: Option<usize>,
+    /// The sources the account's new characters start on (the Sources page's saved default, its toggles applied);
+    /// none: the account's Restrict playtest / third-party toggles ([`crate::content_rules`]).
+    #[serde(default)]
+    pub enabled_sources: Option<Vec<String>>,
+    /// Only the spells a new pick of a character of this ruleset may take (the engine's edition rule).
+    #[serde(default)]
+    pub for_ruleset: Option<String>,
 }
 
 /// The spell keys the account defined (`defined`) or linked (`linked`), by `(key, ruleset)`.
@@ -1452,12 +1459,18 @@ pub async fn list(state: &AppState, owner: &str, q: &ListQuery) -> ApiResult<Val
     if text.len() > 100 {
         return Err(invalid("That search text is too long."));
     }
+    let for_ruleset = crate::content_rules::ruleset(q.for_ruleset.as_deref())?;
     let book = book(state, owner).await?;
     let marks = badges(state, owner).await?;
+    let rules =
+        crate::content_rules::rules(state, owner, q.enabled_sources.clone(), for_ruleset, SPELL)
+            .await?;
     let mut items: Vec<Spell> = book
         .catalog
         .groups()
         .filter_map(|g| spell_of(&book.index, g))
+        // The one copy the resolver chose, when the account's characters may pick it.
+        .filter(|s| rules.offers(&s.key, &s.source))
         .filter(|s| {
             ruleset
                 .as_deref()
@@ -1479,10 +1492,18 @@ pub async fn list(state: &AppState, owner: &str, q: &ListQuery) -> ApiResult<Val
         .into_iter()
         .skip(offset)
         .take(limit)
-        .map(|s| {
+        .map(|mut s| {
             let coverage = coverage_of(&marks, &s);
+            // The other copies of sources that are on, and their books once each for the "also in" note.
+            s.also_in.retain(|c| rules.source_on(&c.source));
+            let books = crate::content_rules::distinct_sources(
+                &rules,
+                &s.source,
+                s.also_in.iter().map(|c| c.source.as_str()),
+            );
             let mut v = serde_json::to_value(&s).unwrap_or(Value::Null);
             v["coverage"] = json!(coverage);
+            v["alsoInSources"] = json!(books);
             v
         })
         .collect();
@@ -1659,6 +1680,15 @@ async fn list_route(
     Ok(Json(list(&state, &user.id, &q).await?))
 }
 
+/// `POST /api/spells/search`: [`list`] with the query as a body, for a long `enabledSources`.
+async fn search_route(
+    State(state): State<AppState>,
+    user: User,
+    Json(q): Json<ListQuery>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(list(&state, &user.id, &q).await?))
+}
+
 async fn detail_route(
     State(state): State<AppState>,
     user: User,
@@ -1828,6 +1858,7 @@ pub(crate) fn routes_if(on: bool) -> axum::Router<AppState> {
     }
     axum::Router::new()
         .route("/api/spells", get(list_route))
+        .route("/api/spells/search", post(search_route))
         .route("/api/spells/{key}", get(detail_route))
         .route(
             "/api/spells/{key}/choose",

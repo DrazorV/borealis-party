@@ -4,7 +4,7 @@ import { Alert, Card } from "../../src/components/Card";
 import { Modal } from "../../src/components/Modal";
 import { errorMessage } from "../../src/state/useAsync";
 import { COVERAGE_HELP, COVERAGE_WORD, coverageWord } from "../combat/dm/spellTypes";
-import { searchSpells, spellDetail, type SpellEntry } from "../combat/dm/spellApi";
+import { alsoInBooks, searchSpells, spellDetail, type SpellEntry } from "../combat/dm/spellApi";
 import type { Creature, Effect, OverrideSpell, Precast, PrecastFields, SpellFrequency } from "../api/overrides/encounters";
 import "../combat/dm/spells.css";
 
@@ -33,7 +33,8 @@ export function SpellPicker({ ruleset, taken, onPick, onClose }: {
   useEffect(() => {
     let live = true;
     const t = setTimeout(() => {
-      searchSpells({ text: text.trim() || undefined, limit: 60 })
+      // What a new pick of a character of the creature's edition may take, from the account's enabled sources.
+      searchSpells({ text: text.trim() || undefined, forRuleset: ruleset, limit: 60 })
         .then((list) => {
           if (!live) return;
           // The creature's edition first; within it by level and name.
@@ -58,7 +59,7 @@ export function SpellPicker({ ruleset, taken, onPick, onClose }: {
                 <button type="button" className="cb-pick" disabled={has} onClick={() => onPick(s)}>
                   <b>{s.name}</b> <span className="muted cb-small">{s.level === 0 ? "Cantrip" : `L${s.level ?? "?"}`} · {editionOf(s.ruleset)}{s.concentration ? " · concentration" : ""} · {s.source}</span>{" "}
                   <span className={`cb-cov cb-cov-${cov}`} title={COVERAGE_HELP[cov]}>{COVERAGE_WORD[cov]}</span>
-                  {s.alsoIn.length ? <span className="muted cb-small"> · also in {s.alsoIn.map((c) => c.source).join(", ")}</span> : null}
+                  {alsoInBooks(s).length ? <span className="muted cb-small"> · also in {alsoInBooks(s).join(", ")}</span> : null}
                   {has ? <span className="muted cb-small"> · added</span> : null}
                 </button>
               </li>

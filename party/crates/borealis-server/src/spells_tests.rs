@@ -884,3 +884,192 @@ async fn the_other_copies_of_a_spell_are_hidden_from_new_picks() {
     let (status, out) = dm.rpc("get_snapshot", json!({ "characterId": id })).await;
     assert_eq!(status, StatusCode::OK, "{out}");
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// The DM tools follow the account's content rules (0.3.5): sources, toggles, one copy, edition
+// ---------------------------------------------------------------------------------------------------------------
+
+/// A made-up homebrew spell with its own id and source name.
+async fn spell_in(client: &Client, id: &str, name: &str, source: &str, level: &str) -> String {
+    let pack = spell_pack(client).await;
+    let saved = ok(
+        client,
+        "POST",
+        &format!("/api/homebrew/packs/{pack}/elements"),
+        json!({ "form": { "type": "Spell", "name": name, "id": id, "source": source, "supports": "Wizard",
+            "description": "A made-up spell for tests.",
+            "setters": [set("level", level), set("school", "Evocation"), set("time", "1 action"),
+                        set("range", "60 feet"), set("duration", "Instantaneous"),
+                        set("hasVerbalComponent", "true")] } }),
+    )
+    .await;
+    saved["id"].as_str().unwrap().to_string()
+}
+
+/// Every installed source name but `off`.
+async fn sources_but(client: &Client, off: &[&str]) -> Vec<String> {
+    let (status, out) = client.rpc("list_sources", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let all: Vec<String> = out
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["id"].as_str().unwrap().to_string())
+        .collect();
+    for name in off {
+        assert!(
+            all.iter().any(|s| s == name),
+            "{name} is installed: {all:?}"
+        );
+    }
+    all.into_iter()
+        .filter(|s| !off.contains(&s.as_str()))
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_dm_tools_offer_only_what_the_accounts_characters_may_pick() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = router_on(
+        dir.path().to_path_buf(),
+        Db::open(&Location::Memory).await.unwrap(),
+    );
+    let dm = sign_up(&router, "rules-dm").await;
+    let zephyr = spell_in(
+        &dm,
+        "ID_TEST_SPELL_ZEPHYR_SPARK",
+        "Zephyr Spark",
+        "Off Book",
+        "1",
+    )
+    .await;
+    // Two copies of Fireball (2014) in one made-up book: the SRD copy is the spell, the book is named once.
+    let a = spell_in(
+        &dm,
+        "ID_TEST_SPELL_FIREBALL_A",
+        "Fireball",
+        "Made Up Grimoire",
+        "3",
+    )
+    .await;
+    let b = spell_in(
+        &dm,
+        "ID_TEST_SPELL_FIREBALL_B",
+        "Fireball",
+        "Made Up Grimoire",
+        "3",
+    )
+    .await;
+
+    // Every source on: both listed, the made-up book once under "also in".
+    let all = ok(
+        &dm,
+        "POST",
+        "/api/spells/search",
+        json!({ "text": "zephyr" }),
+    )
+    .await;
+    assert!(find(&all, &zephyr).is_some(), "{all}");
+    let page = ok(
+        &dm,
+        "POST",
+        "/api/spells/search",
+        json!({ "text": "fireball", "forRuleset": "dnd2014" }),
+    )
+    .await;
+    let fireball = find(&page, FIREBALL_2014).unwrap_or_else(|| panic!("{page}"));
+    let copies: Vec<&str> = fireball["alsoIn"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["key"].as_str().unwrap())
+        .collect();
+    assert!(
+        copies.contains(&a.as_str()) && copies.contains(&b.as_str()),
+        "{fireball}"
+    );
+    assert_eq!(
+        fireball["alsoInSources"],
+        json!(["Made Up Grimoire"]),
+        "{fireball}"
+    );
+    // The edition rule of a new 2014 pick: no 2024 spells (a 2024 creature may take 2014 ones).
+    assert!(find(&page, FIREBALL_2024).is_none(), "{page}");
+    assert!(find(&page, DELAYED_2024).is_none(), "{page}");
+    let new = ok(
+        &dm,
+        "POST",
+        "/api/spells/search",
+        json!({ "text": "fireball", "forRuleset": "dnd2024" }),
+    )
+    .await;
+    assert!(find(&new, FIREBALL_2024).is_some(), "{new}");
+
+    // The Sources page's sources: a book that is off is never offered, nor named under "also in".
+    let on = sources_but(&dm, &["Off Book", "Made Up Grimoire"]).await;
+    let none = ok(
+        &dm,
+        "POST",
+        "/api/spells/search",
+        json!({ "text": "zephyr", "enabledSources": on }),
+    )
+    .await;
+    assert_eq!(none["total"], 0, "{none}");
+    let page = ok(
+        &dm,
+        "POST",
+        "/api/spells/search",
+        json!({ "text": "fireball", "forRuleset": "dnd2014", "enabledSources": on }),
+    )
+    .await;
+    let fireball = find(&page, FIREBALL_2014).unwrap_or_else(|| panic!("{page}"));
+    assert_eq!(fireball["alsoIn"], json!([]), "{fireball}");
+    assert_eq!(fireball["alsoInSources"], json!([]), "{fireball}");
+    // The one copy the resolver chose is off: the spell is not offered (its other copies stay hidden), as in the
+    // character builder.
+    let on = sources_but(&dm, &["SRD 5.1"]).await;
+    let page = ok(
+        &dm,
+        "POST",
+        "/api/spells/search",
+        json!({ "text": "fireball", "forRuleset": "dnd2014", "enabledSources": on }),
+    )
+    .await;
+    assert!(find(&page, FIREBALL_2014).is_none(), "{page}");
+    assert!(
+        find(&page, &a).is_none() && find(&page, &b).is_none(),
+        "{page}"
+    );
+
+    // The bestiary and the creature pickers: a creature of a book that is off is never listed.
+    let goblins = ok(
+        &dm,
+        "POST",
+        "/api/bestiary/search",
+        json!({ "text": "goblin warrior" }),
+    )
+    .await;
+    let goblin = goblins["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == GOBLIN)
+        .unwrap_or_else(|| panic!("{goblins}"));
+    let book = goblin["source"].as_str().unwrap().to_string();
+    let on = sources_but(&dm, &[&book]).await;
+    let off = ok(
+        &dm,
+        "POST",
+        "/api/bestiary/search",
+        json!({ "text": "goblin warrior", "enabledSources": on }),
+    )
+    .await;
+    assert!(
+        off["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|m| m["id"] != GOBLIN),
+        "{off}"
+    );
+}

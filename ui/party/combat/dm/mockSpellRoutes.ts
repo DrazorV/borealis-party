@@ -3,6 +3,7 @@
  * copy per spell per edition, a spell's details with a tag draft, the account's effect definitions
  * (`/api/spell-mechanics`) and a small SRD bestiary for Add creature. Precasts are the encounter's (not mocked here).
  */
+import type { AppSettings, ContentSource } from "../../../src/api/contract";
 import type { MonsterSummary } from "../../api/bestiary";
 import type { MechRow, SpellDetail, SpellEntry } from "./spellApi";
 import type { SpellMech } from "./types";
@@ -23,7 +24,7 @@ export const MOCK_SPELLS: MockSpell[] = [
   S("cure_wounds", "Cure Wounds", 1, false, "auto"),
   S("hold_person", "Hold Person", 2, true, "auto"),
   S("misty_step", "Misty Step", 2, false, "ruling"),
-  S("fireball", "Fireball", 3, false, "auto", "dnd2024", "Each creature in a 20-foot-radius sphere makes a Dexterity saving throw, taking 8d6 fire damage on a failed save or half as much on a successful one.", ["a 5etools copy"]),
+  S("fireball", "Fireball", 3, false, "auto", "dnd2024", "Each creature in a 20-foot-radius sphere makes a Dexterity saving throw, taking 8d6 fire damage on a failed save or half as much on a successful one.", ["a 5etools copy", "a 5etools copy"]),
   S("fireball", "Fireball", 3, false, "auto", "dnd2014", "A 20-foot-radius sphere: Dexterity saving throw, 8d6 fire damage on a failed save, half on a success."),
   S("counterspell", "Counterspell", 3, false, "ruling"),
   S("haste", "Haste", 3, true, "partial"),
@@ -58,7 +59,12 @@ const crNumber = (s: string | undefined): number | null => {
   return Number(s);
 };
 
-export interface MockSpellStore { rows: MechRow[] }
+export interface MockSpellStore {
+  rows: MechRow[];
+  /** The account's books and Sources page toggles (`list_sources`, `get_settings`); unset: those calls fail. */
+  sources?: Pick<ContentSource, "id" | "name" | "playtest" | "thirdParty">[];
+  settings?: Partial<AppSettings>;
+}
 
 export const newSpellStore = (): MockSpellStore => ({ rows: [] });
 
@@ -71,11 +77,17 @@ export function spellRoute(store: MockSpellStore, method: string, path: string, 
   const parts = bare!.split("/").map(decodeURIComponent);
   const q = new URLSearchParams(query);
   const b = (body ?? {}) as Record<string, unknown>;
+  if (parts[2] === "rpc" && store.sources) {
+    if (parts[3] === "list_sources") return store.sources;
+    if (parts[3] === "get_settings") return store.settings ?? {};
+  }
   if (parts[2] === "bestiary" && parts[3] === "search" && method === "POST") {
     const text = String(b.text ?? "").toLowerCase();
     const max = crNumber(b.crMax as string | undefined);
     const types = (b.types as string[] | undefined) ?? [];
-    const items = MOCK_BEASTS.filter((m) => (!text || m.name.toLowerCase().includes(text)) && (max == null || (m.crValue ?? 0) <= max) && (!types.length || types.includes(m.type ?? "")));
+    const on = Array.isArray(b.enabledSources) ? new Set(b.enabledSources as string[]) : null;
+    const items = MOCK_BEASTS.filter((m) => (!text || m.name.toLowerCase().includes(text)) && (max == null || (m.crValue ?? 0) <= max) && (!types.length || types.includes(m.type ?? ""))
+      && (!on || on.has(m.source)));
     return { total: items.length, offset: 0, limit: 50, items };
   }
   if (parts[2] === "spell-mechanics") {
@@ -101,6 +113,20 @@ export function spellRoute(store: MockSpellStore, method: string, path: string, 
     }
   }
   if (parts[2] !== "spells") return undefined;
+  if (parts[3] === "search" && method === "POST") {
+    // As the server's content rules: the enabled sources only, a new pick's edition, each other book named once.
+    const text = String(b.text ?? "").toLowerCase();
+    const on = Array.isArray(b.enabledSources) ? new Set(b.enabledSources as string[]) : null;
+    const pick = b.forRuleset as string | undefined;
+    const items = MOCK_SPELLS.filter((s) => (!text || s.name.toLowerCase().includes(text)) && (!on || on.has(s.source))
+      && (pick !== "dnd2014" || s.ruleset !== "dnd2024"))
+      .map((s) => {
+        const alsoIn = s.alsoIn.filter((c) => !on || on.has(c.source));
+        const e = { ...entry(s), alsoIn, alsoInSources: [...new Set(alsoIn.map((c) => c.source))].filter((n) => n !== s.source) };
+        return store.rows.some((r) => r.spellKey === s.key && r.kind === "def") ? { ...e, coverage: "defined" } : e;
+      });
+    return { total: items.length, offset: 0, items: items.slice(0, Number(b.limit ?? 50)) };
+  }
   if (!parts[3] && method === "GET") {
     const text = (q.get("text") ?? "").toLowerCase();
     const ruleset = q.get("ruleset");

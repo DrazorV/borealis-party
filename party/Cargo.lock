@@ -877,6 +877,7 @@ dependencies = [
  "borealis-bundle",
  "borealis-character",
  "borealis-content",
+ "borealis-engine",
  "borealis-import-5etools",
  "borealis-migrate",
  "clap",

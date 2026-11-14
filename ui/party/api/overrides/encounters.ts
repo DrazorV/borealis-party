@@ -1,4 +1,5 @@
 import { cryptoDie, parseNotation, rollExpr, type DieRoller } from "../../../src/lib/dice";
+import { withEnabledSources } from "../contentRules";
 import { serverFetch } from "../http";
 import { loadSession, type ServerSession } from "../session";
 import { watchParties, type Ruleset } from "./parties";
@@ -457,7 +458,9 @@ export const updateRule = (id: string, rid: string, fields: RuleFields) =>
   call<Encounter>("PATCH", `/api/encounters/${seg(id)}/rules/${seg(rid)}`, fields).then(encounter);
 export const removeRule = (id: string, rid: string) => call<Encounter>("DELETE", `/api/encounters/${seg(id)}/rules/${seg(rid)}`).then(encounter);
 
-export const searchMonsters = (query: MonsterQuery) => call<MonsterPage>("POST", "/api/bestiary/search", query);
+/** The creature picker: creatures of the account's enabled sources only (../contentRules.ts). */
+export const searchMonsters = async (query: MonsterQuery) =>
+  call<MonsterPage>("POST", "/api/bestiary/search", await withEnabledSources((m, p, b) => call(m, p, b), query));
 export const monsterFacets = () => call<Facets>("GET", "/api/bestiary/facets");
 
 /** A party's encounters changed (`kind: "encounters"` on its party events), or events may have been missed. */

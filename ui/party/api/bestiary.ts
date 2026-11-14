@@ -1,3 +1,4 @@
+import { withEnabledSources } from "./contentRules";
 import { serverFetch } from "./http";
 import { loadSession } from "./session";
 
@@ -61,4 +62,6 @@ function call<T>(method: string, path: string, body?: unknown): Promise<T> {
 export const bestiaryCoverage = () => call<Coverage>("GET", "/api/bestiary/coverage");
 
 /** A page of the account's creatures matching `query`. */
-export const searchMonsters = (query: MonsterQuery) => call<MonsterPage>("POST", "/api/bestiary/search", query);
+/** Creatures of the account's content, of its enabled sources only (contentRules.ts). */
+export const searchMonsters = async (query: MonsterQuery) =>
+  call<MonsterPage>("POST", "/api/bestiary/search", await withEnabledSources((m, p, b) => call(m, p, b), query));

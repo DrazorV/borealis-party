@@ -124,6 +124,7 @@ pub async fn call_tool(
                 level: a.level,
                 limit: Some(a.limit.unwrap_or(25).clamp(1, 100)),
                 offset: a.offset,
+                ..Default::default()
             };
             crate::spells::list(state, &user.id, &q)
                 .await

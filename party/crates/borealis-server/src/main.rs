@@ -25,6 +25,7 @@ mod bestiary;
 mod combat;
 mod config;
 mod content_events;
+mod content_rules;
 mod content_update;
 mod db;
 mod encounters;
