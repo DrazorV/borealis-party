@@ -1383,8 +1383,14 @@ fn cr_facet(crs: impl Iterator<Item = Cr>) -> Vec<Count> {
     out.into_iter().map(|(_, c)| c).collect()
 }
 
-fn facets_of(index: &Index) -> Value {
-    let items = &index.items;
+/// The filter chips' counts, of the creatures the account's content rules list (as [`search`]).
+fn facets_of(index: &Index, rules: &crate::content_rules::PickRules) -> Value {
+    let items: Vec<&Summary> = index
+        .items
+        .iter()
+        .filter(|s| rules.source_on(&s.source))
+        .collect();
+    let items = &items;
     let names: HashMap<&str, &str> = index
         .packs
         .iter()
@@ -1714,9 +1720,29 @@ async fn search_route(
     Ok(Json(search(&state, &user.id, &query).await?))
 }
 
+/// What the facets may count: the sources the client's new characters start on, as [`SearchQuery`].
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FacetsQuery {
+    pub enabled_sources: Option<Vec<String>>,
+}
+
+async fn facets(state: &AppState, owner: &str, enabled: Option<Vec<String>>) -> ApiResult<Value> {
+    let index = index(state, owner).await?;
+    let rules = crate::content_rules::rules(state, owner, enabled, None, "Monster").await?;
+    Ok(facets_of(&index, &rules))
+}
+
 async fn facets_route(State(state): State<AppState>, user: User) -> ApiResult<Json<Value>> {
-    let index = index(&state, &user.id).await?;
-    Ok(Json(facets_of(&index)))
+    Ok(Json(facets(&state, &user.id, None).await?))
+}
+
+async fn facets_post_route(
+    State(state): State<AppState>,
+    user: User,
+    Json(query): Json<FacetsQuery>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(facets(&state, &user.id, query.enabled_sources).await?))
 }
 
 async fn monster_route(
@@ -1735,6 +1761,9 @@ pub fn routes() -> axum::Router<AppState> {
     axum::Router::new()
         .route("/api/bestiary/coverage", get(coverage_route))
         .route("/api/bestiary/search", post(search_route))
-        .route("/api/bestiary/facets", get(facets_route))
+        .route(
+            "/api/bestiary/facets",
+            get(facets_route).post(facets_post_route),
+        )
         .route("/api/bestiary/monsters/{id}", get(monster_route))
 }

@@ -136,6 +136,7 @@ fn ward(id: &str, source: &str) -> serde_json::Value {
 /// - `Keeper` prepares from its list and has two selects naming that copy by id.
 /// - `Singer` knows spells: a `$(spellcasting:list),1` select.
 /// - `Warden` prepares, and its extension makes that copy always prepared (`prepared="true"`).
+/// - `Chanter` knows spells, with the same always-prepared extension.
 fn caster(
     name: &str,
     prepare: bool,
@@ -193,6 +194,7 @@ fn stand_in_store() -> ContentStore {
         ],
     ));
     elements.extend(caster("Warden", true, true, Vec::new()));
+    elements.extend(caster("Chanter", false, true, Vec::new()));
     elements.push(ward(WARD_A, "Book A"));
     elements.push(ward(WARD_B, "Book B"));
     let file: ContentFile =
@@ -322,6 +324,54 @@ fn a_prepared_extension_naming_a_hidden_copy_lists_the_spell_once() {
         spells_of(&e.derive(&with_class(&e, "ID_T_WARDEN")), "Warden"),
         [(WARD_A.to_string(), true)]
     );
+}
+
+/// A known caster's always-prepared extension naming the hidden copy: the visible copy, once.
+#[test]
+fn a_known_casters_prepared_extension_naming_a_hidden_copy_lists_the_spell_once() {
+    let store = stand_in_store();
+    let plain = Engine::new(&store);
+    assert_eq!(
+        spells_of(
+            &plain.derive(&with_class(&plain, "ID_T_CHANTER")),
+            "Chanter"
+        ),
+        [(WARD_B.to_string(), true)]
+    );
+    let e = b_hidden(&store);
+    assert_eq!(
+        spells_of(&e.derive(&with_class(&e, "ID_T_CHANTER")), "Chanter"),
+        [(WARD_A.to_string(), true)]
+    );
+}
+
+/// Both copies in the stored prepared list (a state written through the API; the commands never add the second):
+/// one spell, prepared once, as whichever copy is visible.
+#[test]
+fn both_copies_prepared_count_as_one() {
+    let store = stand_in_store();
+    let e = b_hidden(&store);
+    let s = with_class(&e, "ID_T_KEEPER");
+    let mut s = commands::set_prepared(&e, &s, "Keeper", WARD_A, true)
+        .expect("prepare the visible copy")
+        .state;
+    let list = s
+        .prepared
+        .iter_mut()
+        .find(|p| p.class == "Keeper")
+        .expect("Keeper's prepared list");
+    list.spells.push(WARD_B.to_string());
+    for (engine, visible) in [(e, WARD_A), (a_hidden(&store), WARD_B)] {
+        let snap = engine.derive(&s);
+        let keeper = snap.caster("Keeper").expect("Keeper caster");
+        let listed: Vec<(&str, bool)> = keeper
+            .spells
+            .iter()
+            .map(|x| (x.id.as_str(), x.prepared))
+            .collect();
+        assert_eq!(listed, [(visible, true)]);
+        assert_eq!(keeper.prepared_count, 1);
+    }
 }
 
 /// A pick made through a stand-in still replays after the app swaps which copy is visible.

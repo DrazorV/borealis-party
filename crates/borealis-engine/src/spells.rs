@@ -444,17 +444,19 @@ pub fn spellcasting_snapshots(
                         });
                     }
                 }
-                // one copy per spell: an unprepared copy gives way to a prepared one
-                let is_prepared_copy = |e: &SpellEntry| {
+                // one copy per spell: an unprepared copy gives way to a prepared one, and of two
+                // prepared copies (both set through the API) the hidden one gives way to the visible
+                let is_hidden = |id: &str| uni.get(id).is_some_and(|u| u.hidden);
+                let gives_way = |e: &SpellEntry| {
                     uni.get(&e.id).is_some_and(|u| {
-                        out.iter()
-                            .any(|f: &SpellEntry| f.prepared && u.copy_ids.contains(&f.id))
+                        out.iter().any(|f: &SpellEntry| {
+                            f.prepared
+                                && u.copy_ids.contains(&f.id)
+                                && (!e.prepared || u.hidden && !is_hidden(&f.id))
+                        })
                     })
                 };
-                let drop: Vec<bool> = out
-                    .iter()
-                    .map(|e| !e.prepared && is_prepared_copy(e))
-                    .collect();
+                let drop: Vec<bool> = out.iter().map(gives_way).collect();
                 out.into_iter()
                     .zip(drop)
                     .filter_map(|(e, d)| (!d).then_some(e))
