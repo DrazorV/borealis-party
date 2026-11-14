@@ -31,6 +31,7 @@ use tauri::Manager;
 
 use party_combat::spell::{cantrip_tier, CastSpec, MechOrigin, SpellLink, SpellMech};
 use party_combat::{Combatant, Edition};
+use party_spells::canonical::{Candidate, Catalog, Group, Link, Preferences, Reason};
 
 use crate::auth::User;
 use crate::db::now;
@@ -89,23 +90,7 @@ fn no_spell() -> ApiError {
 /// Fireball` stay different.
 #[must_use]
 pub fn normalize(name: &str) -> String {
-    let mut out = String::with_capacity(name.len());
-    let mut gap = false;
-    for c in name.chars() {
-        if matches!(c, '\'' | '\u{2019}' | '\u{2018}') {
-            continue;
-        }
-        if c.is_alphanumeric() {
-            if gap && !out.is_empty() {
-                out.push(' ');
-            }
-            gap = false;
-            out.extend(c.to_lowercase());
-        } else {
-            gap = true;
-        }
-    }
-    out
+    party_spells::canonical::normalize(name)
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -126,7 +111,7 @@ pub struct Copy {
     pub pack_kind: &'static str,
 }
 
-/// One spell (all its copies of one ruleset).
+/// One spell: all its copies of one name, ruleset and level (`party-spells` canonical groups).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Spell {
@@ -144,19 +129,22 @@ pub struct Spell {
     pub concentration: bool,
     /// From `isRitual`.
     pub ritual: bool,
-    /// The chosen copy's source and pack.
+    /// The chosen copy's source.
     pub source: String,
-    /// The pack.
+    /// The chosen copy's pack.
     pub pack_id: String,
-    /// `rule` (the stable rule chose it) or `dm` (the DM's override).
-    pub chosen_by: &'static str,
-    /// The other copies, hidden from pickers.
+    /// Why this copy: `only`, `dmPick`, `newest`, `srd`, `preferred` or `stable`.
+    pub chosen_by: Reason,
+    /// The other copies, hidden from new picks (never deleted).
     pub also_in: Vec<Copy>,
     #[serde(skip)]
     norm: String,
+    /// Every copy's id, the chosen one first.
+    #[serde(skip)]
+    members: Vec<String>,
 }
 
-/// An installed copy with what the grouping needs.
+/// An installed copy with what the list shows.
 #[derive(Debug, Clone)]
 struct Entry {
     copy: Copy,
@@ -167,25 +155,43 @@ struct Entry {
     school: Option<String>,
     concentration: bool,
     ritual: bool,
-    /// The SRD's own copy (a bundled SRD pack).
-    srd: bool,
 }
 
-/// An account's spells, for one content load.
+/// An account's installed spells, for one content load.
 pub struct Index {
     hub: Weak<ContentHub>,
     /// Every copy, by element id.
     entries: HashMap<String, Entry>,
-    /// The copies of each spell, by `(normalized name, ruleset)`, in [`choose`]'s order.
-    groups: BTreeMap<(String, String), Vec<String>>,
+    /// The resolver's input.
+    candidates: Vec<Candidate>,
 }
 
-impl Index {
-    /// The group a copy is in.
-    fn group_of(&self, key: &str) -> Option<&(String, String)> {
-        let e = self.entries.get(key)?;
-        let g = (e.norm.clone(), e.ruleset.clone());
-        self.groups.get_key_value(&g).map(|(k, _)| k)
+/// The index with the account's choices applied: one spell per name, ruleset and level.
+pub struct Book {
+    index: Arc<Index>,
+    catalog: Catalog,
+}
+
+impl Book {
+    /// The one spell `key` (any copy's id) is.
+    #[must_use]
+    pub fn spell(&self, key: &str) -> Option<Spell> {
+        spell_of(&self.index, self.catalog.group(key)?)
+    }
+
+    /// `key` first, then the other copies of its spell.
+    #[must_use]
+    pub fn copies(&self, key: &str) -> Vec<String> {
+        let mut out = vec![key.to_string()];
+        if let Some(g) = self.catalog.group(key) {
+            out.extend(
+                g.members
+                    .iter()
+                    .map(|(id, _)| id.clone())
+                    .filter(|id| id != key),
+            );
+        }
+        out
     }
 }
 
@@ -225,29 +231,9 @@ fn pack_of_file(file: &str) -> &str {
     file.split(['/', '\\']).next().unwrap_or(file)
 }
 
-/// The stable "which copy" rule, best first (until the content layer knows publication dates for every source):
-/// the SRD's own copy, then bundled content, then a 5etools import, an index and custom content; then by source name
-/// and id so the choice never flips between loads.
-fn choose(a: &Entry, b: &Entry) -> std::cmp::Ordering {
-    let rank = |e: &Entry| {
-        let kind = match e.copy.pack_kind {
-            "bundled" => 0,
-            "5etools" => 1,
-            "index" => 2,
-            _ => 3,
-        };
-        (u8::from(!e.srd), kind)
-    };
-    rank(a)
-        .cmp(&rank(b))
-        .then_with(|| a.copy.source.cmp(&b.copy.source))
-        .then_with(|| a.copy.key.cmp(&b.copy.key))
-}
-
 struct PackInfo {
     kind: &'static str,
     ruleset: Option<String>,
-    srd: bool,
 }
 
 fn build(backend: &Backend) -> ApiResult<Index> {
@@ -264,12 +250,12 @@ fn build(backend: &Backend) -> ApiResult<Index> {
                         [one] => Some(text_value(one)),
                         _ => None,
                     },
-                    srd: matches!(p.kind, PackKind::Bundled) && p.id.to_lowercase().contains("srd"),
                 },
             )
         })
         .collect();
     let mut entries = HashMap::new();
+    let mut candidates = Vec::new();
     for stored in hub.store.iter() {
         let el = &stored.element;
         if el.ty != SPELL {
@@ -282,49 +268,48 @@ fn build(backend: &Backend) -> ApiResult<Index> {
             .map(|r| text_value(&r))
             .or_else(|| pack.and_then(|p| p.ruleset.clone()))
             .unwrap_or_else(|| "any".to_string());
-        let entry = Entry {
-            copy: Copy {
-                key: el.id.clone(),
-                source: el.source.clone(),
-                pack_id,
-                pack_kind: pack.map_or("custom", |p| p.kind),
-            },
+        let level = setter(el, "level").and_then(|l| l.parse().ok());
+        candidates.push(Candidate {
+            id: el.id.clone(),
             name: el.name.clone(),
-            norm: normalize(&el.name),
-            ruleset,
-            level: setter(el, "level").and_then(|l| l.parse().ok()),
-            school: setter(el, "school").map(str::to_string),
-            concentration: truthy(el, "isConcentration"),
-            ritual: truthy(el, "isRitual"),
-            srd: pack.is_some_and(|p| p.srd),
-        };
-        entries.insert(el.id.clone(), entry);
-    }
-    let mut groups: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
-    for e in entries.values() {
-        if e.norm.is_empty() {
-            continue;
-        }
-        groups
-            .entry((e.norm.clone(), e.ruleset.clone()))
-            .or_default()
-            .push(e.copy.key.clone());
-    }
-    for keys in groups.values_mut() {
-        keys.sort_by(|a, b| choose(&entries[a], &entries[b]));
+            ruleset: ruleset.clone(),
+            source: el.source.clone(),
+            level,
+            date: party_spells::canonical::srd_date(&el.source).map(str::to_string),
+        });
+        entries.insert(
+            el.id.clone(),
+            Entry {
+                copy: Copy {
+                    key: el.id.clone(),
+                    source: el.source.clone(),
+                    pack_id,
+                    pack_kind: pack.map_or("custom", |p| p.kind),
+                },
+                name: el.name.clone(),
+                norm: normalize(&el.name),
+                ruleset,
+                level,
+                school: setter(el, "school").map(str::to_string),
+                concentration: truthy(el, "isConcentration"),
+                ritual: truthy(el, "isRitual"),
+            },
+        );
     }
     Ok(Index {
         hub: Arc::downgrade(&hub),
         entries,
-        groups,
+        candidates,
     })
 }
 
-/// The account's spell index: the cached one while the content is the same, else a fresh one.
+/// The account's spell index: the cached one while the content is the same, else a fresh one. Spell details a
+/// 5etools import captured are stored first ([`ingest`]).
 ///
 /// # Errors
-/// When the workspace fails.
+/// When the workspace or the database fails.
 pub async fn index(state: &AppState, owner: &str) -> ApiResult<Arc<Index>> {
+    ingest(state, owner).await?;
     let workspace = state.workspaces.get(owner).await?;
     let cached = cache()
         .lock()
@@ -354,8 +339,9 @@ pub async fn index(state: &AppState, owner: &str) -> ApiResult<Arc<Index>> {
     Ok(index)
 }
 
-/// The DM's "this copy" choices: `(normalized name, ruleset)` to element id.
-async fn overrides(state: &AppState, owner: &str) -> ApiResult<HashMap<(String, String), String>> {
+/// The DM's choices as the resolver takes them, from the account's `alias` rows: an alias of the spell's own name is
+/// the DM's pick of that copy; any other name is a link of that name to the spell.
+async fn preferences(state: &AppState, owner: &str, index: &Index) -> ApiResult<Preferences> {
     let rows = sqlx::query(
         "SELECT alias_name, ruleset, spell_key FROM spell_mechanics WHERE account_id = $1 AND kind = $2",
     )
@@ -363,90 +349,72 @@ async fn overrides(state: &AppState, owner: &str) -> ApiResult<HashMap<(String, 
     .bind(KIND_ALIAS)
     .fetch_all(state.db.pool())
     .await?;
-    let mut out = HashMap::new();
+    let mut prefs = Preferences::default();
     for row in rows {
-        out.insert((row.try_get(0)?, row.try_get(1)?), row.try_get(2)?);
-    }
-    Ok(out)
-}
-
-/// The copies that are one spell of `norm` as edition `ruleset` sees it: that edition's copies, then the copies that
-/// name no edition (`any`: Aurora XML and homebrew without a ruleset). Seen as `any`, only the `any` copies.
-fn candidates(index: &Index, norm: &str, ruleset: &str) -> Vec<String> {
-    let mut keys = index
-        .groups
-        .get(&(norm.to_string(), ruleset.to_string()))
-        .cloned()
-        .unwrap_or_default();
-    if ruleset != "any" {
-        if let Some(any) = index.groups.get(&(norm.to_string(), "any".to_string())) {
-            keys.extend(any.iter().cloned());
+        let alias: String = row.try_get(0)?;
+        let ruleset: String = row.try_get(1)?;
+        let key: String = row.try_get(2)?;
+        match index.entries.get(&key) {
+            Some(e) if e.norm == alias && e.ruleset == ruleset => {
+                prefs.picks.insert(key.clone(), key);
+            }
+            Some(_) => {
+                prefs.links.insert(format!("{ruleset}:{alias}"), key);
+            }
+            // A choice of a copy that is gone: the rule chooses again.
+            None => {}
         }
     }
-    keys
+    Ok(prefs)
 }
 
-/// The one spell of `norm` in edition `ruleset`: the DM's chosen copy when it is installed, else the rule's.
-fn spell_of(
-    index: &Index,
-    norm: &str,
-    ruleset: &str,
-    chosen: &HashMap<(String, String), String>,
-) -> Option<Spell> {
-    let keys = candidates(index, norm, ruleset);
-    let (pick, by) = match chosen
-        .get(&(norm.to_string(), ruleset.to_string()))
-        .filter(|k| keys.contains(k))
-    {
-        Some(k) => (k.clone(), "dm"),
-        None => (keys.first()?.clone(), "rule"),
-    };
-    let e = index.entries.get(&pick)?;
+/// The account's spells with its choices applied.
+///
+/// # Errors
+/// When the workspace or the database fails.
+pub async fn book(state: &AppState, owner: &str) -> ApiResult<Book> {
+    let index = index(state, owner).await?;
+    let prefs = preferences(state, owner, &index).await?;
+    let catalog = Catalog::build(&index.candidates, &prefs);
+    Ok(Book { index, catalog })
+}
+
+/// The spell of a canonical group.
+fn spell_of(index: &Index, group: &Group) -> Option<Spell> {
+    let e = index.entries.get(&group.canonical)?;
     Some(Spell {
         key: e.copy.key.clone(),
         name: e.name.clone(),
-        ruleset: ruleset.to_string(),
+        ruleset: e.ruleset.clone(),
         level: e.level,
         school: e.school.clone(),
         concentration: e.concentration,
         ritual: e.ritual,
         source: e.copy.source.clone(),
         pack_id: e.copy.pack_id.clone(),
-        chosen_by: by,
-        also_in: keys
+        chosen_by: group.reason,
+        also_in: group
+            .members
             .iter()
-            .filter(|k| **k != pick)
-            .filter_map(|k| index.entries.get(k).map(|e| e.copy.clone()))
+            .skip(1)
+            .filter_map(|(id, _)| index.entries.get(id).map(|e| e.copy.clone()))
             .collect(),
         norm: e.norm.clone(),
+        members: group.members.iter().map(|(id, _)| id.clone()).collect(),
     })
 }
 
-/// The one spell `key` (any copy's id) belongs to, in edition `ruleset` (default: the copy's own).
+/// The one spell `key` (any copy's id) is.
 ///
 /// # Errors
 /// When the workspace or the database fails.
-pub async fn canonical(
-    state: &AppState,
-    owner: &str,
-    key: &str,
-    ruleset: Option<&str>,
-) -> ApiResult<Option<Spell>> {
-    let index = index(state, owner).await?;
-    let Some((norm, own)) = index.group_of(key).cloned() else {
-        return Ok(None);
-    };
-    // A copy of one edition is never another edition's spell; an `any` copy is whichever edition asks.
-    let rs = match ruleset {
-        Some(r) if own == "any" && RULESETS.contains(&r) => r.to_string(),
-        _ => own,
-    };
-    let chosen = overrides(state, owner).await?;
-    Ok(spell_of(&index, &norm, &rs, &chosen))
+pub async fn canonical(state: &AppState, owner: &str, key: &str) -> ApiResult<Option<Spell>> {
+    Ok(book(state, owner).await?.spell(key))
 }
 
-/// Resolve a spell name (a monster spellbook's line) in `ruleset`: the DM's alias first (a different name may stand
-/// for a spell), then the one spell of that name. `None` when nothing matches.
+/// Resolve a printed spell name (a monster spellbook's line) in `ruleset` (then `any`): the DM's link of that name
+/// first, then the one spell of that name. `None` when nothing matches, or when several spells of different levels
+/// do (the DM picks once).
 ///
 /// # Errors
 /// When the workspace or the database fails.
@@ -456,17 +424,253 @@ pub async fn resolve_name(
     name: &str,
     ruleset: &str,
 ) -> ApiResult<Option<Spell>> {
-    let norm = normalize(name);
-    let index = index(state, owner).await?;
-    let chosen = overrides(state, owner).await?;
-    if let Some(alias) = chosen.get(&(norm.clone(), ruleset.to_string())) {
-        if let Some((n, _)) = index.group_of(alias).cloned() {
-            if n != norm {
-                return Ok(spell_of(&index, &n, ruleset, &chosen));
-            }
+    let book = book(state, owner).await?;
+    Ok(match book.catalog.resolve(name, ruleset, None) {
+        Link::Linked { id } => book.spell(&id),
+        _ => None,
+    })
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Captured 5etools spells (for "Suggested" drafts)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Where [`capture`] leaves its spool files, under the account's data folder.
+pub const SPOOL_DIR: &str = "sync/spells";
+
+/// One pack's captured spells, as [`capture`] spools them and [`ingest`] stores them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Spool {
+    pack_id: String,
+    pack_rev: String,
+    captured_at: i64,
+    /// The raw 5etools spell objects, by element id.
+    spells: BTreeMap<String, Value>,
+}
+
+/// The raw 5etools spells of a data folder (its `spells/spells-*.json` and homebrew files).
+fn read_spells(folder: &std::path::Path) -> Result<Vec<Value>, String> {
+    let files = borealis_import_5etools::folder::data_files(folder).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for rel in files {
+        if !(rel.starts_with("spells/spells-") || rel.starts_with("homebrew/")) {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(folder.join(&rel)) else {
+            continue;
+        };
+        let Ok(mut value) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
+        if let Some(Value::Array(list)) = value.get_mut("spell").map(Value::take) {
+            out.extend(list);
         }
     }
-    Ok(spell_of(&index, &norm, ruleset, &chosen))
+    Ok(out)
+}
+
+/// Read the raw 5etools data of the spells that `report` imported from `folder`, and spool it for [`ingest`] (one
+/// file per pack): the tags the import drops (conditions, `miscTags`, the `{@damage}` dice) are what the drafter
+/// reads. Answers how many spells were captured.
+///
+/// # Errors
+/// When the folder can't be read or the spool can't be written; the import itself is not affected.
+pub fn capture(
+    backend: &Backend,
+    folder: &std::path::Path,
+    report: &borealis_lib::content_dto::FiveToolsImportReport,
+) -> Result<usize, String> {
+    use borealis_import_5etools::ids::{IdAlloc, IdKind};
+    let wanted: std::collections::HashSet<String> =
+        report.packs.iter().map(|p| p.id.clone()).collect();
+    if wanted.is_empty() {
+        return Ok(0);
+    }
+    let raw = read_spells(folder)?;
+    let hub = backend.hub().map_err(|e| e.message)?;
+    // Installed spells of those packs: by id, and by lowercase name per pack.
+    let mut pack_of: HashMap<String, String> = HashMap::new();
+    let mut names: HashMap<(String, String), Vec<String>> = HashMap::new();
+    for stored in hub.store.iter() {
+        let el = &stored.element;
+        let pack = pack_of_file(&stored.file);
+        if el.ty != SPELL || !wanted.contains(pack) {
+            continue;
+        }
+        pack_of.insert(el.id.clone(), pack.to_string());
+        names
+            .entry((pack.to_string(), el.name.to_lowercase()))
+            .or_default()
+            .push(el.id.clone());
+    }
+    let dirs: HashMap<String, std::path::PathBuf> = backend
+        .installed_packs()
+        .into_iter()
+        .filter(|p| wanted.contains(&p.manifest.id))
+        .map(|p| (p.manifest.id, p.dir))
+        .collect();
+    let captured_at = now();
+    let mut spools: BTreeMap<String, Spool> = BTreeMap::new();
+    let mut got = 0;
+    for spell in raw {
+        let (Some(source), Some(name)) = (
+            spell.get("source").and_then(Value::as_str),
+            spell.get("name").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        let pack = borealis_import_5etools::pack::pack_id(source);
+        if !wanted.contains(&pack) {
+            continue;
+        }
+        let plain = IdAlloc::new().named(IdKind::Spell, source, name);
+        let id = if pack_of.get(&plain) == Some(&pack) {
+            Some(plain)
+        } else {
+            names
+                .get(&(pack.clone(), name.to_lowercase()))
+                .filter(|ids| ids.len() == 1)
+                .map(|ids| ids[0].clone())
+        };
+        let Some(id) = id else {
+            continue;
+        };
+        let spool = spools.entry(pack.clone()).or_insert_with(|| Spool {
+            pack_id: pack.clone(),
+            pack_rev: dirs
+                .get(&pack)
+                .map(|d| crate::bestiary::pack_rev(d))
+                .unwrap_or_default(),
+            captured_at,
+            spells: BTreeMap::new(),
+        });
+        spool.spells.insert(id, spell);
+        got += 1;
+    }
+    let dir = backend.paths.data.join(SPOOL_DIR);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    for spool in spools.values() {
+        let name: String = spool
+            .pack_id
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let file = dir.join(format!("{name}.json"));
+        let tmp = file.with_extension("tmp");
+        std::fs::write(&tmp, serde_json::to_vec(spool).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, &file).map_err(|e| e.to_string())?;
+    }
+    Ok(got)
+}
+
+/// [`capture`], with its outcome logged instead of returned: called after a successful 5etools import.
+pub fn capture_logged(
+    backend: &Backend,
+    folder: &std::path::Path,
+    report: &borealis_lib::content_dto::FiveToolsImportReport,
+) {
+    match capture(backend, folder, report) {
+        Ok(n) => tracing::info!(spells = n, "spells: 5etools spell details captured"),
+        Err(e) => tracing::warn!("spells: 5etools spell details not captured: {e}"),
+    }
+}
+
+/// Move the account's spooled spell captures into `spell_meta`, one pack per transaction (its rows replaced whole).
+/// A spool file that can't be read is removed.
+///
+/// # Errors
+/// When the database fails; the spool file then stays for the next call.
+pub async fn ingest(state: &AppState, owner: &str) -> ApiResult<usize> {
+    let dir = state.workspaces.dir(owner).join(SPOOL_DIR);
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(0);
+    };
+    let files: Vec<std::path::PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .collect();
+    let mut done = 0;
+    for file in files {
+        let spool = std::fs::read(&file)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Spool>(&b).ok());
+        let Some(spool) = spool else {
+            tracing::warn!("spells: unreadable capture {} removed", file.display());
+            let _ = std::fs::remove_file(&file);
+            continue;
+        };
+        let mut tx = state.db.pool().begin().await?;
+        sqlx::query("DELETE FROM spell_meta WHERE owner_id = $1 AND pack_id = $2")
+            .bind(owner)
+            .bind(&spool.pack_id)
+            .execute(&mut *tx)
+            .await?;
+        for (id, raw) in &spool.spells {
+            sqlx::query(
+                "INSERT INTO spell_meta (owner_id, element_id, pack_id, pack_rev, raw_json, captured_at)
+                 VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING",
+            )
+            .bind(owner)
+            .bind(id)
+            .bind(&spool.pack_id)
+            .bind(&spool.pack_rev)
+            .bind(raw.to_string())
+            .bind(spool.captured_at)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        let _ = std::fs::remove_file(&file);
+        done += 1;
+    }
+    Ok(done)
+}
+
+/// The raw 5etools data captured for a spell element of the account, if any.
+async fn raw_of(state: &AppState, owner: &str, key: &str) -> ApiResult<Option<Value>> {
+    let row =
+        sqlx::query("SELECT raw_json FROM spell_meta WHERE owner_id = $1 AND element_id = $2")
+            .bind(owner)
+            .bind(key)
+            .fetch_optional(state.db.pool())
+            .await?;
+    Ok(row
+        .map(|r| r.try_get::<String, _>(0))
+        .transpose()?
+        .and_then(|t| serde_json::from_str(&t).ok()))
+}
+
+/// What the drafter reads when nothing was captured: the tags the import keeps on the element (`el.data`), its name
+/// and level. No dice or conditions: the draft then asks the DM for them.
+fn tags_of(element: &Element) -> Value {
+    let mut v = json!({
+        "name": element.name,
+        "level": setter(element, "level").and_then(|l| l.parse::<u8>().ok()).unwrap_or(0),
+        "entries": [],
+        "duration": [{ "type": "timed", "concentration": truthy(element, "isConcentration") }],
+    });
+    for (from, to) in [
+        ("damage_inflict", "damageInflict"),
+        ("saving_throw", "savingThrow"),
+        ("scalingLevelDice", "scalingLevelDice"),
+        ("spellAttack", "spellAttack"),
+        ("areaTags", "areaTags"),
+        ("affectsCreatureType", "affectsCreatureType"),
+    ] {
+        if let Some(x) = element.data.get(from) {
+            v[to] = x.clone();
+        }
+    }
+    v
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -650,26 +854,6 @@ pub async fn rows(state: &AppState, owner: &str) -> ApiResult<Vec<MechRow>> {
     Ok(rows.iter().map(row_from).collect::<sqlx::Result<_>>()?)
 }
 
-/// The rows of some spells (combat start and casts).
-async fn rows_of(state: &AppState, owner: &str, keys: &[String]) -> ApiResult<Vec<MechRow>> {
-    let mut out = Vec::new();
-    // Few keys at a time; one query each keeps the SQL the same on both databases.
-    for key in keys {
-        let rows = sqlx::query(&format!(
-            "SELECT {ROW_COLUMNS} FROM spell_mechanics WHERE account_id = $1 AND spell_key = $2 AND kind <> $3"
-        ))
-        .bind(owner)
-        .bind(key)
-        .bind(KIND_ALIAS)
-        .fetch_all(state.db.pool())
-        .await?;
-        for r in &rows {
-            out.push(row_from(r)?);
-        }
-    }
-    Ok(out)
-}
-
 /// Save one row (insert or replace); a def's `rev` moves one past the stored one. Answers the stored row.
 ///
 /// # Errors
@@ -802,7 +986,7 @@ pub async fn remove(
 pub struct Resolved {
     /// The effect definition.
     pub def: Value,
-    /// `def` (the account's), `link` (another spell's def, through the account's link) or `srd` (the curated table).
+    /// `def` (the account's), `link` (another spell's, through the account's link) or `srd` (the curated table).
     pub origin: &'static str,
     /// The spell key whose definition it is.
     pub from_key: String,
@@ -810,169 +994,220 @@ pub struct Resolved {
     pub rev: i64,
 }
 
-/// The curated SRD definition of a spell key, when `party-spells` has one. Hooked to S2's table at merge; none until
-/// then, so every spell is the account's to define.
-fn curated(_key: &str, _ruleset: &str) -> Option<(Value, i64)> {
-    None
+/// The curated SRD definition of a spell key for an edition (`party-spells`).
+fn curated(key: &str, ruleset: &str) -> Option<(Value, i64)> {
+    let mech = party_spells::data::curated(key)?;
+    if edition_of(ruleset).is_some_and(|e| e != mech.edition) {
+        return None;
+    }
+    Some((serde_json::to_value(mech).ok()?, i64::from(mech.rev)))
 }
 
-/// The mechanics of each of `keys` (the casting edition `ruleset`), by key: the account's def, then its link (one
-/// hop, to the target's def or curated row), then the curated row. A key with none is absent: a ruling.
+/// An account's spells and spell rows, read once: what a combat start (which holds its one connection) or a cast
+/// compiles from without touching the database again.
+pub struct Library {
+    book: Book,
+    /// The account's `def` and `link` rows.
+    rows: Vec<MechRow>,
+}
+
+/// The account's [`Library`].
 ///
 /// # Errors
-/// The database's.
+/// The workspace's and the database's.
+pub async fn library(state: &AppState, owner: &str) -> ApiResult<Library> {
+    let book = book(state, owner).await?;
+    let rows = rows(state, owner)
+        .await?
+        .into_iter()
+        .filter(|r| r.kind != KIND_ALIAS)
+        .collect();
+    Ok(Library { book, rows })
+}
+
+impl Library {
+    /// The chosen copy of the one spell a printed name is in `ruleset` (then `any`), through the DM's links; `None`
+    /// when it is unlinked or ambiguous.
+    #[must_use]
+    pub fn resolve(&self, name: &str, ruleset: &str) -> Option<String> {
+        match self.book.catalog.resolve(name, ruleset, None) {
+            Link::Linked { id } => Some(id),
+            _ => None,
+        }
+    }
+
+    /// The mechanics of `key` cast in edition `ruleset`. The key is the one spell it is a copy of, so a definition
+    /// of any copy counts (an SRD definition applies to the chosen 5etools copy, and back), the key's own first: the
+    /// account's def, then its link (one hop, to the target's def or curated row), then the curated row. `None`: a
+    /// ruling.
+    #[must_use]
+    pub fn mechanics(&self, ruleset: &str, key: &str) -> Option<Resolved> {
+        let fits = |r: &&MechRow| r.ruleset == ruleset || r.ruleset == "any";
+        let copies = self.book.copies(key);
+        for copy in &copies {
+            let own = || {
+                self.rows
+                    .iter()
+                    .filter(fits)
+                    .filter(|r| &r.spell_key == copy)
+            };
+            if let Some(d) = own().find(|r| r.kind == KIND_DEF) {
+                return Some(Resolved {
+                    def: d.def.clone(),
+                    origin: "def",
+                    from_key: copy.clone(),
+                    rev: d.rev,
+                });
+            }
+            if let Some(target) = own()
+                .find(|r| r.kind == KIND_LINK)
+                .and_then(|l| l.def.get("target").and_then(Value::as_str))
+            {
+                let def = self
+                    .rows
+                    .iter()
+                    .filter(fits)
+                    .find(|r| r.spell_key == target && r.kind == KIND_DEF)
+                    .map(|r| (r.def.clone(), r.rev))
+                    .or_else(|| curated(target, ruleset));
+                if let Some((def, rev)) = def {
+                    return Some(Resolved {
+                        def,
+                        origin: "link",
+                        from_key: target.to_string(),
+                        rev,
+                    });
+                }
+            }
+        }
+        copies.iter().find_map(|copy| {
+            curated(copy, ruleset).map(|(def, rev)| Resolved {
+                def,
+                origin: "srd",
+                from_key: copy.clone(),
+                rev,
+            })
+        })
+    }
+
+    /// A spell compiled for one caster (`caster`'s first spellcasting block: DC, attack, modifier and cantrip
+    /// tier), from the account's mechanics for the combat's edition. With no mechanics: `fallback` when the stat
+    /// block entry has its own, else a ruling built from the installed spell (it spends the slot and takes
+    /// concentration from the element's `isConcentration`, never from its text). `Ok(None)` when the spell isn't
+    /// installed and has no entry.
+    ///
+    /// # Errors
+    /// A stored definition that no longer fits the engine's schema.
+    pub fn compile(
+        &self,
+        edition: Edition,
+        key: &str,
+        caster: &Combatant,
+        link: Option<&SpellLink>,
+        fallback: Option<&CastSpec>,
+    ) -> ApiResult<Option<CastSpec>> {
+        let casting = caster.casting.first();
+        let modifier = match (casting, caster.stats.as_ref()) {
+            (Some(c), Some(stats)) => stats.modifier(c.ability),
+            _ => 0,
+        };
+        let tier = casting
+            .and_then(|c| c.cantrip_tier.or_else(|| c.caster_level.map(cantrip_tier)))
+            .unwrap_or(1);
+        let mut spec = if let Some(r) = self.mechanics(ruleset_of(edition), key) {
+            let mut mech: SpellMech = serde_json::from_value(r.def.clone()).map_err(|e| {
+                invalid(format!(
+                    "The saved effect of this spell no longer fits: {e}"
+                ))
+            })?;
+            mech.key = key.to_string();
+            mech.edition = edition;
+            let rev = u32::try_from(r.rev).unwrap_or(u32::MAX);
+            let origin = if r.origin == "srd" {
+                MechOrigin::Srd {
+                    key: r.from_key.clone(),
+                    rev,
+                }
+            } else {
+                MechOrigin::Def {
+                    id: r.from_key.clone(),
+                    rev,
+                }
+            };
+            CastSpec {
+                v: party_combat::spell::MECH_VERSION,
+                origin,
+                mech,
+                dc: None,
+                attack: None,
+                modifier: 0,
+                cantrip_tier: 1,
+                baked_in: false,
+            }
+        } else if let Some(f) = fallback {
+            f.clone()
+        } else {
+            match self.book.spell(key) {
+                Some(spell) => CastSpec::ruling(
+                    key,
+                    &spell.name,
+                    edition,
+                    spell.level.or(link.map(|l| l.level)).unwrap_or(0),
+                    spell.concentration,
+                ),
+                None => return Ok(None),
+            }
+        };
+        if let Some(c) = casting {
+            spec.dc = c.dc.or(spec.dc);
+            spec.attack = c.attack.or(spec.attack);
+        }
+        spec.modifier = modifier;
+        spec.cantrip_tier = tier;
+        spec.baked_in = link.is_some_and(|l| l.baked_in);
+        Ok(Some(spec))
+    }
+}
+
+/// The mechanics of each of `keys` (cast in edition `ruleset`), by key ([`Library::mechanics`]). A key with none is
+/// absent: a ruling.
+///
+/// # Errors
+/// The workspace's and the database's.
 pub async fn mechanics_for(
     state: &AppState,
     owner: &str,
     ruleset: &str,
     keys: &[String],
 ) -> ApiResult<HashMap<String, Resolved>> {
-    let fits = |r: &MechRow| r.ruleset == ruleset || r.ruleset == "any";
-    let mine = rows_of(state, owner, keys).await?;
-    let mut out = HashMap::new();
-    let mut targets = Vec::new();
-    for key in keys {
-        let own: Vec<&MechRow> = mine
-            .iter()
-            .filter(|r| &r.spell_key == key && fits(r))
-            .collect();
-        if let Some(d) = own.iter().find(|r| r.kind == KIND_DEF) {
-            out.insert(
-                key.clone(),
-                Resolved {
-                    def: d.def.clone(),
-                    origin: "def",
-                    from_key: key.clone(),
-                    rev: d.rev,
-                },
-            );
-        } else if let Some(t) = own
-            .iter()
-            .find(|r| r.kind == KIND_LINK)
-            .and_then(|l| l.def.get("target").and_then(Value::as_str))
-        {
-            targets.push((key.clone(), t.to_string()));
-        } else if let Some((def, rev)) = curated(key, ruleset) {
-            out.insert(
-                key.clone(),
-                Resolved {
-                    def,
-                    origin: "srd",
-                    from_key: key.clone(),
-                    rev,
-                },
-            );
-        }
-    }
-    if !targets.is_empty() {
-        let wanted: Vec<String> = targets.iter().map(|(_, t)| t.clone()).collect();
-        let theirs = rows_of(state, owner, &wanted).await?;
-        for (key, target) in targets {
-            let def = theirs
-                .iter()
-                .find(|r| r.spell_key == target && r.kind == KIND_DEF && fits(r))
-                .map(|r| (r.def.clone(), r.rev))
-                .or_else(|| curated(&target, ruleset));
-            if let Some((def, rev)) = def {
-                out.insert(
-                    key,
-                    Resolved {
-                        def,
-                        origin: "link",
-                        from_key: target,
-                        rev,
-                    },
-                );
-            }
-        }
-    }
-    Ok(out)
+    let lib = library(state, owner).await?;
+    Ok(keys
+        .iter()
+        .filter_map(|k| lib.mechanics(ruleset, k).map(|r| (k.clone(), r)))
+        .collect())
 }
 
-/// A spell compiled for one caster (`caster`'s first spellcasting block: DC, attack, modifier and cantrip tier),
-/// from the account's mechanics for the combat's edition. With no mechanics: `fallback` when the stat block entry
-/// has its own, else a ruling built from the installed spell (it spends the slot and takes concentration from the
-/// element's `isConcentration`, never from its text). `None` when the spell isn't installed and has no entry.
-///
-/// # Errors
-/// The workspace's and the database's; a stored definition that no longer fits.
-pub async fn compile(
+/// A suggested effect for a spell the account hasn't defined: `party-spells`' drafter over the user's own installed
+/// copy, from its captured 5etools data, else the tags the import kept on the element. Never binds by itself: the DM
+/// saves it as a def once (origin `suggested`). `None` for a spell of no edition (the drafter needs one).
+async fn suggestion(
     state: &AppState,
     owner: &str,
-    edition: Edition,
-    key: &str,
-    caster: &Combatant,
-    link: Option<&SpellLink>,
-    fallback: Option<&CastSpec>,
-) -> ApiResult<Option<CastSpec>> {
-    let rs = ruleset_of(edition);
-    let got = mechanics_for(state, owner, rs, &[key.to_string()]).await?;
-    let casting = caster.casting.first();
-    let modifier = match (casting, caster.stats.as_ref()) {
-        (Some(c), Some(stats)) => stats.modifier(c.ability),
-        _ => 0,
+    element: &Element,
+    ruleset: &str,
+) -> ApiResult<Option<party_spells::draft::Draft>> {
+    let Some(edition) = edition_of(ruleset) else {
+        return Ok(None);
     };
-    let tier = casting
-        .and_then(|c| {
-            c.cantrip_tier
-                .or_else(|| c.caster_level.map(cantrip_tier))
-        })
-        .unwrap_or(1);
-    let mut spec = if let Some(r) = got.get(key) {
-        let mut mech: SpellMech = serde_json::from_value(r.def.clone())
-            .map_err(|e| invalid(format!("The saved effect of this spell no longer fits: {e}")))?;
-        mech.key = key.to_string();
-        mech.edition = edition;
-        let rev = u32::try_from(r.rev).unwrap_or(u32::MAX);
-        let origin = if r.origin == "srd" {
-            MechOrigin::Srd {
-                key: r.from_key.clone(),
-                rev,
-            }
-        } else {
-            MechOrigin::Def {
-                id: r.from_key.clone(),
-                rev,
-            }
-        };
-        CastSpec {
-            v: party_combat::spell::MECH_VERSION,
-            origin,
-            mech,
-            dc: None,
-            attack: None,
-            modifier: 0,
-            cantrip_tier: 1,
-            baked_in: false,
-        }
-    } else if let Some(f) = fallback {
-        f.clone()
-    } else {
-        match canonical(state, owner, key, Some(rs)).await? {
-            Some(spell) => CastSpec::ruling(
-                key,
-                &spell.name,
-                edition,
-                spell.level.or(link.map(|l| l.level)).unwrap_or(0),
-                spell.concentration,
-            ),
-            None => return Ok(None),
-        }
+    let raw = match raw_of(state, owner, &element.id).await? {
+        Some(raw) => raw,
+        None => tags_of(element),
     };
-    if let Some(c) = casting {
-        spec.dc = c.dc.or(spec.dc);
-        spec.attack = c.attack.or(spec.attack);
-    }
-    spec.modifier = modifier;
-    spec.cantrip_tier = tier;
-    spec.baked_in = link.is_some_and(|l| l.baked_in);
-    Ok(Some(spec))
-}
-
-/// A suggested effect for a spell the account hasn't defined: S2's drafter over the user's own installed copy (its
-/// 5etools tags). Never binds by itself; the DM saves it as a def once. None until the drafter is hooked in.
-fn suggestion(_element: &Element) -> Option<Value> {
-    None
+    Ok(Some(party_spells::draft::from_5etools(
+        &element.id,
+        edition,
+        &raw,
+    )))
 }
 
 /// The hash of the text a suggestion was drafted from: a def saved from it keeps it, so a changed spell is flagged.
@@ -1000,7 +1235,7 @@ pub struct ListQuery {
     /// Part of the name.
     #[serde(default)]
     pub text: Option<String>,
-    /// `dnd2014`, `dnd2024` (also lists `any`).
+    /// `dnd2014` or `dnd2024` (also lists the spells of no edition), or `any`.
     #[serde(default)]
     pub ruleset: Option<String>,
     /// One level.
@@ -1014,7 +1249,7 @@ pub struct ListQuery {
     pub offset: Option<usize>,
 }
 
-/// The coverage badge of each spell key: `defined`, `linked` or none (curated and suggested come with the data).
+/// The spell keys the account defined (`defined`) or linked (`linked`), by `(key, ruleset)`.
 async fn badges(
     state: &AppState,
     owner: &str,
@@ -1041,19 +1276,27 @@ async fn badges(
     Ok(out)
 }
 
-fn coverage_of(badges: &HashMap<(String, String), &'static str>, spell: &Spell) -> &'static str {
-    for rs in [spell.ruleset.as_str(), "any"] {
-        if let Some(b) = badges.get(&(spell.key.clone(), rs.to_string())) {
-            return b;
+/// A spell's coverage badge: `defined` or `linked` (the account's, on any copy), `auto`, `partial`, `utility` or
+/// `ruling` (the curated tier), else `ruling` (no definition: the cast spends and the DM rules).
+fn coverage_of(badges: &HashMap<(String, String), &'static str>, spell: &Spell) -> String {
+    for copy in &spell.members {
+        for rs in [spell.ruleset.as_str(), "any"] {
+            if let Some(b) = badges.get(&(copy.clone(), rs.to_string())) {
+                return (*b).to_string();
+            }
         }
     }
-    if curated(&spell.key, &spell.ruleset).is_some() {
-        return "auto";
+    for copy in &spell.members {
+        if let Some(m) = party_spells::data::curated(copy) {
+            if edition_of(&spell.ruleset).is_none_or(|e| e == m.edition) {
+                return text_value(&m.tier);
+            }
+        }
     }
-    "ruling"
+    "ruling".to_string()
 }
 
-/// The account's spells, one per edition (`GET /api/spells`).
+/// The account's spells, one per name, edition and level (`GET /api/spells`).
 ///
 /// # Errors
 /// A bad query, the workspace or the database.
@@ -1067,27 +1310,26 @@ pub async fn list(state: &AppState, owner: &str, q: &ListQuery) -> ApiResult<Val
     if text.len() > 100 {
         return Err(invalid("That search text is too long."));
     }
-    let index = index(state, owner).await?;
-    let chosen = overrides(state, owner).await?;
+    let book = book(state, owner).await?;
     let marks = badges(state, owner).await?;
-    // Seen as one edition, a name is one spell (its `any` copies with it); else every group is its own.
-    let views: std::collections::BTreeSet<(String, String)> = index
-        .groups
-        .keys()
-        .filter_map(|(norm, rs)| match ruleset.as_deref() {
-            None => Some((norm.clone(), rs.clone())),
-            Some(want) if rs == want => Some((norm.clone(), rs.clone())),
-            Some(want) if rs == "any" => Some((norm.clone(), want.to_string())),
-            Some(_) => None,
+    let mut items: Vec<Spell> = book
+        .catalog
+        .groups()
+        .filter_map(|g| spell_of(&book.index, g))
+        .filter(|s| {
+            ruleset
+                .as_deref()
+                .is_none_or(|want| s.ruleset == want || s.ruleset == "any")
         })
-        .collect();
-    let mut items: Vec<Spell> = views
-        .iter()
-        .filter_map(|(norm, rs)| spell_of(&index, norm, rs, &chosen))
         .filter(|s| text.is_empty() || s.norm.contains(&text))
         .filter(|s| q.level.is_none_or(|l| s.level == Some(l)))
         .collect();
-    items.sort_by(|a, b| a.norm.cmp(&b.norm).then_with(|| a.ruleset.cmp(&b.ruleset)));
+    items.sort_by(|a, b| {
+        a.norm
+            .cmp(&b.norm)
+            .then_with(|| a.ruleset.cmp(&b.ruleset))
+            .then_with(|| a.level.cmp(&b.level))
+    });
     let total = items.len();
     let limit = q.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let offset = q.offset.unwrap_or(0).min(total);
@@ -1105,20 +1347,13 @@ pub async fn list(state: &AppState, owner: &str, q: &ListQuery) -> ApiResult<Val
     Ok(json!({ "total": total, "offset": offset, "items": page }))
 }
 
-/// One spell: the one spell it belongs to, the account's rows about it, the mechanics combat would use, and a
+/// One spell: the one spell it is a copy of, the account's rows about it, the mechanics combat would use, and a
 /// suggestion when it has none (`GET /api/spells/{key}`).
 ///
 /// # Errors
 /// An unknown key, the workspace or the database.
-pub async fn detail(
-    state: &AppState,
-    owner: &str,
-    key: &str,
-    ruleset: Option<&str>,
-) -> ApiResult<Value> {
-    let spell = canonical(state, owner, key, ruleset)
-        .await?
-        .ok_or_else(no_spell)?;
+pub async fn detail(state: &AppState, owner: &str, key: &str) -> ApiResult<Value> {
+    let spell = canonical(state, owner, key).await?.ok_or_else(no_spell)?;
     let workspace = state.workspaces.get(owner).await?;
     let wanted = key.to_string();
     let element: Option<Element> = workspace
@@ -1138,24 +1373,24 @@ pub async fn detail(
         .await?
         .into_iter()
         .filter(|r| {
-            r.spell_key == spell.key
-                || r.spell_key == key
+            spell.members.contains(&r.spell_key)
                 || (r.kind == KIND_ALIAS && r.alias_name == spell.norm)
         })
         .collect();
-    let mut keys = vec![spell.key.clone()];
-    if key != spell.key {
-        keys.push(key.to_string());
-    }
-    let resolved = mechanics_for(state, owner, &spell.ruleset, &keys).await?;
-    let mechanics = resolved
-        .get(key)
-        .or_else(|| resolved.get(&spell.key))
-        .cloned();
-    let suggested = if mechanics.is_none() {
-        suggestion(&element)
-    } else {
+    let rs = if spell.ruleset == "any" {
         None
+    } else {
+        Some(spell.ruleset.as_str())
+    };
+    let mechanics = match rs {
+        Some(rs) => mechanics_for(state, owner, rs, &[key.to_string()])
+            .await?
+            .remove(key),
+        None => None,
+    };
+    let suggested = match (&mechanics, rs) {
+        (None, Some(rs)) => suggestion(state, owner, &element, rs).await?,
+        _ => None,
     };
     Ok(json!({
         "spell": spell,
@@ -1281,58 +1516,41 @@ async fn list_route(
     Ok(Json(list(&state, &user.id, &q).await?))
 }
 
-/// `?ruleset=`: the edition a copy that names none is seen as.
-#[derive(Debug, Default, Deserialize)]
-struct EditionQuery {
-    #[serde(default)]
-    ruleset: Option<String>,
-}
-
 async fn detail_route(
     State(state): State<AppState>,
     user: User,
     UrlPath(key): UrlPath<String>,
-    Query(q): Query<EditionQuery>,
 ) -> ApiResult<Json<Value>> {
     if !key_ok(&key) {
         return Err(no_spell());
     }
-    Ok(Json(
-        detail(&state, &user.id, &key, q.ruleset.as_deref()).await?,
-    ))
+    Ok(Json(detail(&state, &user.id, &key).await?))
 }
 
-/// The one spell `key` is a copy of, as `ruleset` sees it: its normalized name and edition.
-async fn view_of(
-    state: &AppState,
-    owner: &str,
-    key: &str,
-    ruleset: Option<&str>,
-) -> ApiResult<(String, String)> {
-    let spell = canonical(state, owner, key, ruleset)
-        .await?
-        .ok_or_else(no_spell)?;
-    Ok((spell.norm, spell.ruleset))
+/// The installed copy `key` (its normalized name and ruleset), or the one 404.
+async fn copy_of(state: &AppState, owner: &str, key: &str) -> ApiResult<(String, String)> {
+    if !key_ok(key) {
+        return Err(no_spell());
+    }
+    let index = index(state, owner).await?;
+    let e = index.entries.get(key).ok_or_else(no_spell)?;
+    Ok((e.norm.clone(), e.ruleset.clone()))
 }
 
-/// `POST /api/spells/{key}/choose`: this copy is the one spell of its name and edition.
+/// `POST /api/spells/{key}/choose`: this copy is the one spell of its name and edition (the DM's pick, an alias row).
 async fn choose_route(
     State(state): State<AppState>,
     user: User,
     UrlPath(key): UrlPath<String>,
-    Query(q): Query<EditionQuery>,
 ) -> ApiResult<Json<Value>> {
-    if !key_ok(&key) {
-        return Err(no_spell());
-    }
-    let (norm, ruleset) = view_of(&state, &user.id, &key, q.ruleset.as_deref()).await?;
+    let (norm, ruleset) = copy_of(&state, &user.id, &key).await?;
     save(
         &state,
         &user.id,
         MechRow {
             kind: KIND_ALIAS.into(),
             spell_key: key.clone(),
-            ruleset: ruleset.clone(),
+            ruleset,
             alias_name: norm,
             def: Value::Null,
             schema_v: 1,
@@ -1343,9 +1561,9 @@ async fn choose_route(
         },
     )
     .await?;
-    Ok(Json(json!({
-        "spell": canonical(&state, &user.id, &key, Some(&ruleset)).await?,
-    })))
+    Ok(Json(
+        json!({ "spell": canonical(&state, &user.id, &key).await? }),
+    ))
 }
 
 /// `DELETE /api/spells/{key}/choose`: back to the rule's choice.
@@ -1353,24 +1571,25 @@ async fn unchoose_route(
     State(state): State<AppState>,
     user: User,
     UrlPath(key): UrlPath<String>,
-    Query(q): Query<EditionQuery>,
 ) -> ApiResult<Json<Value>> {
-    if !key_ok(&key) {
-        return Err(no_spell());
+    let (norm, ruleset) = copy_of(&state, &user.id, &key).await?;
+    let book = book(&state, &user.id).await?;
+    for copy in book.copies(&key) {
+        sqlx::query(
+            "DELETE FROM spell_mechanics WHERE account_id = $1 AND kind = $2 AND ruleset = $3 AND alias_name = $4
+             AND spell_key = $5",
+        )
+        .bind(&user.id)
+        .bind(KIND_ALIAS)
+        .bind(&ruleset)
+        .bind(&norm)
+        .bind(&copy)
+        .execute(state.db.pool())
+        .await?;
     }
-    let (norm, ruleset) = view_of(&state, &user.id, &key, q.ruleset.as_deref()).await?;
-    sqlx::query(
-        "DELETE FROM spell_mechanics WHERE account_id = $1 AND kind = $2 AND ruleset = $3 AND alias_name = $4",
-    )
-    .bind(&user.id)
-    .bind(KIND_ALIAS)
-    .bind(&ruleset)
-    .bind(&norm)
-    .execute(state.db.pool())
-    .await?;
-    Ok(Json(json!({
-        "spell": canonical(&state, &user.id, &key, Some(&ruleset)).await?,
-    })))
+    Ok(Json(
+        json!({ "spell": canonical(&state, &user.id, &key).await? }),
+    ))
 }
 
 async fn rows_route(State(state): State<AppState>, user: User) -> ApiResult<Json<Value>> {

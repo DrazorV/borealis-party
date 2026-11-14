@@ -45,16 +45,41 @@ fn set(name: &str, value: &str) -> Value {
     json!({ "name": name, "value": value })
 }
 
-/// A homebrew copy of Fireball (no ruleset: an `any` copy), answering its id.
-async fn homebrew_fireball(client: &Client) -> String {
-    let pack = ok(
+/// The account's homebrew pack for these tests.
+async fn spell_pack(client: &Client) -> String {
+    let (status, out) = call(
         client,
         "POST",
         "/api/homebrew/packs",
         json!({ "name": "Spell Test", "description": "Made up for tests.", "author": "Tester" }),
     )
     .await;
-    let pack = pack["id"].as_str().unwrap().to_string();
+    if status == StatusCode::OK {
+        return out["id"].as_str().unwrap().to_string();
+    }
+    "hb-spell-test".to_string()
+}
+
+/// A made-up level 1 homebrew spell, answering its id.
+async fn homebrew_spell(client: &Client, name: &str) -> String {
+    let pack = spell_pack(client).await;
+    let saved = ok(
+        client,
+        "POST",
+        &format!("/api/homebrew/packs/{pack}/elements"),
+        json!({ "form": { "type": "Spell", "name": name, "supports": "Wizard",
+            "description": "A made-up spell for tests.",
+            "setters": [set("level", "1"), set("school", "Evocation"), set("time", "1 action"),
+                        set("range", "60 feet"), set("duration", "Instantaneous"),
+                        set("hasVerbalComponent", "true")] } }),
+    )
+    .await;
+    saved["id"].as_str().unwrap().to_string()
+}
+
+/// A homebrew copy of Fireball (Aurora XML: 2014 rules), answering its id.
+async fn homebrew_fireball(client: &Client) -> String {
+    let pack = spell_pack(client).await;
     let saved = ok(
         client,
         "POST",
@@ -90,8 +115,8 @@ async fn one_spell_checks(state: &crate::AppState, dm: &Client, other: &Client) 
     let fireball = find(&new, FIREBALL_2024).unwrap_or_else(|| panic!("{new}"));
     assert_eq!(fireball["ruleset"], "dnd2024");
     assert_eq!(fireball["level"], 3);
-    assert_eq!(fireball["chosenBy"], "rule");
-    assert_eq!(fireball["coverage"], "ruling", "nothing defined yet");
+    assert_eq!(fireball["chosenBy"], "only");
+    assert_eq!(fireball["coverage"], "auto", "the curated SRD row");
     assert!(find(&new, DELAYED_2024).is_some(), "{new}");
     assert!(find(&new, FIREBALL_2014).is_none(), "{new}");
     let old = ok(
@@ -141,6 +166,10 @@ async fn one_spell_checks(state: &crate::AppState, dm: &Client, other: &Client) 
         .filter(|s| s["name"] == "Fireball")
         .count();
     assert_eq!(total, 1, "{old}");
+    assert_eq!(
+        fireball["chosenBy"], "srd",
+        "a copy of no known date: the SRD one"
+    );
     let all = ok(dm, "GET", "/api/spells?text=fireball", Value::Null).await;
     assert_eq!(all["total"], 4, "two editions, two spells each: {all}");
     let new = ok(
@@ -165,7 +194,7 @@ async fn one_spell_checks(state: &crate::AppState, dm: &Client, other: &Client) 
     )
     .await;
     assert_eq!(chosen["spell"]["key"], copy, "{chosen}");
-    assert_eq!(chosen["spell"]["chosenBy"], "dm");
+    assert_eq!(chosen["spell"]["chosenBy"], "dmPick");
     assert_eq!(chosen["spell"]["alsoIn"][0]["key"], FIREBALL_2014);
     let old = ok(
         dm,
@@ -197,6 +226,15 @@ async fn one_spell_checks(state: &crate::AppState, dm: &Client, other: &Client) 
     assert_eq!(detail["spell"]["key"], copy, "{detail}");
     assert_eq!(detail["element"]["id"], FIREBALL_2014);
     assert!(detail["sourceHash"].as_str().unwrap().len() == 32);
+    // Mechanics key on the one spell: the SRD definition applies to the chosen copy.
+    let mine = ok(dm, "GET", &format!("/api/spells/{copy}"), Value::Null).await;
+    assert_eq!(mine["mechanics"]["origin"], "srd", "{mine}");
+    assert_eq!(mine["mechanics"]["fromKey"], FIREBALL_2014);
+    assert_eq!(
+        mine["suggested"],
+        Value::Null,
+        "a spell with mechanics needs no draft"
+    );
     let named = crate::spells::resolve_name(state, &dm.id, "Fireball", "dnd2014")
         .await
         .unwrap()
@@ -226,6 +264,14 @@ async fn one_spell_checks(state: &crate::AppState, dm: &Client, other: &Client) 
     )
     .await;
     assert_eq!(back["spell"]["key"], FIREBALL_2014, "{back}");
+    // A spell with no definition anywhere gets a draft to confirm, never bound by itself.
+    let bolt = homebrew_spell(dm, "Test Bolt").await;
+    let detail = ok(dm, "GET", &format!("/api/spells/{bolt}"), Value::Null).await;
+    assert_eq!(detail["mechanics"], Value::Null, "{detail}");
+    assert_eq!(detail["suggested"]["mech"]["key"], bolt, "{detail}");
+    assert!(detail["suggested"]["checks"].is_array(), "{detail}");
+    let list = ok(dm, "GET", "/api/spells?text=test%20bolt", Value::Null).await;
+    assert_eq!(list["items"][0]["coverage"], "ruling", "{list}");
     let (status, _) = call(dm, "GET", "/api/spells/ID_NO_SUCH_SPELL", Value::Null).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
@@ -287,7 +333,13 @@ async fn mechanics_checks(state: &crate::AppState, dm: &Client, other: &Client) 
     .unwrap();
     assert_eq!(got[FIREBALL_2024].origin, "def");
     assert_eq!(got[FIREBALL_2024].rev, 2);
-    assert_eq!(got[FIREBALL_2024].def, fireball, "stored as the engine reads it");
+    let mech =
+        |v: &Value| serde_json::from_value::<party_combat::spell::SpellMech>(v.clone()).unwrap();
+    assert_eq!(
+        mech(&got[FIREBALL_2024].def),
+        mech(&fireball),
+        "stored as the engine reads it"
+    );
     assert_eq!(got[DELAYED_2024].origin, "link");
     assert_eq!(got[DELAYED_2024].from_key, FIREBALL_2024);
     assert!(
@@ -298,7 +350,10 @@ async fn mechanics_checks(state: &crate::AppState, dm: &Client, other: &Client) 
         crate::spells::mechanics_for(state, &other.id, "dnd2024", &[FIREBALL_2024.to_string()])
             .await
             .unwrap();
-    assert!(other_got.is_empty(), "another account's rows are not mine");
+    assert_eq!(
+        other_got[FIREBALL_2024].origin, "srd",
+        "another account's rows are not mine: the curated row"
+    );
     let detail = ok(
         dm,
         "GET",
@@ -365,11 +420,22 @@ async fn mechanics_checks(state: &crate::AppState, dm: &Client, other: &Client) 
                 "def": { "big": "x".repeat(70 * 1024) } }),
         // Not the engine's schema: no scripting, no unknown fields, no wrong edition or version.
         json!({ "kind": "def", "spellKey": FIREBALL_2024, "ruleset": "dnd2024", "def": { "v": 1 } }),
-        def_row(FIREBALL_2024, "dnd2024", { let mut d = fixture("fireball", 1); d["script"] = json!("x"); d }),
+        def_row(FIREBALL_2024, "dnd2024", {
+            let mut d = fixture("fireball", 1);
+            d["script"] = json!("x");
+            d
+        }),
         def_row(FIREBALL_2024, "dnd2024", fixture("fireball", 0)),
-        def_row(FIREBALL_2024, "dnd2024", { let mut d = fixture("fireball", 1); d["v"] = json!(2); d }),
-        def_row(FIREBALL_2024, "dnd2024", { let mut d = fixture("fireball", 1);
-            d["on_land"][0]["dice"] = json!("8d6+system()"); d }),
+        def_row(FIREBALL_2024, "dnd2024", {
+            let mut d = fixture("fireball", 1);
+            d["v"] = json!(2);
+            d
+        }),
+        def_row(FIREBALL_2024, "dnd2024", {
+            let mut d = fixture("fireball", 1);
+            d["on_land"][0]["dice"] = json!("8d6+system()");
+            d
+        }),
     ] {
         let (status, out) = call(dm, "PUT", "/api/spell-mechanics", bad.clone()).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}: {out}");
@@ -545,29 +611,73 @@ async fn seed_0_3_1(location: &Location, data: &Path) -> (String, String) {
         .await;
     assert_eq!(status, StatusCode::OK, "{party}");
     let party = party["id"].as_str().unwrap().to_string();
-    let enc = ok(
-        &dm,
+    // The encounter rows as 0.3.1 wrote them. HEAD's encounter routes read the step 9 tables, so the rows are written
+    // directly; the creature's stat block copy comes from the same route on a scratch database.
+    let scratch = Db::open(&Location::Memory).await.unwrap();
+    let scratch_dir = tempfile::tempdir().unwrap();
+    let r = router_on(scratch_dir.path().to_path_buf(), scratch.clone());
+    let sdm = sign_up(&r, "scratch-dm").await;
+    let (_, out) = sdm.post("/api/me/roles/dm", json!({})).await;
+    assert!(out.is_object());
+    let (_, sp) = sdm.post("/api/parties", json!({ "name": "Scratch" })).await;
+    let se = ok(
+        &sdm,
         "POST",
-        &format!("/api/parties/{party}/encounters"),
-        json!({ "name": "Old one" }),
+        &format!("/api/parties/{}/encounters", sp["id"].as_str().unwrap()),
+        json!({ "name": "Scratch" }),
     )
     .await;
-    let enc = enc["id"].as_str().unwrap().to_string();
-    let v = ok(
-        &dm,
+    ok(
+        &sdm,
         "POST",
-        &format!("/api/encounters/{enc}/creatures"),
+        &format!("/api/encounters/{}/creatures", se["id"].as_str().unwrap()),
         json!({ "elementId": GOBLIN }),
     )
     .await;
-    let creature = v["creatures"][0]["id"].as_str().unwrap().to_string();
-    ok(
-        &dm,
-        "POST",
-        &format!("/api/encounters/{enc}/effects"),
-        json!({ "creatureId": creature, "name": "Old ward", "slotLevel": 1 }),
+    let row = sqlx::query(
+        "SELECT kind, dm_label, public_name, element_id, pack_id, pack_rev, statblock_json FROM encounter_creatures",
     )
-    .await;
+    .fetch_one(scratch.pool())
+    .await
+    .unwrap();
+    let enc = "11111111-1111-4111-8111-111111111111".to_string();
+    let creature = "22222222-2222-4222-8222-222222222222".to_string();
+    sqlx::query(
+        "INSERT INTO encounters (id, party_id, name, public_name, created_at, updated_at)
+         VALUES ($1, $2, 'Old one', 'Old one', 1, 1)",
+    )
+    .bind(&enc)
+    .bind(&party)
+    .execute(old.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO encounter_creatures (id, encounter_id, sort, kind, dm_label, public_name, element_id, pack_id,
+            pack_rev, statblock_json, created_at, updated_at)
+         VALUES ($1, $2, 0, $3, $4, $5, $6, $7, $8, $9, 1, 1)",
+    )
+    .bind(&creature)
+    .bind(&enc)
+    .bind(row.try_get::<String, _>(0).unwrap())
+    .bind(row.try_get::<String, _>(1).unwrap())
+    .bind(row.try_get::<String, _>(2).unwrap())
+    .bind(row.try_get::<String, _>(3).unwrap())
+    .bind(row.try_get::<String, _>(4).unwrap())
+    .bind(row.try_get::<String, _>(5).unwrap())
+    .bind(row.try_get::<String, _>(6).unwrap())
+    .execute(old.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO encounter_effects (id, encounter_id, creature_id, sort, name, slot_level, created_at)
+         VALUES ('33333333-3333-4333-8333-333333333333', $1, $2, 0, 'Old ward', 1, 1)",
+    )
+    .bind(&enc)
+    .bind(&creature)
+    .execute(old.pool())
+    .await
+    .unwrap();
+    scratch.pool().close().await;
     old.pool().close().await;
     (enc, creature)
 }

@@ -486,6 +486,18 @@ const MIGRATIONS: &[&[&str]] = &[
             created_at BIGINT NOT NULL
         )",
         "CREATE INDEX IF NOT EXISTS encounter_casts_encounter ON encounter_casts (encounter_id, sort)",
+        // The raw 5etools data of an account's imported spells (spells.rs capture): the tags the import drops,
+        // which the "Suggested" drafts read. Like monster_meta: replaced whole per pack on every import.
+        "CREATE TABLE IF NOT EXISTS spell_meta (
+            owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            element_id TEXT NOT NULL,
+            pack_id TEXT NOT NULL,
+            pack_rev TEXT NOT NULL,
+            raw_json TEXT NOT NULL,
+            captured_at BIGINT NOT NULL,
+            PRIMARY KEY (owner_id, element_id)
+        )",
+        "CREATE INDEX IF NOT EXISTS spell_meta_pack ON spell_meta (owner_id, pack_id)",
     ],
 ];
 

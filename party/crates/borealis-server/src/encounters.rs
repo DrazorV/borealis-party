@@ -1878,9 +1878,12 @@ async fn cast_fields(
     if key.is_empty() || key.len() > 200 {
         return Err(invalid("Choose a spell."));
     }
-    let spell = crate::spells::canonical(state, &enc.dm_id, &key, Some(&enc.ruleset))
+    let spell = crate::spells::canonical(state, &enc.dm_id, &key)
         .await?
         .ok_or_else(|| invalid("That spell isn't in your content."))?;
+    if spell.ruleset != enc.ruleset && spell.ruleset != "any" {
+        return Err(invalid("That spell is of the other edition."));
+    }
     let slot = match form.slot_level {
         Some(s) => s,
         None => had("slotLevel").as_i64(),
@@ -1945,7 +1948,7 @@ async fn cast_answer(
                 continue;
             }
             let key = c["spellKey"].as_str().unwrap_or_default();
-            if crate::spells::canonical(state, &enc.dm_id, key, Some(&enc.ruleset))
+            if crate::spells::canonical(state, &enc.dm_id, key)
                 .await?
                 .is_some_and(|s| s.concentration)
             {
@@ -1953,9 +1956,8 @@ async fn cast_answer(
             }
         }
         if concentrating > 1 {
-            view["castWarning"] = json!(
-                "This creature precasts two concentration spells: only the last one lasts."
-            );
+            view["castWarning"] =
+                json!("This creature precasts two concentration spells: only the last one lasts.");
         }
     }
     Ok(Json(view))

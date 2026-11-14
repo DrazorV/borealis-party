@@ -574,6 +574,8 @@ pub fn capture_logged(backend: &Backend, folder: &Path, report: &FiveToolsImport
         Ok(n) => tracing::info!(creatures = n, "bestiary: creature details captured"),
         Err(e) => tracing::warn!("bestiary: creature details not captured: {e}"),
     }
+    // The same import's spells, for the spell drafts (0.3.2).
+    crate::spells::capture_logged(backend, folder, report);
 }
 
 /// The staged download folder of the last `update_5etools_url` (upstream keeps one: `<data>/<STAGE_DIR>/<id>/data`).

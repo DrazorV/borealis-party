@@ -27,8 +27,8 @@ use party_combat::visibility::{is_visible, player_view_of};
 use party_combat::{
     apply, derive, export_json, import_json, turn_pointer, visible_order, Actor, Boundary, Combat,
     CombatError, CombatState, Combatant, CombatantId, Command, Controller, DamageTaken, DmEvent,
-    DmEventKind, Duration, Edition, EffectSpec, EncounterRule, Hp, Life, Modifier, PlayerEvent, RuleFlag,
-    RuleTarget, ViewerKind, UNDO_LIMIT,
+    DmEventKind, Duration, Edition, EffectSpec, EncounterRule, Hp, Life, Modifier, PlayerEvent,
+    RuleFlag, RuleTarget, ViewerKind, UNDO_LIMIT,
 };
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -1486,7 +1486,7 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
                         .ok_or_else(|| ApiError::Invalid("This combat has no encounter.".into()))?;
                     let row = sqlx::query(
                         "SELECT dm_label, public_name, statblock_json, overrides_json, visibility, owner_creature_id,
-                            init_mode
+                            init_mode, automation_json
                          FROM encounter_creatures WHERE id = $1 AND encounter_id = $2",
                     )
                     .bind(id)
@@ -1504,6 +1504,15 @@ async fn attempt(state: &AppState, combat: &str, w: &Write) -> Res<Done> {
                     let owner: Option<String> = row.try_get(5)?;
                     let mode: String = row.try_get(6)?;
                     let mut t = creature_of("template", &label, &public, &f, f.average);
+                    // Its spells as at the start (no relinking here: a cast names its spell).
+                    spellcasting(
+                        &mut t,
+                        &f,
+                        &row.try_get::<String, _>(3)?,
+                        row.try_get::<Option<String>, _>(7)?.as_deref(),
+                        None,
+                        "",
+                    );
                     t.visible = visibility != "hidden";
                     // Its owner: the first combatant made from the owning encounter creature, if it's in the fight.
                     if let Some(owner) = owner {
@@ -2174,6 +2183,8 @@ async fn start_inner(state: &AppState, user: &User, encounter: &str, body: &[u8]
         return Err(ApiError::TooMany.into());
     }
     let _job = job(&user.id).await?;
+    // The DM's spells and spell rules (0.3.2), read before the one connection below is taken.
+    let spells = crate::spells::library(state, &user.id).await?;
     // One connection for the reads (a single-connection pool must never wait on a second one).
     let mut conn = state.db.pool().acquire().await?;
     let mut die = SeededDie::new(seed());
@@ -2182,7 +2193,7 @@ async fn start_inner(state: &AppState, user: &User, encounter: &str, body: &[u8]
     let mut by_creature: HashMap<String, String> = HashMap::new();
     let rows = sqlx::query(
         "SELECT id, dm_label, public_name, statblock_json, overrides_json, hp_mode, hp_max, visibility,
-            owner_creature_id, init_mode
+            owner_creature_id, init_mode, automation_json
          FROM encounter_creatures WHERE encounter_id = $1 ORDER BY sort, id",
     )
     .bind(encounter)
@@ -2210,6 +2221,14 @@ async fn start_inner(state: &AppState, user: &User, encounter: &str, body: &[u8]
         };
         let id = new_id();
         let mut c = creature_of(&id, &label, &public, &f, hp);
+        spellcasting(
+            &mut c,
+            &f,
+            &row.try_get::<String, _>(4)?,
+            row.try_get::<Option<String>, _>(10)?.as_deref(),
+            Some(&spells),
+            &ruleset,
+        );
         let visible = visibility != "hidden";
         c.visible = visible;
         c.ever_revealed = visible;
@@ -2368,7 +2387,7 @@ async fn start_inner(state: &AppState, user: &User, encounter: &str, body: &[u8]
         }
     }
     // Precast spells (0.3.2), with their real effect and their slot spent.
-    st = precast(state, &mut conn, &user.id, encounter, &by_creature, st, &mut die).await?;
+    st = precast(&spells, &mut conn, encounter, &by_creature, st, &mut die).await?;
     if let Ok(rows) = sqlx::query(
         "SELECT id, name, text, creature_id, ends_when, active, flags_json FROM encounter_rules
          WHERE encounter_id = $1 ORDER BY sort, id",
@@ -2805,7 +2824,12 @@ async fn act_inner(
             let mut cmd = args.clone();
             cmd.insert("command".into(), json!(action));
             cmd.insert(
-                (if action == "apply_zone" { "id" } else { "cast_id" }).into(),
+                (if action == "apply_zone" {
+                    "id"
+                } else {
+                    "cast_id"
+                })
+                .into(),
                 json!(new_id()),
             );
             let command: Command = serde_json::from_value(Value::Object(cmd))
@@ -2887,6 +2911,52 @@ async fn act_inner(
     Ok(view)
 }
 
+/// A creature's spellcasting from its encounter row (0.3.2), on top of what [`creature_of`] read from its printed
+/// text: the raw 5etools spellcasting kept with its copy (when the text gave no spells), the DM's override spells
+/// and slots, and each unlinked spell linked to the DM's chosen copy of that name. The slots and per-day pools are
+/// seeded here, so precast spells and starting effects spend them.
+fn spellcasting(
+    c: &mut Combatant,
+    f: &Fighter,
+    overrides: &str,
+    automation: Option<&str>,
+    spells: Option<&crate::spells::Library>,
+    ruleset: &str,
+) {
+    use party_encounter::spellbook;
+    let has_spells = c.abilities.iter().any(|a| a.spell.is_some());
+    let raw = automation
+        .filter(|_| !has_spells)
+        .and_then(|a| serde_json::from_str::<Value>(a).ok())
+        .and_then(|a| a.pointer("/fivetools/spellcasting").cloned());
+    let o = serde_json::from_str::<party_encounter::overrides::Overrides>(overrides).ok();
+    let added = o
+        .as_ref()
+        .and_then(|o| o.spells.as_ref())
+        .filter(|s| !s.is_empty());
+    match f.data.as_ref() {
+        // One list of books (printed, then 5etools, then the DM's), so each spell keeps its place and key.
+        Some(d) if raw.is_some() || added.is_some() => {
+            let books = spellbook::of_monster(d, raw.as_ref(), added);
+            spellbook::equip(c, &books, spellbook::edition_of(d));
+        }
+        None => {
+            if let Some(o) = &o {
+                spellbook::seed_overrides(c, None, o);
+            }
+        }
+        Some(_) => {}
+    }
+    if let Some(lib) = spells {
+        for a in &mut c.abilities {
+            let Some(link) = a.spell.as_mut().filter(|l| l.key.is_none()) else {
+                continue;
+            };
+            link.key = lib.resolve(&a.name, ruleset);
+        }
+    }
+}
+
 /// A DM's `cast_spell`, made whole by the server: a random cast id, never `precast` (only combat start casts before
 /// the fight), and the definition compiled on the server from the DM's own mechanics for this caster (the stat block
 /// entry's own spec, or a ruling, when there are none). `spellKey` names the spell when the caster has no entry for
@@ -2947,10 +3017,9 @@ async fn cast_command(
     if !sent_spec {
         let fallback = ability.and_then(|a| a.mech.as_deref());
         let spec = match &key {
-            Some(key) => {
-                crate::spells::compile(state, &user.id, st.edition, key, caster, link, fallback)
-                    .await?
-            }
+            Some(key) => crate::spells::library(state, &user.id)
+                .await?
+                .compile(st.edition, key, caster, link, fallback)?,
             None => None,
         };
         match spec {
@@ -2976,9 +3045,8 @@ async fn cast_command(
 /// compiled from the DM's mechanics like a live cast, spending its slot (the engine's `precast`: no economy or
 /// edition rules). A precast that can't be cast (a missing slot, a spell gone from the content) is skipped and logged.
 async fn precast(
-    state: &AppState,
+    lib: &crate::spells::Library,
     conn: &mut AnyConnection,
-    dm: &str,
     encounter: &str,
     by_creature: &HashMap<String, String>,
     st: CombatState,
@@ -3025,16 +3093,13 @@ async fn precast(
             .abilities
             .iter()
             .find(|a| a.spell.as_ref().and_then(|l| l.key.as_deref()) == Some(key.as_str()));
-        let spec = crate::spells::compile(
-            state,
-            dm,
+        let spec = lib.compile(
             st.edition,
             &key,
             &caster,
             ability.and_then(|a| a.spell.as_ref()),
             ability.and_then(|a| a.mech.as_deref()),
-        )
-        .await?;
+        )?;
         let cmd = json!({
             "command": "cast_spell",
             "id": new_id(),

@@ -476,6 +476,17 @@ const TABLES: &[(&str, &[(&str, Column)])] = &[
             ("created_at", Column::Int),
         ],
     ),
+    (
+        "spell_meta",
+        &[
+            ("owner_id", Column::Text),
+            ("element_id", Column::Text),
+            ("pack_id", Column::Text),
+            ("pack_rev", Column::Text),
+            ("raw_json", Column::Text),
+            ("captured_at", Column::Int),
+        ],
+    ),
 ];
 
 /// Tests: every table the copy moves, with its columns as `text`, `int` (never NULL) or `optint`.
