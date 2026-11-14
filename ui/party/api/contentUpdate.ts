@@ -20,7 +20,7 @@ export interface UpdateAll {
 }
 
 export interface UpdateInfo {
-  /** "Update content automatically" (the account's `autoContentUpdate`). */
+  /** The account's "Automatic Updates" (`autoContentUpdate`, Settings, Data files). */
   auto: boolean;
   everyHours: number;
   indexes: number;

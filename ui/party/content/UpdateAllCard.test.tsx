@@ -28,7 +28,6 @@ vi.mock("../../src/components/Confirm", () => ({
   useConfirm: () => async (q: { title: string; body: string }) => { state.asked.push(q); return state.confirm; },
 }));
 const api = vi.hoisted(() => ({
-  saveSettings: async (a: unknown) => { state.saved.push(a); return {}; },
   clearDownloadedContent: async () => { state.cleared++; return []; },
   subscribe: () => () => undefined,
 }));
@@ -77,17 +76,19 @@ describe("Update content (0.3.3)", () => {
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Other downloads keep running"));
   });
 
-  it("shows the last automatic check and switches it off for the account", async () => {
+  it("shows the last automatic check, and whether the account's Automatic Updates is on", async () => {
     state.info = { ...state.info, last: result({ auto: true }) };
-    render(<UpdateAllCard />);
+    const { unmount } = render(<UpdateAllCard />);
     await settle();
     expect(screen.getByRole("status").textContent).toContain("· 2 updated");
-    const box = screen.getByRole("checkbox", { name: /Update content automatically/ }) as HTMLInputElement;
-    expect(box.checked).toBe(true);
-    expect(screen.getByText(/at most once every 24 hours: index files and 5etools sources/)).toBeTruthy();
-    fireEvent.click(box);
+    expect(screen.getByText(/Automatic Updates is on: checked when you open Borealis Party, at most once every 24 hours/)).toBeTruthy();
+    // The setting is the existing one, under Settings: no second switch here.
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    unmount();
+    state.info = { ...state.info, auto: false };
+    render(<UpdateAllCard />);
     await settle();
-    expect(state.saved).toEqual([{ patch: { autoContentUpdate: false } }]);
+    expect(screen.getByText(/Automatic Updates is off\. Change it under Settings, Data files/)).toBeTruthy();
   });
 
   it("has nothing to update without sources, and asks before clearing downloads", async () => {

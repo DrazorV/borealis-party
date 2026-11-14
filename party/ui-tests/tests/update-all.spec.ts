@@ -8,7 +8,7 @@ import { expect, measureOverflow, minTap, open, signedInShell, smallTargets, tes
  * - one "Update all content" button for the index files and every 5etools source; upstream's "Update content files"
  *   and its "Import from an address" list are gone, so the 5etools source shows once (in the 5etools card, with
  *   Update and Remove);
- * - the last check and the "Update content automatically" switch;
+ * - the last check, whether the account's Automatic Updates is on, and the status bar's real last-check time;
  * - the button runs the real job on the rig server (the account has nothing to update, so it says so).
  * The 5etools source and the facts on the line are answered in the browser; the job is the server's.
  */
@@ -39,7 +39,8 @@ test("Update content: one button, each 5etools source once, the automatic check 
   await expect(card).toBeVisible({ timeout: 30_000 });
   await expect(card.getByRole("status")).toContainText("Last checked");
   await expect(card.getByRole("status")).toContainText("2 index files and 1 5etools source checked · 1 updated");
-  await expect(card.getByRole("checkbox", { name: /Update content automatically/ })).toBeChecked();
+  await expect(card).toContainText("Automatic Updates is on");
+  await expect(card.getByRole("checkbox")).toHaveCount(0);
   // One Update all; upstream's own update section and address list are gone.
   await expect(page.getByRole("button", { name: "Update all content" })).toHaveCount(1);
   await expect(page.getByRole("region", { name: "Update content files" })).toBeHidden();
@@ -61,5 +62,7 @@ test("Update content: one button, each 5etools source once, the automatic check 
   // The real job: this account has no index file or source on the server, so it says so.
   await card.getByRole("button", { name: "Update all content" }).click();
   await expect(card.getByRole("status")).toContainText("Nothing to update", { timeout: 30_000 });
+  // The status bar now says when this account's content was really checked (the job just wrote it), not the page load.
+  await expect(page.locator(".status-msg").filter({ visible: true }).first()).toHaveText(/^Last checked for content updates at \d\d:\d\d$/, { timeout: 15_000 });
   await shot(page, testInfo, "ran");
 });

@@ -8,7 +8,7 @@
 //!   ([`crate::net_guard`]), and answers one summary: `{ indexes, sources, updated, failed, message, checkedAt }`.
 //!   A failure of one part is reported in `failed` and the others still run.
 //! - When an account's workspace opens, [`schedule`] starts it as the account's job after [`AUTO_DELAY`], when the
-//!   account's "Update content automatically" setting (upstream's `autoContentUpdate`, on by default) is on, the last
+//!   account's "Automatic Updates" setting (upstream's `autoContentUpdate`, on by default) is on, the last
 //!   check is at least [`AUTO_EVERY`] old, and there is something to check. It never blocks a request: it is a
 //!   background job like a user's own, and a job the user already runs is left alone.
 //! - The last check is kept in the account's folder ([`STAMP`]), so the 24 hours count across restarts.

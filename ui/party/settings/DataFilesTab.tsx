@@ -16,7 +16,7 @@ export function DataFilesTab({ form, set, clearCache, cacheCleared, error }: Par
       <SectionDesc>Your additional content settings.</SectionDesc>
       <SectionTitle>ADDITIONAL CONTENT</SectionTitle>
       <SectionDesc>Manage additional content added through index files.</SectionDesc>
-      <DescCheck spaced title="Update content automatically" description="When you open Borealis Party, at most once a day: your index files and 5etools sources." checked={form.autoContentUpdate} onChange={(v) => set({ autoContentUpdate: v })} />
+      <DescCheck spaced title="Automatic Updates" description="Check your index files and 5etools sources for updates when you open Borealis Party, at most once a day." checked={form.autoContentUpdate} onChange={(v) => set({ autoContentUpdate: v })} />
       <DescCheck spaced title="Content Import Notice" description="Remind me to import only content I own before each content import." checked={form.showImportNotice} onChange={(v) => set({ showImportNotice: v })} />
       <div className="aur-set-left-clear">
         <Button disabled={cacheCleared} onClick={clearCache}>Clear Cache</Button>

@@ -102,7 +102,6 @@ html.phone .party-compact-sort { flex: 1 1 100%; }
 .party-update-line > .btn { flex: none; }
 .party-update-failed { margin: 0; padding-left: 1.2em; color: var(--danger, #b22222); overflow-wrap: anywhere; }
 .party-update-opts { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; justify-content: space-between; }
-.party-update-opts .check { flex: 1 1 18em; min-width: 0; }
+.party-update-auto { flex: 1 1 18em; min-width: 0; overflow-wrap: anywhere; }
 html.phone .party-update-line > .btn { flex: 1 1 100%; justify-content: center; min-height: var(--ph-hit); }
 html.phone .party-update-opts > .btn { min-height: var(--ph-hit); }
-html.phone .party-update-opts .check input { width: 22px; height: 22px; }

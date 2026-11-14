@@ -21,8 +21,8 @@ saved but did nothing, 5etools sources were never checked, and the status bar's 
   Update and Remove. Clear downloaded content (the index files' downloads) moved to the Update content card.
 - **Automatically.** When an account's workspace opens (`Workspaces::get`), `content_update::schedule` waits 10 s and
   starts `update_all_content` as the account's job when:
-  - the account's "Update content automatically" setting is on (upstream's `autoContentUpdate`, on by default; the
-    Update content card and Settings, Data files change it);
+  - the account's existing "Automatic Updates" setting is on (Settings, Data files; upstream's `autoContentUpdate`, on
+    by default), which until now did nothing on a server;
   - the last check is at least 24 h old;
   - the account has an index file or a 5etools source.
 
@@ -31,7 +31,9 @@ saved but did nothing, 5etools sources were never checked, and the status bar's 
   across restarts. `content_update_info` answers `{ auto, everyHours, indexes, sources, last }` for the card.
 - **The status bar.** `content_update_status` answers upstream's shape from the server's own check. The bar shows
   "Checking for content updates..." while an automatic check runs, then its outcome. A check the user started shows
-  its result on the card instead.
+  its result on the card instead. The bar's idle line, "Last checked for content updates at …", is now the account's
+  real last check (`checkedAt`), not the time the page loaded: `ui/party/shell/status.ts` stands in for upstream's
+  `state/status` in Chrome.tsx only (ui/party/vite.config.ts). A loaded character still shows "Loaded '…'".
 
 Tests: `content_update_tests.rs` (summary, throttle, one run over both kinds with one failing, the job over HTTP, the
 automatic start when due and not again within a day, and off), `UpdateAllCard.test.tsx`, `ImportedFrom.test.tsx`, and

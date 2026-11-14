@@ -3,7 +3,6 @@ import type { ContentProgress } from "../../src/api/contract";
 import { Button } from "../../src/components/Button";
 import { ProgressBar } from "../../src/components/Card";
 import { useConfirm } from "../../src/components/Confirm";
-import { Check } from "../../src/components/Fields";
 import { Section } from "../../src/pages/content/Section";
 import { useApi } from "../../src/state/ApiContext";
 import { errorMessage } from "../../src/state/useAsync";
@@ -15,8 +14,8 @@ import "./content.css";
  * "Update content" at the top of the installed content (0.3.3): ONE button updates the index files and every 5etools
  * source, with one progress line and one summary. It replaces upstream's "Update content files" section and its
  * duplicate list of 5etools addresses (hidden by ./content.css); each 5etools source keeps a small Update and Remove in
- * the Import section's 5etools card. The account's "Update content automatically" (upstream's `autoContentUpdate`,
- * also under Settings, Data files) has the server check at most once a day when the account's workspace opens.
+ * the Import section's 5etools card. The account's own "Automatic Updates" (upstream's `autoContentUpdate`, Settings,
+ * Data files, on by default) has the server check at most once a day when the account's workspace opens.
  */
 export function UpdateAllCard() {
   const api = useApi();
@@ -43,12 +42,6 @@ export function UpdateAllCard() {
       contentSync.changed();
     } catch (e) { setError(errorMessage(e)); }
     finally { setBusy(false); setProgress(null); reload(); }
-  };
-
-  const setAuto = async (on: boolean) => {
-    setInfo((i) => (i ? { ...i, auto: on } : i));
-    try { await api.saveSettings({ patch: { autoContentUpdate: on } }); } catch (e) { setError(errorMessage(e)); }
-    reload();
   };
 
   const clear = async () => {
@@ -84,8 +77,11 @@ export function UpdateAllCard() {
         )}
         {error && <p className="party-import-field-error" role="alert">{error}</p>}
         <div className="party-update-opts">
-          <Check label="Update content automatically" description={`When you open Borealis Party, at most once every ${info?.everyHours ?? 24} hours: index files and 5etools sources.`}
-            checked={info?.auto ?? true} disabled={!info} onChange={(e) => void setAuto(e.target.checked)} />
+          <span className="muted small party-update-auto">
+            {info && (info.auto
+              ? `Automatic Updates is on: checked when you open Borealis Party, at most once every ${info.everyHours} hours.`
+              : "Automatic Updates is off.")} Change it under Settings, Data files.
+          </span>
           <Button small disabled={busy || !info || info.indexes === 0} onClick={() => void clear()}>Clear downloaded content</Button>
         </div>
       </div>

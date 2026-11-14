@@ -7,7 +7,7 @@ import { defineConfig, devices } from "@playwright/test";
  *  - iphone: WebKit as iOS Safari at 390x844;
  *  - desktop: Chromium at 1280x800 without the phone layer, for unify-imports.spec.ts, combat-tracker.spec.ts,
  *    content-refresh.spec.ts and content-compact.spec.ts (which sets 1440x900);
- *  - desktop-wide: Chromium at 1440x900, a DM's big screen, for encounter-tab.spec.ts, spell-combat.spec.ts, combat-end.spec.ts, ai-guides.spec.ts and update-all.spec.ts.
+ *  - desktop-wide: Chromium at 1440x900, a DM's big screen, for encounter-tab.spec.ts, ai-signin.spec.ts, spell-combat.spec.ts, combat-end.spec.ts, ai-guides.spec.ts and update-all.spec.ts.
  * The server is a throwaway local one (server/start.ts).
  */
 const ANDROID_UA =
